@@ -499,6 +499,24 @@ async function main() {
   ok('Purge is idempotent — the collected orphans are not re-reported on a second run',
     gcAgain.status === 200 && !(gcAgain.json.item_ids ?? []).includes('GC-ORPHAN'), `items_deleted=${gcAgain.json.items_deleted}`);
 
+  // ── 3g6. FORCE purge — GC-USED survives the normal purge (HQ references it on a PO). Force purge deletes it
+  //         anyway, wiping the cross-tenant reference. Blast-radius preview shows HQ; strong confirm required. ──
+  const fpPreview = await inj('POST', '/api/admin/item-maintenance/force-preview', owner, { item_ids: ['GC-USED'] });
+  const fpHq = (fpPreview.json.by_tenant ?? []).find((k: any) => Number(k.tenant_id) === hq);
+  ok('Force-preview shows the blast radius per company (HQ loses its GC-USED PO line)',
+    fpPreview.status === 200 && fpPreview.json.items === 1 && !!fpHq && fpHq.ref_rows >= 1 && fpPreview.json.total_ref_rows >= 1,
+    `items=${fpPreview.json.items} total_ref_rows=${fpPreview.json.total_ref_rows} by=${JSON.stringify((fpPreview.json.by_tenant ?? []).slice(0, 3))}`);
+  const fpBad = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'PURGE-UNUSED-ITEMS' });
+  ok('Force-purge rejects the normal confirm phrase (needs the stronger FORCE-PURGE-ITEMS) → 400', fpBad.status === 400 && fpBad.json.error?.code === 'CONFIRM_MISMATCH', `${fpBad.status} ${fpBad.json.error?.code}`);
+  const poBefore = (await db.select().from(s.poItems).where(eq(s.poItems.itemId, 'GC-USED'))).length;
+  const fpPurge = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'FORCE-PURGE-ITEMS' });
+  ok('Force-purge (god + strong confirm) deletes the referenced item AND its cross-tenant reference rows',
+    fpPurge.status === 200 && fpPurge.json.status === 'force_purged' && fpPurge.json.items_deleted === 1 && fpPurge.json.ref_rows_deleted >= 1,
+    `${fpPurge.status} ${JSON.stringify({ items: fpPurge.json.items_deleted, refs: fpPurge.json.ref_rows_deleted, blocked: fpPurge.json.blocked })}`);
+  const usedGoneNow = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length === 0;
+  const poGoneNow = (await db.select().from(s.poItems).where(eq(s.poItems.itemId, 'GC-USED'))).length === 0;
+  ok('Force-purge removed the item and its PO line (nothing dangles)', usedGoneNow && poGoneNow, JSON.stringify({ usedGoneNow, poGoneNow, poBefore }));
+
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;

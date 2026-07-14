@@ -5,6 +5,8 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ItemSetupService } from './item-setup.service';
 
 const PurgeBody = z.object({ confirm: z.string().min(1).max(100) });
+const ForcePreviewBody = z.object({ item_ids: z.array(z.string().min(1).max(100)).max(5000).optional() });
+const ForcePurgeBody = z.object({ item_ids: z.array(z.string().min(1).max(100)).max(5000).optional(), confirm: z.string().min(1).max(100) });
 
 // God-only maintenance for the SHARED item master. `items` has no tenant_id, so factory-reset/purge (which
 // clear only tenant_id-scoped tables) never touch it — a wiped company's catalogue rows survive and keep
@@ -26,5 +28,17 @@ export class ItemMaintenanceController {
   @Post('purge-unused-items') @PlatformAdmin() @HttpCode(200)
   purgeUnused(@Body(new ZodValidationPipe(PurgeBody)) b: z.infer<typeof PurgeBody>, @CurrentUser() u: JwtUser) {
     return this.svc.purgeUnusedItems(u, b.confirm);
+  }
+
+  // FORCE purge — deletes products EVEN IF a company still uses them, wiping the references cross-tenant.
+  // force-preview is the mandatory blast-radius report; force-purge needs the strong confirm FORCE-PURGE-ITEMS.
+  @Post('force-preview') @PlatformAdmin() @HttpCode(200)
+  forcePreview(@Body(new ZodValidationPipe(ForcePreviewBody)) b: z.infer<typeof ForcePreviewBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.forcePurgePreview(u, b.item_ids);
+  }
+
+  @Post('force-purge') @PlatformAdmin() @HttpCode(200)
+  forcePurge(@Body(new ZodValidationPipe(ForcePurgeBody)) b: z.infer<typeof ForcePurgeBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.forcePurgeItems(u, b.item_ids, b.confirm);
   }
 }

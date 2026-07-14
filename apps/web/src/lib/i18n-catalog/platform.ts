@@ -261,6 +261,27 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.mnt_kept_shared': { th: 'ข้อมูลกลาง / ไม่ผูกบริษัท', en: 'Shared / no company' },
   'plt.mnt_kept_items': { th: '{n} รายการ', en: '{n} product(s)' },
 
+  // ── Force purge (DANGER) — delete products even if a company still uses them ──
+  'plt.mnt_force_title': { th: 'ลบแบบบังคับ (อันตราย)', en: 'Force purge (danger)' },
+  'plt.mnt_force_desc': {
+    th: 'ลบสินค้าทั้งหมดในแคตตาล็อกกลางแม้ยังมีบริษัทใช้อยู่ โดยจะ**ลบข้อมูลอ้างอิงในทุกบริษัท**ทิ้งด้วย (ใบสั่งซื้อ/สต็อก/สูตร/ราคา ฯลฯ) — ใช้เมื่อสินค้าเป็นข้อมูลทดสอบ/ขยะเท่านั้น เพราะถ้ามีบริษัทจริงใช้ ข้อมูลบริษัทนั้นจะเสียหาย กด "ตรวจผลกระทบ" เพื่อดูก่อนว่าบริษัทไหนโดนบ้าง',
+    en: 'Deletes every product in the shared catalogue even if a company still uses it, and **wipes the references in every company** too (POs / stock / recipes / prices / …). Use only for test/junk products — a real company that uses one will lose data. Click "Check impact" to see which companies are affected first.',
+  },
+  'plt.mnt_force_check': { th: 'ตรวจผลกระทบ (blast radius)', en: 'Check impact (blast radius)' },
+  'plt.mnt_force_preview_done': { th: 'จะลบ {n} รายการ + {rows} แถวอ้างอิง', en: '{n} product(s) + {rows} reference row(s) would be deleted' },
+  'plt.mnt_force_result': { th: 'จะลบแบบบังคับ {n} รายการ และลบ {rows} แถวอ้างอิงทั่วทุกบริษัท', en: 'Force-delete {n} product(s) and {rows} reference row(s) across all companies' },
+  'plt.mnt_force_blast_hint': { th: 'บริษัทที่จะเสียข้อมูลอ้างอิง (ตรวจให้แน่ใจว่าไม่มีบริษัทจริงในนี้ก่อนลบ):', en: 'Companies that will lose reference rows (make sure no real company is here before deleting):' },
+  'plt.mnt_force_rows': { th: '{n} แถว', en: '{n} rows' },
+  'plt.mnt_force_no_refs': { th: 'ไม่มีแถวอ้างอิง — ลบได้ปลอดภัย', en: 'No reference rows — safe to delete' },
+  'plt.mnt_force_btn': { th: 'ลบแบบบังคับ {n} รายการ', en: 'Force-purge {n}' },
+  'plt.mnt_force_confirm_title': { th: '⚠️ ยืนยันการลบแบบบังคับ', en: '⚠️ Confirm force purge' },
+  'plt.mnt_force_confirm_desc': {
+    th: 'จะลบสินค้า {n} รายการ และลบข้อมูลอ้างอิง {rows} แถวในทุกบริษัทอย่างถาวร กู้คืนไม่ได้ ยืนยันหรือไม่?',
+    en: 'Permanently delete {n} product(s) and {rows} reference row(s) across all companies. This cannot be undone. Confirm?',
+  },
+  'plt.mnt_force_confirm_btn': { th: 'ลบแบบบังคับ', en: 'Force-purge now' },
+  'plt.mnt_force_done': { th: 'ลบแบบบังคับ {n} รายการ + {rows} แถวอ้างอิงเรียบร้อย', en: 'Force-purged {n} product(s) + {rows} reference row(s)' },
+
   // ── App-shell: GodScopeBanner ──
   'plt.scope_acting_as': { th: 'กำลังดูข้อมูลของ', en: 'Viewing data for' },
   'plt.scope_read_only': { th: 'อ่านอย่างเดียว', en: 'read-only' },

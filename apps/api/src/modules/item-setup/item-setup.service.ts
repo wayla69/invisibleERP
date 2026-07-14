@@ -7,7 +7,7 @@ import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { logger } from '../../observability/logger';
-import { previewUnusedItems as previewUnusedItemsQuery, purgeUnusedItems as purgeUnusedItemsQuery } from './item-cleanup';
+import { previewUnusedItems as previewUnusedItemsQuery, purgeUnusedItems as purgeUnusedItemsQuery, forcePurgePreview as forcePurgePreviewQuery, forcePurgeItems as forcePurgeItemsQuery } from './item-cleanup';
 
 // Item-posting SETUP master data (docs/33 PR3, GL-21). Maintains the account/tax profile that the
 // AccountDeterminationService resolves at posting time: item categories, tax codes, and the per-item override.
@@ -320,6 +320,25 @@ export class ItemSetupService {
     const result = await purgeUnusedItemsQuery(this.db);
     logger.warn({ event: 'items_unused_purged', by: user.username, items: result.items_deleted, images: result.images_deleted }, 'unused shared-catalogue items purged (god)');
     return { status: 'purged', ...result };
+  }
+
+  // FORCE purge (god-only, DANGEROUS) — deletes items EVEN IF a company still references them, wiping those
+  // references across every tenant. `item_ids` targets specific products; omitted ⇒ the whole catalogue. The
+  // preview is a read-only blast-radius report (which companies lose how many referencing rows) — always show
+  // it before the destructive call. The purge needs a distinct strong confirm so it can't be a normal-purge slip.
+  async forcePurgePreview(user: JwtUser, itemIds?: string[]) {
+    this.assertItemGcAllowed(user);
+    return forcePurgePreviewQuery(this.db, itemIds);
+  }
+
+  async forcePurgeItems(user: JwtUser, itemIds: string[] | undefined, confirm: string) {
+    this.assertItemGcAllowed(user);
+    if ((confirm ?? '').trim() !== 'FORCE-PURGE-ITEMS') {
+      throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type FORCE-PURGE-ITEMS to confirm the forced deletion', messageTh: 'พิมพ์ FORCE-PURGE-ITEMS เพื่อยืนยันการลบแบบบังคับ' });
+    }
+    const result = await forcePurgeItemsQuery(this.db, itemIds);
+    logger.warn({ event: 'items_force_purged', by: user.username, items: result.items_deleted, ref_rows: result.ref_rows_deleted, scoped: !!(itemIds && itemIds.length), blocked: result.blocked }, 'FORCE-purged shared-catalogue items incl. cross-tenant references (god)');
+    return { status: 'force_purged', ...result };
   }
 
   // ── Warehouse (location) account defaults — the lowest determination tier (docs/33 PR5) ──
