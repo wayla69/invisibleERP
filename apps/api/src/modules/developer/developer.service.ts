@@ -18,12 +18,15 @@ const SCOPES = [
   { key: 'inventory:read', desc: 'Read stock levels' },
   { key: 'orders:read', desc: 'Read sales orders' },
   { key: 'invoices:read', desc: 'Read invoices' },
+  { key: 'analytics:read', desc: 'Read analytics feeds (daily sales, customer purchase facts)' },
 ];
 const ENDPOINTS = [
   { method: 'GET', path: '/api/v1/items', scope: 'catalog:read' },
   { method: 'GET', path: '/api/v1/inventory', scope: 'inventory:read' },
   { method: 'GET', path: '/api/v1/orders', scope: 'orders:read' },
   { method: 'GET', path: '/api/v1/invoices', scope: 'invoices:read' },
+  { method: 'GET', path: '/api/v1/sales/daily', scope: 'analytics:read' },
+  { method: 'GET', path: '/api/v1/customers/transactions', scope: 'analytics:read' },
 ];
 
 @Injectable()

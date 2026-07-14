@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ItemSetupController } from './item-setup.controller';
+import { ItemMaintenanceController } from './item-maintenance.controller';
 import { ItemSetupService } from './item-setup.service';
 import { MasterDataModule } from '../masterdata/masterdata.module';
 
@@ -8,7 +9,7 @@ import { MasterDataModule } from '../masterdata/masterdata.module';
 // setup pages' own Excel/CSV template surface — gated to the same setup duties, not the coarse `masterdata`).
 @Module({
   imports: [MasterDataModule],
-  controllers: [ItemSetupController],
+  controllers: [ItemSetupController, ItemMaintenanceController],
   providers: [ItemSetupService],
   exports: [ItemSetupService],
 })
