@@ -326,6 +326,8 @@ export class ProjectsService {
   async eacScenarios(code: string) { return this.evmSvc.eacScenarios(code); }
   async schedule(code: string) { return this.evmSvc.schedule(code); }
   async evmSeries(code: string, dto?: { months?: number; as_of?: string }) { return this.evmSvc.evmSeries(code, dto); }
+  // PROJ-24: read-only change-order impact simulation (projected cost/margin/EVM before authorisation).
+  async simulateChangeOrder(coId: number) { return this.evmSvc.simulateChangeOrder(coId); }
   async earnedSchedule(code: string, asOf?: string) { return this.evmSvc.earnedSchedule(code, asOf); }
   async setProgram(code: string, dto: ProgramDto, user: JwtUser) { return this.evmSvc.setProgram(code, dto, user); }
   async programCriticalPath(programCode: string, user: JwtUser) { return this.evmSvc.programCriticalPath(programCode, user); }

@@ -462,6 +462,13 @@ export class ProjectsController {
     return this.svc.rejectChangeOrder(Number(coId), u);
   }
 
+  // PROJ-24: read-only what-if — the projected cost/margin/EVM impact of a pending change order before it is
+  // authorised. Mutates nothing; inherits the class gate (exec/planner/ar).
+  @Get('change-orders/:coId/simulate')
+  simulateChangeOrder(@Param('coId') coId: string) {
+    return this.svc.simulateChangeOrder(Number(coId));
+  }
+
   // ── Risk & issue register (B4, PROJ-08) ──
   @Post(':code/risks')
   addRisk(@Param('code') code: string, @Body(new ZodValidationPipe(RiskBody)) b: RiskDto, @CurrentUser() u: JwtUser) {
