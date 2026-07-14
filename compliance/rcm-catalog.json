@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 281,
+    "total": 282,
     "by_status": {
-      "Implemented": 277,
+      "Implemented": 278,
       "Partial": 4
     },
     "by_family": {
@@ -28,7 +28,7 @@
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 5,
-      "Project Accounting": 23,
+      "Project Accounting": 24,
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
@@ -3474,6 +3474,25 @@
       "tod": "Inspect the latest-per-bucket aggregation (a superseded entry for the same task/project-level bucket is excluded, only its latest row counts), the formulaic-vs-bottom-up variance computation, and that a project with zero project_etc rows reports bottom_up=null (the formulaic EAC is unaffected).",
       "toe": "Re-perform: with no manual entries, eac-scenarios reports the formulaic EAC only (bottom_up null); a second, updated ETC entry for the same task supersedes the first in the aggregation (only the latest counts); entries across multiple tasks plus a project-level entry sum into one bottom-up EAC with a variance against the formulaic figure; an ETC submitted against a task_id not on the project → 400/404 TASK_NOT_FOUND, nothing written (re-performed by the projects harness).",
       "evidence": "eac-scenarios payload with the formulaic EAC, the bottom-up EAC (entry_count + contributing entries), and the variance between them",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "PROJ-23",
+      "cycle": "Project Accounting",
+      "category": "Detective",
+      "fsli": "Resource leveling (over-allocation vs slack)",
+      "risk": "A resource can be booked over 100% (or over its real availability calendar ceiling) across two or more task assignments in the same month — the capacity heatmap flags the over-allocation, but nothing in the system tells a scheduler WHICH assignment could be moved, or by how much, to resolve it without delaying the project, so resolution is manual trial-and-error against the Gantt.",
+      "assertion": "Completeness/Accuracy",
+      "description": "Resource leveling (PPM-A2), read-only/detective and additive — it suggests, it never moves an assignment. GET /api/projects/:code/resource-leveling detects an over-allocated resource-month WITHIN this project's own task-linked assignments (the same calendar-aware ceiling as the tenant-wide resourceCapacity heatmap, PROJ-20), then cross-references the CPM schedule's per-task SLACK (schedule(), PROJ-06/21) to find the contributing task with the MOST slack and suggest shifting it later by up to that slack (in days) — freeing the over-allocated month without delaying the critical path. An over-allocated resource-month where every contributing task is already on the critical path (slack 0) is flagged NO_SLACK: genuinely unresolvable without accepting a project delay, surfaced rather than silently ignored. A project with no over-allocated resource reports empty over_allocations/suggestions/unresolvable — zero regression to the existing capacity/schedule engines.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per schedule/resourcing review",
+      "owner": "PMO / Project Planner",
+      "coso": "P13",
+      "code_reference": "projects.service.ts resourceLeveling (composes evmSvc.schedule() slack with project_resources capacity, calendar-aware ceiling); projects.controller.ts GET /api/projects/:code/resource-leveling; no new schema (pure computation over project_resources + project_tasks + resource_calendar); cutover/projects.ts (ToE)",
+      "tod": "Inspect the over-allocation detection (same calendar-aware ceiling as resourceCapacity), the slack-based candidate selection (only positive-slack contributors, largest slack first), and the NO_SLACK fallback when every contributor is on the critical path.",
+      "toe": "Re-perform: two assignments to the same resource in the same month totalling over 100% with one task on the critical path (slack 0) and one off-path (positive slack) → the off-path task is suggested with suggested_shift_days equal to its slack; a resource-month over-allocated by two CRITICAL-path assignments (both slack 0) → NO_SLACK, no suggestion offered (re-performed by the projects harness).",
+      "evidence": "resource-leveling payload with over_allocations, slack-based suggestions (task/shift-days/target month), and unresolvable (NO_SLACK) resource-months",
       "status": "Implemented"
     },
     {

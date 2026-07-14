@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -366,6 +366,85 @@ export class ProjectsService {
   async listResourceCalendar(user: JwtUser, resourceName?: string) { return this.resourcing.listResourceCalendar(user, resourceName); }
   async roleSupplyDemand(user: JwtUser, dto?: { months?: number; from?: string }) { return this.resourcing.roleSupplyDemand(user, dto); }
 
+  // ── Resource leveling (PPM-A2, PROJ-23) ───────────────────────────────────
+  // Detects a month where a named resource is over-allocated WITHIN this project's own assignments (the
+  // same calendar-aware ceiling as the tenant-wide resourceCapacity heatmap — default 100% absent a
+  // resource_calendar override), then cross-references the CPM schedule's per-task SLACK (schedule(),
+  // PROJ-06/21) to suggest which task-linked assignment could be shifted later — by up to its slack, in
+  // days — without delaying the critical path. An over-allocated resource-month where every contributing
+  // task is already on the critical path (slack 0) is flagged NO_SLACK: genuinely unresolvable without
+  // accepting a project delay. Project-scoped (unlike the tenant-wide resourceCapacity) because slack is a
+  // property of THIS project's own schedule. Read-only/detective — suggests, never moves anything; a
+  // project with no over-allocated resource carries empty over_allocations/suggestions/unresolvable.
+  // Composed directly in the facade (spans both evmSvc's schedule and the resourcing sub-service's data),
+  // mirroring the existing forecast() cross-sub-service composition.
+  async resourceLeveling(code: string, _user: JwtUser) {
+    const db = this.db;
+    const p = await this.row(code);
+    const sched = await this.evmSvc.schedule(code);
+    const slackByTask = new Map<number, number>(sched.tasks.map((t: any) => [t.id, Number(t.slack) || 0]));
+    const taskById = new Map<number, any>(sched.tasks.map((t: any) => [t.id, t]));
+
+    const assignments = (await db.select().from(projectResources).where(eq(projectResources.projectId, Number(p.id))))
+      .filter((r: any) => r.taskId != null)
+      .map((r: any) => {
+        const t = taskById.get(Number(r.taskId));
+        return { ...r, effStart: r.periodStart ?? t?.planned_start ?? null, effEnd: r.periodEnd ?? t?.planned_end ?? null };
+      });
+
+    const calendarRows = await db.select().from(resourceCalendar);
+    const availByResMonth = new Map<string, number>();
+    for (const c of calendarRows) availByResMonth.set(`${c.resourceName}|${String(c.month).slice(0, 7)}`, n(c.availablePct));
+
+    const activeIn = (ps: string | null, pe: string | null, month: string) => {
+      const mStart = `${month}-01`, mEnd = `${month}-31`;
+      return (ps == null || ps <= mEnd) && (pe == null || pe >= mStart);
+    };
+    const months = new Set<string>();
+    for (const r of assignments) {
+      if (r.effStart) months.add(String(r.effStart).slice(0, 7));
+      if (r.effEnd) months.add(String(r.effEnd).slice(0, 7));
+    }
+
+    const byResMonth = new Map<string, { alloc: number; contributors: { taskId: number; allocPct: number }[] }>();
+    for (const month of months) {
+      for (const r of assignments) {
+        if (!activeIn(r.effStart, r.effEnd, month)) continue;
+        const key = `${r.resourceName}|${month}`;
+        const bucket = byResMonth.get(key) ?? { alloc: 0, contributors: [] };
+        bucket.alloc = r2(bucket.alloc + n(r.allocPct));
+        bucket.contributors.push({ taskId: Number(r.taskId), allocPct: n(r.allocPct) });
+        byResMonth.set(key, bucket);
+      }
+    }
+
+    const overAllocations: any[] = [], suggestions: any[] = [], unresolvable: any[] = [];
+    for (const [key, bucket] of byResMonth) {
+      const [resourceName, month] = key.split('|');
+      const available = availByResMonth.get(key) ?? 100;
+      if (bucket.alloc <= available) continue;
+      overAllocations.push({ resource_name: resourceName, month, allocated_pct: r2(bucket.alloc), available_pct: available, over_by_pct: r2(bucket.alloc - available) });
+      const candidates = bucket.contributors
+        .map((c) => ({ ...c, slack: slackByTask.get(c.taskId) ?? 0, task: taskById.get(c.taskId) }))
+        .filter((c) => c.slack > 0)
+        .sort((a, b) => b.slack - a.slack);
+      const top = candidates[0];
+      if (!top) { unresolvable.push({ resource_name: resourceName, month, reason: 'NO_SLACK' }); continue; }
+      const newStart = top.task?.planned_start ? addDays(top.task.planned_start, top.slack) : null;
+      suggestions.push({
+        resource_name: resourceName, month, task_id: top.taskId, task_name: top.task?.name ?? null,
+        alloc_pct: top.allocPct, slack_days: top.slack, suggested_shift_days: top.slack,
+        shifted_to_month: newStart ? newStart.slice(0, 7) : null,
+      });
+    }
+    return {
+      project_code: code,
+      over_allocations: overAllocations.sort((a, b) => a.month.localeCompare(b.month) || a.resource_name.localeCompare(b.resource_name)),
+      suggestions: suggestions.sort((a, b) => a.month.localeCompare(b.month)),
+      unresolvable: unresolvable.sort((a, b) => a.month.localeCompare(b.month)),
+      over_allocated_count: overAllocations.length,
+    };
+  }
 
 
 
