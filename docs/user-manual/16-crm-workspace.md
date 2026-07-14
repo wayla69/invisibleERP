@@ -68,9 +68,17 @@ Click any card (or a row in list view) to open the deal:
   reason dialog as the board).
 - **งานถัดไป (Next step):** the nearest unfinished task on the deal is highlighted with its due date —
   tick **ทำเสร็จแล้ว** when done.
-- **ไทม์ไลน์กิจกรรม (Timeline):** every activity (call / email / meeting / note / task), every **stage
-  change** (from the audit trail) and every **linked quotation** merged in time order. Log a new activity
-  from the quick-add row (a *task* takes a due date).
+- **ไทม์ไลน์กิจกรรม (Timeline) — CRM-8, control CRM-14:** every activity (call / email / meeting / note /
+  task, **including emails/LINE sent from the deal, inbound replies, and cadence touches**), every **stage
+  change** (from the audit trail), every **linked quotation**, and every **team note** merged in one time
+  order — the complete interaction history of the deal in one place. Log a new activity from the quick-add row
+  (a *task* takes a due date). *(The same unified stream is available per lead/opportunity/account via
+  `GET /api/crm/timeline`.)*
+- **บันทึกทีม (Team notes / collaboration feed) — CRM-8:** post an **internal note** on the deal from the
+  composer under the quick-add row. Type **`@username`** to mention a teammate — they get a **private
+  notification** in their bell inbox (only they see it). Notes are **append-only**: once posted they can't be
+  edited or deleted, so they stand as a permanent, auditable decision trail. Mentions of unknown users are
+  ignored.
 - **ใบเสนอราคาที่เชื่อมโยง (Linked quotes):** the CPQ quotes created against this deal, with status and
   amount (create new ones on `/cpq` — pass the deal when creating so they link).
 - A **Won** deal shows **เป็นโครงการ (To project)** — it seeds a project's contract from the deal value
@@ -539,6 +547,7 @@ documented public API exists yet for pulling a business's own Wongnai reviews.
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.8 | 2026-07-14 | **Unified timeline + team notes on the deal page (`/crm/deals/…`) — CRM-8, control CRM-14:** §16.2 timeline now merges **every** touch (all-channel activities incl. sent comms / inbound replies / cadence touches, stage changes, linked quotes, **team notes**) into one time-ordered stream (same stream available per lead/opportunity/account via `GET /api/crm/timeline`). New **collaboration feed** composer: post an **append-only** internal note (can't be edited/deleted) and **`@mention`** a teammate to send them a private notification. Read-only to the ledger. |
 | 2.7 | 2026-07-14 | **Stage playbooks — exit criteria & WIP limits (`/crm`) — CRM-7, control CRM-13:** new §16.1b. Each pipeline stage can require a set of **fields before a deal enters** it (blocked with `STAGE_REQUIREMENTS_UNMET` + the missing list) and cap how many open deals it holds (a **WIP limit**, `WIP_LIMIT_EXCEEDED`), enforced on every move path and shown as a WIP badge + *Requires* chips + guidance on the board columns. Supervisors (`crm`/`exec`) configure them from the new **Playbook ขั้นตอน** editor. List view gains a multi-select **bulk stage move** (per-item result, not all-or-nothing). Read-only to the ledger. |
 | 2.6 | 2026-07-13 | **Reputation & external analytics (docs/47, new control MKT-14) — new §16.14, `/reputation`.** Connect Google Maps reviews (Business Profile OAuth2) and Google Analytics (GA4) — neither offers a webhook, so this is scheduled-poll ingestion (`reputation_review_sync`/`reputation_ga4_sync` via Scheduled Reports). New errors `OAUTH_NOT_CONFIGURED`/`BAD_STATE`/`NO_REFRESH_TOKEN`/`CONNECTION_NOT_FOUND`. |
 | 2.5 | 2026-07-13 | **Audience export screen (docs/45) — new §16.13, `/crm/audience-export`.** No new control (extends PDPA-05, documented in manual 09 §7) — a dedicated preview + register + ROPA-status view over the existing consent-gated hashed audience export, cross-linked to Scheduled Reports for actually running it. |

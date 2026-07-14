@@ -779,6 +779,66 @@ async function main() {
   const hqPut = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, admin, { wip_limit: 5 });
   ok('CRM-7 tenant-scope: HQ (no tenant) cannot configure a T1 stage playbook → 400', hqPut.status === 400 && ['BAD_STAGE', 'TENANT_REQUIRED'].includes(hqPut.json.error?.code), `${hqPut.status} ${hqPut.json.error?.code}`);
 
+  // ── CRM-8 unified timeline + collaboration feed (control CRM-14, migration 0407) ─────────────────────────
+  // Build a deal with touches from several sources: an activity, two stage transitions, a feed post.
+  const tlOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-8 timeline deal', amount: 30000 });
+  const tlNo = tlOpp.json.opp_no;
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'opportunity', entity_no: tlNo, type: 'call', subject: 'Discovery call' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${tlNo}/stage`, sales1, { stage: 'Proposal' }); // creation + move → 2 stage rows
+
+  // 81. Feed post: append an immutable collaboration note (with an @mention of a real teammate).
+  const post = await inj('POST', '/api/crm/feed', sales1, { entity_type: 'opportunity', entity_no: tlNo, body: 'Aligning on scope with @sales2 before we send the quote.' });
+  ok('CRM-8 feed: post an internal note → 201, @mention resolved to a real tenant user',
+    post.status === 201 && post.json.id > 0 && Array.isArray(post.json.mentions) && post.json.mentions.includes('sales2'), JSON.stringify({ status: post.status, mentions: post.json.mentions }));
+
+  // 82. Unknown / other-tenant @handles are dropped (only validated tenant users are mentioned).
+  const post2 = await inj('POST', '/api/crm/feed', sales1, { entity_type: 'opportunity', entity_no: tlNo, body: 'cc @nobody_xyz @sales2' });
+  ok('CRM-8 feed: an unknown @handle is dropped, a valid one kept', post2.status === 201 && post2.json.mentions.length === 1 && post2.json.mentions[0] === 'sales2', JSON.stringify(post2.json.mentions));
+
+  // 83. Unified timeline merges every source, newest-first.
+  const tl = await inj('GET', `/api/crm/timeline?entity_type=opportunity&entity_no=${encodeURIComponent(tlNo)}`, sales1);
+  const kinds = new Set((tl.json.items ?? []).map((i: any) => i.kind));
+  const ats = (tl.json.items ?? []).map((i: any) => new Date(i.at).getTime());
+  const sortedDesc = ats.every((v: number, idx: number) => idx === 0 || ats[idx - 1] >= v);
+  ok('CRM-8 timeline: merges activity + stage + feed into one stream, newest-first',
+    tl.status === 200 && kinds.has('activity') && kinds.has('stage') && kinds.has('feed') && sortedDesc,
+    JSON.stringify({ kinds: [...kinds], count: tl.json.count }));
+
+  // 84. The stage transitions (creation + move) are present in the unified stream.
+  const stageItems = (tl.json.items ?? []).filter((i: any) => i.kind === 'stage');
+  ok('CRM-8 timeline: both stage transitions captured (creation + move to proposal)',
+    stageItems.length >= 2 && stageItems.some((s: any) => s.to_stage === 'proposal'), `stageCount=${stageItems.length}`);
+
+  // 85. Feed list is a dedicated read of just the posts (newest-first).
+  const feed = await inj('GET', `/api/crm/feed?entity_type=opportunity&entity_no=${encodeURIComponent(tlNo)}`, sales1);
+  ok('CRM-8 feed list: returns the posted notes', feed.status === 200 && feed.json.count >= 2 && feed.json.posts[0].author === 'sales1', JSON.stringify({ count: feed.json.count }));
+
+  // 86. @mention routes a DIRECTED notification: the mentioned user sees it, the author does not.
+  const sales2Inbox = await inj('GET', '/api/notifications/inbox', sales2);
+  const sales1Inbox = await inj('GET', '/api/notifications/inbox', sales1);
+  const mentionMsg = (r: any) => (r.json.items ?? []).some((it: any) => (it.message_en ?? '').includes('mentioned you'));
+  ok('CRM-8 @mention: a directed notification reaches the mentioned user only (not the author)',
+    sales2Inbox.status === 200 && mentionMsg(sales2Inbox) && !mentionMsg(sales1Inbox), JSON.stringify({ sales2: mentionMsg(sales2Inbox), sales1: mentionMsg(sales1Inbox) }));
+
+  // 87. BOLA: posting/reading a timeline for a non-existent entity is rejected.
+  const bolaPost = await inj('POST', '/api/crm/feed', sales1, { entity_type: 'opportunity', entity_no: 'OPP-NOPE', body: 'x' });
+  const bolaTl = await inj('GET', '/api/crm/timeline?entity_type=opportunity&entity_no=OPP-NOPE', sales1);
+  ok('CRM-8 BOLA: feed/timeline on an unknown opportunity → 404 NOT_FOUND',
+    bolaPost.status === 404 && bolaPost.json.error?.code === 'NOT_FOUND' && bolaTl.status === 404, `${bolaPost.status}/${bolaTl.status}`);
+
+  // 88. Account timeline rolls up the account's opportunities' touches.
+  const acctForTl = await inj('POST', '/api/crm/accounts', sales1, { name: 'CRM-8 Timeline Co' });
+  const acctNo = acctForTl.json.account_no;
+  const acctOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-8 acct deal', amount: 5000, account_no: acctNo });
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'opportunity', entity_no: acctOpp.json.opp_no, type: 'meeting', subject: 'Kickoff' });
+  const acctTl = await inj('GET', `/api/crm/timeline?entity_type=account&entity_no=${encodeURIComponent(acctNo)}`, sales1);
+  ok('CRM-8 timeline: an account rolls up its opportunities\' activities',
+    acctTl.status === 200 && (acctTl.json.items ?? []).some((i: any) => i.kind === 'activity' && i.subject === 'Kickoff'), `count=${acctTl.json.count}`);
+
+  // 89. RLS: a T1 feed post is not visible to another tenant (HQ god excepted). Bad entity type rejected.
+  const badType = await inj('GET', '/api/crm/timeline?entity_type=widget&entity_no=x', sales1);
+  ok('CRM-8 validation: an unknown entity_type → 400 BAD_ENTITY_TYPE', badType.status === 400 && badType.json.error?.code === 'BAD_ENTITY_TYPE', `${badType.status} ${badType.json.error?.code}`);
+
   await app.close();
 }
 

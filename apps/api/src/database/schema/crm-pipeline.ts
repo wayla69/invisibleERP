@@ -438,3 +438,23 @@ export type CrmLeadScore = typeof crmLeadScores.$inferSelect;
 export type CrmFollowupSettings = typeof crmFollowupSettings.$inferSelect;
 export type CrmInboundMessage = typeof crmInboundMessages.$inferSelect;
 export type CrmStagePlaybook = typeof crmStagePlaybooks.$inferSelect;
+
+// CRM-8 unified timeline + collaboration feed (control CRM-14, migration 0407) — an APPEND-ONLY internal note
+// on a lead / opportunity / account. Posts are immutable (no updated_at, no edit/delete path) so the
+// collaboration + decision trail on the customer record cannot be silently rewritten. `mentions` is the set of
+// @-mentioned usernames validated against the tenant's active users at post time (each is routed a directed
+// notification). Feed posts surface in the unified timeline (kind='feed'). Tenant-scoped (RLS 0232).
+export const crmFeedPosts = pgTable('crm_feed_posts', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  entityType: text('entity_type').notNull(),           // lead | opportunity | account
+  entityNo: text('entity_no').notNull(),               // lead_no | opp_no | account_no
+  body: text('body').notNull(),
+  mentions: jsonb('mentions').notNull().default('[]'), // string[] of validated @-mentioned usernames
+  author: text('author'),                              // posting username
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byEntity: index('idx_crm_feed_post_entity').on(t.tenantId, t.entityType, t.entityNo),
+}));
+
+export type CrmFeedPost = typeof crmFeedPosts.$inferSelect;

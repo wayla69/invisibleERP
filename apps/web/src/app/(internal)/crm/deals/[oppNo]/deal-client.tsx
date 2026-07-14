@@ -31,6 +31,7 @@ interface Stage { id: number | null; name: string; sequence: number; defaultProb
 interface Activity { id: number; entity_type: string; entity_no: string; type: string; subject: string | null; notes: string | null; due_date: string | null; done: boolean; owner: string | null; created_at: string }
 interface HistoryRow { id: number; from_stage: string | null; to_stage: string; changed_by: string | null; changed_at: string }
 interface Quote { id: number; quote_no: string; status: string; total: number; issued_date: string | null; expires_date: string | null; created_at: string }
+interface FeedPost { id: number; body: string; author: string | null; mentions: string[]; created_at: string }
 interface Deal {
   opp_no: string; name: string; stage: string; status: string; stage_id: number | null; amount: number;
   probability: number; expected_close_date: string | null; owner: string | null; lost_reason: string | null;
@@ -47,7 +48,14 @@ const ACT_ICON: Record<string, typeof Phone> = { call: Phone, email: Mail, meeti
 type TimelineItem =
   | { kind: 'activity'; at: string; a: Activity }
   | { kind: 'stage'; at: string; h: HistoryRow }
-  | { kind: 'quote'; at: string; q: Quote };
+  | { kind: 'quote'; at: string; q: Quote }
+  | { kind: 'feed'; at: string; f: FeedPost };
+
+// CRM-8: highlight @mentions inside a feed note.
+function renderBody(body: string) {
+  return body.split(/(@[A-Za-z0-9_.\-]{2,40})/g).map((part, i) =>
+    part.startsWith('@') ? <span key={i} className="font-medium text-primary">{part}</span> : <span key={i}>{part}</span>);
+}
 
 export default function DealClient({ oppNo, initial }: { oppNo: string; initial?: unknown }) {
   const { t } = useLang();
@@ -95,6 +103,15 @@ export default function DealClient({ oppNo, initial }: { oppNo: string; initial?
     onError: (e: Error) => notifyError(e.message),
   });
 
+  // ── CRM-8 collaboration feed: append-only internal notes with @mentions (surface in the timeline) ──
+  const feedQ = useQuery<{ posts: FeedPost[] }>({ queryKey: ['crm-feed', oppNo], queryFn: () => api(`/api/crm/feed?entity_type=opportunity&entity_no=${encodeURIComponent(oppNo)}`) });
+  const [feedBody, setFeedBody] = useState('');
+  const postNote = useMutation({
+    mutationFn: () => api('/api/crm/feed', { method: 'POST', body: JSON.stringify({ entity_type: 'opportunity', entity_no: oppNo, body: feedBody.trim() }) }),
+    onSuccess: () => { notifySuccess(t('crmx.feed_posted')); setFeedBody(''); qc.invalidateQueries({ queryKey: ['crm-feed', oppNo] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+
   // ── won deal → project (CRM-WL, ported from /projects/crm) ──
   const [convOpen, setConvOpen] = useState(false);
   const [pf, setPf] = useState({ project_code: '', billing_type: 'Fixed', budget_amount: '', start_date: '', end_date: '' });
@@ -114,9 +131,10 @@ export default function DealClient({ oppNo, initial }: { oppNo: string; initial?
       ...d.activities.map((a): TimelineItem => ({ kind: 'activity', at: a.created_at, a })),
       ...d.history.map((h): TimelineItem => ({ kind: 'stage', at: h.changed_at, h })),
       ...d.quotes.map((q): TimelineItem => ({ kind: 'quote', at: q.created_at, q })),
+      ...(feedQ.data?.posts ?? []).map((f): TimelineItem => ({ kind: 'feed', at: f.created_at, f })),
     ];
     return items.sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime());
-  }, [d]);
+  }, [d, feedQ.data]);
 
   const currentIdx = d ? stages.findIndex((s) => (d.stage_id != null && s.id != null) ? s.id === d.stage_id : legacyOf(s.name) === d.stage) : -1;
   const openStages = stages.filter((s) => !s.isWon && !s.isLost);
@@ -239,6 +257,21 @@ export default function DealClient({ oppNo, initial }: { oppNo: string; initial?
                     </div>
                   </div>
 
+                  {/* CRM-8 collaboration feed composer — append-only internal note, @mention a teammate */}
+                  <div className="grid gap-2 rounded-md border p-3">
+                    <textarea
+                      aria-label={t('crmx.feed_ph')}
+                      className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      placeholder={t('crmx.feed_ph')}
+                      value={feedBody}
+                      onChange={(e) => setFeedBody(e.target.value)}
+                    />
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{t('crmx.feed_hint')}</span>
+                      <Button size="sm" className="ms-auto" disabled={!feedBody.trim() || postNote.isPending} onClick={() => postNote.mutate()}><MessageSquare className="size-4" /> {t('crmx.btn_post_note')}</Button>
+                    </div>
+                  </div>
+
                   <div className="grid gap-0.5">
                     {timeline.map((item) => {
                       if (item.kind === 'stage') {
@@ -261,6 +294,21 @@ export default function DealClient({ oppNo, initial }: { oppNo: string; initial?
                               <Badge className="ms-2" variant={statusVariant(item.q.status)}>{item.q.status}</Badge>
                               <span className="ms-2 tabular">{baht(item.q.total)}</span>
                               <span className="ms-2 text-xs text-muted-foreground">{thaiDate(item.q.created_at)}</span>
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (item.kind === 'feed') {
+                        const f = item.f;
+                        return (
+                          <div key={`f${f.id}`} className="flex items-start gap-3 border-s-2 border-success/50 ps-3 py-2">
+                            <MessageSquare className="mt-0.5 size-4 shrink-0 text-success" />
+                            <div className="min-w-0 flex-1 text-sm">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="success">{t('crmx.feed_note')}</Badge>
+                                <span className="text-xs text-muted-foreground">{f.author ?? ''} · {thaiDate(f.created_at)}</span>
+                              </div>
+                              <p className="mt-0.5 whitespace-pre-wrap">{renderBody(f.body)}</p>
                             </div>
                           </div>
                         );
