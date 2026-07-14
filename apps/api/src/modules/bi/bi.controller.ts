@@ -73,6 +73,13 @@ export class BiController {
     return this.svc.reputationSummaryLive(user!, qintOpt('days', days));
   }
 
+  // Live Marketing Mix (MMM) dashboard read (docs/48) — the latest model run's per-channel ROI/allocation.
+  @Get('mmm-summary')
+  @Permissions('marketing', 'exec')
+  mmmSummary(@CurrentUser() user?: JwtUser) {
+    return this.svc.mmmSummaryLive(user!);
+  }
+
   // ── Real-time streaming analytics (docs/22 Phase B) ──
   // Live KPI/event SSE stream, filtered to the caller's tenant. A snapshot refresh pushes a kpi_refresh event.
   @Sse('live/stream')
