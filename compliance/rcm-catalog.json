@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 288,
+    "total": 289,
     "by_status": {
-      "Implemented": 284,
+      "Implemented": 285,
       "Partial": 4
     },
     "by_family": {
@@ -28,7 +28,7 @@
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 5,
-      "Project Accounting": 26,
+      "Project Accounting": 27,
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
@@ -3607,6 +3607,25 @@
       "tod": "Inspect the maker-checker commit (committer <> created_by), the over-envelope block + exec-only override with a recorded reason, the draft→committed lock, and the read-only nature of the analysis (no project row mutated).",
       "toe": "Re-perform: build a scenario (envelope 100,000) including two projects whose budgets total 110,000 → analyze reports over_envelope with over_by 10,000; the author self-commits → SOD_SELF_APPROVAL; a different user commits without an override → OVER_ENVELOPE; the different user commits with an exec override + reason → committed (committed_by recorded, GO-set locked); a within-envelope scenario commits with no override; a committed scenario rejects edits (SCENARIO_LOCKED) and re-commit (SCENARIO_NOT_DRAFT) — all re-performed by the projects harness.",
       "evidence": "Portfolio scenario register (draft/committed, envelope, committer, override reason); the committed selection payload (included/excluded, selected budget vs envelope)",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "PROJ-26",
+      "cycle": "Project Accounting",
+      "category": "Authorization",
+      "fsli": "Project advances a lifecycle phase without an independent stage-gate decision",
+      "risk": "A project rolls from one lifecycle phase to the next — or keeps consuming capital in a phase it should have exited or been stopped in — with no documented, independent authorisation: whoever runs the project decides on their own when it moves to planning/execution/closeout, so there is no segregated GO/HOLD/KILL control over project continuation and no auditable record that a phase transition was reviewed and approved.",
+      "assertion": "Authorization/Segregation of Duties",
+      "description": "Project phase-gate governance (PPM Wave P4, PROJ-26). A project advances along an ordered lifecycle (concept -> planning -> execution -> closeout -> closed, project_phase_gates, migration 0411) only through a GATE that is SUBMITTED for review (pending) to a target phase — forward-only along the ladder (BAD_PHASE_ORDER on a non-advancing target; BAD_PHASE on an unknown one) with at most one gate pending at a time (GATE_ALREADY_PENDING) — then INDEPENDENTLY decided: an approver records GO / HOLD / KILL and MUST differ from the submitter (SOD_SELF_APPROVAL on self-decide; GATE_ALREADY_DECIDED on a re-decision). A GO advances the project to the gate's target phase (the current phase = the target of the latest GO gate); a HOLD or KILL records the outcome without advancing. Every gate preserves submitted_by / decided_by / decided_at / decision_notes as the authorisation trail. So a project cannot change lifecycle phase on one person's say-so, and every transition carries a segregated, documented review.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per phase gate",
+      "owner": "PMO / Project Sponsor (segregated)",
+      "coso": "P13",
+      "code_reference": "projects-gate.service.ts submitGate (forward-only ladder, single-pending) / decideGate (GO/HOLD/KILL, SOD_SELF_APPROVAL, GATE_ALREADY_DECIDED) / listGates (current-phase derivation); projects.service.ts delegators; projects.controller.ts /api/projects/:code/gates + /api/projects/gates/:gateId/decide (exec/planner/ar gate); schema/projects.ts project_phase_gates (migration 0411, canonical RLS); web /projects/:code phase-gate panel; cutover/projects.ts (ToE)",
+      "tod": "Inspect the forward-only submit (BAD_PHASE / BAD_PHASE_ORDER / GATE_ALREADY_PENDING), the maker-checker decide (decider <> submitter, GO advances / HOLD-KILL record), the current-phase derivation from the latest GO gate, and the preserved submitter/decider trail.",
+      "toe": "Re-perform: a fresh project starts at concept; submit a gate to planning (pending); a second submit → GATE_ALREADY_PENDING; the submitter self-decides → SOD_SELF_APPROVAL; a different user records GO → project advances to planning; re-deciding the gate → GATE_ALREADY_DECIDED; a gate that does not advance past the current phase → BAD_PHASE_ORDER; a HOLD on the next gate records the decision without advancing; an unknown phase → BAD_PHASE and an unknown gate → GATE_NOT_FOUND — all re-performed by the projects harness.",
+      "evidence": "Phase-gate register (per project: gate_key, from/target phase, status, submitter, decider, decision notes); the derived current lifecycle phase",
       "status": "Implemented"
     },
     {

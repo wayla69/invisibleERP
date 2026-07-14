@@ -8,10 +8,10 @@
 **Related:** `soc2-readiness.md` · `COSO_ICFR_Audit_Readiness_Plan.md` · `Oshinei_ERP_SOX_RCM_v1.xlsx` · `policies/`
 
 > **Relationship to SOC 2 and SOX work:** ISO 27001:2022 Annex A maps almost one-to-one with SOC 2 CC6–CC9
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->288<!-- /rcm-total -->-control RCM built for SOX
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->288<!-- /rcm-total -->-control RCM built for SOX
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->288<!-- /rcm-total -->-control RCM built for SOX
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->288<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->289<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->289<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->289<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->289<!-- /rcm-total -->-control RCM built for SOX
 > 404(a) covers the ITGC spine of ISO 27001; the gap analysis below shows where existing controls satisfy
 > Annex A requirements and where incremental work is needed. A shared evidence base keeps the three
 > certifications from tripling compliance work.

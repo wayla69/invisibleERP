@@ -832,6 +832,34 @@ export const portfolioScenarioItems = pgTable(
 export type PortfolioScenario = typeof portfolioScenarios.$inferSelect;
 export type PortfolioScenarioItem = typeof portfolioScenarioItems.$inferSelect;
 
+// PROJ-26 — Project phase-gate governance (PPM Wave P4). A stage-gate over a project's lifecycle: a gate is
+// SUBMITTED for review (pending) to advance the project to a target phase, then an INDEPENDENT reviewer
+// records a GO / HOLD / KILL decision (decider <> submitter → SOD_SELF_APPROVAL). A GO advances the project;
+// the current phase is the target of the latest GO gate. One tenant table (0232 canonical RLS, tenant idx).
+export const projectPhaseGates = pgTable(
+  'project_phase_gates',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    gateKey: text('gate_key').notNull(),                     // e.g. G1_PLANNING
+    name: text('name'),
+    targetPhase: text('target_phase').notNull(),             // planning | execution | closeout | closed
+    fromPhase: text('from_phase').notNull(),                 // current phase at submit time (audit)
+    status: text('status').notNull().default('pending'),     // pending | go | hold | kill
+    readiness: text('readiness'),                            // submitter's readiness / exit-criteria note
+    submittedBy: text('submitted_by').notNull(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow(),
+    decidedBy: text('decided_by'),                           // reviewer — must differ from submitted_by (SoD)
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decisionNotes: text('decision_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_project_phase_gates_tenant').on(t.tenantId, t.projectId), byProject: index('idx_project_phase_gates_project').on(t.projectId, t.status) }),
+);
+export type ProjectPhaseGate = typeof projectPhaseGates.$inferSelect;
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;
