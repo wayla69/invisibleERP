@@ -259,6 +259,21 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     inline duplicate + its dispatch line; never leave both. And remember mantra #9's hidden second collision:
     the auto-merge can silently DROP main's added dispatch line in a region your branch edited — grep the
     merged file for every key main added, not just the conflict hunks.
+14. **A file that opens in a LENIENT renderer but not the REAL consumer means you validated against the wrong
+    tool — reproduce in the actual target (mantra #1 for generated artifacts).** A `.pptx` this repo's deck
+    generator (`presentation/`) built opened fine in `python-pptx`, `lxml`, AND LibreOffice, yet PowerPoint —
+    *especially PowerPoint mobile* — refused it ("PowerPoint found a problem … needs to close"). The lenient
+    trio masked the defect for two round-trips. Two distinct causes, both schema-strictness PowerPoint alone
+    enforces: (a) the embedded-font post-processor put `<p:embeddedFontLst>` BEFORE `<p:sldSz>`, but
+    `CT_Presentation` child order requires it AFTER `sldSz`+`notesSz`; (b) even with fonts fixed, the styled
+    DrawingML (soft-shadow `<a:effectLst><a:outerShdw>`, fill `<a:alpha>`) tripped PP's validator. **Fix that
+    always works: don't hand-tune the OOXML — render each slide to a high-res image and assemble a PPTX
+    containing ONLY `<p:pic>` shapes** (`build_pptx_images.py`; the simplest valid structure, opens
+    everywhere, pixel-perfect, but text isn't editable). Diagnose by structural assert, not by eyeballing:
+    `grep`/`lxml` the slides for `outerShdw`/`<a:alpha>`/`embeddedFontLst` position — a green `python-pptx`
+    reopen proves nothing about PowerPoint. Generalize: when an artifact is *consumed* by tool X, X is the
+    only renderer whose acceptance counts; a permissive local parser is a false "green gate" (cf. the
+    `codeql`/dist staleness lessons — trust the authoritative consumer, not a convenient proxy).
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -533,6 +548,20 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   **page-level overflow SOURCE**, not the fixed element — find and fix the too-wide element (e.g. a flex row of
   `shrink-0` controls wider than the viewport: make trailing buttons **icon-only on mobile**, label from `sm` up),
   then the fixed sheet positions correctly. Bit the `/shop` list view + basket sheet (PR #509).
+- **Customer-facing decks live in `presentation/` — bilingual, generated, image-based PPTX.** One content
+  module (`content.py`) holds BOTH languages: every user string is `T("<th>","<en>")` and `set_lang('th'|'en')`
+  picks one; the same specs feed the PPTX deck (`slides.py`/`pptx_lib.py`, light **pastel-on-white** theme) and
+  the PDF whitepaper (`build_pdf.py`, reportlab). **Ship the PPTX via `build_pptx_images.py`, NOT `build_pptx.py`
+  directly** — see debug-mantra #14 (native styled PPTX won't open in PowerPoint mobile; the image build does).
+  Four deliverables = `{TH,EN} × {Presentation.pptx, Whitepaper.pdf}`. Gotchas learned: (a) LibreOffice needs
+  **`libreoffice-impress`** installed to convert pptx (core+common alone → "source file could not be loaded");
+  the image build shells out to `soffice` + `pdftoppm` (poppler). (b) **reportlab Thai needs `wordWrap='CJK'`**
+  (Thai has no spaces) and a real TTF — `Loma.otf` (only Thai font pre-installed) is CFF/OTF and reportlab can't
+  use it; fonts are **vendored** in `presentation/fonts/` (IBM Plex Sans Thai — covers Thai+Latin with correct
+  vowel/tone positioning). (c) reportlab `<font color="...">` markup needs a **`#RRGGBB`** prefix (a bare hex
+  → `Invalid color value`). (d) any hardcoded UI chrome (footers, section labels) must route through the
+  per-language label map or the EN deck shows stray Thai. Numbers in the deck are pulled from real docs
+  (`docs/process-narratives/`, `compliance/`) — RCM **282** controls, **23** SoD rules, 22 remediated findings.
 
 ## Build / verify quick reference
 - API: `pnpm --filter @ierp/api build` · Web: `pnpm --filter @ierp/web build` · Typecheck: `pnpm -r typecheck`
