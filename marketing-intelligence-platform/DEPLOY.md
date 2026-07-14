@@ -34,19 +34,37 @@ The configs pin the Dockerfile, start command, restart policy, the analytics **c
 **health check** (`/_stcore/health`).
 
 ## 3. Mint the ERP API key (scope `analytics:read`)
-The platform reads ERP data with a tenant-bound key. Two ways:
+The platform reads ERP data with a **tenant-bound** key. Minting is via the **API** — the `/developer`
+web page only *lists/manages* existing keys (and shows the scope catalog); it has no "create key" button.
+You need an ERP admin (a user holding the `users` permission — a tenant Admin does).
 
-- **ERP Developer portal (recommended):** sign in to the ERP as an admin → **Developer** (`/developer`) →
-  create a key named `marketing-intelligence` with scope **`analytics:read`**. Copy the `ierp_…` value
-  (shown once).
-- **API:** with an admin session token,
-  ```bash
-  curl -X POST "$ERP/api/platform/api-keys" \
-    -H "Authorization: Bearer <admin-JWT>" -H "Content-Type: application/json" \
-    -d '{"name":"marketing-intelligence","scopes":["analytics:read"]}'
-  # → { "key": "ierp_…" }   (returned once)
-  ```
-The key is bound to that admin's tenant; the platform only ever sees that tenant's data (RLS-enforced).
+```bash
+ERP="https://<your-erp-host>"
+
+# 1) Log in as admin → get a JWT
+TOKEN=$(curl -s -X POST "$ERP/api/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"<admin-username>","password":"<admin-password>"}' | jq -r .token)
+
+# 2) Mint the key (scope analytics:read). Add "ttl_days": 365 to auto-expire.
+curl -s -X POST "$ERP/api/platform/api-keys" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"marketing-intelligence","scopes":["analytics:read"]}'
+# → {"id":..,"name":"marketing-intelligence","prefix":"ierp_xxxxxxx","scopes":["analytics:read"],
+#    "expires_at":null,"key":"ierp_<32 hex>"}   ← the `key` is shown ONCE. Copy it now.
+```
+
+**Verify the key + scope before touching Railway:**
+```bash
+KEY="ierp_..."
+curl -s "$ERP/api/v1/me" -H "Authorization: Bearer $KEY"
+# → {"principal":"apikey:ierp_xxxxxxx","tenant_id":<n>,"scopes":["analytics:read"],"version":"v1"}
+curl -s "$ERP/api/v1/sales/daily?from=2026-01-01&to=2026-01-31" -H "Authorization: Bearer $KEY"
+# → 200 {"window":{...},"group_by":"day","data":[...]}
+# 403 INSUFFICIENT_SCOPE → key lacks analytics:read;  401 → bad/typo'd key.
+```
+The key is bound to the minting admin's tenant; the platform only ever sees that tenant's data (RLS).
+Optional: confirm the scope catalog + your new key row at **`/developer`** (needs the `users` permission).
 
 ## 4. Environment variables
 Set these on each service (use Railway **reference variables** for the add-ons so they auto-wire):
