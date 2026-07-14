@@ -306,9 +306,10 @@ No. Each organisation is a separate tenant; you only ever see your own data.
 That's expected. The **product catalogue is shared by all companies** — products have no
 company owner — so a company reset wipes its *business data* but leaves the products it
 added in the **shared catalogue**, where they keep appearing in every company's shop. To
-remove them, the **platform owner** runs the unused-product cleanup: preview with
-`GET /api/admin/item-maintenance/unused-items`, then purge with
-`POST /api/admin/item-maintenance/purge-unused-items` (`{ "confirm": "PURGE-UNUSED-ITEMS" }`).
+remove them, the **platform owner** runs the unused-product cleanup from **ศูนย์ควบคุมแพลตฟอร์ม**
+(`/platform`) → the **ดูแลระบบ (Maintenance)** tab → **ตรวจสอบ** (preview) then **ลบ** (with a confirm
+dialog). *(Same thing via the API: `GET /api/admin/item-maintenance/unused-items` then
+`POST /api/admin/item-maintenance/purge-unused-items` with `{ "confirm": "PURGE-UNUSED-ITEMS" }`.)*
 It removes only products **no company references** any more (one another company still has
 on a PO, in stock, on a recipe/BoM, … is kept). See [Administration](./11-administration.md) §8.1.
 

@@ -133,8 +133,9 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
     `403 ITEM_PURGE_HQ_ONLY` / `PLATFORM_ADMIN_REQUIRED`). Idempotent (a second run collects nothing) and
     audit-logged (`items_unused_purged`). Descriptive maintenance tooling on the shared master — **no GL, no
     new numbered control** (god-gated + typed-confirm + dry-run preview, mirroring the §7 step 12 merge and the
-    tenant factory-reset/purge gates in PN-08 ITGC / `docs/ops/tenancy-model.md`). Verified by the `onboarding`
-    harness.
+    tenant factory-reset/purge gates in PN-08 ITGC / `docs/ops/tenancy-model.md`). On the web the platform
+    owner runs both from **`/platform` → ดูแลระบบ (Maintenance)** — a **ตรวจสอบ** (dry-run preview) button then
+    a **ลบ** button behind a confirm dialog. Verified by the `onboarding` harness.
 
 ## 8. Process flow
 

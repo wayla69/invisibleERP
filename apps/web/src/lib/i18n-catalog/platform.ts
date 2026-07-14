@@ -231,6 +231,28 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.tab_onboarding': { th: 'Onboarding', en: 'Onboarding' },
   'plt.tab_notifications': { th: 'แจ้งเตือน', en: 'Notifications' },
   'plt.tab_activity': { th: 'กิจกรรม', en: 'Activity' },
+  'plt.tab_maintenance': { th: 'ดูแลระบบ', en: 'Maintenance' },
+
+  // ── Maintenance tab: global item-master garbage collection (unused shared-catalogue items) ──
+  'plt.mnt_title': { th: 'ล้างสินค้าที่ไม่มีใครใช้แล้ว', en: 'Purge unused products' },
+  'plt.mnt_desc': {
+    th: 'สินค้าเป็นข้อมูลกลางที่ทุกบริษัทใช้ร่วมกัน การล้างข้อมูลบริษัทจึงไม่ลบสินค้าที่บริษัทนั้นเพิ่มไว้ — สินค้ายังค้างในแคตตาล็อกและโผล่ในหน้าเลือกซื้อของทุกบริษัท ปุ่มนี้ลบเฉพาะสินค้าที่ไม่มีบริษัทไหนอ้างอิงอีกแล้ว (ที่ยังใช้อยู่จะถูกเก็บไว้)',
+    en: 'Products are a shared catalogue across all companies, so resetting a company does not remove the products it added — they linger and keep showing in every company’s shop. This removes only products that no company references any more (still-used ones are kept).',
+  },
+  'plt.mnt_check': { th: 'ตรวจสอบ (ดูจำนวน)', en: 'Check (preview)' },
+  'plt.mnt_checking': { th: 'กำลังตรวจสอบ…', en: 'Checking…' },
+  'plt.mnt_preview_done': { th: 'พบสินค้าที่ไม่มีใครใช้ {n} รายการ', en: 'Found {n} unused product(s)' },
+  'plt.mnt_result': { th: 'จะลบ {n} รายการ (สแกน {cols} คอลัมน์อ้างอิงทั่วทุกบริษัท)', en: 'Would remove {n} product(s) (scanned {cols} reference columns across all companies)' },
+  'plt.mnt_sample': { th: 'ตัวอย่างรหัส', en: 'Sample codes' },
+  'plt.mnt_purge_btn': { th: 'ลบ {n} รายการ', en: 'Purge {n}' },
+  'plt.mnt_confirm_title': { th: 'ยืนยันการลบสินค้า', en: 'Confirm product purge' },
+  'plt.mnt_confirm_desc': {
+    th: 'จะลบสินค้าที่ไม่มีใครใช้ {n} รายการออกจากแคตตาล็อกกลางอย่างถาวร (สินค้าที่บริษัทอื่นยังใช้จะไม่ถูกลบ) ยืนยันหรือไม่?',
+    en: 'Permanently remove {n} unused product(s) from the shared catalogue (products other companies still use are kept). Confirm?',
+  },
+  'plt.mnt_confirm_btn': { th: 'ลบเลย', en: 'Purge now' },
+  'plt.mnt_purging': { th: 'กำลังลบ…', en: 'Purging…' },
+  'plt.mnt_purge_done': { th: 'ลบสินค้าที่ไม่ใช้แล้ว {n} รายการเรียบร้อย', en: 'Purged {n} unused product(s)' },
 
   // ── App-shell: GodScopeBanner ──
   'plt.scope_acting_as': { th: 'กำลังดูข้อมูลของ', en: 'Viewing data for' },
