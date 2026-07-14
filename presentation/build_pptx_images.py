@@ -25,6 +25,7 @@ def run(cmd, **kw):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "output", "Invisible-ERP-Presentation.pptx")
+    lang = sys.argv[2] if len(sys.argv) > 2 else "th"
     work = tempfile.mkdtemp(prefix="ierp_deck_")
     design = os.path.join(work, "design.pptx")
 
@@ -33,7 +34,7 @@ def main():
     from slides import Slides
     orig = Slides.save_embedded
     Slides.save_embedded = lambda self, p: self.prs.save(p)
-    sys.argv = ["x", design]
+    sys.argv = ["x", design, lang]
     build_pptx.main()
     Slides.save_embedded = orig
 

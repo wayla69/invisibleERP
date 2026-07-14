@@ -14,6 +14,7 @@ from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame, Paragraph,
                                 Table, TableStyle, PageBreak, Flowable, KeepTogether,
                                 NextPageTemplate, CondPageBreak)
 from reportlab.lib.styles import ParagraphStyle
+import content
 from content import build_specs
 
 F = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
@@ -23,35 +24,41 @@ _ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 LOGO_WHITE = os.path.join(_ASSETS, "invisible-consulting-logo-white.png")
 LOGO_DARK  = os.path.join(_ASSETS, "invisible-consulting-logo-dark.png")
 LOGO_AR = 1.908  # width / height
-pdfmetrics.registerFont(TTFont("Sarabun", f"{F}/Sarabun-Regular.ttf"))
-pdfmetrics.registerFont(TTFont("Sarabun-B", f"{F}/Sarabun-Bold.ttf"))
-pdfmetrics.registerFont(TTFont("Sarabun-L", f"{F}/Sarabun-Light.ttf"))
-pdfmetrics.registerFont(TTFont("Kanit", f"{F}/Kanit-Regular.ttf"))
-pdfmetrics.registerFont(TTFont("Kanit-M", f"{F}/Kanit-Medium.ttf"))
-pdfmetrics.registerFont(TTFont("Kanit-SB", f"{F}/Kanit-SemiBold.ttf"))
-pdfmetrics.registerFont(TTFont("Kanit-B", f"{F}/Kanit-Bold.ttf"))
+# IBM Plex Sans Thai throughout — registered under the deck's existing logical names.
+_IP = f"{F}/IBMPlexSansThai"
+pdfmetrics.registerFont(TTFont("Sarabun",   f"{_IP}-Regular.ttf"))
+pdfmetrics.registerFont(TTFont("Sarabun-B", f"{_IP}-SemiBold.ttf"))
+pdfmetrics.registerFont(TTFont("Sarabun-L", f"{_IP}-Regular.ttf"))
+pdfmetrics.registerFont(TTFont("Kanit",     f"{_IP}-Regular.ttf"))
+pdfmetrics.registerFont(TTFont("Kanit-M",   f"{_IP}-Medium.ttf"))
+pdfmetrics.registerFont(TTFont("Kanit-SB",  f"{_IP}-SemiBold.ttf"))
+pdfmetrics.registerFont(TTFont("Kanit-B",   f"{_IP}-Bold.ttf"))
 pdfmetrics.registerFontFamily("Sarabun", normal="Sarabun", bold="Sarabun-B")
 
-# ── Light editorial palette ────────────────────────────────────────────────────
-PAPER   = HexColor("#FBFAF6")   # warm off-white page
-INK     = HexColor("#1C2333")   # deep ink
-MUTED   = HexColor("#4E586E")   # secondary
-FAINT   = HexColor("#8A93A5")   # tertiary
-HAIR    = HexColor("#E4E1D8")   # hairline on paper
+# ── Light pastel editorial palette (matched to the deck) ────────────────────────
+PAPER   = HexColor("#FDFDFC")   # soft white page
+INK     = HexColor("#202636")   # deep slate ink
+MUTED   = HexColor("#545D6E")   # secondary
+FAINT   = HexColor("#939BA9")   # tertiary
+HAIR    = HexColor("#E6E8EE")   # hairline
 CARD    = HexColor("#FFFFFF")   # card surface
-CARDLN  = HexColor("#E7E3D8")   # card border
-PANEL   = HexColor("#F3F1EA")   # tinted panel
-DARK    = HexColor("#141B2D")   # dark blocks (cover/divider band)
-PAPER2  = HexColor("#F6F4ED")
+CARDLN  = HexColor("#E7E9EF")   # card border
+PANEL   = HexColor("#F5F6F8")   # tinted panel
+DARK    = HexColor("#1D2333")   # dark blocks (cover/divider band)
+PAPER2  = HexColor("#F7F8FA")
 
-TEAL    = HexColor("#0E8C79")
-CYAN    = HexColor("#1E7FB8")
-VIOLET  = HexColor("#6A54C2")
-GOLD    = HexColor("#B5892B")
-GREEN   = HexColor("#2E9366")
-CORAL   = HexColor("#CF5245")
+TEAL    = HexColor("#2F8E7E")
+CYAN    = HexColor("#4E82C0")
+VIOLET  = HexColor("#826FC4")
+GOLD    = HexColor("#BE944B")
+GREEN   = HexColor("#51A17B")
+CORAL   = HexColor("#CB727C")
 AC = {"teal":TEAL,"cyan":CYAN,"violet":VIOLET,"gold":GOLD,"green":GREEN,"coral":CORAL}
+# very light tints for card fills, index-aligned with the accents
+TINTS = {"teal":HexColor("#E9F3F1"),"cyan":HexColor("#EBF1FA"),"violet":HexColor("#F1EEFA"),
+         "gold":HexColor("#F8F2E5"),"green":HexColor("#EAF4EF"),"coral":HexColor("#FAEEEF")}
 def col(k, d=TEAL): return AC.get(k, d) if isinstance(k, str) else (k or d)
+def tint(k): return TINTS.get(k if isinstance(k,str) else "teal", PANEL)
 def hx(c): return '#'+c.hexval()[2:]
 
 PW, PH = A4
@@ -138,9 +145,16 @@ def _draw_wrapped(c, text, x, y, maxw, font, size, leading, color):
 # ── card/panel builders (Table-based) ──────────────────────────────────────────
 def make_card(glyph, title, desc, accent, w, h=None):
     ac = col(accent)
+    if len(glyph) <= 2:   # glyph symbol + title
+        head = (f'<font name="Kanit-B" color="{hx(ac)}">{_esc(glyph)}</font>  '
+                f'<font name="Kanit-SB">{_esc(title)}</font>')
+    elif title:           # no glyph: title + accent subtitle
+        head = (f'<font name="Kanit-SB">{_esc(glyph)}</font><br/>'
+                f'<font name="Kanit-SB" color="{hx(ac)}" size="8.6">{_esc(title)}</font>')
+    else:                 # no glyph, no subtitle: title only
+        head = f'<font name="Kanit-SB">{_esc(glyph)}</font>'
     inner = [
-        [Paragraph(f'<font name="Kanit-B" color="{hx(ac)}">{_esc(glyph)}</font>  '
-                   f'<font name="Kanit-SB">{_esc(title)}</font>', st_card_t)],
+        [Paragraph(head, st_card_t)],
         [Paragraph(_esc(desc), st_card_d)],
     ]
     t = Table(inner, colWidths=[w-14])
@@ -266,7 +280,7 @@ def make_onpage(holder):
         canvas.drawRightString(PW-RM, PH-16, sec)
         # footer
         canvas.setFont("Sarabun", 8); canvas.setFillColor(FAINT)
-        canvas.drawString(LM, BM-14, "ระบบบริหารธุรกิจอัจฉริยะครบวงจร")
+        canvas.drawString(LM, BM-14, content.T("แพลตฟอร์มบริหารธุรกิจสำหรับองค์กร","Enterprise Business Platform"))
         canvas.setFont("Kanit-B", 9); canvas.setFillColor(TEAL)
         canvas.drawRightString(PW-RM, BM-14, f"{doc.page:02d}")
         canvas.restoreState()
@@ -286,16 +300,18 @@ def cover_page(canvas, doc):
         canvas.setFillColor(TEAL); canvas.setFont("Kanit-B", 22); canvas.drawCentredString(LM+17, PH-63, "i")
         canvas.setFillColor(colors.white); canvas.setFont("Kanit-B", 16); canvas.drawString(LM+44, PH-58, "Invisible")
     canvas.setFillColor(HexColor("#9AA6BD")); canvas.setFont("Sarabun",9)
-    canvas.drawString(LM, PH-134, "V2 · Enterprise Suite · เอกสารสรุประบบ")
+    canvas.drawString(LM, PH-134, content.T("แพลตฟอร์มบริหารธุรกิจสำหรับองค์กร · เอกสารสรุประบบ","Enterprise Business Platform · System Overview"))
     canvas.restoreState()
 
 
 # ── build document ───────────────────────────────────────────────────────────
-def build(out):
+def build(out, lang="th"):
+    content.set_lang(lang)
     holder={"section":""}
+    _title = "Invisible ERP — System Overview" if lang == "en" else "Invisible ERP — สรุประบบ"
     doc = BaseDocTemplate(out, pagesize=A4, leftMargin=LM, rightMargin=RM,
-                          topMargin=TMg, bottomMargin=BM, title="Invisible ERP — สรุประบบ",
-                          author="Invisible ERP")
+                          topMargin=TMg, bottomMargin=BM, title=_title,
+                          author="Invisible Consulting")
     frame = Frame(LM, BM, CW, PH-TMg-BM, leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     body = PageTemplate(id="body", frames=[frame], onPage=make_onpage(holder))
     coverT = PageTemplate(id="cover", frames=[Frame(LM, BM, CW, PH-TMg-BM)], onPage=cover_page)
@@ -349,13 +365,13 @@ def build(out):
             E += mod_ctrl_flow(sp, holder)
         elif t=="compare":
             E += header_block(sp, holder)
-            E.append(compare_flow(sp["rows"]))
+            E.append(compare_flow(sp["rows"], sp.get("us","Invisible ERP"), sp.get("them","")))
             E.append(Spacer(1,5*mm))
         elif t=="closing":
-            E.append(HeaderMark(holder, "สรุป"))
+            E.append(HeaderMark(holder, content.T("สรุป","In summary")))
             E += closing_flow(sp)
     doc.build(E)
-    print(f"wrote {out}")
+    print(f"wrote {out}  ({lang})")
 
 # ── flow builders ───────────────────────────────────────────────────────────────
 def header_block(sp, holder, big=False):
@@ -379,14 +395,15 @@ def cover_flow(sp):
     out.append(Paragraph(f'<font color="{hx(TEAL)}">▎</font>  <i><font color="#FFFFFF">{_esc(sp["tagline"])}</font></i>',
                          ParagraphStyle("ctag",fontName="Sarabun",fontSize=12,textColor=colors.white,leading=16,wordWrap="CJK")))
     out.append(Spacer(1, 8*mm))
-    out.append(Paragraph('<font color="#8A93A5">พัฒนาโดย </font><font name="Kanit-B" color="#C4CBD8">Invisible Consulting</font>',
+    out.append(Paragraph(f'<font color="#8A93A5">{_esc(sp.get("credit","พัฒนาโดย"))} </font><font name="Kanit-B" color="#C4CBD8">Invisible Consulting</font>',
                          ParagraphStyle("cred",fontName="Sarabun",fontSize=11,textColor=HexColor("#C4CBD8"),leading=14)))
     return out
 
 def agenda_flow(sp, holder):
-    out=[HeaderMark(holder,"สารบัญ")]
-    out.append(AccentTick(TEAL)); out.append(Paragraph("สารบัญ · AGENDA", st_kicker))
-    out.append(Paragraph("สิ่งที่คุณจะได้เห็นในเอกสารฉบับนี้", st_h1))
+    _k = sp.get("kicker", content.T("สารบัญ","Contents"))
+    out=[HeaderMark(holder, _k)]
+    out.append(AccentTick(TEAL)); out.append(Paragraph(_esc(_k).upper(), st_kicker))
+    out.append(Paragraph(_esc(sp.get("title", content.T("ภาพรวมของการนำเสนอ","Overview"))), st_h1))
     out.append(HR(CW,HAIR,0.6,3)); out.append(Spacer(1,4*mm))
     rows=[]
     for j,(num,ti,de) in enumerate(sp["items"]):
@@ -440,7 +457,7 @@ def mod_over_flow(sp, holder):
     out.append(Paragraph(f'<font name="Kanit-B" color="{hx(ac)}">{_esc(sp["family"]).upper()}</font>{tagtxt}', st_kicker))
     out.append(Paragraph(_esc(sp["title"]), st_h2))
     # positioning box
-    pos=Table([[Paragraph(f'<font name="Kanit-B" color="{hx(ac)}">บทบาท</font>  '
+    pos=Table([[Paragraph(f'<font name="Kanit-B" color="{hx(ac)}">{_esc(content.T("บทบาท","Role"))}</font>  '
                           f'<font color="{hx(INK)}">{_esc(sp["positioning"])}</font>',
                           S("pos",fontSize=9.3,leading=13))]], colWidths=[CW])
     pos.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),PANEL),("LINEBEFORE",(0,0),(0,-1),3,ac),
@@ -456,11 +473,11 @@ def mod_over_flow(sp, holder):
 def mod_ctrl_flow(sp, holder):
     ac=col(sp.get("accent")); out=[HeaderMark(holder, sp["family"])]
     out.append(CondPageBreak(120*mm))
-    out.append(Paragraph(f'<font name="Kanit-B" color="{hx(ac)}" size="8.5">{_esc(sp["family"]).upper()}  ·  ต่อ</font>', st_kicker))
+    out.append(Paragraph(f'<font name="Kanit-B" color="{hx(ac)}" size="8.5">{_esc(sp["family"]).upper()}  ·  {_esc(content.T("ต่อ","continued"))}</font>', st_kicker))
     out.append(Paragraph(_esc(sp["title"]), st_h2)); out.append(Spacer(1,1*mm))
     w=(CW-8)/2
     # controls panel
-    crows=[[Paragraph(f'<font color="{hx(CORAL)}">⛨</font>  <font name="Kanit-SB">การควบคุม &amp; แบ่งแยกหน้าที่ (SoD)</font>', S("h",fontName="Kanit-SB",fontSize=10,leading=13))]]
+    crows=[[Paragraph(f'<font color="{hx(CORAL)}">⛨</font>  <font name="Kanit-SB">{_esc(content.T("การควบคุมและการแยกหน้าที่","Controls & segregation of duties"))}</font>', S("h",fontName="Kanit-SB",fontSize=10,leading=13))]]
     import re
     for c in sp["controls"]:
         m=re.match(r"^([A-Z]{2,6}-[0-9A-Za-z/]+)\s+(.*)$", c)
@@ -470,7 +487,7 @@ def mod_ctrl_flow(sp, holder):
     ct=Table(crows,colWidths=[w-16]); ct.setStyle(_panelstyle())
     cp=Table([[ct]],colWidths=[w]); cp.setStyle(_panelbox(CORAL))
     # wow panel
-    wrows=[[Paragraph(f'<font color="{hx(GOLD)}">★</font>  <font name="Kanit-SB">จุดเด่นที่เหนือคู่แข่ง</font>', S("h",fontName="Kanit-SB",fontSize=10,leading=13))]]
+    wrows=[[Paragraph(f'<font color="{hx(GOLD)}">★</font>  <font name="Kanit-SB">{_esc(content.T("จุดเด่นที่เหนือกว่า","Where it stands out"))}</font>', S("h",fontName="Kanit-SB",fontSize=10,leading=13))]]
     for wv in sp["wow"]:
         wrows.append([Paragraph(f'<font color="{hx(GOLD)}">●</font>  <font color="{hx(INK)}">{_esc(wv)}</font>', S("wb",fontSize=8.5,leading=11.7))])
     wt=Table(wrows,colWidths=[w-16]); wt.setStyle(_panelstyle())
@@ -480,7 +497,7 @@ def mod_ctrl_flow(sp, holder):
         ("RIGHTPADDING",(0,0),(-1,-1),0),("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0)]))
     out.append(tb); out.append(Spacer(1,2.5*mm))
     # routes
-    rt=Table([[Paragraph(f'<font name="Kanit-B" color="{hx(ac)}" size="8.5">หน้าจอหลัก</font>   '
+    rt=Table([[Paragraph(f'<font name="Kanit-B" color="{hx(ac)}" size="8.5">{_esc(content.T("หน้าจอหลัก","Key screens"))}</font>   '
                          f'<font color="{hx(MUTED)}" size="9">{_esc("   ".join(sp["routes"]))}</font>', S("r",leading=12))]],colWidths=[CW])
     rt.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),PAPER2),("BOX",(0,0),(-1,-1),0.5,CARDLN),
         ("LEFTPADDING",(0,0),(-1,-1),9),("RIGHTPADDING",(0,0),(-1,-1),9),
@@ -498,10 +515,11 @@ def _panelbox(ac):
         ("LEFTPADDING",(0,0),(-1,-1),9),("RIGHTPADDING",(0,0),(-1,-1),8),
         ("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP")])
 
-def compare_flow(rows):
-    data=[[Paragraph('<font name="Kanit-B" size="10">ความสามารถ</font>', S("h",leading=13)),
-           Paragraph(f'<font name="Kanit-B" size="10" color="{hx(TEAL)}">● Invisible ERP</font>', S("h",leading=13,alignment=TA_CENTER)),
-           Paragraph(f'<font name="Kanit-B" size="10" color="{hx(FAINT)}">ERP ทั่วไป</font>', S("h",leading=13,alignment=TA_CENTER))]]
+def compare_flow(rows, us="Invisible ERP", them=""):
+    _cap = content.T("ความสามารถ","Capability")
+    data=[[Paragraph(f'<font name="Kanit-B" size="10">{_esc(_cap)}</font>', S("h",leading=13)),
+           Paragraph(f'<font name="Kanit-B" size="10" color="{hx(TEAL)}">● {_esc(us)}</font>', S("h",leading=13,alignment=TA_CENTER)),
+           Paragraph(f'<font name="Kanit-B" size="10" color="{hx(FAINT)}">{_esc(them)}</font>', S("h",leading=13,alignment=TA_CENTER))]]
     for feat,ours,theirs in rows:
         data.append([Paragraph(f'<font name="Sarabun-B" size="9.3">{_esc(feat)}</font>', S("f",leading=12)),
                      Paragraph(f'<font color="{hx(GREEN)}">✔</font>  <font size="8.6">{_esc(ours)}</font>', S("o",leading=12,alignment=TA_CENTER)),
@@ -527,7 +545,7 @@ def closing_flow(sp):
         img=RLImage(LOGO_DARK, width=lw, height=lh); img.hAlign="LEFT"
         out.append(img); out.append(Spacer(1, 8*mm))
     out.append(AccentTick(TEAL,22,3))
-    out.append(Paragraph("ก้าวต่อไปกับ INVISIBLE ERP", ParagraphStyle("k",fontName="Kanit-B",fontSize=10,textColor=TEAL,leading=14,spaceAfter=6)))
+    out.append(Paragraph(_esc(sp.get("kicker", content.T("ก้าวต่อไปกับ Invisible ERP","The next step"))).upper(), ParagraphStyle("k",fontName="Kanit-B",fontSize=10,textColor=TEAL,leading=14,spaceAfter=6)))
     out.append(Paragraph(_esc(sp["title"]), ParagraphStyle("t",fontName="Kanit-B",fontSize=30,textColor=INK,leading=34,spaceAfter=8)))
     out.append(Paragraph(_esc(sp["subtitle"]), ParagraphStyle("s",fontName="Sarabun",fontSize=12,textColor=MUTED,leading=18,wordWrap="CJK",spaceAfter=10)))
     out.append(HR(CW,HAIR,0.6,3)); out.append(Spacer(1,4*mm))
@@ -538,4 +556,5 @@ def closing_flow(sp):
 
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv)>1 else "Invisible-ERP-Whitepaper.pdf"
-    build(out)
+    lang = sys.argv[2] if len(sys.argv)>2 else "th"
+    build(out, lang)

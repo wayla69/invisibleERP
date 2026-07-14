@@ -3,6 +3,7 @@
 import os, sys
 from slides import Slides
 from pptx_lib import TEAL, CYAN, VIOLET, GOLD, GREEN, CORAL
+import content
 from content import build_specs
 
 AC = {"teal":TEAL,"cyan":CYAN,"violet":VIOLET,"gold":GOLD,"green":GREEN,"coral":CORAL}
@@ -23,7 +24,19 @@ def conv_panel(p):
     return (heading, glyph, col(ac), bl)
 
 def main():
+    lang = sys.argv[2] if len(sys.argv) > 2 else "th"
+    content.set_lang(lang)
+    T = content.T
     d = Slides()
+    d.L = {
+        "role": T("บทบาท","Role"),
+        "controls": T("การควบคุมและการแยกหน้าที่","Controls & segregation of duties"),
+        "wow": T("จุดเด่นที่เหนือกว่า","Where it stands out"),
+        "routes": T("หน้าจอหลัก","Key screens"),
+        "continued": T("· ต่อ","· continued"),
+        "capability": T("ความสามารถ","Capability"),
+        "foot": T("แพลตฟอร์มบริหารธุรกิจสำหรับองค์กร","Enterprise Business Platform"),
+    }
     _here = os.path.dirname(os.path.abspath(__file__))
     _assets = os.path.join(_here, "assets")
     lw = os.path.join(_assets, "invisible-consulting-logo-white.png")
@@ -36,13 +49,15 @@ def main():
         t = sp["t"]
         acc = col(sp.get("accent"))
         if t == "cover":
-            d.cover(sp["title"], sp["subtitle"], sp["tagline"])
+            d.cover(sp["title"], sp["subtitle"], sp["tagline"],
+                    kicker=sp.get("kicker","Enterprise Business Platform"),
+                    credit=sp.get("credit","พัฒนาโดย"))
         elif t == "agenda":
-            page += 1; d.agenda(sp["items"], page)
+            page += 1; d.agenda(sp["items"], page, kicker=sp.get("kicker"), title=sp.get("title"))
         elif t == "divider":
             try: dnum = int(sp["num"])
             except Exception: dnum = 0
-            d.divider(sp["num"], sp["title"], sp["subtitle"], dnum, acc)
+            d.divider(sp["num"], sp["title"], sp["subtitle"], dnum, acc, label=sp.get("label","SECTION"))
         elif t == "bullets":
             page += 1
             d.bullets(sp["kicker"], sp["title"], sp["bullets"], page,
@@ -72,9 +87,10 @@ def main():
                               sp["routes"], page, accent=acc)
         elif t == "compare":
             page += 1
-            d.compare(sp["kicker"], sp["title"], sp["rows"], page, section=sp.get("section",""))
+            d.compare(sp["kicker"], sp["title"], sp["rows"], page, section=sp.get("section",""),
+                      us=sp.get("us","Invisible ERP"), them=sp.get("them",""))
         elif t == "closing":
-            d.closing(sp["title"], sp["subtitle"], sp["contacts"])
+            d.closing(sp["title"], sp["subtitle"], sp["contacts"], kicker=sp.get("kicker","Invisible ERP"))
         else:
             raise SystemExit(f"unknown spec type: {t}")
 

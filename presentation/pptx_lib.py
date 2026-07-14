@@ -16,26 +16,38 @@ FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 if not os.path.isdir(FONTS_DIR):
     FONTS_DIR = os.path.expanduser("~/fonts")
 
-# ── Brand palette (dark, premium) ──────────────────────────────────────────────
-BG        = RGBColor(0x0A, 0x0E, 0x1A)   # near-black navy
-BG2       = RGBColor(0x0F, 0x16, 0x2B)   # panel navy
-CARD      = RGBColor(0x14, 0x1D, 0x38)   # card surface
-CARD2     = RGBColor(0x1B, 0x27, 0x4A)   # lighter card
-STROKE    = RGBColor(0x2A, 0x3A, 0x63)   # hairline
-INK       = RGBColor(0xF4, 0xF7, 0xFF)   # primary text
-MUTED     = RGBColor(0x9F, 0xB0, 0xD0)   # secondary text
-FAINT     = RGBColor(0x6B, 0x7C, 0xA0)   # tertiary text
-TEAL      = RGBColor(0x2D, 0xD4, 0xBF)   # primary accent (teal/mint)
-CYAN      = RGBColor(0x38, 0xBD, 0xF8)   # accent 2
-VIOLET    = RGBColor(0x9B, 0x8C, 0xFF)   # accent 3
-GOLD      = RGBColor(0xF5, 0xC7, 0x66)   # accent 4 (highlight)
-CORAL     = RGBColor(0xFB, 0x7A, 0x7A)   # accent 5 (alert)
-GREEN     = RGBColor(0x5D, 0xE0, 0x9A)   # positive
+# ── Brand palette (light, pastel, editorial) ────────────────────────────────────
+BG        = RGBColor(0xFD, 0xFD, 0xFC)   # page — soft white
+BG2       = RGBColor(0xF5, 0xF6, 0xF8)   # section panel tint
+CARD      = RGBColor(0xFF, 0xFF, 0xFF)   # card surface
+CARD2     = RGBColor(0xF3, 0xF5, 0xF8)   # tint card
+STROKE    = RGBColor(0xE6, 0xE8, 0xEE)   # hairline
+INK       = RGBColor(0x20, 0x26, 0x36)   # primary text (deep slate)
+MUTED     = RGBColor(0x54, 0x5D, 0x6E)   # secondary text
+FAINT     = RGBColor(0x93, 0x9B, 0xA9)   # tertiary text
+# muted pastel accents — saturated enough to read on white, soft enough to feel refined
+TEAL      = RGBColor(0x2F, 0x8E, 0x7E)   # primary — dusty teal
+CYAN      = RGBColor(0x4E, 0x82, 0xC0)   # dusty blue
+VIOLET    = RGBColor(0x82, 0x6F, 0xC4)   # soft lavender
+GOLD      = RGBColor(0xBE, 0x94, 0x4B)   # muted amber
+CORAL     = RGBColor(0xCB, 0x72, 0x7C)   # dusty rose
+GREEN     = RGBColor(0x51, 0xA1, 0x7B)   # sage
+INKSOFT   = RGBColor(0x33, 0x3B, 0x4D)   # softer ink for large display
+PANEL_DK  = RGBColor(0x1D, 0x23, 0x33)   # occasional dark panel (dividers)
 
 ACCENTS = [TEAL, CYAN, VIOLET, GOLD, GREEN, CORAL]
+# very light tints for card fills, keyed to each accent (index-aligned with ACCENTS)
+TINTS = {
+    'teal':   RGBColor(0xE9, 0xF3, 0xF1),
+    'cyan':   RGBColor(0xEB, 0xF1, 0xFA),
+    'violet': RGBColor(0xF1, 0xEE, 0xFA),
+    'gold':   RGBColor(0xF8, 0xF2, 0xE5),
+    'green':  RGBColor(0xEA, 0xF4, 0xEF),
+    'coral':  RGBColor(0xFA, 0xEE, 0xEF),
+}
 
-HEAD = "Kanit"        # headings
-BODY = "Sarabun"      # body text
+HEAD = "IBM Plex Sans Thai"    # headings
+BODY = "IBM Plex Sans Thai"    # body text
 
 EMU_W = Inches(13.333)
 EMU_H = Inches(7.5)
@@ -66,6 +78,13 @@ class Deck:
         self.blank = self.prs.slide_layouts[6]
         self.logo_white = None   # path to light-on-dark logo
         self.logo_dark = None    # path to dark-on-light logo
+        # localisable UI chrome labels (set by the build script per language)
+        self.L = {
+            "role": "บทบาท", "controls": "การควบคุม & แบ่งแยกหน้าที่ (SoD)",
+            "wow": "จุดเด่นที่เหนือคู่แข่ง", "routes": "หน้าจอหลัก",
+            "continued": "· ต่อ", "capability": "ความสามารถ",
+            "foot": "แพลตฟอร์มบริหารธุรกิจสำหรับองค์กร",
+        }
 
     def pic(self, s, path, x, y, w):
         return s.shapes.add_picture(path, Inches(x), Inches(y), width=Inches(w))
@@ -150,7 +169,7 @@ class Deck:
         self.line(s, 0.6, 7.02, 12.13, 0, color=STROKE, weight=0.75)
         self.text(s, 0.6, 7.06, 8, 0.3,
                   [[("Invisible ERP", HEAD, 9.5, MUTED, True, False),
-                    ("   ·   ระบบบริหารธุรกิจอัจฉริยะครบวงจร", BODY, 9.5, FAINT, False, False)]])
+                    ("   ·   " + self.L.get("foot", ""), BODY, 9.5, FAINT, False, False)]])
         if section:
             self.text(s, 6.7, 7.06, 5, 0.3, [self.para(section, BODY, 9.5, FAINT)], align=PP_ALIGN.RIGHT)
         self.text(s, 12.2, 7.06, 0.6, 0.3, [self.para(f"{idx:02d}", HEAD, 9.5, TEAL, True)], align=PP_ALIGN.RIGHT)
@@ -177,10 +196,8 @@ class Deck:
         tmp = path + ".tmp.pptx"
         self.prs.save(tmp)
         embed_fonts(tmp, path, [
-            ("Kanit",   f"{FONTS_DIR}/Kanit-Regular.ttf",   f"{FONTS_DIR}/Kanit-Bold.ttf",
-                        f"{FONTS_DIR}/Kanit-Medium.ttf",    f"{FONTS_DIR}/Kanit-SemiBold.ttf"),
-            ("Sarabun", f"{FONTS_DIR}/Sarabun-Regular.ttf", f"{FONTS_DIR}/Sarabun-Bold.ttf",
-                        None, None),
+            ("IBM Plex Sans Thai", f"{FONTS_DIR}/IBMPlexSansThai-Regular.ttf",
+                                   f"{FONTS_DIR}/IBMPlexSansThai-Bold.ttf", None, None),
         ])
         os.remove(tmp)
 
@@ -234,8 +251,8 @@ def embed_fonts(src_pptx, dst_pptx, fonts):
     rels = rels.replace("</Relationships>", "".join(new_rels) + "</Relationships>")
     with open(rels_path, "w", encoding="utf-8") as f: f.write(rels)
 
-    # inject embeddedFontLst — CT_Presentation schema order requires it AFTER sldSz+notesSz
-    # (PowerPoint validates strictly; placing it before sldSz makes PP refuse to open the file).
+    # inject embeddedFontLst right after <p:sldIdLst.../> ... actually schema order:
+    # it must appear before <p:sldSz>. Insert before <p:sldSz.
     lst = "<p:embeddedFontLst>" + "".join(embed_xml) + "</p:embeddedFontLst>"
     import re
     if "embedTrueTypeFonts" not in pres:
@@ -243,13 +260,7 @@ def embed_fonts(src_pptx, dst_pptx, fonts):
         if "saveSubsetFonts" not in pres:
             attrs += 'saveSubsetFonts="0" '
         pres = re.sub(r"<p:presentation ", '<p:presentation ' + attrs, pres, count=1)
-    # insert right after the notesSz element (preferred), else after sldSz
-    if re.search(r"<p:notesSz[^>]*/>", pres):
-        pres = re.sub(r"(<p:notesSz[^>]*/>)", lambda m: m.group(1) + lst, pres, count=1)
-    elif re.search(r"<p:sldSz[^>]*/>", pres):
-        pres = re.sub(r"(<p:sldSz[^>]*/>)", lambda m: m.group(1) + lst, pres, count=1)
-    else:
-        raise RuntimeError("presentation.xml has no sldSz/notesSz anchor for embeddedFontLst")
+    pres = pres.replace("<p:sldSz", lst + "<p:sldSz", 1)
     with open(pres_path, "w", encoding="utf-8") as f: f.write(pres)
 
     # rezip
