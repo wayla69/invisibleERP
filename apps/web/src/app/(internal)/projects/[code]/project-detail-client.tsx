@@ -39,7 +39,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'eac', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'eac', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'leveling', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   // detail + evm are server-prefetched (see page.tsx) so the first paint carries data; react-query still
   // owns the cache and refetches on invalidation exactly as before (null prefetch = old client-only path).
@@ -53,6 +53,8 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const tasks = useQuery<any>({ queryKey: ['proj', code, 'tasks'], queryFn: () => api(`/api/projects/${code}/tasks`) });
   const milestones = useQuery<any>({ queryKey: ['proj', code, 'milestones'], queryFn: () => api(`/api/projects/${code}/milestones`) });
   const resources = useQuery<any>({ queryKey: ['proj', code, 'resources'], queryFn: () => api(`/api/projects/${code}/resources`) });
+  // PPM-A2 (PROJ-23): over-allocated resource-months within this project + slack-based leveling suggestions.
+  const leveling = useQuery<any>({ queryKey: ['proj', code, 'leveling'], queryFn: () => api(`/api/projects/${code}/resource-leveling`) });
   const risks = useQuery<any>({ queryKey: ['proj', code, 'risks'], queryFn: () => api(`/api/projects/${code}/risks`) });
 
   const p = detail.data;
@@ -787,6 +789,36 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
 
   const resourcesTab = (
     <div className="space-y-4">
+      {!!leveling.data?.over_allocated_count && (
+        <Card className="gap-3 p-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold">{t('pj.leveling_title')}</h3>
+            <Badge variant="warning">{t('pj.leveling_count', { n: leveling.data.over_allocated_count })}</Badge>
+          </div>
+          <div className="flex flex-col divide-y">
+            {(leveling.data.over_allocations ?? []).map((o: any, i: number) => {
+              const sugg = (leveling.data.suggestions ?? []).find((s: any) => s.resource_name === o.resource_name && s.month === o.month);
+              const unres = (leveling.data.unresolvable ?? []).find((u: any) => u.resource_name === o.resource_name && u.month === o.month);
+              return (
+                <div key={i} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{o.resource_name}</span>
+                    <span className="text-muted-foreground">{o.month}</span>
+                    <Badge variant="destructive">{t('pj.leveling_over', { pct: o.allocated_pct, ceiling: o.available_pct })}</Badge>
+                  </span>
+                  {sugg ? (
+                    <span className="text-xs text-muted-foreground">
+                      {t('pj.leveling_suggest', { task: sugg.task_name ?? `#${sugg.task_id}`, days: sugg.suggested_shift_days, month: sugg.shifted_to_month ?? '—' })}
+                    </span>
+                  ) : unres ? (
+                    <Badge variant="muted">{t('pj.leveling_no_slack')}</Badge>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
       <div className="flex justify-end"><Button size="sm" onClick={() => setResDlg(true)}><Plus className="size-4" /> {t('pj.btn_alloc_resource')}</Button></div>
       {resources.data && (
         <DataTable

@@ -761,4 +761,11 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'pj.f_etc_note': { th: 'หมายเหตุ (ถ้ามี)', en: 'Note (optional)' },
   'pj.btn_submit_etc': { th: 'บันทึกประมาณการ', en: 'Submit estimate' },
   'pj.toast_etc_submitted': { th: 'บันทึกประมาณการต้นทุนคงเหลือแล้ว', en: 'Cost-to-complete estimate submitted' },
+
+  // ── PPM-A2 (PROJ-23): resource leveling — over-allocation vs the CPM schedule's slack ──
+  'pj.leveling_title': { th: 'ปรับสมดุลกำลังคน', en: 'Resource leveling' },
+  'pj.leveling_count': { th: '{n} รายการจัดสรรเกิน', en: '{n} over-allocated' },
+  'pj.leveling_over': { th: 'จัดสรร {pct}% (เพดาน {ceiling}%)', en: '{pct}% allocated (ceiling {ceiling}%)' },
+  'pj.leveling_suggest': { th: 'เลื่อนงาน {task} ออกไป {days} วัน → {month}', en: 'Shift {task} by {days}d → {month}' },
+  'pj.leveling_no_slack': { th: 'ไม่มีระยะเผื่อให้เลื่อน', en: 'No slack to shift' },
 };
