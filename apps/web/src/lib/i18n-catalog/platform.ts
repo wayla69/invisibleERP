@@ -253,6 +253,13 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.mnt_confirm_btn': { th: 'ลบเลย', en: 'Purge now' },
   'plt.mnt_purging': { th: 'กำลังลบ…', en: 'Purging…' },
   'plt.mnt_purge_done': { th: 'ลบสินค้าที่ไม่ใช้แล้ว {n} รายการเรียบร้อย', en: 'Purged {n} unused product(s)' },
+  'plt.mnt_kept_title': { th: 'สินค้าที่ยังเก็บไว้ (เพราะบริษัทเหล่านี้ยังใช้อยู่)', en: 'Kept products (still in use by these companies)' },
+  'plt.mnt_kept_hint': {
+    th: 'สินค้าที่ไม่ถูกลบเพราะยังมีบริษัทอ้างอิงอยู่ (ใน PO, สต็อก, สูตร, ราคา ฯลฯ) ถ้าเห็นบริษัทที่คุณเพิ่งล้างข้อมูลอยู่ในรายการนี้ แปลว่าข้อมูลบริษัทนั้นยังถูกล้างไม่หมด — ล้าง (factory-reset) ให้สมบูรณ์แล้ว purge ซ้ำ',
+    en: 'Products not removed because a company still references them (on a PO, in stock, a recipe, a price list, …). If a company you just reset appears here, its data was not fully wiped — factory-reset it completely, then purge again.',
+  },
+  'plt.mnt_kept_shared': { th: 'ข้อมูลกลาง / ไม่ผูกบริษัท', en: 'Shared / no company' },
+  'plt.mnt_kept_items': { th: '{n} รายการ', en: '{n} product(s)' },
 
   // ── App-shell: GodScopeBanner ──
   'plt.scope_acting_as': { th: 'กำลังดูข้อมูลของ', en: 'Viewing data for' },

@@ -377,9 +377,11 @@ export default function PlatformConsole({
   // company's factory-reset/purge leaves its catalogue rows behind and they keep showing in every tenant's
   // /shop. Preview counts the items no tenant references any more (cross-tenant, under the @PlatformAdmin
   // bypass); purge deletes exactly those. Manual (not an auto-query) — the scan is a heavy cross-tenant sweep.
-  const [unusedPreview, setUnusedPreview] = useState<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number } | null>(null);
+  type KeptBy = { tenant_id: number | null; code: string | null; name: string | null; items: number };
+  type UnusedPreview = { total: number; item_ids: string[]; sampled: boolean; ref_columns: number; kept_by: KeptBy[] };
+  const [unusedPreview, setUnusedPreview] = useState<UnusedPreview | null>(null);
   const checkUnused = useMutation({
-    mutationFn: () => api<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number }>('/api/admin/item-maintenance/unused-items'),
+    mutationFn: () => api<UnusedPreview>('/api/admin/item-maintenance/unused-items'),
     onSuccess: (r) => { setUnusedPreview(r); notifyInfo(t('plt.mnt_preview_done', { n: r.total })); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -927,6 +929,20 @@ export default function PlatformConsole({
               {t('plt.mnt_sample')}: {unusedPreview.item_ids.slice(0, 50).join(', ')}{unusedPreview.sampled ? ' …' : ''}
             </div>
           )}
+        </div>
+      )}
+      {unusedPreview && unusedPreview.kept_by.length > 0 && (
+        <div className="rounded-md border p-3 text-sm">
+          <div className="mb-1 font-medium">{t('plt.mnt_kept_title')}</div>
+          <p className="mb-2 text-xs text-muted-foreground">{t('plt.mnt_kept_hint')}</p>
+          <ul className="space-y-1">
+            {unusedPreview.kept_by.slice(0, 20).map((k, i) => (
+              <li key={k.tenant_id ?? `shared-${i}`} className="flex items-center justify-between gap-3">
+                <span>{k.tenant_id == null ? t('plt.mnt_kept_shared') : `${k.name ?? k.code ?? `#${k.tenant_id}`}${k.code ? ` (${k.code})` : ''}`}</span>
+                <Badge variant="secondary">{t('plt.mnt_kept_items', { n: k.items })}</Badge>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </Card>
