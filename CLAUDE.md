@@ -431,9 +431,10 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
-  the result. Currently **187 controls**. **When `main` added controls too** (a concurrent PR bumped the
-  count): `build_rcm.py` auto-merges cleanly (both control sets combine), so the merged total = base +
-  main's Δ + yours (e.g. 183 + 1 + 3 = 187). Get the truth from `python3 compliance/build_rcm.py --counts`,
+  the result. Currently **282 controls** (278 Implemented, 4 Partial, 0 Gap; as of 2026-07-14 — always
+  confirm the live figure, this number grows as controls land). **When `main` added controls too** (a
+  concurrent PR bumped the count): `build_rcm.py` auto-merges cleanly (both control sets combine), so the
+  merged total = base + main's Δ + yours (e.g. base 278 + main's Δ + yours). Get the truth from `python3 compliance/build_rcm.py --counts`,
   then reconcile the `<!-- rcm-total -->`/`-implemented`/`-partial`/`-gap` markers in the conflicting census
   docs (`CONTROL_STATUS_HONEST.md`, `COSO_ICFR_Audit_Readiness_Plan.md`, `iso27001-gap-analysis.md`,
   `soc2-readiness.md`) to match — resolve to *ours* then `sed` the two differing numbers — and confirm with
@@ -442,9 +443,10 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   That gate (a step *inside* the `migrations-journaled` CI job) re-derives the census from `build_rcm.py`
   and fails if any `<!-- rcm-total -->N<!-- /rcm-total -->` (also `rcm-implemented`/`rcm-partial`/`rcm-gap`)
   span across `compliance/**.md` + `docs/**.md` disagrees. After a new `add(...)` in `build_rcm.py`, run
-  `node tools/ci/check-rcm-census.mjs`, then update the stale tagged numbers (the 2026-07 PROJ-15 add moved
-  implemented 180→181 / total 183→184, and the finance-analytics ELC-07/GL-22/TR-01 adds then moved it to
-  184→187) across `CONTROL_STATUS_HONEST.md`, `COSO_ICFR_Audit_Readiness_Plan.md`, `iso27001-gap-analysis.md`,
+  `node tools/ci/check-rcm-census.mjs`, then update the stale tagged numbers (historical example: the 2026-07
+  PROJ-15 add moved implemented 180→181 / total 183→184, then finance-analytics ELC-07/GL-22/TR-01 moved it
+  184→187; subsequent adds have since taken the total to **282** — 278 Implemented / 4 Partial / 0 Gap, 2026-07-14)
+  across `CONTROL_STATUS_HONEST.md`, `COSO_ICFR_Audit_Readiness_Plan.md`, `iso27001-gap-analysis.md`,
   `soc2-readiness.md`. `pnpm install openpyxl` may be needed to run `build_rcm.py`.
 - **Stacked PRs + squash-merge conflicts.** When a feature PR is stacked on another and the base
   squash-merges to `main`, the dependent PR goes `dirty` because main now holds the same content under a
