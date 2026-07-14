@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 282,
+    "total": 283,
     "by_status": {
-      "Implemented": 278,
+      "Implemented": 279,
       "Partial": 4
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 43,
+      "Revenue & Cash": 44,
       "Tax": 12
     }
   },
@@ -1707,6 +1707,25 @@
       "tod": "Inspect the bundle-to-quote_lines expansion (captured component cost, no core floor-check change), the exec-tier threshold computation on send + the enforced approver-tier check on approve, and the co-purchase recommendation read.",
       "toe": "Re-perform (cpq-approval harness): create a 2-component bundle (one thin-margin, one healthy) and add it to a Draft quote -> 2 bundle-tagged lines; sending the quote catches the BLENDED margin breach via the unmodified CPQ-01 check -> PendingApproval, and a plain cpq_approve holder (no exec) clears it (margin-only breach stays manager-tier); set an exec-tier discount ceiling, add a healthy-margin bundle with a discount above it -> PendingApproval, a plain cpq_approve holder is BLOCKED (403 TIER_APPROVAL_REQUIRED), an exec-permission holder clears it; accepting the bundle quote then makes its components surface as a mutual recommendation; a second tenant cannot see the first tenant's bundle (RLS).",
       "evidence": "Bundle master + component cost register; bundle-expansion audit trail (shared quote_lines, CPQ-01 floor coverage); tiered discount-approval log (required_tier on quote_approvals); co-purchase recommendation read",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-13",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (pipeline stage governance)",
+      "risk": "The sales pipeline advances with NO governed exit criteria and NO work-in-progress discipline: a deal is dragged into a later stage (Qualified / Proposal / Negotiation) with no deal amount, no expected close and no contact of record — so the weighted revenue forecast rests on empty, unqualified deals — and there is no cap on how many open deals may sit in a stage, so a stage silently overloads and deals stall unworked. Pipeline hygiene is unenforced and the stage-weighted forecast is unreliable.",
+      "assertion": "Accuracy/Completeness/Authorization",
+      "description": "CRM-7 kanban depth (migration 0406) — a per-stage PLAYBOOK on the REV-17 pipeline enforced server-side in the SAME governed setStage path (so it binds on the board drag, the list 'Move to…', and the bulk multi-select alike). Each stage may define (a) REQUIRED-FIELD exit criteria: a whitelist-validated set of opportunity fields (amount / expected close / primary contact / account / customer / owner / notes) that must be POPULATED before a deal can advance INTO the stage — an unmet move is refused STAGE_REQUIREMENTS_UNMET listing the missing fields (skipped only for Lost, since abandoning a deal is never blocked on data-completeness); and (b) a WIP LIMIT: a cap on how many OPEN opportunities may sit in the stage at once — a move that would exceed it is refused WIP_LIMIT_EXCEEDED (ignored for the terminal Won/Lost stages). Configuring a playbook (WIP limit + required fields + coaching guidance) is a supervisor duty (crm/exec; an unknown required-field key is rejected BAD_REQUIRED_FIELDS, a negative cap BAD_WIP_LIMIT); the config is tenant master data (HQ with no tenant cannot set a tenant playbook). Every resulting stage move remains audited in crm_stage_history (REV-17). One tenant table (crm_stage_playbooks, RLS 0232, tenant-leading index); reads gate crm/exec/ar. No GL post.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per stage move",
+      "owner": "Sales / Sales Manager",
+      "coso": "P13",
+      "code_reference": "crm-stage-playbook.service.ts (assertStageEntry — the required-field + WIP gate called from setStage; listView — stages + playbook config + live open counts for the board WIP badge; putPlaybook — whitelist-validated upsert, BAD_REQUIRED_FIELDS/BAD_WIP_LIMIT/TENANT_REQUIRED); crm-pipeline.service.ts setStage (invokes the gate before the write) + bulkSetStage (per-item result over the governed path); crm-pipeline.controller.ts (GET /api/crm/pipeline/playbooks, PUT …/playbooks/:stageId gated crm/exec, POST …/opportunities/bulk-stage); schema/crm-pipeline.ts crm_stage_playbooks + migration 0406; web crm-client.tsx (WIP badge + required-field/guidance on the kanban column, supervisor playbook editor, list-view bulk move); cutover/pipeline.ts (ToE, CRM-7 checks)",
+      "tod": "Inspect the per-stage playbook config (WIP limit + whitelist-validated required fields + guidance), the enforced required-field + WIP gates on setStage (both refusal codes), the bulk move riding the SAME governed path, and the supervisor-only / tenant-scoped configuration.",
+      "toe": "Re-perform (pipeline harness, CRM-7 checks): configure the Qualified stage with a required amount + a WIP cap; advancing a no-amount deal into Qualified is refused STAGE_REQUIREMENTS_UNMET (missing amount); a sized deal advances; the next sized deal past the cap is refused WIP_LIMIT_EXCEEDED (limit echoed); clearing the WIP limit (null) then admits it; a bulk stage move advances a multi-select and reports per-item moved/failed (a valid deal succeeds while an unknown opp fails NOT_FOUND — never atomic across deals); an unknown required-field key is rejected BAD_REQUIRED_FIELDS; HQ (no tenant) cannot configure a T1 stage playbook.",
+      "evidence": "Stage playbook config (WIP limit + required-field exit criteria + guidance); enforced STAGE_REQUIREMENTS_UNMET / WIP_LIMIT_EXCEEDED gate; bulk-move per-item audit; crm_stage_history trail",
       "status": "Implemented"
     },
     {

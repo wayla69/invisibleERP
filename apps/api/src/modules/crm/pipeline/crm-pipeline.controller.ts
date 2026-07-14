@@ -10,6 +10,10 @@ const ReasonBody = z.object({ reason: z.string().optional() });
 const OppBody = z.object({ name: z.string().min(1), customer_no: z.string().optional(), amount: z.number().nonnegative().optional(), probability: z.number().int().min(0).max(100).optional(), expected_close_date: z.string().optional(), owner: z.string().optional(), account_no: z.string().optional(), primary_contact_id: z.number().int().optional() });
 const StageBody = z.object({ stage: z.string().min(1), lost_reason: z.string().optional(), win_reason: z.string().optional(), probability: z.number().int().min(0).max(100).optional() });
 const ActivityBody = z.object({ entity_type: z.enum(['lead', 'opportunity']), entity_no: z.string().min(1), type: z.enum(['call', 'email', 'meeting', 'note', 'task']), subject: z.string().optional(), notes: z.string().optional(), due_date: z.string().optional(), done: z.boolean().optional() });
+// CRM-7 kanban depth (control CRM-13): a stage playbook (WIP limit + required-field exit criteria + guidance)
+// and a bulk stage move. wip_limit null clears the cap; required_fields is whitelist-validated service-side.
+const PlaybookBody = z.object({ wip_limit: z.number().int().min(0).max(100000).nullable().optional(), required_fields: z.array(z.string().max(60)).max(20).optional(), guidance: z.string().max(2000).nullable().optional() });
+const BulkStageBody = z.object({ opp_nos: z.array(z.string().min(1)).min(1).max(100), stage: z.string().min(1), lost_reason: z.string().optional(), win_reason: z.string().optional(), probability: z.number().int().min(0).max(100).optional() });
 const ActivityDoneBody = z.object({ done: z.boolean() });
 const LeadImportBody = z.object({
   format: z.enum(['rows', 'csv', 'xlsx']).optional(),
@@ -71,6 +75,12 @@ export class CrmPipelineController {
   @Post('opportunities') createOpp(@Body(new ZodValidationPipe(OppBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.createOpportunity(b, u); }
   @Get('opportunities') listOpps(@Query('stage') stage: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listOpportunities(stage, u); }
   @Patch('opportunities/:oppNo/stage') @HttpCode(200) setStage(@Param('oppNo') no: string, @Body(new ZodValidationPipe(StageBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setStage(no, b.stage, b, u); }
+  // CRM-7 bulk stage move — move a board multi-select through the SAME governed setStage path; per-item result.
+  @Post('opportunities/bulk-stage') @HttpCode(200) bulkStage(@Body(new ZodValidationPipe(BulkStageBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.bulkSetStage(b, u); }
+  // CRM-7 stage playbooks — the board reads the WIP limits / required-field exit criteria / guidance + live
+  // open counts; a supervisor (crm/exec) configures one stage's playbook.
+  @Get('playbooks') playbooks(@CurrentUser() u: JwtUser) { return this.svc.listPlaybooks(u); }
+  @Put('playbooks/:stageId') @Permissions('crm', 'exec') putPlaybook(@Param('stageId') id: string, @Body(new ZodValidationPipe(PlaybookBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.putPlaybook(Number(id), b, u); }
   // Stage-transition audit trail (crm_stage_history, CRM-1) — REV-17 evidence for one deal.
   @Get('opportunities/:oppNo/history') stageHistory(@Param('oppNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.stageHistory(no, u); }
   // Deal detail (CRM-2 workspace): opp + account/contact + stage history + activities + linked CPQ quotes.
