@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.17 · 2026-07-11** · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
+**Status: DRAFT v0.18 · 2026-07-14** · *v0.18 (2026-07-14): §8.1 — new **platform-owner** cleanup for leftover products after a company reset: because the product catalogue is shared (no company owner), a factory-reset/purge leaves a company's products in the shared catalogue and they keep showing in every company's `/shop`. Preview `GET /api/admin/item-maintenance/unused-items` then purge `POST /api/admin/item-maintenance/purge-unused-items` (`confirm: PURGE-UNUSED-ITEMS`) removes only products **no company references** any more; god-only (`ITEM_PURGE_HQ_ONLY`), idempotent. FAQ updated. No new numbered control.* · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
 info form (`/setup`); it prints alongside phone in the full tax invoice (ม.86/4) header. Saves immediately
 like phone (not a maker-checker field).* · *v0.15 (2026-07-06): §13 — documented **where the G15 company-profile approval queue lives in the app**: a **"Financial-profile changes pending approval"** card on the **Company Setup** screen (`/setup`), where a **different** exec/approvals user approves/rejects the staged PromptPay/tax-ID change. UI surfacing of an already-shipped control — no new endpoint, no new numbered control.* · *v0.14 (2026-07-06): §13 — a change to the **PromptPay ID** or **tax ID** on the company profile is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve it before it takes effect (self-approval → `SOD_VIOLATION`); all other company-info fields still save immediately, and a no-op never stages (G15; strengthens SoD R02; no new numbered control).* · *v0.13 (2026-07-05): §8 — a bulk master-data import that **sets** a financially-sensitive field (customer/vendor credit limit, vendor payment term, price-list price, promotion discount) is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve before anything is written (self-approval → `SOD_VIOLATION`); ordinary imports are unaffected (audit gaps G5+G8; strengthens SoD R02/R09/R10/R13).* · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
@@ -425,6 +425,35 @@ before committing, and bad rows never silently corrupt your data.
 > fields — items, contacts, tax codes, plain menu prices — are **unaffected** and still
 > import immediately. This is the two-person rule that stops one person bulk-changing
 > fraud-relevant figures on their own (SoD rules R02 / R09 / R10 / R13).
+
+### 8.1 Clearing leftover products after a company reset (platform owner only)
+
+> **Why products can survive a company reset.** The **product catalogue (สินค้า / items)
+> is shared across all companies** — it has no company owner. So when you **factory-reset
+> or purge** a company, its business data is wiped but the **products it added stay in the
+> shared catalogue** and keep appearing in **every** company's *เลือกซื้อสินค้า* (`/shop`)
+> screen. That's expected, not a bug — but it means a reset alone won't remove those
+> products.
+
+Only the **platform owner** can clean these up, and only the products that **no company
+uses any more** are removed (a product another company still has on a purchase order, in
+stock, on a recipe/BoM, etc. is **kept**):
+
+1. **Preview first (nothing is deleted).** Call
+   `GET /api/admin/item-maintenance/unused-items`. It returns how many products are
+   currently unused (`total`), a sample of their codes (`item_ids`), and how many reference
+   tables were scanned (`ref_columns`) — so you can see exactly what *would* be removed.
+2. **Purge.** Call `POST /api/admin/item-maintenance/purge-unused-items` with body
+   `{ "confirm": "PURGE-UNUSED-ITEMS" }`. The exact confirm phrase is required (a wrong or
+   missing phrase is refused with `CONFIRM_MISMATCH`). Unused products and their images are
+   deleted; the response lists what was removed. Running it again is safe — it simply finds
+   nothing left to clean.
+
+> **Important:** because the catalogue is shared, this removes those products **for every
+> company**, not just one — which is exactly why it only ever removes products **nobody
+> references**, and why it is **restricted to the platform owner** (a normal company Admin
+> is refused with `ITEM_PURGE_HQ_ONLY`). A product that was merged into another as a
+> duplicate is preserved so the merge history stays intact.
 
 ---
 
