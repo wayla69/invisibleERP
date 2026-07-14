@@ -871,6 +871,60 @@ async function main() {
     simTask.status === 200 && simTask.json.bac_basis === 'tasks' && near(simTask.json.projected.bac, simTask.json.current.bac) && near(simTask.json.delta.eac, 0) && near(simTask.json.delta.budget_headroom, 500),
     JSON.stringify({ basis: simTask.json.bac_basis, dbac: simTask.json.delta.eac, dh: simTask.json.delta.budget_headroom }));
 
+  // ── 24c. Portfolio selection scenarios (PPM Wave P4, PROJ-25) — what-if funding within a budget envelope
+  // + maker-checker commit (committer ≠ author; over-envelope needs an exec override). Read-only aggregation
+  // over the projects spine; no project row is mutated. ──
+  for (const [code, contract, budget, est] of [['PRJ-PF1', 100000, 60000, 50000], ['PRJ-PF2', 80000, 50000, 40000], ['PRJ-PF3', 120000, 70000, 60000]] as const)
+    await inj('POST', '/api/projects', admin, { project_code: code, name: `พอร์ต ${code}`, billing_type: 'Fixed', contract_amount: contract, budget_amount: budget, estimated_cost: est });
+
+  const pfCreate = await inj('POST', '/api/projects/portfolio/scenarios', admin, { name: 'FY27 candidate slate', budget_envelope: 100000, objective: 'จัดลำดับโครงการปีหน้า' });
+  ok('PROJ-25 create scenario → draft, PSC-#### numbered', pfCreate.status < 300 && /^PSC-\d{4}$/.test(pfCreate.json.scenario_no) && pfCreate.json.status === 'draft', JSON.stringify({ s: pfCreate.status, no: pfCreate.json.scenario_no }));
+  const psc = pfCreate.json.scenario_no;
+
+  await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF1', decision: 'include', priority_score: 10 });
+  await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF2', decision: 'include', priority_score: 5 });
+  const pfAnalyze = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF3', decision: 'exclude' });
+  ok('PROJ-25 analyze: included Σbudget 110000 (>envelope 100000) → over_envelope, over_by 10000, Σmargin 90000, priority-ranked',
+    pfAnalyze.status < 300 && pfAnalyze.json.totals.included_count === 2 && pfAnalyze.json.totals.excluded_count === 1 &&
+    near(pfAnalyze.json.totals.selected_budget, 110000) && near(pfAnalyze.json.totals.selected_margin, 90000) &&
+    pfAnalyze.json.totals.over_envelope === true && near(pfAnalyze.json.totals.over_by, 10000) &&
+    pfAnalyze.json.included[0].project_code === 'PRJ-PF1',
+    JSON.stringify({ inc: pfAnalyze.json.totals.included_count, b: pfAnalyze.json.totals.selected_budget, over: pfAnalyze.json.totals.over_by, first: pfAnalyze.json.included[0]?.project_code }));
+
+  const pfUnknown = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-NOPE', decision: 'include' });
+  ok('PROJ-25 unknown candidate → 404 PROJECT_NOT_FOUND', pfUnknown.status === 404 && pfUnknown.json.error?.code === 'PROJECT_NOT_FOUND', `${pfUnknown.status}/${pfUnknown.json.error?.code}`);
+
+  const pfSelf = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, admin, {});
+  ok('PROJ-25 author self-commit → 400 SOD_SELF_APPROVAL', pfSelf.status === 400 && pfSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${pfSelf.status}/${pfSelf.json.error?.code}`);
+
+  const pfOver = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, mgr, {});
+  ok('PROJ-25 different-user commit over envelope w/o override → 400 OVER_ENVELOPE (over_by 10000)',
+    pfOver.status === 400 && pfOver.json.error?.code === 'OVER_ENVELOPE' && near(pfOver.json.error?.details?.over_by, 10000), `${pfOver.status}/${pfOver.json.error?.code}`);
+
+  const pfCommit = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, mgr, { override: true, override_reason: 'อนุมัติเกินวงเงินโดยผู้บริหาร' });
+  ok('PROJ-25 exec override commit → committed, committed_by=mgr, override_reason recorded',
+    pfCommit.status < 300 && pfCommit.json.status === 'committed' && pfCommit.json.committed_by === 'mgr' && !!pfCommit.json.override_reason, JSON.stringify({ st: pfCommit.json.status, by: pfCommit.json.committed_by }));
+
+  const pfLocked = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF3', decision: 'include' });
+  const pfRecommit = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, mgr, {});
+  ok('PROJ-25 a committed scenario is locked: edit → 400 SCENARIO_LOCKED, re-commit → 400 SCENARIO_NOT_DRAFT',
+    pfLocked.status === 400 && pfLocked.json.error?.code === 'SCENARIO_LOCKED' && pfRecommit.status === 400 && pfRecommit.json.error?.code === 'SCENARIO_NOT_DRAFT',
+    `${pfLocked.json.error?.code}/${pfRecommit.json.error?.code}`);
+
+  // Within-envelope clean commit path (no override needed) + removeItem regression.
+  const pfB = await inj('POST', '/api/projects/portfolio/scenarios', admin, { name: 'FY27 conservative', budget_envelope: 200000 });
+  await inj('POST', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/items`, admin, { project_code: 'PRJ-PF1', decision: 'include', priority_score: 8 });
+  await inj('POST', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/items`, admin, { project_code: 'PRJ-PF2', decision: 'include', priority_score: 3 });
+  const pfBremove = await inj('DELETE', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/items/PRJ-PF2`, admin);
+  ok('PROJ-25 removeItem drops a candidate → included_count 1', pfBremove.status < 300 && pfBremove.json.totals.included_count === 1, JSON.stringify({ inc: pfBremove.json.totals?.included_count }));
+  const pfBcommit = await inj('POST', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/commit`, mgr, {});
+  ok('PROJ-25 within-envelope commit needs no override → committed, over_envelope false, headroom 140000',
+    pfBcommit.status < 300 && pfBcommit.json.status === 'committed' && pfBcommit.json.totals.over_envelope === false && near(pfBcommit.json.totals.budget_headroom, 140000),
+    JSON.stringify({ st: pfBcommit.json.status, hr: pfBcommit.json.totals?.budget_headroom }));
+
+  const pfList = await inj('GET', '/api/projects/portfolio/scenarios', admin);
+  ok('PROJ-25 list surfaces both scenarios with included counts', pfList.status < 300 && pfList.json.count >= 2 && pfList.json.scenarios.some((x: any) => x.scenario_no === psc && x.status === 'committed'), JSON.stringify({ n: pfList.json.count }));
+
   // ── 25. time-phased resource capacity calendar (PPM upgrade) ──
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAP', name: 'งานวางกำลังคน', billing_type: 'TM' });
   // Bob: 60% Jul–Aug, +60% Aug–Sep → August double-booked to 120%.

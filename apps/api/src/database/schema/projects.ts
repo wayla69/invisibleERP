@@ -788,6 +788,50 @@ export const pmrLines = pgTable(
 export type ProjectMaterialRequisition = typeof projectMaterialRequisitions.$inferSelect;
 export type PmrLine = typeof pmrLines.$inferSelect;
 
+// PROJ-25 — Portfolio selection scenario (PPM Wave P4). A named what-if that models which candidate
+// projects to fund within a budget ENVELOPE. DRAFT until COMMITTED: committing is a maker-checker decision
+// (committer <> created_by → SOD_SELF_APPROVAL) that locks the authorised GO-set; an over-envelope commit is
+// rejected unless an exec overrides with a reason. Read-only aggregation over the projects spine — no
+// project row is mutated. One tenant table (0232 canonical RLS, tenant-leading index).
+export const portfolioScenarios = pgTable(
+  'portfolio_scenarios',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    scenarioNo: text('scenario_no').notNull(),               // PSC-#### per tenant
+    name: text('name').notNull(),
+    status: text('status').notNull().default('draft'),       // draft | committed
+    budgetEnvelope: numeric('budget_envelope', { precision: 18, scale: 2 }), // funding ceiling (null = none)
+    objective: text('objective'),
+    notes: text('notes'),
+    overrideReason: text('override_reason'),                 // set when committed over the envelope (exec override)
+    createdBy: text('created_by').notNull(),
+    committedBy: text('committed_by'),                       // checker — must differ from created_by (SoD)
+    committedAt: timestamp('committed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqNo: unique('uq_portfolio_scenario_no').on(t.tenantId, t.scenarioNo), byTenant: index('idx_portfolio_scenarios_tenant').on(t.tenantId, t.status) }),
+);
+
+export const portfolioScenarioItems = pgTable(
+  'portfolio_scenario_items',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    scenarioId: bigint('scenario_id', { mode: 'number' }).notNull().references(() => portfolioScenarios.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    decision: text('decision').notNull().default('include'), // include | exclude
+    priorityScore: numeric('priority_score', { precision: 6, scale: 2 }).notNull().default('0'), // higher = higher priority
+    rationale: text('rationale'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqItem: unique('uq_portfolio_scenario_item').on(t.tenantId, t.scenarioId, t.projectId), byTenant: index('idx_portfolio_scenario_items_tenant').on(t.tenantId, t.scenarioId) }),
+);
+export type PortfolioScenario = typeof portfolioScenarios.$inferSelect;
+export type PortfolioScenarioItem = typeof portfolioScenarioItems.$inferSelect;
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;

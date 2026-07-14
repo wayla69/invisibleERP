@@ -306,6 +306,25 @@ Nothing is written — it is a pure what-if; the numbers it shows are exactly wh
 Approve or reject the change order as usual from the same panel. Required role/permission: `exec`/`planner`/`ar`.
 Detective — posts nothing to the GL.
 
+## Portfolio selection scenarios — what-if funding + commit (PROJ-25)
+When you need to decide **which projects to fund** within a limited budget, the portfolio command center
+(`/projects/portfolio`) has a **สถานการณ์คัดเลือกพอร์ตโฟลิโอ (selection scenarios)** panel:
+- **New scenario** — give it a name and an optional **budget envelope** (the funding ceiling). It opens as a
+  **draft** you can edit freely.
+- **Add candidates** — pick a project, set a **priority** score, and mark it **include** or **exclude**. The
+  scenario shows the **selected budget vs the envelope** live: a **headroom** figure when it fits, or a red
+  **over-envelope** banner (with the amount over) when the included projects cost more than the ceiling.
+- The candidate table ranks included projects by priority and shows each one's budget and margin, so you can
+  see the trade-off at a glance.
+- **Commit** — locks the selected GO-set as the authorised plan. Committing is **two-person**: it must be done
+  by a **different user than the one who created** the scenario (self-commit is refused), and if the selection
+  is **over the envelope** it is blocked unless an **exec** enters an **override reason**. Once committed the
+  scenario is read-only, stamped with who committed it and any override reason.
+
+Nothing on the projects themselves changes — the scenario is a governance record of the funding decision, not
+a mutation of project budgets. Required role/permission: `exec`/`planner`/`ar` (the exec override needs the
+`exec` duty). Preventive/authorization — posts nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -402,10 +421,15 @@ Cash spent at site can be booked **against the project** so it shows up in the p
   margin, EAC and budget headroom before it is approved — read-only/detective, it writes nothing; the
   projection is exactly what approval would then apply, so a margin-negative or over-budget variation is
   surfaced rather than approved blind.
+- **Portfolio selection scenarios** (**PROJ-25**) commit a portfolio funding decision maker-checker: a
+  scenario's GO-set is committed by a **different user than its author** and cannot exceed the budget envelope
+  unless an exec overrides with a recorded reason — so portfolio capital can't be committed by one person
+  alone or silently beyond the ceiling; the aggregation itself mutates no project.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.32 | 2026-07-14 | **PROJ-25 — portfolio selection scenarios.** The portfolio command center gains a **สถานการณ์คัดเลือกพอร์ตโฟลิโอ (selection scenarios)** panel: model candidate projects into a named scenario with a budget envelope + priorities, watch the selected budget vs the envelope live (headroom / over-envelope banner), then **commit** the GO-set as a two-person decision — a different user than the author must commit, and an over-envelope selection needs an exec override reason. Committed scenarios are locked and stamped with the committer + reason. Read-only aggregation — no project budget is mutated. |
 | 2.31 | 2026-07-14 | **PROJ-24 — change-order impact simulation.** Each pending change order gains a **จำลองผลกระทบ (simulate impact)** button opening a current/projected/Δ table for the contract value, budget, estimated cost, gross margin, EAC and budget headroom, with each Δ coloured favourable (green) / unfavourable (red). Read-only what-if — nothing is written; the figures are exactly what approval would then apply, so a variation that turns the project margin-negative or pushes the EAC past the new budget is obvious before authorization. |
 | 2.30 | 2026-07-14 | **PROJ-23 — resource leveling: over-allocation vs the schedule's slack.** The project's Resources tab gains a leveling panel: each over-allocated resource-month shows how far over its ceiling it is, plus a suggested shift (task + days + target month) drawn from the schedule's slack, or a "no slack to shift" flag when every contributing task is on the critical path. Advisory only — it never moves an assignment or task dates itself. |
 | 2.29 | 2026-07-13 | **PROJ-22 — bottom-up cost-to-complete (ETC) vs the formulaic EAC.** The project overview's EVM card gains an **ETC/EAC comparison** panel: submit a manual estimate-to-complete per task (or project-level) and see it side by side with the existing CPI-based EAC, with a variance badge. A second submission for the same task supersedes the first; a project-level entry sums alongside per-task entries. No change to the existing EVM/schedule figures when no estimate has been submitted. |

@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto, type PortfolioScenarioDto, type PortfolioItemDto, type PortfolioCommitDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
 const BoqLineBody = z.object({
@@ -201,6 +201,20 @@ const ResourceCalendarBody = z.object({
   available_pct: z.number().optional(),
   reason: z.string().optional(),
 });
+// PROJ-25 portfolio selection scenarios (PPM Wave P4)
+const PortfolioScenarioBody = z.object({
+  name: z.string().min(1),
+  budget_envelope: z.number().nonnegative().optional(),
+  objective: z.string().optional(),
+  notes: z.string().optional(),
+});
+const PortfolioItemBody = z.object({
+  project_code: z.string().min(1),
+  decision: z.enum(['include', 'exclude']).optional(),
+  priority_score: z.number().nonnegative().optional(),
+  rationale: z.string().optional(),
+});
+const PortfolioCommitBody = z.object({ override: z.boolean().optional(), override_reason: z.string().optional() });
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')
@@ -467,6 +481,39 @@ export class ProjectsController {
   @Get('change-orders/:coId/simulate')
   simulateChangeOrder(@Param('coId') coId: string) {
     return this.svc.simulateChangeOrder(Number(coId));
+  }
+
+  // ── Portfolio selection scenarios (PPM Wave P4, PROJ-25) — what-if funding within a budget envelope +
+  // maker-checker commit. Static `portfolio/*` paths sit above the `:code` param routes; inherit the class
+  // gate (exec/planner/ar), with the commit's segregation-of-duties enforced in the service. ──
+  @Post('portfolio/scenarios')
+  createPortfolioScenario(@Body(new ZodValidationPipe(PortfolioScenarioBody)) b: PortfolioScenarioDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createPortfolioScenario(b, u);
+  }
+
+  @Get('portfolio/scenarios')
+  listPortfolioScenarios(@CurrentUser() u: JwtUser) {
+    return this.svc.listPortfolioScenarios(u);
+  }
+
+  @Get('portfolio/scenarios/:scenarioNo')
+  getPortfolioScenario(@Param('scenarioNo') scenarioNo: string) {
+    return this.svc.getPortfolioScenario(scenarioNo);
+  }
+
+  @Post('portfolio/scenarios/:scenarioNo/items')
+  upsertPortfolioItem(@Param('scenarioNo') scenarioNo: string, @Body(new ZodValidationPipe(PortfolioItemBody)) b: PortfolioItemDto, @CurrentUser() u: JwtUser) {
+    return this.svc.upsertPortfolioItem(scenarioNo, b, u);
+  }
+
+  @Delete('portfolio/scenarios/:scenarioNo/items/:projectCode')
+  removePortfolioItem(@Param('scenarioNo') scenarioNo: string, @Param('projectCode') projectCode: string, @CurrentUser() u: JwtUser) {
+    return this.svc.removePortfolioItem(scenarioNo, projectCode, u);
+  }
+
+  @Post('portfolio/scenarios/:scenarioNo/commit')
+  commitPortfolioScenario(@Param('scenarioNo') scenarioNo: string, @Body(new ZodValidationPipe(PortfolioCommitBody)) b: PortfolioCommitDto, @CurrentUser() u: JwtUser) {
+    return this.svc.commitPortfolioScenario(scenarioNo, b, u);
   }
 
   // ── Risk & issue register (B4, PROJ-08) ──
