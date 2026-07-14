@@ -23,8 +23,10 @@
 content.py      # เนื้อหาทั้งหมด (spec ที่ทั้ง 2 generator ใช้ร่วมกัน) — แก้ที่นี่ที่เดียว
 pptx_lib.py     # helper วาดสไลด์ + ฝัง font ลง .pptx
 slides.py       # เทมเพลตสไลด์ (cover/divider/cards/module-deepdive/compare/…)
-build_pptx.py   # สร้าง PPTX (ธีมมืด)
-build_pdf.py    # สร้าง PDF whitepaper (ธีมสว่าง, reportlab)
+build_pptx.py         # สร้าง PPTX ธีมมืดแบบ native (แก้ไขข้อความได้ — แต่ DrawingML บางส่วน
+                      #   PowerPoint mobile ไม่ยอมรับ; ใช้เป็นตัวตั้งต้นของ build_pptx_images.py)
+build_pptx_images.py  # ★ สร้าง PPTX ที่ "เปิดได้ทุกเครื่อง" — เรนเดอร์แต่ละสไลด์เป็นรูป (pixel-perfect)
+build_pdf.py          # สร้าง PDF whitepaper (ธีมสว่าง, reportlab)
 fonts/          # Kanit + Sarabun (OFL) — vendored เพื่อ reproduce ได้
 assets/         # โลโก้ Invisible Consulting (เวอร์ชันขาว/ดำ พื้นโปร่งใส)
 output/         # ไฟล์ผลลัพธ์
@@ -44,9 +46,16 @@ output/         # ไฟล์ผลลัพธ์
 ```bash
 pip install python-pptx reportlab
 cd presentation
-python3 build_pptx.py output/Invisible-ERP-Presentation.pptx
-python3 build_pdf.py  output/Invisible-ERP-Whitepaper.pdf
+# PPTX ที่ส่งลูกค้า (เปิดได้ทุกเครื่องรวม PowerPoint mobile) — ต้องมี libreoffice-impress + poppler-utils
+python3 build_pptx_images.py output/Invisible-ERP-Presentation.pptx
+python3 build_pdf.py         output/Invisible-ERP-Whitepaper.pdf
 ```
+
+> **ทำไม PPTX ถึงเป็น image-based:** ดาต้าสไลด์แบบ native (เงา/ความโปร่งใส/ฝัง font) LibreOffice
+> เปิดได้ แต่ **PowerPoint (โดยเฉพาะบนมือถือ) ตรวจ OOXML schema เข้มกว่าและปฏิเสธการเปิด**
+> `build_pptx_images.py` จึงเรนเดอร์แต่ละสไลด์เป็นรูปความละเอียดสูงแล้วประกอบเป็น PPTX ที่มีแต่
+> `<p:pic>` (โครงสร้าง PPTX ที่ง่ายและ valid ที่สุด) — เปิดได้ทุกเครื่อง หน้าตาเป๊ะตามดีไซน์
+> (ข้อแลกเปลี่ยน: สไลด์เป็นรูป แก้ข้อความในตัวไม่ได้ — ถ้าต้องแก้ให้แก้ `content.py` แล้ว build ใหม่)
 
 แก้เนื้อหาที่ `content.py` แล้ว build ใหม่ — ทั้ง PPTX และ PDF จะอัปเดตพร้อมกัน
 
