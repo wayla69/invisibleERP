@@ -198,7 +198,12 @@ export async function publicApi<T = unknown>(path: string, init: RequestInit = {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
-    throw new Error(msg);
+    // Preserve the machine-readable `code` + HTTP status (mirrors api()), so pre-auth callers can branch on
+    // a specific failure — e.g. the login form revealing the OTP field on MFA_REQUIRED / MFA_INVALID.
+    const err = new Error(msg) as Error & { code?: string; status?: number };
+    err.code = body?.error?.code;
+    err.status = res.status;
+    throw err;
   }
   return body as T;
 }
