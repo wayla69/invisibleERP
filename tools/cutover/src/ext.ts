@@ -845,6 +845,43 @@ async function main() {
   const qIsoTotal = (qIso.json.rows ?? []).reduce((a: number, r: any) => a + Number(r.sales_total || 0), 0);
   ok('Query: RLS-scoped — another tenant does not see these sales', qIsoTotal === 0, `cf2 total=${qIsoTotal}`);
 
+  // ── Analytics feeds (Marketing Intelligence integration): /api/v1/sales/daily + /customers/transactions ──
+  // The Marketing Intelligence platform (separate Python app) reads these via an analytics:read API key.
+  // Seeded here (AFTER the RLS-zero-sales assertion above) so a cf2 sale doesn't perturb that check.
+  await db.insert(s.custPosSales).values({ saleNo: 'SALE-PUB-CF2', saleDate: '2026-06-02', tenantId: cf2.id, total: '250', status: 'Completed' });
+  await db.insert(s.custPosSales).values({ saleNo: 'SALE-PUB-CF2-VOID', saleDate: '2026-06-02', tenantId: cf2.id, total: '999', status: 'Voided' }); // must be excluded
+  const [cf2Mem] = await db.insert(s.posMembers).values({ tenantId: cf2.id, memberCode: 'M-CF2A', name: 'CF2 Member' }).returning({ id: s.posMembers.id });
+  const [hqMem] = await db.insert(s.posMembers).values({ tenantId: hq.id, memberCode: 'M-HQA', name: 'HQ Member' }).returning({ id: s.posMembers.id });
+  await db.insert(s.customerProfiles).values({ tenantId: cf2.id, memberId: cf2Mem.id, totalOrders: 5, totalSpend: '1250', lastOrderAt: new Date('2026-06-02T00:00:00Z'), firstOrderAt: new Date('2026-01-01T00:00:00Z') });
+  await db.insert(s.customerProfiles).values({ tenantId: hq.id, memberId: hqMem.id, totalOrders: 2, totalSpend: '400', lastOrderAt: new Date('2026-06-02T00:00:00Z'), firstOrderAt: new Date('2026-03-01T00:00:00Z') });
+
+  const anKeyCf2 = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-an-cf2', scopes: ['analytics:read'] })).json.key;
+  const anKeyHq = (await inj('POST', '/api/platform/api-keys', token, { name: 'pub-an-hq', scopes: ['analytics:read'] })).json.key;
+  const catKey2 = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cat2', scopes: ['catalog:read'] })).json.key;
+
+  // Scope enforcement: a key without analytics:read is denied both analytics feeds.
+  const catSales = await inj('GET', '/api/v1/sales/daily', catKey2);
+  ok('Public API: /sales/daily requires analytics:read (catalog-only key → 403 INSUFFICIENT_SCOPE)', catSales.status === 403 && catSales.json.error?.code === 'INSUFFICIENT_SCOPE', `${catSales.status} ${catSales.json.error?.code}`);
+  const catTxn = await inj('GET', '/api/v1/customers/transactions', catKey2);
+  ok('Public API: /customers/transactions requires analytics:read (catalog-only key → 403)', catTxn.status === 403 && catTxn.json.error?.code === 'INSUFFICIENT_SCOPE', `${catTxn.status} ${catTxn.json.error?.code}`);
+
+  // /sales/daily returns per-day revenue (Voided excluded), tenant-scoped.
+  const cf2Sales = await inj('GET', '/api/v1/sales/daily?from=2026-06-01&to=2026-06-03', anKeyCf2);
+  const cf2Day = (cf2Sales.json.data ?? []).find((r: any) => r.date === '2026-06-02');
+  ok('Public API: /sales/daily returns per-day revenue (Voided excluded)', cf2Sales.status === 200 && !!cf2Day && cf2Day.revenue === 250 && cf2Day.orders === 1, `${cf2Sales.status} ${JSON.stringify(cf2Day ?? {})}`);
+  const hqSales = await inj('GET', '/api/v1/sales/daily?from=2026-06-01&to=2026-06-03', anKeyHq);
+  ok('Public API: /sales/daily is RLS tenant-scoped (HQ does not see cf2 revenue)', !(hqSales.json.data ?? []).some((r: any) => r.revenue === 250), `hq=${JSON.stringify(hqSales.json.data ?? [])}`);
+
+  // /customers/transactions exposes per-customer RFM base facts, tenant-scoped.
+  const cf2Txn = await inj('GET', '/api/v1/customers/transactions', anKeyCf2);
+  const cf2Rows = cf2Txn.json.data ?? [];
+  const cf2Fact = cf2Rows.find((r: any) => r.customer_no === 'M-CF2A');
+  ok('Public API: /customers/transactions returns RFM base facts (frequency/monetary)', cf2Txn.status === 200 && !!cf2Fact && cf2Fact.order_count === 5 && cf2Fact.total_spend === 1250, `${cf2Txn.status} ${JSON.stringify(cf2Fact ?? {})}`);
+  ok('Public API: /customers/transactions is tenant-scoped (cf2 key sees no HQ member)', !cf2Rows.some((r: any) => r.customer_no === 'M-HQA'), `cf2=${cf2Rows.map((r: any) => r.customer_no).join(',')}`);
+  const hqTxn = await inj('GET', '/api/v1/customers/transactions', anKeyHq);
+  const hqRows = hqTxn.json.data ?? [];
+  ok('Public API: /customers/transactions — HQ key sees only its own member', hqRows.some((r: any) => r.customer_no === 'M-HQA') && !hqRows.some((r: any) => r.customer_no === 'M-CF2A'), `hq=${hqRows.map((r: any) => r.customer_no).join(',')}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

@@ -34,7 +34,7 @@ export class PublicApiController {
       version: 'v1',
       documentation: '/api/v1/openapi.json',
       authentication: 'Bearer ierp_… (API key)',
-      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
+      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/sales/daily', '/api/v1/customers/transactions', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
     };
   }
 
@@ -88,6 +88,19 @@ export class PublicApiController {
   @Scopes('invoices:read')
   invoices(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('status') status?: string) {
     return this.svc.invoices({ limit, offset, status });
+  }
+
+  // ── Analytics reads (Marketing Intelligence integration) ────────────
+  @Get('sales/daily')
+  @Scopes('analytics:read')
+  salesDaily(@Query('from') from?: string, @Query('to') to?: string, @Query('group_by') groupBy?: string) {
+    return this.svc.salesDaily({ from, to, group_by: groupBy });
+  }
+
+  @Get('customers/transactions')
+  @Scopes('analytics:read')
+  customerTransactions(@Query('from') from?: string, @Query('to') to?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.svc.customerTransactions({ from, to, limit, offset });
   }
 
   // ── Loyalty write API (Phase C2) — enrol / earn / redeem + read a member. Fires loyalty.* webhooks. ──
