@@ -2682,6 +2682,13 @@
       "when": 2023820000348,
       "tag": "0409_crm_dq_merge_log",
       "breakpoints": true
+    },
+    {
+      "idx": 384,
+      "version": "7",
+      "when": 2023820000349,
+      "tag": "0410_portfolio_selection_scenarios",
+      "breakpoints": true
     }
   ]
 }

@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Activity, ShieldAlert, ShieldCheck, Users, Wallet, Receipt, Clock, TrendingUp, FolderKanban, BellRing } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Activity, ShieldAlert, ShieldCheck, Users, Wallet, Receipt, Clock, TrendingUp, FolderKanban, BellRing, Scale, Plus, Lock, Trash2, CheckCircle2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
@@ -13,6 +15,8 @@ import { StateView } from '@/components/state-view';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { statusVariant } from '@/components/ui';
 
 const cpiTone = (v: number | null): 'success' | 'warning' | 'danger' | 'default' =>
@@ -69,6 +73,9 @@ export default function PortfolioPage() {
             <StatCard label={t('pj.stat_wip_full')} value={baht(d?.financials?.wip)} icon={Clock} tone="info" />
             <StatCard label={t('pj.stat_margin')} value={baht(d?.financials?.margin)} icon={TrendingUp} tone={(d?.financials?.margin ?? 0) < 0 ? 'danger' : 'success'} />
           </div>
+
+          {/* Portfolio selection scenarios (PPM Wave P4, PROJ-25) */}
+          <PortfolioScenarios projects={d?.projects ?? []} />
 
           <div className="grid gap-4 lg:grid-cols-5">
             {/* pipeline → delivery funnel */}
@@ -244,5 +251,156 @@ export default function PortfolioPage() {
         </div>
       </StateView>
     </div>
+  );
+}
+
+// Portfolio selection scenarios (PPM Wave P4, PROJ-25) — a what-if funding surface. Inlined in this already-
+// 'use client' page so it inherits the client boundary (no new client-first file → use-client ratchet flat).
+// Model candidate projects into a named scenario with a budget envelope + priorities, watch the selected
+// total vs the envelope, then COMMIT the GO-set as a maker-checker decision (a different user must commit;
+// an over-envelope commit needs an exec override reason). Read-only aggregation — no project row is mutated.
+function PortfolioScenarios({ projects }: { projects: any[] }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const list = useQuery<any>({ queryKey: ['projects', 'portfolio-scenarios'], queryFn: () => api('/api/projects/portfolio/scenarios') });
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [envelope, setEnvelope] = useState('');
+  const [sel, setSel] = useState<string | null>(null);
+  const detail = useQuery<any>({ queryKey: ['projects', 'portfolio-scenario', sel], queryFn: () => api(`/api/projects/portfolio/scenarios/${sel}`), enabled: !!sel });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['projects', 'portfolio-scenarios'] }); if (sel) qc.invalidateQueries({ queryKey: ['projects', 'portfolio-scenario', sel] }); };
+
+  const create = useMutation({
+    mutationFn: () => api('/api/projects/portfolio/scenarios', { method: 'POST', body: JSON.stringify({ name, budget_envelope: envelope ? Number(envelope) : undefined }) }),
+    onSuccess: (r: any) => { notifySuccess(t('pj.pf_created', { no: r.scenario_no })); setCreating(false); setName(''); setEnvelope(''); setSel(r.scenario_no); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const [pcode, setPcode] = useState('');
+  const [prio, setPrio] = useState('0');
+  const addItem = useMutation({
+    mutationFn: (decision: 'include' | 'exclude') => api(`/api/projects/portfolio/scenarios/${sel}/items`, { method: 'POST', body: JSON.stringify({ project_code: pcode, decision, priority_score: Number(prio) || 0 }) }),
+    onSuccess: () => { setPcode(''); setPrio('0'); refresh(); }, onError: (e: any) => notifyError(e.message),
+  });
+  const removeItem = useMutation({ mutationFn: (code: string) => api(`/api/projects/portfolio/scenarios/${sel}/items/${encodeURIComponent(code)}`, { method: 'DELETE' }), onSuccess: refresh, onError: (e: any) => notifyError(e.message) });
+
+  const [override, setOverride] = useState('');
+  const commit = useMutation({
+    mutationFn: () => api(`/api/projects/portfolio/scenarios/${sel}/commit`, { method: 'POST', body: JSON.stringify(override.trim() ? { override: true, override_reason: override.trim() } : {}) }),
+    onSuccess: () => { notifySuccess(t('pj.pf_committed')); setOverride(''); refresh(); }, onError: (e: any) => notifyError(e.message),
+  });
+
+  const d = detail.data;
+  const draft = d?.status === 'draft';
+  const overEnv = d?.totals?.over_envelope;
+
+  return (
+    <Card className="gap-3 p-5">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-semibold"><Scale className="size-4" /> {t('pj.pf_title')}</h3>
+        <Button size="sm" variant="outline" onClick={() => setCreating(true)}><Plus className="size-4" /> {t('pj.pf_new')}</Button>
+      </div>
+      <p className="text-xs text-muted-foreground">{t('pj.pf_desc')}</p>
+
+      {(list.data?.scenarios?.length ?? 0) === 0 ? (
+        <div className="py-6 text-center text-sm text-muted-foreground">{t('pj.pf_empty')}</div>
+      ) : (
+        <ul className="divide-y divide-border/50">
+          {list.data.scenarios.map((s: any) => (
+            <li key={s.scenario_no}>
+              <button onClick={() => setSel(s.scenario_no)} className="flex w-full items-center justify-between gap-2 py-2 text-left text-sm hover:opacity-80">
+                <span className="min-w-0 truncate"><span className="font-medium">{s.scenario_no}</span> <span className="text-muted-foreground">{s.name}</span></span>
+                <span className="flex shrink-0 items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">{t('pj.pf_n_selected', { n: s.included_count })}</span>
+                  {s.budget_envelope != null && <Badge variant="muted">{baht(s.budget_envelope)}</Badge>}
+                  {s.status === 'committed' ? <Badge variant="success"><Lock className="mr-1 size-3" />{t('pj.pf_committed_badge')}</Badge> : <Badge variant="warning">{t('pj.pf_draft')}</Badge>}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Create-scenario dialog */}
+      <Dialog open={creating} onOpenChange={(o) => !o && setCreating(false)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('pj.pf_new')}</DialogTitle></DialogHeader>
+          <div className="grid gap-3">
+            <div><label className="text-xs text-muted-foreground">{t('pj.pf_name')}</label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('pj.pf_name')} /></div>
+            <div><label className="text-xs text-muted-foreground">{t('pj.pf_envelope')}</label><Input type="number" value={envelope} onChange={(e) => setEnvelope(e.target.value)} placeholder={t('pj.pf_envelope_hint')} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreating(false)}>{t('pj.btn_close')}</Button>
+            <Button onClick={() => create.mutate()} disabled={!name.trim() || create.isPending}>{t('pj.pf_create')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scenario detail / manage dialog */}
+      <Dialog open={!!sel} onOpenChange={(o) => !o && setSel(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>{d ? `${d.scenario_no} · ${d.name}` : ''}</DialogTitle></DialogHeader>
+          {d && (
+            <div className="grid gap-3">
+              {/* totals band */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-border/60 p-2 text-center"><div className="text-xs text-muted-foreground">{t('pj.pf_selected')}</div><div className="tabular font-medium">{d.totals.included_count}</div></div>
+                <div className="rounded-lg border border-border/60 p-2 text-center"><div className="text-xs text-muted-foreground">{t('pj.pf_sel_budget')}</div><div className="tabular font-medium">{baht(d.totals.selected_budget)}</div></div>
+                <div className="rounded-lg border border-border/60 p-2 text-center"><div className="text-xs text-muted-foreground">{t('pj.pf_sel_margin')}</div><div className="tabular font-medium">{baht(d.totals.selected_margin)}</div></div>
+                <div className={`rounded-lg border p-2 text-center ${overEnv ? 'border-destructive/60' : 'border-border/60'}`}><div className="text-xs text-muted-foreground">{t('pj.pf_headroom')}</div><div className={`tabular font-medium ${overEnv ? 'text-destructive' : 'text-success'}`}>{d.totals.budget_headroom != null ? baht(d.totals.budget_headroom) : '—'}</div></div>
+              </div>
+              {overEnv && <div className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{t('pj.pf_over_envelope', { amount: baht(d.totals.over_by) })}</div>}
+              {d.override_reason && <div className="rounded-lg bg-warning/10 px-3 py-2 text-xs">{t('pj.pf_override_note', { reason: d.override_reason })}</div>}
+
+              {/* candidate rows */}
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-border/60">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-foreground"><tr className="border-b border-border/60"><th className="px-2 py-1 text-left">{t('pj.col_project')}</th><th className="px-2 py-1 text-right">{t('pj.pf_priority')}</th><th className="px-2 py-1 text-right">{t('pj.col_margin')}</th><th className="px-2 py-1 text-center">{t('pj.pf_decision')}</th>{draft && <th className="w-8" />}</tr></thead>
+                  <tbody>
+                    {[...(d.included ?? []), ...(d.excluded ?? [])].map((it: any) => (
+                      <tr key={it.project_code} className="border-b border-border/30">
+                        <td className="px-2 py-1"><span className="font-medium">{it.project_code}</span> <span className="text-muted-foreground">{it.name}</span></td>
+                        <td className="px-2 py-1 text-right tabular">{it.priority_score}</td>
+                        <td className={`px-2 py-1 text-right tabular ${it.margin < 0 ? 'text-destructive' : ''}`}>{baht(it.margin)}</td>
+                        <td className="px-2 py-1 text-center">{it.decision === 'include' ? <Badge variant="success">{t('pj.pf_include')}</Badge> : <Badge variant="muted">{t('pj.pf_exclude')}</Badge>}</td>
+                        {draft && <td className="px-1 text-center"><button onClick={() => removeItem.mutate(it.project_code)} className="text-muted-foreground hover:text-destructive"><Trash2 className="size-3.5" /></button></td>}
+                      </tr>
+                    ))}
+                    {[...(d.included ?? []), ...(d.excluded ?? [])].length === 0 && <tr><td colSpan={5} className="px-2 py-3 text-center text-xs text-muted-foreground">{t('pj.pf_no_candidates')}</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+
+              {draft ? (
+                <>
+                  {/* add candidate */}
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="min-w-40 flex-1">
+                      <label className="text-xs text-muted-foreground">{t('pj.pf_add_candidate')}</label>
+                      <select value={pcode} onChange={(e) => setPcode(e.target.value)} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+                        <option value="">{t('pj.pf_pick_project')}</option>
+                        {projects.map((p: any) => <option key={p.project_code} value={p.project_code}>{p.project_code} · {p.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="w-24"><label className="text-xs text-muted-foreground">{t('pj.pf_priority')}</label><Input type="number" value={prio} onChange={(e) => setPrio(e.target.value)} /></div>
+                    <Button size="sm" variant="outline" disabled={!pcode || addItem.isPending} onClick={() => addItem.mutate('include')}>{t('pj.pf_include')}</Button>
+                    <Button size="sm" variant="ghost" disabled={!pcode || addItem.isPending} onClick={() => addItem.mutate('exclude')}>{t('pj.pf_exclude')}</Button>
+                  </div>
+                  {/* commit (maker-checker; override reason if over envelope) */}
+                  {overEnv && <div><label className="text-xs text-muted-foreground">{t('pj.pf_override_reason')}</label><Input value={override} onChange={(e) => setOverride(e.target.value)} placeholder={t('pj.pf_override_hint')} /></div>}
+                  <p className="text-xs text-muted-foreground">{t('pj.pf_commit_hint')}</p>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-success"><CheckCircle2 className="size-4" /> {t('pj.pf_committed_by', { who: d.committed_by ?? '' })}</div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSel(null)}>{t('pj.btn_close')}</Button>
+            {draft && <Button disabled={commit.isPending || (d?.totals?.included_count ?? 0) === 0 || (overEnv && !override.trim())} onClick={() => commit.mutate()}><Lock className="size-4" /> {t('pj.pf_commit')}</Button>}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
