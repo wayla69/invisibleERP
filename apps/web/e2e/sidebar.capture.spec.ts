@@ -30,6 +30,17 @@ async function boot(page: Page) {
 
 const sidebar = (page: Page) => page.locator('[data-slot="sidebar-inner"]').first();
 const header = (page: Page) => page.locator('[data-sidebar="header"]').first();
+
+// Top-level domains are collapsible and default to only-active-open (docs/15 rev 2/3), so an item in a
+// non-active domain is hidden until its header is expanded. Advanced areas need the "show advanced" toggle.
+async function openDomain(page: Page, name: string) {
+  const btn = page.getByRole('button', { name, exact: true });
+  if ((await btn.getAttribute('aria-expanded')) === 'false') await btn.click();
+}
+async function enableAdvanced(page: Page) {
+  const t = page.getByRole('button', { name: 'แสดงเมนูขั้นสูง', exact: true });
+  if ((await t.getAttribute('aria-pressed')) !== 'true') await t.click();
+}
 const scrollSidebar = (page: Page, to: 'top' | 'bottom') =>
   page.locator('[data-slot="sidebar-content"]').first().evaluate((el, t) => {
     el.scrollTo({ top: t === 'top' ? 0 : el.scrollHeight });
@@ -49,6 +60,9 @@ test('capture sidebar imagery for the user manual', async ({ page }) => {
   await sidebar(page).screenshot({ path: `${OUT}/sidebar-overview.png` });
 
   // 3) Favourites: star two items so the รายการโปรด group appears, then scroll back to the top so it shows.
+  //    Open each item's domain first (they default collapsed): /inventory → ซัพพลายเชน, /finance → การเงิน & บัญชี.
+  await openDomain(page, 'ซัพพลายเชน');
+  await openDomain(page, 'การเงิน & บัญชี');
   for (const href of ['/inventory', '/finance']) {
     await page
       .locator('li[data-sidebar="menu-item"]', { has: page.locator(`a[href="${href}"]`) })
@@ -59,8 +73,10 @@ test('capture sidebar imagery for the user manual', async ({ page }) => {
   await scrollSidebar(page, 'top');
   await sidebar(page).screenshot({ path: `${OUT}/sidebar-favourites.png` });
 
-  // 4) Collapsible Settings: expand one advanced sub-section (ปรับแต่ง) and leave another collapsed
-  //    (เชื่อมต่อ & ขยาย), then scroll to the ตั้งค่าระบบ group at the bottom.
+  // 4) Collapsible Settings: reveal advanced areas, expand the ตั้งค่าระบบ domain, then expand one advanced
+  //    sub-section (ปรับแต่ง) and leave another collapsed (เชื่อมต่อ & ขยาย); scroll to the group at the bottom.
+  await enableAdvanced(page);
+  await openDomain(page, 'ตั้งค่าระบบ');
   await page.getByRole('button', { name: 'ปรับแต่ง', exact: true }).click();
   await scrollSidebar(page, 'bottom');
   await sidebar(page).screenshot({ path: `${OUT}/sidebar-settings.png` });

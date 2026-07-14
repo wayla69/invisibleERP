@@ -45,6 +45,19 @@ const tab = (page: Page, name: 'ERP' | 'POS') => tabs(page).getByRole('tab', { n
 // (e.g. /pos, /branches), so an unscoped `a[href=...]` would match 2 elements (strict-mode violation).
 const navLink = (page: Page, href: string) => page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
 
+// Top-level domains are now collapsible and default to only-active-open (docs/15 rev 2), so a link inside a
+// non-active domain is hidden until its domain header is expanded. Idempotent — a no-op if already open.
+async function openDomain(page: Page, name: string) {
+  const header = page.getByRole('button', { name, exact: true });
+  if ((await header.getAttribute('aria-expanded')) === 'false') await header.click();
+}
+// Advanced domains/sub-sections (Controls, Customise, Integrations, Intercompany) are hidden until the
+// "show advanced" toggle is on. Idempotent.
+async function enableAdvanced(page: Page) {
+  const toggle = page.getByRole('button', { name: 'แสดงเมนูขั้นสูง', exact: true });
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+}
+
 test('POS-only operator is redirected from the ERP home to the POS home on first landing', async ({ page }) => {
   await bootAs(page, CASHIER); // no saved workspace → role-based default = POS
   await page.goto('/dashboard');
@@ -56,8 +69,9 @@ test('switcher filters the menu and navigates between the two workspace homes', 
   await bootAs(page, ADMIN); // Admin → default ERP
   await page.goto('/dashboard');
 
-  // ERP view: an ERP-only item is visible, a POS-only item is not.
+  // ERP view: an ERP-only item is visible (after opening its domain), a POS-only item is not.
   await expect(tab(page, 'ERP')).toHaveAttribute('aria-selected', 'true');
+  await openDomain(page, 'ซัพพลายเชน'); // Supply Chain domain holds /procurement
   await expect(navLink(page, '/procurement')).toBeVisible();
   await expect(navLink(page, '/pos')).toHaveCount(0);
 
@@ -65,12 +79,14 @@ test('switcher filters the menu and navigates between the two workspace homes', 
   await tab(page, 'POS').click();
   await expect(page).toHaveURL(/\/pos-home$/);
   await expect(tab(page, 'POS')).toHaveAttribute('aria-selected', 'true');
+  await openDomain(page, 'ขายหน้าร้าน'); // POS Sales domain holds /pos
   await expect(navLink(page, '/pos')).toBeVisible();
   await expect(navLink(page, '/procurement')).toHaveCount(0);
 
   // Switch back to ERP → back to /dashboard.
   await tab(page, 'ERP').click();
   await expect(page).toHaveURL(/\/dashboard$/);
+  await openDomain(page, 'ซัพพลายเชน');
   await expect(navLink(page, '/procurement')).toBeVisible();
 });
 
@@ -83,21 +99,27 @@ test('workspace choice persists across a reload (localStorage)', async ({ page }
 
   await page.reload();
   await expect(tab(page, 'POS')).toHaveAttribute('aria-selected', 'true');
+  await openDomain(page, 'ขายหน้าร้าน');
   await expect(navLink(page, '/pos')).toBeVisible();
 });
 
 test('dual-use item (Branches) is cross-listed in both workspaces', async ({ page }) => {
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
+  await openDomain(page, 'ขาย & ลูกค้า'); // Commercial domain → Pricing sub-section holds /branches
   await expect(navLink(page, '/branches')).toBeVisible(); // ERP
   await tab(page, 'POS').click();
   await expect(page).toHaveURL(/\/pos-home$/);
+  await openDomain(page, 'ขาย & ลูกค้า');
   await expect(navLink(page, '/branches')).toBeVisible(); // POS too
 });
 
 test('System settings sub-sections are collapsible and reachable', async ({ page }) => {
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
+
+  await enableAdvanced(page); // the Customise sub-section is advanced — reveal advanced areas first
+  await openDomain(page, 'ตั้งค่าระบบ'); // expand the System Settings domain
 
   // A "ตั้งค่าระบบ" item lives inside the "ข้อมูลหลัก" sub-section and is visible (sub-sections open by default).
   await expect(navLink(page, '/master-data')).toBeVisible();
@@ -121,9 +143,44 @@ test('System settings sub-sections are collapsible and reachable', async ({ page
   await expect(navLink(page, '/master-data')).toBeVisible();
 });
 
+test('top-level domains collapse and expand, and only the active domain opens on load', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // On the ERP dashboard, only the active domain (ภาพรวม / Overview) is open; other domains start collapsed.
+  await expect(page.getByRole('button', { name: 'ภาพรวม', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  const supply = page.getByRole('button', { name: 'ซัพพลายเชน', exact: true });
+  await expect(supply).toHaveAttribute('aria-expanded', 'false');
+  await expect(navLink(page, '/inventory')).toBeHidden();
+
+  // Expanding the domain reveals its items; collapsing hides them again.
+  await supply.click();
+  await expect(supply).toHaveAttribute('aria-expanded', 'true');
+  await expect(navLink(page, '/inventory')).toBeVisible();
+  await supply.click();
+  await expect(navLink(page, '/inventory')).toBeHidden();
+});
+
+test('advanced domains are hidden until the "show advanced" toggle is on', async ({ page }) => {
+  await bootAs(page, ADMIN);
+  await page.goto('/dashboard');
+
+  // The Controls domain (advanced) is not rendered by default.
+  await expect(page.getByRole('button', { name: 'การควบคุม', exact: true })).toHaveCount(0);
+  await enableAdvanced(page);
+  const controls = page.getByRole('button', { name: 'การควบคุม', exact: true });
+  await expect(controls).toHaveCount(1);
+  // Its items become reachable once the domain is expanded.
+  await controls.click();
+  await expect(navLink(page, '/audit')).toBeVisible();
+});
+
 test('Finance group is split into PEAK-style cycle sub-sections', async ({ page }) => {
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
+
+  await enableAdvanced(page); // the Intercompany/FX sub-section is advanced
+  await openDomain(page, 'การเงิน & บัญชี'); // expand the Finance & Accounting domain
 
   // The daily book sub-section is open by default and exposes /finance.
   const arap = page.getByRole('button', { name: 'รายรับ–รายจ่าย (AR/AP)', exact: true });
@@ -174,7 +231,8 @@ test('starring a menu item pins it to the Favourites group and persists across r
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
 
-  // Star /procurement via its hover menu-action button.
+  // Star /procurement via its hover menu-action button (open its domain first so the item renders).
+  await openDomain(page, 'ซัพพลายเชน');
   const procItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/procurement"]') });
   await procItem.locator('button[data-sidebar="menu-action"]').click();
 
@@ -203,7 +261,7 @@ test('server-saved favourites hydrate the sidebar and toggles are persisted to /
   await page.route('**/api/user-prefs', async (route) => {
     const req = route.request();
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-    if (req.method() === 'GET') return json({ favorites: ['/procurement'], navFold: { 'nav.sub.customise': true }, saved: true });
+    if (req.method() === 'GET') return json({ favorites: ['/procurement'], navFold: { 'nav.sub.customise': true, '__show_advanced__': true }, saved: true });
     if (req.method() === 'PUT') {
       puts.push(JSON.parse(req.postData() || '{}'));
       return json({ favorites: [], navFold: {}, saved: true });
@@ -215,10 +273,13 @@ test('server-saved favourites hydrate the sidebar and toggles are persisted to /
   // The server-saved favourite hydrates into the Favourites group even though localStorage started empty.
   const favGroup = page.locator('div[data-sidebar="group"]', { has: page.getByText('รายการโปรด', { exact: true }) });
   await expect(favGroup.locator('a[href="/procurement"]')).toBeVisible();
-  // The server-saved fold-state is applied: ปรับแต่ง (collapsed by default) is now expanded.
+  // The server-saved fold-state is applied: ปรับแต่ง (collapsed by default) is now expanded. It is an
+  // advanced sub-section, so the server also enabled the advanced toggle; expand its domain to reveal it.
+  await openDomain(page, 'ตั้งค่าระบบ');
   await expect(page.getByRole('button', { name: 'ปรับแต่ง', exact: true })).toHaveAttribute('aria-expanded', 'true');
 
-  // Starring another item issues a PUT carrying the updated favourites.
+  // Starring another item issues a PUT carrying the updated favourites (open its domain first).
+  await openDomain(page, 'ซัพพลายเชน');
   const invItem = page.locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/inventory"]') });
   await invItem.locator('button[data-sidebar="menu-action"]').click();
   await expect.poll(() => puts.some((p) => p.favorites?.includes('/inventory'))).toBeTruthy();
@@ -228,7 +289,8 @@ test('favourites and recents surface at the top of the command palette', async (
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
 
-  // Pin an item, then open the ⌘K palette.
+  // Pin an item (open its domain first), then open the ⌘K palette.
+  await openDomain(page, 'ซัพพลายเชน');
   await page
     .locator('li[data-sidebar="menu-item"]', { has: page.locator('a[href="/inventory"]') })
     .locator('button[data-sidebar="menu-action"]')
@@ -242,6 +304,8 @@ test('favourites and recents surface at the top of the command palette', async (
 test('favourites can be reordered with the move up/down controls', async ({ page }) => {
   await bootAs(page, ADMIN);
   await page.goto('/dashboard');
+  await openDomain(page, 'ซัพพลายเชน'); // /inventory
+  await openDomain(page, 'การเงิน & บัญชี'); // /finance
   const star = (href: string) =>
     page
       .locator('li[data-sidebar="menu-item"]', { has: page.locator(`a[href="${href}"]`) })

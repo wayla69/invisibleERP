@@ -48,6 +48,8 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Sidebar chrome ────────────────────────────────────────────────────────
   'nav.favorites': { th: 'รายการโปรด', en: 'Favourites', ms: 'Kegemaran', vi: 'Yêu thích', id: 'Favorit' },
   'nav.recents': { th: 'ล่าสุด', en: 'Recent', ms: 'Terkini', vi: 'Gần đây', id: 'Terkini' },
+  'nav.show_advanced': { th: 'แสดงเมนูขั้นสูง', en: 'Show advanced', ms: 'Tunjuk lanjutan', vi: 'Hiện nâng cao', id: 'Tampilkan lanjutan' },
+  'nav.items_count': { th: 'รายการ', en: 'items', ms: 'item', vi: 'mục', id: 'item' },
   'nav.fav_add': { th: 'เพิ่ม {label} ในรายการโปรด', en: 'Add {label} to favourites', ms: 'Tambah {label} ke kegemaran', vi: 'Thêm {label} vào yêu thích', id: 'Tambah {label} ke favorit' },
   'nav.fav_remove': { th: 'เอา {label} ออกจากรายการโปรด', en: 'Remove {label} from favourites', ms: 'Buang {label} dari kegemaran', vi: 'Xoá {label} khỏi yêu thích', id: 'Hapus {label} dari favorit' },
   'nav.fav_add_short': { th: 'เพิ่มในรายการโปรด', en: 'Add to favourites', ms: 'Tambah ke kegemaran', vi: 'Thêm vào yêu thích', id: 'Tambah ke favorit' },
@@ -82,13 +84,18 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.group.store': { th: 'ร้าน & การจัดส่ง', en: 'Store & Delivery' },
   'nav.group.devices': { th: 'อุปกรณ์ & การชำระเงิน', en: 'Devices & Payments' },
   'nav.group.restaurant': { th: 'วิเคราะห์ร้านอาหาร', en: 'Restaurant Analytics' },
+  // Consolidated top-level domains (docs/15 rev 2) — each nests former groups as foldable subgroups.
+  'nav.group.commercial': { th: 'ขาย & ลูกค้า', en: 'Sales & Customers' },
+  'nav.group.supply_chain': { th: 'ซัพพลายเชน', en: 'Supply Chain' },
+  'nav.group.projects': { th: 'โครงการ', en: 'Projects' },
+  'nav.group.store_ops': { th: 'ร้าน & อุปกรณ์', en: 'Store & Devices' },
   'nav.group.crm': { th: 'ลูกค้า & CRM', en: 'Customers & CRM' },
   'nav.group.loyalty': { th: 'ลอยัลตี้', en: 'Loyalty' },
   'nav.group.pricing': { th: 'ราคา & สาขา', en: 'Pricing & Branches' },
   'nav.group.inventory': { th: 'สินค้าคงคลัง', en: 'Inventory' },
   'nav.group.procurement': { th: 'จัดซื้อ', en: 'Procurement' },
   'nav.group.production': { th: 'การผลิต', en: 'Production' },
-  'nav.group.finance': { th: 'การเงิน', en: 'Finance' },
+  'nav.group.finance': { th: 'การเงิน & บัญชี', en: 'Finance & Accounting' },
   'nav.group.tax': { th: 'ภาษี', en: 'Tax' },
   'nav.group.hr': { th: 'บุคลากร & เงินเดือน', en: 'HR & Payroll' },
   'nav.group.pm': { th: 'จัดการโครงการ', en: 'Project Management' },
@@ -108,6 +115,10 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.sub.customise': { th: 'ปรับแต่ง', en: 'Customise' },
   'nav.sub.integrations': { th: 'เชื่อมต่อ & ขยาย', en: 'Integrations & Extensions' },
   'nav.sub.admin': { th: 'ผู้ดูแลระบบ', en: 'Administration' },
+  // POS Sell (nav.group.pos_sales) sub-sections — docs/15 rev 3.
+  'nav.sub.pos_frontline': { th: 'ขาย & ออเดอร์', en: 'Sell & Orders' },
+  'nav.sub.pos_dining': { th: 'โต๊ะ & ครัว', en: 'Tables & Kitchen' },
+  'nav.sub.pos_shift': { th: 'กะ & ควบคุม', en: 'Shift & Control' },
 
   // ── Overview ──────────────────────────────────────────────────────────────
   'nav.dashboard': { th: 'แดชบอร์ด', en: 'Dashboard' },

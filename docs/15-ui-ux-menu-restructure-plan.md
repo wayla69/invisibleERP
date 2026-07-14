@@ -1,6 +1,6 @@
 # 15 — UI/UX & Menu Restructure Plan (Navigation IA)
 
-> **Date:** 2026-06-25 · **Status:** v1.0 — IMPLEMENTED (conservative, URL-stable) · **Owner:** Web / Product
+> **Date:** 2026-06-25 (rev 2: 2026-07-14) · **Status:** v2.0 — IMPLEMENTED (URL-stable; rev 2 adds collapsible domains + basic/advanced, see §2bis) · **Owner:** Web / Product
 > **Scope:** A conservative, **URL-stable** restructure of the internal navigation
 > (`apps/web/src/lib/nav.ts`, rendered by `apps/web/src/components/app-shell.tsx`) so the menu matches the
 > real, grown app structure after the recent ERP + POS feature additions. **Now implemented** — §2 is the
@@ -109,6 +109,54 @@ store/delivery → hardware → pricing → loyalty → money → analytics).
 
 > The exact Thai labels and the precise sub-section boundaries are the **sign-off artifact of Phase 1** —
 > §2 is the proposed default, to be confirmed before any `nav.ts` edit.
+
+---
+
+## 2bis. Rev 2 — collapsible domains, only-active-open & basic/advanced (2026-07-14)
+
+v1.0 kept **~18 top-level groups** in ERP, each rendered as a *static* label — every group expanded at once,
+so the menu was still a long scroll and (unlike the Finance/Settings sub-sections) the top-level headings
+**could not be collapsed**. Rev 2 addresses that without touching a single `href`/`perm`:
+
+**(a) Consolidate 18 → ~10 domains.** Former flat groups become foldable **subgroups** of a smaller set of
+domains (the `subgroups` third level from §3 — no new data-model level). The former group `title` keys are
+**reused as subgroup titles**, so saved per-container item order (`itemOrder`) survives.
+
+```
+ภาพรวม (Overview)                → แดชบอร์ด
+ขาย & ลูกค้า (Sales & Customers)  ▸ ลูกค้า & CRM · ลอยัลตี้ · ราคา & สาขา
+ซัพพลายเชน (Supply Chain)         ▸ สินค้าคงคลัง · จัดซื้อ · การผลิต
+การเงิน & บัญชี (Finance & Acct.) ▸ รายรับ–รายจ่าย · สมุดบัญชี · ธนาคาร · งบการเงิน · ระหว่างบริษัท* · ภาษี
+บุคลากร & เงินเดือน (HR & Payroll) → (flat)
+โครงการ (Projects)               ▸ จัดการโครงการ · อสังหาริมทรัพย์
+วางแผน & วิเคราะห์ (Planning & BI) → (flat)
+การควบคุม & ตรวจสอบ (Controls)*   → (flat, advanced)
+ผู้ช่วย AI (AI)                   → (flat)
+ตั้งค่าระบบ (Settings)            ▸ ข้อมูลหลัก · ปรับแต่ง* · เชื่อมต่อ* · ผู้ดูแล
+```
+`*` = **advanced** (see (c)).
+
+**POS (rev 3, 2026-07-14):** the same consolidation is applied to the POS surface — the 16-item **ขายหน้าร้าน**
+group is broken into foldable sub-sections *ขาย & ออเดอร์ · โต๊ะ & ครัว · กะ & ควบคุม*, and the small
+**ร้าน & การจัดส่ง / อุปกรณ์ & การชำระเงิน / วิเคราะห์ร้านอาหาร** groups collapse under one **ร้าน & อุปกรณ์**
+domain (each a sub-section). POS-specific top-level groups drop 5 → 3; hrefs/perms unchanged.
+
+**(b) Collapsible top-level groups + only-active-open.** Each domain header is now a fold toggle
+(`NavGroupSection` in `app-shell.tsx`; chevron + item-count badge when collapsed). On load **only the domain
+containing the active route is open**; the rest start collapsed. Fold state is keyed by the group `title` in
+the same device-synced `navFold` map (`/api/user-prefs`) already used by sub-sections; an explicit user
+toggle persists and overrides the active-derived default.
+
+**(c) Basic / advanced toggle.** A new `advanced?: boolean` on `NavGroup`/`NavSubGroup` marks infrequent/
+expert areas — the **Controls** domain and the **Customise**, **Integrations** and **Intercompany**
+sub-sections. A sidebar-footer switch **"แสดงเมนูขั้นสูง"** reveals them; off by default (`filterAdvancedNav`
+in `nav.ts`). The filter applies to the **sidebar only** — the ⌘K palette and Favourites/Recents still resolve
+against the full tree, so a pinned advanced item stays reachable. The toggle state is stored in the synced
+fold map under a reserved key (no backend change).
+
+**Invariants preserved:** every `href`/`perm` unchanged; icon-rail (collapsed) mode still shows all items as
+icons; admin group/item ordering (`groupOrder`/`itemOrder`) degrades gracefully for renamed top-level keys
+(unknown keys fall back to code order — no crash).
 
 ---
 
@@ -254,3 +302,5 @@ with **zero route changes** and a small additive data-model extension. The orpha
 | 2026-06-25 | v1.4 (IMPLEMENTED) | Web / Docs | §6 follow-up delivered: **screenshot refresh**. Replaced the user-manual sidebar `[screenshot: …]` placeholders with real captures (`docs/user-manual/img/` — overview, switcher, favourites, settings). Added a reproducible, CI-excluded capture spec `apps/web/e2e/sidebar.capture.spec.ts` (`testIgnore` in `playwright.config.ts`). All §6 follow-ups now closed. |
 | 2026-06-25 | v1.5 (SUPERSEDED-BY-16) | Web / Product | Follow-on UI/UX convergence moved to its own doc, [`16-peak-style-erp-convergence.md`](./16-peak-style-erp-convergence.md): the *การเงิน* group (left "ok-ish" / flat here) is now five **PEAK-style cycle sub-sections** (using this doc's `NavSubGroup` model, no href change); the `/finance` page is split into **ภาพรวม/รายรับ/รายจ่าย tabs** (`?tab=` deep-link); a dashboard **action center** and a reusable **`ModulePage`** scaffold were added. No route/permission/control change. |
 | 2026-06-25 | v1.3 (IMPLEMENTED) | Web / API | §6 follow-up delivered: **server-synced preferences**. New API `UserPrefsModule` — `GET`/`PUT /api/user-prefs`, table `user_prefs` (migration `0119`, hand-journaled), RLS-scoped, owner-scoped, no `@Permissions` (any authed user, own row). `app-shell.tsx`: favourites + nav fold-state now sync (localStorage cache + reconcile-to-server + debounced PUT); `NavSubSection` lifted to controlled. Recents stay per-device (scope confirmed with user). Docs: process-narrative `27` §7.23 + revision row; user-manual *Workspaces*. Verified: API typecheck ✅ + build ✅ + journal gate ✅; web typecheck ✅ + build ✅; Playwright `workspace-split` 7/7 ✅ (added server-hydrate + PUT-on-toggle case). |
+| 2026-07-14 | v2.1 (IMPLEMENTED) | Web / Product | **Rev 3 (§2bis, POS): same consolidation applied to POS.** `nav.ts`: the 16-item *ขายหน้าร้าน* group split into foldable sub-sections (`nav.sub.pos_frontline` *ขาย & ออเดอร์* · `nav.sub.pos_dining` *โต๊ะ & ครัว* · `nav.sub.pos_shift` *กะ & ควบคุม*); *ร้าน & การจัดส่ง* + *อุปกรณ์ & การชำระเงิน* + *วิเคราะห์ร้านอาหาร* collapsed under one new **ร้าน & อุปกรณ์** domain (`nav.group.store_ops`) with the three former groups as sub-sections. POS-specific top-level groups 5 → 3. i18n: `nav.group.store_ops` + the three `nav.sub.pos_*` keys. **No `href`/`perm` changed** (213 href+perm tuples byte-identical to pre-menu-work HEAD). Verified: web typecheck ✅, build ✅, Playwright `workspace-split` 13/13 ✅. Docs: user-manual *Workspaces* (00). |
+| 2026-07-14 | v2.0 (IMPLEMENTED) | Web / Product | **Rev 2 (§2bis): collapsible domains, only-active-open & basic/advanced.** `nav.ts`: consolidated the ~18 ERP top-level groups into ~10 domains by nesting former flat groups (CRM/Loyalty/Pricing → *ขาย & ลูกค้า*; Inventory/Procurement/Production → *ซัพพลายเชน*; PM/Real-Estate → *โครงการ*; Tax folded into *การเงิน & บัญชี*) as `subgroups` — former group `title` keys reused so `itemOrder` survives; added `advanced?` on group/subgroup + `filterAdvancedNav()`. `app-shell.tsx`: new collapsible top-level `NavGroupSection` (chevron + collapsed count badge), only-active-open default keyed on `navFold[group.title]`, sidebar-footer **"แสดงเมนูขั้นสูง"** toggle (persisted in the synced fold map under a reserved key — no backend change) hiding Controls / Customise / Integrations / Intercompany. **No `href`/`perm` changed.** i18n: new `nav.group.commercial`/`supply_chain`/`projects` + `nav.show_advanced`. Verified: web typecheck ✅, build ✅ (use-client ratchet 284/284 ✅), Playwright `workspace-split` ✅ (expand-domain + advanced-toggle + only-active-open cases added). Docs: user-manual *Workspaces* (00) + *Administration* (11) updated. No API/permission/control change → no RCM/UAT/narrative impact. |
