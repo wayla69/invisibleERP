@@ -165,6 +165,62 @@ async function main() {
   const t1Bundles = await inj('GET', '/api/cpq/bundles', t1user);
   ok('CRM-14 RLS: a T1 user cannot see an HQ bundle', t1Bundles.status === 200 && !(t1Bundles.json.bundles ?? []).some((b: any) => b.code === 'STARTER-KIT'), `codes=${(t1Bundles.json.bundles ?? []).map((b: any) => b.code).join('|')}`);
 
+  // ── CRM-15 CPQ pricebooks (control CRM-15, migration 0408) — quotes price from a governed, effective-dated
+  //    price list; the CPQ-01 floor still governs; the effective window + active flag are enforced ──────────
+  // 23. Create a pricebook (masterdata) — active, no effective bounds (always effective) + entries.
+  const pb = await inj('POST', '/api/cpq/pricebooks', admin, { code: 'PB-2026', name: 'FY2026 List', currency: 'THB' });
+  ok('CRM-15 pricebook: created under the masterdata duty', pb.status === 201 && pb.json.id > 0 && pb.json.code === 'PB-2026', JSON.stringify(pb.json));
+
+  // 24. A cpq author WITHOUT masterdata cannot create a pricebook.
+  const pbForbidden = await inj('POST', '/api/cpq/pricebooks', sales1, { code: 'NOPE', name: 'x' });
+  ok('CRM-15 pricebook: a non-masterdata author is refused → 403', pbForbidden.status === 403, `${pbForbidden.status}`);
+
+  const ent = await inj('POST', '/api/cpq/pricebooks/PB-2026/entries', admin, { entries: [{ item_code: 'WIDGET', unit_price: 42000 }, { item_code: 'CHEAP', unit_price: 20000 }] });
+  ok('CRM-15 pricebook: entries upserted (item_code → unit_price)', ent.status === 201 && (ent.json.entries ?? []).length === 2, JSON.stringify(ent.json.entries));
+
+  // 25. A quote priced FROM the pricebook: a covered line takes the pricebook price (typed price ignored); an
+  // uncovered line keeps its typed price; quotes.pricebook_id records the pricing basis.
+  const pq = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Pricebook Buyer', pricebook_id: pb.json.id, lines: [
+    { description: 'Widget', item_code: 'WIDGET', qty: 1, unit_price: 99999, unit_cost: 30000 },
+    { description: 'Custom', item_code: 'UNLISTED', qty: 1, unit_price: 5000, unit_cost: 1000 },
+  ] });
+  ok('CRM-15 pricing: covered line → pricebook price (42000), uncovered line keeps typed (5000); subtotal 47000, basis recorded',
+    pq.status === 201 && near(pq.json.subtotal, 47000) && pq.json.pricebook_id === pb.json.id, JSON.stringify({ subtotal: pq.json.subtotal, pb: pq.json.pricebook_id }));
+
+  // 26. Config path also prices from the pricebook (by config code), overriding the config base price.
+  const cfgW = await inj('POST', '/api/cpq/configs', admin, { code: 'WIDGET', name: 'Widget Config', base_price: 88888 });
+  const pqCfg = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Config Pricebook', pricebook_id: pb.json.id, config_id: cfgW.json.id, qty: 1, unit_cost: 30000 });
+  ok('CRM-15 pricing: a config-path quote prices from the pricebook (WIDGET 42000, not base_price 88888)', pqCfg.status === 201 && near(pqCfg.json.subtotal, 42000), JSON.stringify({ subtotal: pqCfg.json.subtotal }));
+
+  // 27. The CPQ-01 margin floor STILL governs a pricebook price (a below-cost entry trips it on send).
+  const pbLowQ = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Below-cost Buyer', pricebook_id: pb.json.id, lines: [{ description: 'Cheap', item_code: 'CHEAP', qty: 1, unit_price: 99999, unit_cost: 30000 }] });
+  const pbSentLow = await inj('POST', `/api/cpq/quotes/${pbLowQ.json.id}/send`, sales1);
+  ok('CRM-15 floor composes: a below-cost pricebook price (20000 vs cost 30000) still trips CPQ-01 → PendingApproval',
+    near(pbLowQ.json.subtotal, 20000) && pbSentLow.status === 200 && pbSentLow.json.status === 'PendingApproval', JSON.stringify({ sub: pbLowQ.json.subtotal, st: pbSentLow.json.status }));
+
+  // 28. Effective window enforced: an EXPIRED pricebook is rejected at quote time.
+  const pbExp = await inj('POST', '/api/cpq/pricebooks', admin, { code: 'PB-OLD', name: 'Old', effective_from: '2020-01-01', effective_to: '2020-12-31' });
+  await inj('POST', '/api/cpq/pricebooks/PB-OLD/entries', admin, { entries: [{ item_code: 'WIDGET', unit_price: 1 }] });
+  const qExp = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Expired', pricebook_id: pbExp.json.id, lines: [{ description: 'Widget', item_code: 'WIDGET', qty: 1, unit_price: 5000, unit_cost: 1000 }] });
+  ok('CRM-15 effective window: an expired pricebook → 400 PRICEBOOK_NOT_EFFECTIVE', qExp.status === 400 && qExp.json.error?.code === 'PRICEBOOK_NOT_EFFECTIVE', `${qExp.status} ${qExp.json.error?.code}`);
+
+  // 29. An INACTIVE pricebook is rejected.
+  const pbOff = await inj('POST', '/api/cpq/pricebooks', admin, { code: 'PB-OFF', name: 'Off', is_active: false });
+  const qOff = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Off', pricebook_id: pbOff.json.id, lines: [{ description: 'x', item_code: 'WIDGET', qty: 1, unit_price: 5000, unit_cost: 1000 }] });
+  ok('CRM-15: an inactive pricebook → 400 PRICEBOOK_INACTIVE', qOff.status === 400 && qOff.json.error?.code === 'PRICEBOOK_INACTIVE', `${qOff.status} ${qOff.json.error?.code}`);
+
+  // 30. An unknown pricebook id → 404; a from>to window on create → 400.
+  const qBad = await inj('POST', '/api/cpq/quotes', sales1, { customer_name: 'Bad', pricebook_id: 999999, lines: [{ description: 'x', qty: 1, unit_price: 1000, unit_cost: 100 }] });
+  const pbBad = await inj('POST', '/api/cpq/pricebooks', admin, { code: 'PB-BAD', name: 'Bad', effective_from: '2026-12-31', effective_to: '2026-01-01' });
+  ok('CRM-15 validation: unknown pricebook → 404 PRICEBOOK_NOT_FOUND; from>to → 400 BAD_EFFECTIVE_WINDOW',
+    qBad.status === 404 && qBad.json.error?.code === 'PRICEBOOK_NOT_FOUND' && pbBad.status === 400 && pbBad.json.error?.code === 'BAD_EFFECTIVE_WINDOW', `${qBad.json.error?.code}/${pbBad.json.error?.code}`);
+
+  // 31. RLS: a T1 user sees no HQ pricebook and cannot price a quote from it.
+  const t1pbs = await inj('GET', '/api/cpq/pricebooks', t1user);
+  const t1Priced = await inj('POST', '/api/cpq/quotes', t1user, { customer_name: 'T1', pricebook_id: pb.json.id, lines: [{ description: 'x', item_code: 'WIDGET', qty: 1, unit_price: 5000, unit_cost: 1000 }] });
+  ok('CRM-15 RLS: a T1 user sees no HQ pricebook and cannot price from it (404)',
+    t1pbs.status === 200 && !(t1pbs.json.pricebooks ?? []).some((p: any) => p.code === 'PB-2026') && t1Priced.status === 404, `t1see=${(t1pbs.json.pricebooks ?? []).map((p: any) => p.code).join('|')} priced=${t1Priced.status}`);
+
   await app.close();
 }
 

@@ -29,6 +29,9 @@ interface Config { id: number; code: string; name: string; base_price: number; c
 // its component configs — expanding it into a quote reuses the CPQ-01 floor check unmodified.
 interface Bundle { code: string; name: string; description: string | null; active: boolean }
 interface BundleDraftItem { config_id: number | ''; qty: number; unit_cost: number }
+// CRM-15 CPQ pricebooks — a governed, effective-dated price list a quote can be priced from.
+interface Pricebook { id: number; code: string; name: string; currency: string; effective_from: string | null; effective_to: string | null; is_active: boolean }
+interface PbEntryDraft { item_code: string; unit_price: number }
 
 // Quote lifecycle (cpq.service.ts): Draft → Sent → Accepted | Rejected. CPQ-01 (SVC-1): a quote breaching the
 // margin floor / max discount parks in PendingApproval on send and needs a different approver.
@@ -48,6 +51,7 @@ export default function CpqPage() {
           { key: 'quotes', label: t('crm.tab_quotes'), content: <Quotes /> },
           { key: 'configs', label: t('crm.tab_configs'), content: <Configs /> },
           { key: 'bundles', label: t('crm.tab_bundles'), content: <Bundles /> },
+          { key: 'pricebooks', label: t('crm.tab_pricebooks'), content: <Pricebooks /> },
         ]}
       />
     </div>
@@ -255,6 +259,97 @@ function Bundles() {
               { key: 'name', label: t('crm.col_name') },
               { key: 'description', label: t('crm.description'), render: (r: Bundle) => r.description ?? '—' },
               { key: 'active', label: t('fin.col_status'), render: (r: Bundle) => <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? t('crm.active') : t('crm.inactive')}</Badge> },
+            ]}
+          />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// CRM-15 CPQ pricebooks — master-data management: create effective-dated price lists and maintain their
+// item→price entries. A quote created against a pricebook prices its lines from these entries (backend).
+function Pricebooks() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ pricebooks: Pricebook[]; count: number }>({ queryKey: ['cpq-pricebooks'], queryFn: () => api('/api/cpq/pricebooks') });
+
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [currency, setCurrency] = useState('THB');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const resetForm = () => { setCode(''); setName(''); setCurrency('THB'); setFrom(''); setTo(''); };
+  const create = useMutation({
+    mutationFn: () => api('/api/cpq/pricebooks', { method: 'POST', body: JSON.stringify({ code, name, currency, effective_from: from || null, effective_to: to || null }) }),
+    onSuccess: () => { notifySuccess(t('crm.pb_created')); qc.invalidateQueries({ queryKey: ['cpq-pricebooks'] }); resetForm(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // Entry editor — pick a pricebook, add item_code→unit_price rows, save (upsert).
+  const [entryCode, setEntryCode] = useState('');
+  const [entries, setEntries] = useState<PbEntryDraft[]>([{ item_code: '', unit_price: 0 }]);
+  const updateEntry = (i: number, patch: Partial<PbEntryDraft>) => setEntries((p) => p.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
+  const saveEntries = useMutation({
+    mutationFn: () => api(`/api/cpq/pricebooks/${encodeURIComponent(entryCode)}/entries`, { method: 'POST', body: JSON.stringify({ entries: entries.filter((e) => e.item_code.trim()).map((e) => ({ item_code: e.item_code.trim(), unit_price: Number(e.unit_price) || 0 })) }) }),
+    onSuccess: () => { notifySuccess(t('crm.pb_entries_saved')); setEntries([{ item_code: '', unit_price: 0 }]); qc.invalidateQueries({ queryKey: ['cpq-pricebooks'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const win = (r: Pricebook) => `${r.effective_from ?? '—'} → ${r.effective_to ?? '—'}`;
+  const canCreate = code.trim() && name.trim() && !create.isPending;
+  const canSaveEntries = entryCode && entries.some((e) => e.item_code.trim()) && !saveEntries.isPending;
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <h3 className="text-sm font-medium">{t('crm.pb_create_title')}</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5"><Label>{t('crm.pb_code')}</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div>
+          <div className="space-y-1.5"><Label>{t('crm.pb_name')}</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="space-y-1.5"><Label>{t('crm.pb_currency')}</Label><Input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5"><Label>{t('crm.pb_effective_from')}</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label>{t('crm.pb_effective_to')}</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">{t('crm.pb_hint')}</p>
+        <Button disabled={!canCreate} onClick={() => create.mutate()}>{t('crm.pb_create_btn')}</Button>
+      </Card>
+
+      <Card className="p-4 space-y-3">
+        <h3 className="text-sm font-medium">{t('crm.pb_entries_title')}</h3>
+        <div className="space-y-1.5 sm:max-w-xs">
+          <Label>{t('crm.pb_pick')}</Label>
+          <Select value={entryCode} onChange={(e) => setEntryCode(e.target.value)}>
+            <option value="">—</option>
+            {(q.data?.pricebooks ?? []).map((p) => <option key={p.id} value={p.code}>{p.code} — {p.name}</option>)}
+          </Select>
+        </div>
+        <div className="space-y-2">
+          {entries.map((e, idx) => (
+            <div key={idx} className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_8rem_auto]">
+              <div className="space-y-1.5"><Label>{t('crm.pb_item_code')}</Label><Input value={e.item_code} onChange={(ev) => updateEntry(idx, { item_code: ev.target.value })} /></div>
+              <div className="space-y-1.5"><Label>{t('crm.pb_unit_price')}</Label><Input type="number" min={0} value={e.unit_price} onChange={(ev) => updateEntry(idx, { unit_price: Number(ev.target.value) })} /></div>
+              <Button variant="ghost" size="sm" onClick={() => setEntries((p) => p.filter((_, i) => i !== idx))} disabled={entries.length <= 1}><X className="size-3.5" /></Button>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" onClick={() => setEntries((p) => [...p, { item_code: '', unit_price: 0 }])}>{t('crm.pb_add_entry')}</Button>
+        </div>
+        <Button disabled={!canSaveEntries} onClick={() => saveEntries.mutate()}>{t('crm.pb_save_entries')}</Button>
+      </Card>
+
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.pricebooks}
+            emptyState={{ icon: FileText, title: t('crm.pb_empty_title'), description: t('crm.pb_empty_desc') }}
+            columns={[
+              { key: 'code', label: t('crm.col_code') },
+              { key: 'name', label: t('crm.col_name') },
+              { key: 'currency', label: t('crm.pb_currency') },
+              { key: 'window', label: t('crm.pb_window'), render: (r: Pricebook) => win(r) },
+              { key: 'is_active', label: t('fin.col_status'), render: (r: Pricebook) => <Badge variant={r.is_active ? 'success' : 'muted'}>{r.is_active ? t('crm.active') : t('crm.inactive')}</Badge> },
             ]}
           />
         )}

@@ -2668,6 +2668,13 @@
       "when": 2023820000346,
       "tag": "0407_crm_feed_timeline",
       "breakpoints": true
+    },
+    {
+      "idx": 382,
+      "version": "7",
+      "when": 2023820000347,
+      "tag": "0408_cpq_pricebooks",
+      "breakpoints": true
     }
   ]
 }

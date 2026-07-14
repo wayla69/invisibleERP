@@ -80,6 +80,9 @@ export const quotes = pgTable('quotes', {
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   notes: text('notes'),
   createdBy: text('created_by'),
+  // CRM-15 (migration 0408): the governed pricebook this quote was priced from (audit of the pricing basis;
+  // null = ad-hoc / config base-price pricing).
+  pricebookId: bigint('pricebook_id', { mode: 'number' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byTenant: index('idx_qt_tenant').on(t.tenantId, t.status),
@@ -169,4 +172,37 @@ export const cpqBundleItems = pgTable('cpq_bundle_items', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byBundle: index('idx_cpq_bundle_item_bundle').on(t.tenantId, t.bundleId) }));
 
+// CRM-15 CPQ pricebooks (control CRM-15, migration 0408) — a governed, effective-dated price list a quote can
+// be priced FROM instead of ad-hoc typed unit prices. A pricebook is master data (created under the same
+// `masterdata` duty as configs/rules/bundles). When a quote is created against a pricebook, each line's unit
+// price resolves from the pricebook's entry for that item (by config/item code), so revenue is quoted from an
+// approved, in-window price list — the effective window (from/to) + active flag are enforced at quote time,
+// and the CPQ-01 margin floor still governs the resulting price. Two tenant tables (0232 RLS).
+export const cpqPricebooks = pgTable('cpq_pricebooks', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  currency: text('currency').notNull().default('THB'),
+  effectiveFrom: date('effective_from'), // inclusive; null = no lower bound
+  effectiveTo: date('effective_to'),     // inclusive; null = no upper bound
+  isActive: boolean('is_active').notNull().default(true),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ uqCode: uniqueIndex('uq_cpq_pricebook_code').on(t.tenantId, t.code) }));
+
+export const cpqPricebookEntries = pgTable('cpq_pricebook_entries', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  pricebookId: bigint('pricebook_id', { mode: 'number' }).notNull().references(() => cpqPricebooks.id),
+  itemCode: text('item_code').notNull(),                 // matches product_configs.code / quote_lines.item_code
+  unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull().default('0'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqEntry: uniqueIndex('uq_cpq_pricebook_entry').on(t.tenantId, t.pricebookId, t.itemCode),
+  byBook: index('idx_cpq_pricebook_entry_book').on(t.tenantId, t.pricebookId),
+}));
+
 export type Quote = typeof quotes.$inferSelect;
+export type CpqPricebook = typeof cpqPricebooks.$inferSelect;
+export type CpqPricebookEntry = typeof cpqPricebookEntries.$inferSelect;
