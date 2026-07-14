@@ -117,6 +117,12 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'crmx.pb_bulk_done': { th: 'ย้าย {moved} รายการแล้ว', en: 'Moved {moved} deals' },
   'crmx.pb_bulk_partial': { th: 'ย้าย {moved} รายการ, ไม่สำเร็จ {failed}', en: 'Moved {moved}, {failed} failed' },
   'crmx.pb_select_row': { th: 'เลือกดีล', en: 'Select deal' },
+  // CRM-8 collaboration feed + unified timeline
+  'crmx.feed_ph': { th: 'บันทึกภายในทีม… พิมพ์ @ เพื่อกล่าวถึงเพื่อนร่วมงาน', en: 'Internal note… type @ to mention a teammate' },
+  'crmx.feed_hint': { th: 'บันทึกนี้แก้ไข/ลบไม่ได้ (เก็บเป็นหลักฐานถาวร) · @ผู้ใช้จะได้รับการแจ้งเตือน', en: 'Notes are append-only (permanent record) · @user gets a notification' },
+  'crmx.btn_post_note': { th: 'โพสต์บันทึก', en: 'Post note' },
+  'crmx.feed_posted': { th: 'โพสต์บันทึกแล้ว', en: 'Note posted' },
+  'crmx.feed_note': { th: 'บันทึกทีม', en: 'Team note' },
   'crmx.seq_create_title': { th: 'สร้างลำดับการติดตาม (cadence)', en: 'Create a sequence (cadence)' },
   'crmx.seq_name': { th: 'ชื่อลำดับ', en: 'Sequence name' },
   'crmx.seq_step1_body': { th: 'ข้อความอีเมลขั้นแรก', en: 'Step-1 email body' },

@@ -6,6 +6,7 @@ export const notifications = pgTable('notifications', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   targetTenantId: bigint('target_tenant_id', { mode: 'number' }).references(() => tenants.id),
   targetRole: roleEnum('target_role'),
+  targetUsername: text('target_username'), // CRM-8: directed notification (e.g. an @mention) — visible ONLY to this user within target_tenant_id; NULL = the legacy role/broadcast behavior
   message: text('message'), // Thai
   messageEn: text('message_en'),
   isRead: boolean('is_read').default(false),

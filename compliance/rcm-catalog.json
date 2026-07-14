@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 283,
+    "total": 284,
     "by_status": {
-      "Implemented": 279,
+      "Implemented": 280,
       "Partial": 4
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 44,
+      "Revenue & Cash": 45,
       "Tax": 12
     }
   },
@@ -1726,6 +1726,25 @@
       "tod": "Inspect the per-stage playbook config (WIP limit + whitelist-validated required fields + guidance), the enforced required-field + WIP gates on setStage (both refusal codes), the bulk move riding the SAME governed path, and the supervisor-only / tenant-scoped configuration.",
       "toe": "Re-perform (pipeline harness, CRM-7 checks): configure the Qualified stage with a required amount + a WIP cap; advancing a no-amount deal into Qualified is refused STAGE_REQUIREMENTS_UNMET (missing amount); a sized deal advances; the next sized deal past the cap is refused WIP_LIMIT_EXCEEDED (limit echoed); clearing the WIP limit (null) then admits it; a bulk stage move advances a multi-select and reports per-item moved/failed (a valid deal succeeds while an unknown opp fails NOT_FOUND — never atomic across deals); an unknown required-field key is rejected BAD_REQUIRED_FIELDS; HQ (no tenant) cannot configure a T1 stage playbook.",
       "evidence": "Stage playbook config (WIP limit + required-field exit criteria + guidance); enforced STAGE_REQUIREMENTS_UNMET / WIP_LIMIT_EXCEEDED gate; bulk-move per-item audit; crm_stage_history trail",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-14",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (customer-interaction record)",
+      "risk": "The record of what actually happened on a deal is FRAGMENTED and MUTABLE — a customer's touches are scattered across separate lists (activities in one place, stage changes in another, comms and cadence touches elsewhere) with no single chronological view, so an auditor (or a rep taking over the account) cannot reconstruct the interaction history and a lost/disputed deal cannot be reviewed end-to-end; and internal collaboration/decision notes on the deal, where recorded at all, can be silently edited or deleted after the fact — so the account's decision trail is neither complete nor tamper-evident, and a colleague flagged for input is not reliably notified.",
+      "assertion": "Completeness/Timeliness/Accuracy",
+      "description": "CRM-8 unified activity timeline + collaboration feed (migration 0407). ONE canonical, tenant-scoped, newest-first read (GET /api/crm/timeline?entity_type=&entity_no=) merges EVERY touch on a lead/opportunity/account into a single chronological stream: activities across all channels (call/email/meeting/note/task incl. outbound comms 'comms', inbound replies 'inbound', cadence touches 'sequence'), stage transitions (crm_stage_history), and linked CPQ quotes — an account rolls up its opportunities' streams — so the interaction history is reconstructable in one place, nothing siloed. The COLLABORATION FEED (crm_feed_posts) is APPEND-ONLY: a posted internal note is immutable (no update/delete path — the schema carries no updated_at and no mutation endpoint exists), so the decision/collaboration trail on the customer record cannot be silently rewritten; @-mentions in a note are validated against the tenant's ACTIVE users (unknown/other-tenant handles dropped) and each mentioned user is routed a DIRECTED notification (notifications.target_username — visible only to that user within the tenant, additive + backward-compatible with the role/broadcast rail). Entities are existence-checked in the caller's tenant before any read/write (BOLA-safe; unknown entity -> 404, bad entity_type -> 400). Reads gate crm/exec/ar; one tenant table (crm_feed_posts, RLS 0232, tenant-leading index) + one directed-target column on notifications. No GL post.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per interaction / continuous",
+      "owner": "Sales / Sales Manager / IA",
+      "coso": "P13",
+      "code_reference": "crm-timeline.service.ts (timeline — merges crm_activities all-sources + crm_stage_history + linked quotes + crm_feed_posts, account rolls up its opportunities; listFeed; postFeed — append-only insert + validateMentions against active tenant users + directed notification per mention; requireEntity BOLA existence check); crm-timeline.controller.ts (GET /api/crm/timeline, GET/POST /api/crm/feed, gated crm/exec/ar); notifications.module.ts visibleTo (widened for target_username — directed rows visible only to that user, legacy NULL rows unchanged); schema/crm-pipeline.ts crm_feed_posts + schema/system.ts notifications.target_username + migration 0407; web deals/[oppNo]/deal-client.tsx (feed composer + @mention highlight, feed folded into the deal timeline); cutover/pipeline.ts (ToE, CRM-8 timeline/feed checks)",
+      "tod": "Inspect the unified timeline merge (all activity sources + stage history + quotes + feed in one sorted stream; account roll-up), the append-only feed (no mutation path), the @mention validation + directed-notification routing, and the BOLA existence checks.",
+      "toe": "Re-perform (pipeline harness, CRM-8 checks): a deal's timeline merges an activity + two stage transitions + a feed note into one newest-first stream; a feed note posts (201) with a valid @mention resolved and an unknown @handle dropped; the mentioned user receives a directed notification while the AUTHOR does not; an account timeline rolls up its opportunity's activity; posting/reading a timeline for an unknown opportunity is refused 404 NOT_FOUND and a bad entity_type 400.",
+      "evidence": "Unified customer-interaction timeline (all sources); append-only collaboration feed; directed @mention notifications; BOLA existence checks",
       "status": "Implemented"
     },
     {
