@@ -141,6 +141,11 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   reputation_ga4_sync: { label: 'ซิงก์ Google Analytics (GA4)', labelEn: 'Sync Google Analytics (GA4)' },
   // Read-only dashboard aggregate — also exposed live via GET /api/bi/reputation-summary.
   reputation_summary: { label: 'สรุปชื่อเสียงร้าน + Analytics', labelEn: 'Reputation & analytics summary' },
+  // docs/48 — Marketing Mix Modeling. mmm_run is a scheduled "action" job (refresh the channel model from
+  // the latest ingested signals); mmm_summary is a read-only dashboard aggregate also exposed live via
+  // GET /api/bi/mmm-summary.
+  mmm_run: { label: 'รันโมเดล Marketing Mix (MMM)', labelEn: 'Run Marketing Mix Model (MMM)' },
+  mmm_summary: { label: 'สรุปผล Marketing Mix (ROI ต่อช่องทาง)', labelEn: 'Marketing Mix summary (channel ROI)' },
 };
 export const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 
