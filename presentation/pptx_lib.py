@@ -234,8 +234,8 @@ def embed_fonts(src_pptx, dst_pptx, fonts):
     rels = rels.replace("</Relationships>", "".join(new_rels) + "</Relationships>")
     with open(rels_path, "w", encoding="utf-8") as f: f.write(rels)
 
-    # inject embeddedFontLst right after <p:sldIdLst.../> ... actually schema order:
-    # it must appear before <p:sldSz>. Insert before <p:sldSz.
+    # inject embeddedFontLst — CT_Presentation schema order requires it AFTER sldSz+notesSz
+    # (PowerPoint validates strictly; placing it before sldSz makes PP refuse to open the file).
     lst = "<p:embeddedFontLst>" + "".join(embed_xml) + "</p:embeddedFontLst>"
     import re
     if "embedTrueTypeFonts" not in pres:
@@ -243,7 +243,13 @@ def embed_fonts(src_pptx, dst_pptx, fonts):
         if "saveSubsetFonts" not in pres:
             attrs += 'saveSubsetFonts="0" '
         pres = re.sub(r"<p:presentation ", '<p:presentation ' + attrs, pres, count=1)
-    pres = pres.replace("<p:sldSz", lst + "<p:sldSz", 1)
+    # insert right after the notesSz element (preferred), else after sldSz
+    if re.search(r"<p:notesSz[^>]*/>", pres):
+        pres = re.sub(r"(<p:notesSz[^>]*/>)", lambda m: m.group(1) + lst, pres, count=1)
+    elif re.search(r"<p:sldSz[^>]*/>", pres):
+        pres = re.sub(r"(<p:sldSz[^>]*/>)", lambda m: m.group(1) + lst, pres, count=1)
+    else:
+        raise RuntimeError("presentation.xml has no sldSz/notesSz anchor for embeddedFontLst")
     with open(pres_path, "w", encoding="utf-8") as f: f.write(pres)
 
     # rezip
