@@ -444,6 +444,54 @@ async function main() {
 
   const purgedLogin = await login('lifeco_admin', 'lifeco12345');
   ok('The purged company Admin can no longer log in at all (user row deleted, 401)', purgedLogin.status === 401, `${purgedLogin.status}`);
+
+  // ── 3g5. Global item-master GC (unused-item purge). `items` is a SHARED master (no tenant_id), so
+  //         factory-reset/purge — which clear only tenant_id-scoped tables — never touch it: a wiped
+  //         company's catalogue rows survive and keep showing in EVERY tenant's /shop. The platform owner
+  //         garbage-collects items NO tenant references any more; an item another company still uses (here HQ
+  //         has GC-USED on a PO line) is kept. Cross-tenant view is essential — computed under the
+  //         @PlatformAdmin full RLS bypass, never per-company. ──
+  await db.insert(s.items).values([
+    { itemId: 'GC-USED', itemDescription: 'referenced by a surviving tenant (HQ)' },
+    { itemId: 'GC-ORPHAN', itemDescription: 'no references anywhere' },
+    { itemId: 'GC-IMG', itemDescription: 'orphan that also owns an image row' },
+  ]).onConflictDoNothing();
+  await db.insert(s.itemImages).values([{ itemId: 'GC-IMG', dataUrl: 'data:image/png;base64,AAAA' }]).onConflictDoNothing();
+  await db.insert(s.poItems).values([{ tenantId: hq, itemId: 'GC-USED', orderQty: '1', unitPrice: '10' }]).onConflictDoNothing();
+
+  process.env.PLATFORM_ADMIN_USERNAMES = ''; // owner is momentarily NOT a platform admin
+  const gcDenied = await inj('GET', '/api/admin/item-maintenance/unused-items', owner);
+  ok('Unused-items preview blocked for a non-platform-admin (403)', gcDenied.status === 403, `${gcDenied.status} ${gcDenied.json.error?.code}`);
+  process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
+
+  const gcPreview = await inj('GET', '/api/admin/item-maintenance/unused-items', owner);
+  const gcIds: string[] = gcPreview.json.item_ids ?? [];
+  ok('Unused-items preview lists the orphans but NOT the HQ-referenced item',
+    gcPreview.status === 200 && gcIds.includes('GC-ORPHAN') && gcIds.includes('GC-IMG') && !gcIds.includes('GC-USED'),
+    `orphan=${gcIds.includes('GC-ORPHAN')} img=${gcIds.includes('GC-IMG')} used=${gcIds.includes('GC-USED')} total=${gcPreview.json.total} refCols=${gcPreview.json.ref_columns}`);
+  const usedBeforePurge = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length;
+  const orphanBeforePurge = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-ORPHAN'))).length;
+  ok('Preview is a dry-run — nothing deleted yet', usedBeforePurge === 1 && orphanBeforePurge === 1, JSON.stringify({ usedBeforePurge, orphanBeforePurge }));
+
+  const gcBad = await inj('POST', '/api/admin/item-maintenance/purge-unused-items', owner, { confirm: 'nope' });
+  ok('Purge with a wrong confirm phrase → 400 CONFIRM_MISMATCH', gcBad.status === 400 && gcBad.json.error?.code === 'CONFIRM_MISMATCH', `${gcBad.status} ${gcBad.json.error?.code}`);
+
+  const gcPurge = await inj('POST', '/api/admin/item-maintenance/purge-unused-items', owner, { confirm: 'PURGE-UNUSED-ITEMS' });
+  const gcPurged: string[] = gcPurge.json.item_ids ?? [];
+  ok('Purge (god + confirm) → 200 status=purged, collects the orphans not the HQ-referenced item',
+    gcPurge.status === 200 && gcPurge.json.status === 'purged' && gcPurged.includes('GC-ORPHAN') && gcPurged.includes('GC-IMG') && !gcPurged.includes('GC-USED'),
+    `${gcPurge.status} items_deleted=${gcPurge.json.items_deleted} images_deleted=${gcPurge.json.images_deleted}`);
+  const orphanGone = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-ORPHAN'))).length === 0;
+  const imgItemGone = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-IMG'))).length === 0;
+  const imgRowGone = (await db.select().from(s.itemImages).where(eq(s.itemImages.itemId, 'GC-IMG'))).length === 0;
+  const usedKept = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length === 1;
+  ok('Purge deleted the orphan + its image row, KEPT the still-referenced item', orphanGone && imgItemGone && imgRowGone && usedKept,
+    JSON.stringify({ orphanGone, imgItemGone, imgRowGone, usedKept }));
+
+  const gcAgain = await inj('POST', '/api/admin/item-maintenance/purge-unused-items', owner, { confirm: 'PURGE-UNUSED-ITEMS' });
+  ok('Purge is idempotent — the collected orphans are not re-reported on a second run',
+    gcAgain.status === 200 && !(gcAgain.json.item_ids ?? []).includes('GC-ORPHAN'), `items_deleted=${gcAgain.json.items_deleted}`);
+
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3b. Billing checkout. Without STRIPE_SECRET_KEY (CI/dev) a paid plan returns a mock checkout URL;

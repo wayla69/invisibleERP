@@ -1,0 +1,55 @@
+# Local development stack — mirrors the Railway topology (Postgres + Redis + 3 services).
+# Usage:  cp .env.example .env  &&  docker compose up --build
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: midw
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  ingestion-worker:
+    build:
+      context: .
+      dockerfile: services/ingestion-worker/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/midw
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  analytics-engine:
+    build:
+      context: .
+      dockerfile: services/analytics-engine/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/midw
+    depends_on:
+      postgres: { condition: service_healthy }
+    # Runs once on `up`; in production schedule `python run.py` (Railway cron) after the daily sync.
+    restart: "no"
+
+  dashboard-ui:
+    build:
+      context: .
+      dockerfile: services/dashboard-ui/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/midw
+      PORT: "8501"
+    ports: ["8501:8501"]
+    depends_on:
+      postgres: { condition: service_healthy }

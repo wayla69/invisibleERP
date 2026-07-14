@@ -44,6 +44,21 @@ Phase 24)**. **Planned (see roadmap `13` §4):** D3 marketplace **deferred** to 
    `connector_syncs` + `external_id_map` (migration `0097`); RLS-scoped — idempotency is **per tenant**. Web
    `/connectors`. *Verified by the `ext` harness (catalog / register / sync / idempotent-resync / bank-CSV /
    per-tenant-RLS). Live OAuth per platform is a noted follow-up.*
+3. **Analytics read feeds — public API v1 (Marketing Intelligence integration).** Two new API-key,
+   scope-gated read endpoints on the public surface (`@Controller('api/v1')`) that let an external analytics
+   client pull the ERP's own sales + customer data by API (never a shared DB). New scope **`analytics:read`**
+   (added to the developer-portal scope catalog + OpenAPI). **`GET /api/v1/sales/daily?from=&to=&group_by=`** —
+   per-business-day revenue aggregated from POS sales (Voided excluded; `group_by=product` breaks it down; the
+   MMM target variable; there is **no** native marketing-channel dimension on ERP sales — channel attribution
+   is the integrator's own). **`GET /api/v1/customers/transactions?from=&to=`** — per-customer purchase facts
+   (`customer_no`, `order_count`, `total_spend`, `first/last_order_date`) at the loyalty-profile grain
+   (`customer_profiles ⋈ pos_members`), the Recency/Frequency/Monetary base. Both are **RLS tenant-scoped** to
+   the calling key and **per-key rate-limited**, reusing the existing `PublicApiGuard`. This serves the
+   separate **Marketing Intelligence Platform** (a Python data-science app — advanced MMM / sentiment-weighted
+   RFM / TOWS — that reads ERP data over this API into its own warehouse; ERP posts **nothing** and stores
+   nothing new). *Verified by the `ext` harness (+8: scope-required `403 INSUFFICIENT_SCOPE`, per-day revenue
+   with Voided excluded, RFM base facts, and HQ↔cf2 tenant isolation on both feeds). Read-only this phase; a
+   future `analytics:write` push-back is a noted follow-up.*
 
 ## 5. Control matrix
 
@@ -51,6 +66,7 @@ Phase 24)**. **Planned (see roadmap `13` §4):** D3 marketplace **deferred** to 
 |---|---|---|---|---|---|
 | API maturity / portal | Over-broad or mis-tiered machine access | Keys + tiers RLS-scoped to the tenant; tier from an allowlist; reuses the v1 scope-gate + per-key rate limit | Preventive | ITGC-AC-07 | `ext` developer checks (portal, set-tier, bad-tier, RLS) |
 | Connector framework | Cross-tenant data bleed; duplicate imports; premature posting | Stub-default transport (CI-safe); idempotent dedupe via `external_id_map` (per-tenant RLS); imported records staged for review, never auto-posted; live creds would be encrypted at rest | Preventive | (operational) | `ext` connector checks (idempotent resync, per-tenant RLS) |
+| Analytics read feeds (`/api/v1/sales/daily`, `/customers/transactions`) | Over-broad machine access to sales/customer data; cross-tenant leak | Dedicated `analytics:read` scope (least privilege — not covered by catalog/orders/invoices scopes); RLS tenant-scoped to the calling key; per-key rate-limited; read-only (no write-back this phase); within-tenant egress only (a tenant's own key reads its own data) | Preventive | ITGC-AC-07 | `ext` analytics checks (scope-required 403, per-day revenue, RFM base facts, HQ↔cf2 isolation on both feeds) |
 
 ## 6. Exception & error handling
 
@@ -64,3 +80,4 @@ RLS-filtered.
 |---|---|---|---|
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial ecosystem narrative. Delivered **Platform Phase 23 — API maturity / developer portal (D1)**: a portal over the shipped public API v1 (keys + rate tiers, scopes, endpoints, OpenAPI); `api_keys.tier` (migration `0096`). RLS-scoped, no GL; `ext` +4 checks. D2 connector framework planned; D3 marketplace deferred — see roadmap `13` §4. |
 | 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 24 — connector framework (D2)**: register + sync inbound connectors (LINE / Shopee / bank-CSV) over a canonical model with a stub-default transport, idempotent `external_id_map` dedupe (per-tenant), and a per-run log; imported records staged for review, never auto-posted. Tables `connectors`/`connector_syncs`/`external_id_map` (migration `0097`). RLS-scoped, no GL; new §4.2, control-matrix row, `BAD_CONNECTOR`/`CONNECTOR_NOT_FOUND`; `ext` +6 checks. D3 marketplace deferred. |
+| 0.3 DRAFT | 2026-07-14 | Platform | Added **analytics read feeds** to the public API v1 for the separate **Marketing Intelligence Platform** (a Python data-science app: advanced MMM / sentiment-weighted RFM / TOWS that reads ERP data by API into its own warehouse — no shared DB, ERP posts nothing). New scope **`analytics:read`** + two endpoints: `GET /api/v1/sales/daily` (per-day POS revenue, Voided excluded, `group_by=day\|product` — the MMM target) and `GET /api/v1/customers/transactions` (per-customer RFM base facts from `customer_profiles ⋈ pos_members`). Both RLS tenant-scoped + per-key rate-limited via the existing `PublicApiGuard`; wired into `developer.service.ts` scope/endpoint catalog + `openapi.ts` (HTML reference auto-derives). Read-only this phase (a future `analytics:write` push-back deferred). New §4.3, control-matrix row. `ext` +8 checks (scope-required 403, per-day revenue, RFM facts, HQ↔cf2 isolation). No new migration/RCM control (reuses ITGC-AC-07). |
