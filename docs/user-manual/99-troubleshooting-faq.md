@@ -217,6 +217,8 @@ your code below.
 | `ITEMS_PENDING` | You tried to **certify an access recertification campaign** while one or more users are still undecided. | Finish the worklist — click **Keep** or **Revoke** for every user — then certify. See [Administration](./11-administration.md) §4.1 (control **ITGC-AC-21**). |
 | `CAMPAIGN_CERTIFIED` | You tried to change a keep/revoke line, or re-certify, on a **campaign that is already certified**. | A certified campaign is frozen audit evidence. Open a **new** campaign for the next period. See [Administration](./11-administration.md) §4.1. |
 | `SIGNUP_DISABLED` / request-access | Someone tried to self-open a company. Public self-service signup is **disabled in production**. | The public page now files a **request access** entry instead of creating a company. The platform owner reviews the queue and **approves** it (or provisions/invites directly). No company exists until the platform owner approves. See [Administration](./11-administration.md) §14. |
+| `ITEM_PURGE_HQ_ONLY` (403) | A company Admin tried to run the unused-product cleanup. | The product catalogue is **shared across all companies**, so only the **platform owner** may garbage-collect unused products. Ask the platform owner. See [Administration](./11-administration.md) §8.1. |
+| `CONFIRM_MISMATCH` (unused-product purge) | You called the purge without the exact confirm phrase. | Send `{ "confirm": "PURGE-UNUSED-ITEMS" }` exactly. Preview first with `GET /api/admin/item-maintenance/unused-items`. See [Administration](./11-administration.md) §8.1. |
 | `RESERVED_USERNAME` | A company was being provisioned (signup / request / platform-owner create) with an admin **username that is a configured platform owner**. | Choose a different admin username. Platform-owner usernames carry a cross-company bypass and are never assigned to a company admin through the tenant provisioning path. |
 | `BAD_ISSUER` | You saved an **SSO / OIDC** configuration whose **Issuer URL** isn't a valid `https://` address. | Enter the IdP's issuer as a full `https://` URL (e.g. `https://login.microsoftonline.com/…`). Internal/localhost addresses are also refused when the server contacts the IdP (`SSRF_BLOCKED`) — the issuer must be a public https endpoint. |
 
@@ -299,6 +301,16 @@ the in-app camera scanner or a hardware scanner.
 
 **Can I see other shops' data?**
 No. Each organisation is a separate tenant; you only ever see your own data.
+
+**I reset (factory-reset / purged) a company, but its products still show in *เลือกซื้อสินค้า* (the shop).**
+That's expected. The **product catalogue is shared by all companies** — products have no
+company owner — so a company reset wipes its *business data* but leaves the products it
+added in the **shared catalogue**, where they keep appearing in every company's shop. To
+remove them, the **platform owner** runs the unused-product cleanup: preview with
+`GET /api/admin/item-maintenance/unused-items`, then purge with
+`POST /api/admin/item-maintenance/purge-unused-items` (`{ "confirm": "PURGE-UNUSED-ITEMS" }`).
+It removes only products **no company references** any more (one another company still has
+on a PO, in stock, on a recipe/BoM, … is kept). See [Administration](./11-administration.md) §8.1.
 
 **Where do I download Excel / PDF reports?**
 From each module's report area — see [Reports & Analytics](./09-reports-and-analytics.md).

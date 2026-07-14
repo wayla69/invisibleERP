@@ -6,6 +6,8 @@ import { itemCategories, taxCodes, items, accounts, locations, itemRelationships
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
+import { logger } from '../../observability/logger';
+import { previewUnusedItems as previewUnusedItemsQuery, purgeUnusedItems as purgeUnusedItemsQuery } from './item-cleanup';
 
 // Item-posting SETUP master data (docs/33 PR3, GL-21). Maintains the account/tax profile that the
 // AccountDeterminationService resolves at posting time: item categories, tax codes, and the per-item override.
@@ -288,6 +290,36 @@ export class ItemSetupService {
       throw e;
     }
     return { survivor_item_id: survivorItemId, merged_item_id: duplicateItemId, merged: true };
+  }
+
+  // ── Global item-master garbage collection (god-only) ─────────────────────────────────────────────────
+  // `items` is a SHARED master (no tenant_id), so the tenant factory-reset/purge — which clear only
+  // tenant_id-scoped tables — leave a wiped company's catalogue rows behind, and they keep appearing in every
+  // tenant's /shop. These two ops let the platform owner delete exactly the items NO tenant references any
+  // more, keeping items another company still uses. Gated to the platform owner here (defence in depth) AND
+  // exposed only on @PlatformAdmin routes (which keep the full cross-tenant RLS bypass even when a god is
+  // scoped to one company via act-as) — so "unreferenced" is computed across EVERY tenant, never per-company.
+  private assertItemGcAllowed(user: JwtUser) {
+    if (!isPlatformAdmin(user.username)) {
+      throw new ForbiddenException({ code: 'ITEM_PURGE_HQ_ONLY', message: 'Items are a shared master — only the platform owner may purge unused items', messageTh: 'สินค้าเป็นข้อมูลกลาง — เฉพาะผู้ดูแลแพลตฟอร์มเท่านั้นที่ล้างสินค้าที่ไม่มีใครใช้ได้' });
+    }
+  }
+
+  // Dry-run: how many items would be collected (+ a bounded sample), without deleting anything.
+  async previewUnusedItems(user: JwtUser) {
+    this.assertItemGcAllowed(user);
+    return previewUnusedItemsQuery(this.db);
+  }
+
+  // Destructive purge — requires typing the exact confirm phrase. Idempotent (a second run collects nothing).
+  async purgeUnusedItems(user: JwtUser, confirm: string) {
+    this.assertItemGcAllowed(user);
+    if ((confirm ?? '').trim() !== 'PURGE-UNUSED-ITEMS') {
+      throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type PURGE-UNUSED-ITEMS to confirm the purge', messageTh: 'พิมพ์ PURGE-UNUSED-ITEMS เพื่อยืนยันการล้างสินค้า' });
+    }
+    const result = await purgeUnusedItemsQuery(this.db);
+    logger.warn({ event: 'items_unused_purged', by: user.username, items: result.items_deleted, images: result.images_deleted }, 'unused shared-catalogue items purged (god)');
+    return { status: 'purged', ...result };
   }
 
   // ── Warehouse (location) account defaults — the lowest determination tier (docs/33 PR5) ──
