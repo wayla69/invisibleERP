@@ -372,6 +372,23 @@ export default function PlatformConsole({
     mutationFn: () => api('/api/admin/notifications/mark-all-read', { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: () => { notifs.refetch(); notifySuccess(t('plt.notif_mark_all_done')); },
   });
+
+  // Global item-master garbage collection (§ PN-17 step 14). `items` is a SHARED master (no tenant_id), so a
+  // company's factory-reset/purge leaves its catalogue rows behind and they keep showing in every tenant's
+  // /shop. Preview counts the items no tenant references any more (cross-tenant, under the @PlatformAdmin
+  // bypass); purge deletes exactly those. Manual (not an auto-query) — the scan is a heavy cross-tenant sweep.
+  const [unusedPreview, setUnusedPreview] = useState<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number } | null>(null);
+  const checkUnused = useMutation({
+    mutationFn: () => api<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number }>('/api/admin/item-maintenance/unused-items'),
+    onSuccess: (r) => { setUnusedPreview(r); notifyInfo(t('plt.mnt_preview_done', { n: r.total })); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const purgeUnused = useMutation({
+    mutationFn: () => api<{ items_deleted: number; images_deleted: number }>('/api/admin/item-maintenance/purge-unused-items', { method: 'POST', body: JSON.stringify({ confirm: 'PURGE-UNUSED-ITEMS' }) }),
+    onSuccess: (r) => { notifySuccess(t('plt.mnt_purge_done', { n: r.items_deleted })); setUnusedPreview(null); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
   const comps = companies.data ?? [];
 
   const refresh = () => {
@@ -868,6 +885,53 @@ export default function PlatformConsole({
     </StateView>
   );
 
+  const maintenanceTab = (
+    <Card className="space-y-4 p-4">
+      <div className="flex items-start gap-3">
+        <Database className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        <div>
+          <h3 className="font-medium">{t('plt.mnt_title')}</h3>
+          <p className="text-sm text-muted-foreground">{t('plt.mnt_desc')}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={() => checkUnused.mutate()} disabled={checkUnused.isPending}>
+          {checkUnused.isPending ? t('plt.mnt_checking') : t('plt.mnt_check')}
+        </Button>
+        {unusedPreview && (
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="destructive" disabled={unusedPreview.total === 0 || purgeUnused.isPending}>
+                {t('plt.mnt_purge_btn', { n: unusedPreview.total })}
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t('plt.mnt_confirm_title')}</DialogTitle>
+                <DialogDescription>{t('plt.mnt_confirm_desc', { n: unusedPreview.total })}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="destructive" onClick={() => purgeUnused.mutate()} disabled={purgeUnused.isPending}>
+                  {purgeUnused.isPending ? t('plt.mnt_purging') : t('plt.mnt_confirm_btn')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+      {unusedPreview && (
+        <div className="rounded-md border p-3 text-sm">
+          <div className="font-medium">{t('plt.mnt_result', { n: unusedPreview.total, cols: unusedPreview.ref_columns })}</div>
+          {unusedPreview.item_ids.length > 0 && (
+            <div className="mt-1 break-words text-muted-foreground">
+              {t('plt.mnt_sample')}: {unusedPreview.item_ids.slice(0, 50).join(', ')}{unusedPreview.sampled ? ' …' : ''}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+
   return (
     <div>
       <PageHeader
@@ -883,6 +947,7 @@ export default function PlatformConsole({
           { key: 'onboarding', label: pending ? `${t('plt.tab_onboarding')} (${pending})` : t('plt.tab_onboarding'), content: onboardingTab },
           { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `${t('plt.tab_notifications')} (${notifs.data?.unread_count})` : t('plt.tab_notifications'), content: notificationsTab },
           { key: 'activity', label: t('plt.tab_activity'), content: activityTab },
+          { key: 'maintenance', label: t('plt.tab_maintenance'), content: maintenanceTab },
         ]}
       />
       <CompanyDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={refresh} />
