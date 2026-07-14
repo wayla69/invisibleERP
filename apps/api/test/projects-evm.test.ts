@@ -567,3 +567,54 @@ describe('ProjectsEvmService — working calendar CRUD (PPM-B1, PROJ-21)', () =>
     expect(r).toEqual({ exceptions: [{ exception_date: '2026-01-01', description: null }], count: 1 });
   });
 });
+
+describe('ProjectsEvmService — simulateChangeOrder (PROJ-24 change-order what-if)', () => {
+  // Read-only projection; the db.select sequence is: CO lookup → project lookup → evm() task scan →
+  // evm() non-billable sum → the projectTasks planned-cost sum (BAC basis). rowOf feeds evm()'s project.
+  const CO = (extra: any = {}) => ({ id: 7, coNo: 'CO-1', status: 'pending', projectId: 1, contractDelta: '0', budgetDelta: '0', estimatedCostDelta: '0', ...extra });
+
+  it('projects a pending CO on a budget-basis project: margin +5000, bac_basis budget, EAC 180000', async () => {
+    const proj = { id: 1, projectCode: 'PRJ-SIM', contractAmount: '200000', budgetAmount: '150000', estimatedCost: '140000', costToDate: '0' };
+    // no task carries a planned cost → evm() falls back to the project budget (bac_basis 'budget'), so the
+    // CO's budget delta moves the BAC/EAC; empty evm task scan + zero projectTasks sum drive that fallback.
+    const svc = evmSvc(
+      [[CO({ contractDelta: '50000', budgetDelta: '30000', estimatedCostDelta: '45000' })], [proj], [], [{ v: '0' }], [{ v: '0' }]],
+      { rowOf: async () => proj, noWrites: true },
+    );
+    const r = await svc.simulateChangeOrder(7);
+    expect(r).toMatchObject({ change_order: 'CO-1', project_code: 'PRJ-SIM', status: 'pending', bac_basis: 'budget' });
+    expect(r.current).toMatchObject({ contract_amount: 200000, budget_amount: 150000, estimated_cost: 140000, margin: 60000, margin_pct: 30, eac: 150000, budget_headroom: 0 });
+    expect(r.projected).toMatchObject({ contract_amount: 250000, budget_amount: 180000, estimated_cost: 185000, margin: 65000, margin_pct: 26, bac: 180000, eac: 180000, budget_headroom: 0 });
+    expect(r.delta).toEqual({ contract: 50000, budget: 30000, estimated_cost: 45000, margin: 5000, eac: 30000, budget_headroom: 0 });
+  });
+
+  it('a task-basis project keeps the BAC (and EAC) fixed under a money-only CO; headroom moves with the budget delta', async () => {
+    const proj = { id: 1, projectCode: 'PRJ-T', contractAmount: '300000', budgetAmount: '200000', estimatedCost: '250000', costToDate: '400' };
+    const evmTasks = [task(1, { plannedCost: '1000', pctComplete: 50, plannedEnd: '2026-01-01' })]; // BAC 1000, EV 500
+    const svc = evmSvc(
+      [[CO({ budgetDelta: '50000' })], [proj], evmTasks, [{ v: '0' }], [{ v: '1000' }]], // projectTasks sum > 0 → task basis
+      { rowOf: async () => proj, noWrites: true },
+    );
+    const r = await svc.simulateChangeOrder(7);
+    expect(r.bac_basis).toBe('tasks');
+    expect(r.projected.bac).toBe(1000);          // a task-derived BAC is unaffected by the money CO
+    expect(r.delta.eac).toBe(0);                 // EAC unchanged when estimated cost + BAC are unchanged
+    expect(r.delta.budget_headroom).toBe(50000); // headroom rises by exactly the budget delta
+    expect(r.delta.contract).toBe(0);
+  });
+
+  it('a missing change order is CHANGE_ORDER_NOT_FOUND', async () => {
+    const svc = evmSvc([[]], { noWrites: true });
+    await expect(svc.simulateChangeOrder(404)).rejects.toMatchObject({ response: { code: 'CHANGE_ORDER_NOT_FOUND' } });
+  });
+
+  it('an already-decided change order cannot be simulated (CHANGE_ORDER_DECIDED)', async () => {
+    const svc = evmSvc([[CO({ status: 'approved' })]], { noWrites: true });
+    await expect(svc.simulateChangeOrder(7)).rejects.toMatchObject({ response: { code: 'CHANGE_ORDER_DECIDED' } });
+  });
+
+  it('a change order pointing at a missing project is PROJECT_NOT_FOUND', async () => {
+    const svc = evmSvc([[CO()], []], { noWrites: true });
+    await expect(svc.simulateChangeOrder(7)).rejects.toMatchObject({ response: { code: 'PROJECT_NOT_FOUND' } });
+  });
+});
