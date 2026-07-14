@@ -88,6 +88,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.group.commercial': { th: 'ขาย & ลูกค้า', en: 'Sales & Customers' },
   'nav.group.supply_chain': { th: 'ซัพพลายเชน', en: 'Supply Chain' },
   'nav.group.projects': { th: 'โครงการ', en: 'Projects' },
+  'nav.group.store_ops': { th: 'ร้าน & อุปกรณ์', en: 'Store & Devices' },
   'nav.group.crm': { th: 'ลูกค้า & CRM', en: 'Customers & CRM' },
   'nav.group.loyalty': { th: 'ลอยัลตี้', en: 'Loyalty' },
   'nav.group.pricing': { th: 'ราคา & สาขา', en: 'Pricing & Branches' },
@@ -114,6 +115,10 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.sub.customise': { th: 'ปรับแต่ง', en: 'Customise' },
   'nav.sub.integrations': { th: 'เชื่อมต่อ & ขยาย', en: 'Integrations & Extensions' },
   'nav.sub.admin': { th: 'ผู้ดูแลระบบ', en: 'Administration' },
+  // POS Sell (nav.group.pos_sales) sub-sections — docs/15 rev 3.
+  'nav.sub.pos_frontline': { th: 'ขาย & ออเดอร์', en: 'Sell & Orders' },
+  'nav.sub.pos_dining': { th: 'โต๊ะ & ครัว', en: 'Tables & Kitchen' },
+  'nav.sub.pos_shift': { th: 'กะ & ควบคุม', en: 'Shift & Control' },
 
   // ── Overview ──────────────────────────────────────────────────────────────
   'nav.dashboard': { th: 'แดชบอร์ด', en: 'Dashboard' },

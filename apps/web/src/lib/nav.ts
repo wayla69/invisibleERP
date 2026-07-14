@@ -177,60 +177,81 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
 
   // ─── POS surface ────────────────────────────────────────────────────────────────────────────────
+  // docs/15 rev 3 (2026-07-14): POS consolidated like ERP. The 16-item Sell group is broken into foldable
+  // subgroups (frontline · dining · shift); Store + Devices + Restaurant collapse under one "ร้าน & อุปกรณ์"
+  // domain. Hrefs/perms unchanged; former group `title` keys reused as subgroup titles.
   {
     title: 'nav.group.pos_sales',
     workspace: ['pos'],
-    items: [
-      // pos_sell = primary sell perm; coarse 'pos' holders (e.g. Sales role) still pass via implication.
-      { label: 'nav.pos_register', href: '/pos/register', icon: ShoppingCart, perms: ['pos_sell', 'pos', 'order_mgt'] },
-      { label: 'nav.pos_orders', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
-      // SoD R12 complement: AR staff (ar) and refund supervisors (pos_refund) must also reach /returns
-      // to view the return record before acting. The "บันทึกคืนสินค้า" record button inside the page
-      // is further gated on canRefund (pos_refund|pos|ar) — the nav perm only controls visibility.
-      { label: 'nav.returns', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt', 'ar', 'pos_refund'] },
-      // SoD R08/R12: refund authorization is a supervisor duty (pos_refund), not a cashier duty (pos_sell).
-      { label: 'nav.refund_auth', href: '/pos/refunds', icon: Banknote, perms: ['pos_refund', 'pos'] },
-      { label: 'nav.giftcards', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
-      { label: 'nav.tables', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.reservations', href: '/reservations', icon: CalendarClock, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.tips', href: '/tips', icon: HandCoins, perms: ['order_mgt', 'exec', 'pos'] },
-      { label: 'nav.kds', href: '/kds', icon: ChefHat, perms: ['pos'] },
-      { label: 'nav.menu', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.buffet', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
-      { label: 'nav.pos_control', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
-      // SoD R08: till management (open/close/variance) is pos_till — segregated from pos_sell cashier.
-      { label: 'nav.till', href: '/pos/till', icon: CircleDollarSign, perms: ['pos_till', 'pos'] },
-      { label: 'nav.close_of_day', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
-      // Self-service: any POS staffer sets their own quick-login PIN (ITGC-AC-17).
-      { label: 'nav.pos_pin', href: '/pos-pin', icon: KeyRound, perms: ['pos_sell', 'pos', 'pos_till', 'order_mgt'] },
-      { label: 'nav.print', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
+    subgroups: [
+      {
+        title: 'nav.sub.pos_frontline',
+        items: [
+          // pos_sell = primary sell perm; coarse 'pos' holders (e.g. Sales role) still pass via implication.
+          { label: 'nav.pos_register', href: '/pos/register', icon: ShoppingCart, perms: ['pos_sell', 'pos', 'order_mgt'] },
+          { label: 'nav.pos_orders', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
+          // SoD R12 complement: AR staff (ar) and refund supervisors (pos_refund) must also reach /returns
+          // to view the return record before acting. The "บันทึกคืนสินค้า" record button inside the page
+          // is further gated on canRefund (pos_refund|pos|ar) — the nav perm only controls visibility.
+          { label: 'nav.returns', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt', 'ar', 'pos_refund'] },
+          // SoD R08/R12: refund authorization is a supervisor duty (pos_refund), not a cashier duty (pos_sell).
+          { label: 'nav.refund_auth', href: '/pos/refunds', icon: Banknote, perms: ['pos_refund', 'pos'] },
+          { label: 'nav.giftcards', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
+          { label: 'nav.print', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
+        ],
+      },
+      {
+        title: 'nav.sub.pos_dining',
+        items: [
+          { label: 'nav.tables', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.reservations', href: '/reservations', icon: CalendarClock, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.kds', href: '/kds', icon: ChefHat, perms: ['pos'] },
+          { label: 'nav.menu', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.buffet', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
+          { label: 'nav.tips', href: '/tips', icon: HandCoins, perms: ['order_mgt', 'exec', 'pos'] },
+        ],
+      },
+      {
+        title: 'nav.sub.pos_shift',
+        items: [
+          { label: 'nav.pos_control', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
+          // SoD R08: till management (open/close/variance) is pos_till — segregated from pos_sell cashier.
+          { label: 'nav.till', href: '/pos/till', icon: CircleDollarSign, perms: ['pos_till', 'pos'] },
+          { label: 'nav.close_of_day', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
+          // Self-service: any POS staffer sets their own quick-login PIN (ITGC-AC-17).
+          { label: 'nav.pos_pin', href: '/pos-pin', icon: KeyRound, perms: ['pos_sell', 'pos', 'pos_till', 'order_mgt'] },
+        ],
+      },
     ],
   },
   {
-    title: 'nav.group.store',
+    title: 'nav.group.store_ops',
     workspace: ['pos'],
-    items: [
-      { label: 'nav.claims', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
-      { label: 'nav.delivery', href: '/delivery', icon: Truck, perms: ['delivery'] },
-      { label: 'nav.channels', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
-    ],
-  },
-  {
-    title: 'nav.group.devices',
-    workspace: ['pos'],
-    items: [
-      { label: 'nav.peripherals', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.terminals', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
-      { label: 'nav.payment_accounts', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
-    ],
-  },
-  {
-    title: 'nav.group.restaurant',
-    workspace: ['pos'],
-    items: [
-      { label: 'nav.food_cost', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
-      { label: 'nav.restaurant_analytics', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
-      { label: 'nav.production_plan', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
+    subgroups: [
+      {
+        title: 'nav.group.store',
+        items: [
+          { label: 'nav.claims', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
+          { label: 'nav.delivery', href: '/delivery', icon: Truck, perms: ['delivery'] },
+          { label: 'nav.channels', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
+        ],
+      },
+      {
+        title: 'nav.group.devices',
+        items: [
+          { label: 'nav.peripherals', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.terminals', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
+          { label: 'nav.payment_accounts', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
+        ],
+      },
+      {
+        title: 'nav.group.restaurant',
+        items: [
+          { label: 'nav.food_cost', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
+          { label: 'nav.restaurant_analytics', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
+          { label: 'nav.production_plan', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
+        ],
+      },
     ],
   },
 

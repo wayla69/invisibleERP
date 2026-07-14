@@ -185,7 +185,8 @@ appear in **both** workspaces.
 - **Menus are grouped into foldable domains:** within each workspace the side menu is organised into a small
   set of top-level **domains**. In ERP these are *ภาพรวม*, *ขาย & ลูกค้า*, *ซัพพลายเชน*, *การเงิน & บัญชี*,
   *บุคลากร & เงินเดือน*, *โครงการ*, *วางแผน & วิเคราะห์*, plus the shared *ผู้ช่วย AI* and *ตั้งค่าระบบ*; POS shows
-  *ขายหน้าร้าน*, *ร้าน & การจัดส่ง*, *อุปกรณ์ & การชำระเงิน*, *วิเคราะห์ร้านอาหาร*.
+  *ขายหน้าร้าน* (with *ขาย & ออเดอร์ · โต๊ะ & ครัว · กะ & ควบคุม* sub-sections) and *ร้าน & อุปกรณ์*
+  (*ร้าน & การจัดส่ง · อุปกรณ์ & การชำระเงิน · วิเคราะห์ร้านอาหาร*).
 - **Click a domain heading to fold/unfold it.** Each domain collapses, and **only the domain you're currently
   in opens automatically** when you load the app — the rest start collapsed (a small number badge shows how
   many items are inside), so the menu stays short and scannable. Your open/closed choices are remembered and
