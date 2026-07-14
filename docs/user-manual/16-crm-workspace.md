@@ -255,6 +255,28 @@ cadence and every touch is recorded. It posts nothing to the ledger. *(Control C
 
 ---
 
+## 16.4g Data quality (คุณภาพข้อมูล — the "Data quality" tab, CRM-17, control CRM-16)
+
+Keeps the **customer master** clean and de-duplicated — the data your revenue and forecast rest on.
+
+- **Score worklist.** Every account gets a **0–100 data-quality score** from the completeness *and validity* of
+  its key fields — tax ID (must be 13 digits), email (must parse), phone, an assigned **owner**, at least one
+  **contact of record**, industry, website, size. A field that's filled with *junk* (e.g. a 5-digit tax ID)
+  scores the same as blank — **present isn't enough, it must be valid**. Accounts are banded
+  **ดี (good ≥ 80) / พอใช้ (fair) / ต้องแก้ไข (poor)** and listed **worst-first**, each with its **missing /
+  invalid** fields as chips, so you fix the weakest records first. **บันทึกสแนปช็อต (Snapshot now)** — or the
+  scheduled *CRM data-quality scan* report — records a dated score per account for the trend.
+- **Duplicate surveillance.** The **บัญชีที่อาจซ้ำ** panel proactively lists **likely-duplicate account pairs**
+  — same tax ID / email / phone, or a near-identical name (e.g. "Acme Robotics Ltd" ≈ "Acme Robotics Limited")
+  — with the match reasons and a similarity %. This goes beyond the check you get when *creating* an account:
+  it finds duplicates that already slipped in. Open either account and **merge** them the governed way (a
+  *different* person must merge an account-with-data you created — maker-checker).
+- **Merge audit log.** The **ประวัติการรวมบัญชี** panel is the append-only record of every merge — which account
+  was retired into which survivor, how many contacts/deals were reassigned, and who did it — so a merge (which
+  rewrites ownership) is always traceable. Read-only to the ledger.
+
+---
+
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
 
 Beyond the win/loss dashboard, three read-only analytics answer *why* deals move the way they do. Each looks
@@ -547,6 +569,7 @@ documented public API exists yet for pulling a business's own Wongnai reviews.
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.9 | 2026-07-14 | **Data quality — score worklist + duplicate surveillance + merge audit (`/crm`) — CRM-17, control CRM-16:** new §16.4g + a new *Data quality* tab. Every account gets a 0–100 **data-quality score** from the completeness **and validity** of its key fields (tax ID must be 13 digits, email must parse, owner + a contact of record, etc. — junk scores like blank), banded good/fair/poor, listed **worst-first** with the missing/invalid fields as chips; **Snapshot now** (or the scheduled *CRM data-quality scan* report) records the trend. A **likely-duplicates** panel proactively surfaces near-duplicate account pairs (same tax/email/phone or near-identical name) to merge the governed (maker-checker) way, and a **merge audit log** records every merge. Read-only to the ledger. |
 | 2.8 | 2026-07-14 | **Unified timeline + team notes on the deal page (`/crm/deals/…`) — CRM-8, control CRM-14:** §16.2 timeline now merges **every** touch (all-channel activities incl. sent comms / inbound replies / cadence touches, stage changes, linked quotes, **team notes**) into one time-ordered stream (same stream available per lead/opportunity/account via `GET /api/crm/timeline`). New **collaboration feed** composer: post an **append-only** internal note (can't be edited/deleted) and **`@mention`** a teammate to send them a private notification. Read-only to the ledger. |
 | 2.7 | 2026-07-14 | **Stage playbooks — exit criteria & WIP limits (`/crm`) — CRM-7, control CRM-13:** new §16.1b. Each pipeline stage can require a set of **fields before a deal enters** it (blocked with `STAGE_REQUIREMENTS_UNMET` + the missing list) and cap how many open deals it holds (a **WIP limit**, `WIP_LIMIT_EXCEEDED`), enforced on every move path and shown as a WIP badge + *Requires* chips + guidance on the board columns. Supervisors (`crm`/`exec`) configure them from the new **Playbook ขั้นตอน** editor. List view gains a multi-select **bulk stage move** (per-item result, not all-or-nothing). Read-only to the ledger. |
 | 2.6 | 2026-07-13 | **Reputation & external analytics (docs/47, new control MKT-14) — new §16.14, `/reputation`.** Connect Google Maps reviews (Business Profile OAuth2) and Google Analytics (GA4) — neither offers a webhook, so this is scheduled-poll ingestion (`reputation_review_sync`/`reputation_ga4_sync` via Scheduled Reports). New errors `OAUTH_NOT_CONFIGURED`/`BAD_STATE`/`NO_REFRESH_TOKEN`/`CONNECTION_NOT_FOUND`. |

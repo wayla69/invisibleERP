@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 285,
+    "total": 286,
     "by_status": {
-      "Implemented": 281,
+      "Implemented": 282,
       "Partial": 4
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 46,
+      "Revenue & Cash": 47,
       "Tax": 12
     }
   },
@@ -1764,6 +1764,25 @@
       "tod": "Inspect the pricebook master-data CRUD (masterdata-gated) + entries, the effective-window/active validation at quote time, the line-price resolution on both the config and free-line paths, the recorded pricing basis (quotes.pricebook_id), and that the CPQ-01 floor still governs a pricebook price.",
       "toe": "Re-perform (cpq-approval harness): create a pricebook + entries (masterdata; a cpq-only author is 403); a quote priced against it takes the pricebook price on a covered line (typed price ignored) and keeps the typed price on an uncovered line, recording quotes.pricebook_id; a config-path quote prices from the book by config code; a below-cost pricebook price still trips CPQ-01 -> PendingApproval; an expired book -> PRICEBOOK_NOT_EFFECTIVE, an inactive book -> PRICEBOOK_INACTIVE, an unknown book -> PRICEBOOK_NOT_FOUND, a from>to window -> BAD_EFFECTIVE_WINDOW; a second tenant sees none of the first tenant's pricebooks and cannot price from one (404).",
       "evidence": "Pricebook master + effective window; per-item price entries; quote pricing-basis (quotes.pricebook_id); effective/active validation; CPQ-01 floor composition",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-16",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (customer-master data quality)",
+      "risk": "The customer master (CRM accounts) degrades unmonitored — key fields go unfilled or hold junk (a missing/blank tax-id, an unparseable email, an ownerless account, an account with no contact of record), so the data revenue rests on is incomplete and unreliable and no one can see WHICH records need cleanup; duplicate accounts accumulate silently (the same company entered twice with a slightly different name), fragmenting a customer's revenue/AR and inflating the pipeline, because duplicates are only checked at create time (exact key) with no proactive surveillance of near-duplicates; and account merges — which repoint children and rewrite ownership — leave no dedicated audit trail. Master-data quality and de-duplication are ungoverned.",
+      "assertion": "Completeness/Accuracy",
+      "description": "CRM DATA-QUALITY governance (CRM-17, migration 0409). SCORING: CrmDqService scores each non-merged account on the completeness AND validity of its master-data fields — tax_id (present + 13 digits), email (present + parseable), phone (present + ≥9 digits), owner (assigned), contact (≥1 active contact of record), industry, website, size — as an explainable weighted score summing to 100 (present-but-invalid earns nothing, so junk is caught, not just blanks), banded good(≥80)/fair(≥50)/poor. GET /api/crm/dq is the worst-first WORKLIST (+ band counts) so cleanup is targeted; GET …/dq/account/:no returns the per-field breakdown; a schedulable idempotent daily snapshot (crm_dq_scores, upsert per account/day) drives the trend + the crm_dq_scan BI report (module-owned BiReportSource). DUPLICATE SURVEILLANCE: GET /api/crm/dq/duplicates proactively scans the tenant's accounts for likely-duplicate PAIRS — exact normalized tax_id/email/phone OR a fuzzy name match (nameSimilarity Dice-trigram ≥ threshold, legal-suffix-stripped) — ranked strongest-first, extending the existing create-time DUPLICATE_SUSPECT (exact-key) check with near-duplicate detection; a confirmed pair is resolved through the EXISTING maker-checked survivor merge (caller ≠ duplicate creator when children reassign → SOD_VIOLATION; REV-17). MERGE AUDIT: every merge now writes an append-only crm_merge_log row INSIDE the merge transaction (survivor, retired duplicate, children reassigned, survivorship-filled fields, who/when; a MERGE_CONFLICT rollback discards it), read at GET /api/crm/dq/merge-log. Reads gate crm/exec/ar; the snapshot job crm/exec. Two tenant tables (crm_dq_scores, crm_merge_log; 0232 RLS, tenant-leading indexes). No GL post.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / daily scan",
+      "owner": "Sales Ops / Master-data / CRM",
+      "coso": "P13",
+      "code_reference": "crm/dq/crm-dq.service.ts (computeDq weighted completeness+validity → score/band/breakdown; worklist worst-first + band_counts; accountDq; captureAllDq idempotent snapshot; dqHistory; duplicateCandidates fuzzy nameSimilarity + exact tax/email/phone; mergeLog read); crm-dq.controller.ts (GET /api/crm/dq[/account/:no|/history/:no|/duplicates|/merge-log] crm/exec/ar, POST …/dq/snapshot crm/exec); crm-dq-bi-reports.ts (crm_dq_scan BiReportSource); crm/accounts/crm-accounts.service.ts merge (writes crm_merge_log inside the transaction; existing SOD_VIOLATION maker-checker unchanged); common/text-similarity.ts (normalizeName/nameSimilarity/normalizeKey); schema/crm-pipeline.ts crm_dq_scores + crm_merge_log + migration 0409; bi report-registry crm_dq_scan; web crm-client.tsx Data-quality tab (worklist + duplicate surveillance + merge log); cutover/pipeline.ts (ToE, CRM-17 checks)",
+      "tod": "Inspect the DQ scoring (completeness + validity, present-but-invalid scored not-ok), the worst-first worklist + band counts, the idempotent snapshot + BI report, the proactive near-duplicate surveillance vs the create-time exact check, and the append-only merge log written atomically with the maker-checked merge.",
+      "toe": "Re-perform (pipeline harness, CRM-17 checks): a complete account scores good, a name-only account scores poor listing its missing fields, an invalid tax_id/email is scored not-ok; the worklist ranks worst-first with band counts; the snapshot is idempotent per account/day and feeds the trend + a registered crm_dq_scan report; a near-duplicate pair (shared phone + near-identical name) surfaces with reasons; the earlier maker-checked merge is recorded in the merge log (survivor + children reassigned + who); a second tenant's accounts are absent from the first tenant's worklist (RLS).",
+      "evidence": "CRM data-quality score + worklist + breakdown; idempotent snapshot + BI report; near-duplicate surveillance pairs; append-only merge audit log",
       "status": "Implemented"
     },
     {

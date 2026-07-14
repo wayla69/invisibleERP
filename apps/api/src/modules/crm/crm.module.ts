@@ -9,6 +9,7 @@ import { CrmAccountHealthModule } from './account-health/crm-account-health.modu
 import { CrmForecastModule } from './forecast/crm-forecast.module';
 import { CrmTerritoryModule } from './territory/crm-territory.module';
 import { CrmSequencesModule } from './sequences/crm-sequences.module';
+import { CrmDqModule } from './dq/crm-dq.module';
 import { CrmInboundModule } from './inbound/crm-inbound.module';
 import { FinanceModule } from '../finance/finance.module';
 import { CrmBiReports } from './crm-bi-reports';
@@ -21,9 +22,9 @@ import { CrmBiReports } from './crm-bi-reports';
 // (crm_accounts/crm_contacts with duplicate governance + audited merge). Re-exported so importers (bi)
 // can keep resolving.
 @Module({
-  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmInboundModule, FinanceModule],
+  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmDqModule, CrmInboundModule, FinanceModule],
   controllers: [CrmController],
   providers: [CrmBiReports, CrmService],
-  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmInboundModule],
+  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmDqModule, CrmInboundModule],
 })
 export class CrmModule {}

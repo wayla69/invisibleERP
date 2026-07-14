@@ -31,6 +31,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // (detective control REV-22). Fires lead.stagnant into the automation engine + drops a rail notification.
   crm_followup_digest: { label: 'สรุปการติดตามงานขายประจำวัน', labelEn: 'CRM follow-up digest' },
   crm_account_health: { label: 'บันทึกสุขภาพบัญชีลูกค้า (churn watchlist)', labelEn: 'CRM account health snapshot' },
+  crm_dq_scan: { label: 'ประเมินคุณภาพข้อมูลบัญชีลูกค้า (CRM data quality)', labelEn: 'CRM data-quality scan' },
   crm_forecast_snapshot: { label: 'บันทึกพยากรณ์ยอดขาย (forecast vs actual)', labelEn: 'CRM sales forecast snapshot' },
   crm_sequence_run: { label: 'รันลำดับติดตามการขาย (cadence)', labelEn: 'CRM sequence run (advance due steps)' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).

@@ -13,11 +13,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Target, TrendingUp, Layers, Search, LayoutGrid, List as ListIcon, Upload, Download, Handshake,
   UserCheck, ArrowRightLeft, XCircle, Building2, Users, BarChart3, Star, Bookmark, Trash2, GripVertical,
-  SlidersHorizontal, AlertTriangle,
+  SlidersHorizontal, AlertTriangle, History,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useMe, hasPerm } from '@/lib/auth';
-import { baht, num } from '@/lib/format';
+import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
@@ -61,6 +61,11 @@ interface SequenceRow { code: string; name: string; active: boolean; description
 // CRM-7 kanban depth: per-stage playbook view (WIP limit + required-field exit criteria + guidance + live counts).
 interface PlaybookStage { stage_id: number | null; name: string; sequence: number; is_won: boolean; is_lost: boolean; wip_limit: number | null; required_fields: string[]; guidance: string | null; open_count: number; over_wip: boolean; at_wip: boolean }
 interface PlaybookView { stages: PlaybookStage[]; field_catalog: { key: string; label: string }[] }
+// CRM-17 data-quality shapes.
+interface DqRow { account_no: string; name: string; score: number; band: string; missing_count: number; missing: string[] }
+interface DqWorklist { accounts: DqRow[]; count: number; band_counts: Record<string, number> }
+interface DqDuplicate { a: string; b: string; a_name: string; b_name: string; reasons: string[]; similarity: number }
+interface DqMergeRow { id: number; survivor_no: string; duplicate_no: string; reassigned_children: number; filled_fields: string[]; merged_by: string | null; created_at: string }
 interface EnrollmentRow { id: number; entity_type: string; entity_no: string; current_step: number; status: string; next_due_at: string | null }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
@@ -95,6 +100,7 @@ export default function CrmWorkspaceClient() {
           { key: 'contacts', label: t('crmx.tab_contacts'), content: <ContactsTab /> },
           { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
           { key: 'health', label: t('crmx.tab_health'), content: <AccountHealthTab /> },
+          { key: 'dq', label: t('crmx.tab_dq'), content: <DataQualityTab /> },
           { key: 'forecast', label: t('crmx.tab_forecast'), content: <ForecastTab /> },
           { key: 'territory', label: t('crmx.tab_territory'), content: <TerritoryTab /> },
           { key: 'sequences', label: t('crmx.tab_sequences'), content: <SequencesTab /> },
@@ -1122,6 +1128,92 @@ function AccountHealthTab() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ── CRM-17 — customer-master data quality: score worklist + duplicate surveillance + merge audit ────
+const DQ_BAND_VARIANT: Record<string, 'success' | 'warning' | 'destructive'> = { good: 'success', fair: 'warning', poor: 'destructive' };
+function DataQualityTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [band, setBand] = useState('');
+  const wlQ = useQuery<DqWorklist>({ queryKey: ['crm-dq', band], queryFn: () => api(`/api/crm/dq${band ? `?band=${band}` : ''}`) });
+  const dupQ = useQuery<{ candidates: DqDuplicate[]; count: number }>({ queryKey: ['crm-dq-dups'], queryFn: () => api('/api/crm/dq/duplicates') });
+  const logQ = useQuery<{ merges: DqMergeRow[]; count: number }>({ queryKey: ['crm-dq-log'], queryFn: () => api('/api/crm/dq/merge-log') });
+  const snapshot = useMutation({
+    mutationFn: () => api<{ captured: number }>('/api/crm/dq/snapshot', { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('crmx.dq_snapshot_done', { n: r.captured })); qc.invalidateQueries({ queryKey: ['crm-dq'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const counts = wlQ.data?.band_counts ?? {};
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatCard label={t('crmx.dq_poor')} value={String(counts.poor ?? 0)} icon={XCircle} tone="danger" />
+        <StatCard label={t('crmx.dq_fair')} value={String(counts.fair ?? 0)} icon={BarChart3} tone="warning" />
+        <StatCard label={t('crmx.dq_good')} value={String(counts.good ?? 0)} icon={Target} tone="success" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select className="w-auto" aria-label={t('crmx.dq_band')} value={band} onChange={(e) => setBand(e.target.value)}>
+          <option value="">{t('crmx.dq_band_all')}</option>
+          <option value="poor">{t('crmx.dq_poor')}</option>
+          <option value="fair">{t('crmx.dq_fair')}</option>
+          <option value="good">{t('crmx.dq_good')}</option>
+        </Select>
+        <div className="ms-auto"><Button size="sm" variant="outline" disabled={snapshot.isPending} onClick={() => snapshot.mutate()}><BarChart3 className="size-4" /> {t('crmx.dq_snapshot')}</Button></div>
+      </div>
+
+      <StateView q={wlQ}>
+        <DataTable
+          rows={wlQ.data?.accounts ?? []}
+          rowKey={(r) => r.account_no}
+          columns={[
+            { key: 'band', label: t('crmx.dq_band'), render: (r: DqRow) => <Badge variant={DQ_BAND_VARIANT[r.band] ?? 'outline'}>{t(`crmx.dq_${r.band}`)}</Badge> },
+            { key: 'score', label: t('crmx.dq_score'), render: (r: DqRow) => <span className="tabular-nums">{r.score}</span> },
+            { key: 'account', label: t('crmx.col_account'), render: (r: DqRow) => <Link className="text-primary underline-offset-2 hover:underline" href={`/crm/accounts/${encodeURIComponent(r.account_no)}`}>{r.name}</Link> },
+            { key: 'missing', label: t('crmx.dq_missing'), render: (r: DqRow) => r.missing.length ? <div className="flex flex-wrap gap-1">{r.missing.map((m) => <Badge key={m} variant="outline" className="px-1 py-0 text-[10px]">{m}</Badge>)}</div> : <span className="text-muted-foreground">—</span> },
+          ]}
+          emptyState={{ icon: Building2, title: t('crmx.dq_empty_title'), description: t('crmx.dq_empty_desc') }}
+        />
+      </StateView>
+
+      <Card className="p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Users className="size-4 text-primary" /> {t('crmx.dq_dups_title')} <span className="text-xs text-muted-foreground">({dupQ.data?.count ?? 0})</span></div>
+        {(dupQ.data?.candidates?.length ?? 0) === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('crmx.dq_dups_empty')}</p>
+        ) : (
+          <div className="grid gap-1.5">
+            {(dupQ.data?.candidates ?? []).slice(0, 25).map((c) => (
+              <div key={`${c.a}-${c.b}`} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1 text-sm">
+                <Link className="text-primary hover:underline" href={`/crm/accounts/${encodeURIComponent(c.a)}`}>{c.a_name}</Link>
+                <ArrowRightLeft className="size-3.5 text-muted-foreground" />
+                <Link className="text-primary hover:underline" href={`/crm/accounts/${encodeURIComponent(c.b)}`}>{c.b_name}</Link>
+                <div className="flex flex-wrap gap-1">{c.reasons.map((r) => <Badge key={r} variant="secondary" className="px-1 py-0 text-[10px]">{r}</Badge>)}</div>
+                <span className="ms-auto text-xs text-muted-foreground">{t('crmx.dq_similarity')}: {Math.round(c.similarity * 100)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium"><History className="size-4 text-primary" /> {t('crmx.dq_mergelog_title')} <span className="text-xs text-muted-foreground">({logQ.data?.count ?? 0})</span></div>
+        {(logQ.data?.merges?.length ?? 0) === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('crmx.dq_mergelog_empty')}</p>
+        ) : (
+          <div className="grid gap-1.5">
+            {(logQ.data?.merges ?? []).slice(0, 25).map((m) => (
+              <div key={m.id} className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{m.duplicate_no}</span> → <span className="font-medium text-foreground">{m.survivor_no}</span>
+                <span className="text-xs">· {t('crmx.dq_children', { n: m.reassigned_children })} · {m.merged_by ?? ''} · {thaiDate(m.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

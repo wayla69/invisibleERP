@@ -178,6 +178,44 @@ export const crmAccountHealthSnapshots = pgTable('crm_account_health_snapshots',
   byAccount: index('idx_crm_acct_health_account').on(t.tenantId, t.accountId),
 }));
 
+// CRM-17 data-quality scoring (control CRM-16, migration 0409) — a per-account DATA-QUALITY snapshot (mirrors
+// the health snapshot). The live score (weighted completeness + validity of the customer-master fields:
+// tax_id / email / phone / industry / owner / website / size / has-contact) is computed in CrmDqService;
+// this table is the schedulable daily snapshot (upsert on (tenant_id, account_id, snapshot_date)) for trend.
+export const crmDqScores = pgTable('crm_dq_scores', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  accountId: bigint('account_id', { mode: 'number' }).notNull().references(() => crmAccounts.id),
+  snapshotDate: date('snapshot_date').notNull(),
+  score: integer('score').notNull().default(0),         // 0..100 (100 = complete + valid)
+  band: text('band').notNull().default('poor'),         // good | fair | poor
+  signals: jsonb('signals').notNull().default({}),      // per-field breakdown snapshot
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqDay: unique('uq_crm_dq_day').on(t.tenantId, t.accountId, t.snapshotDate),
+  byAccount: index('idx_crm_dq_account').on(t.tenantId, t.accountId),
+}));
+
+// CRM-17 merge audit log (control CRM-16, migration 0409) — an append-only record of every account merge
+// (survivor, retired duplicate, children reassigned, which survivor fields were survivorship-filled, who/when).
+// Written inside the merge transaction so it commits atomically with the merge (a MERGE_CONFLICT rollback
+// discards it). The maker-checker (caller ≠ duplicate creator when children reassign) lives in the merge itself.
+export const crmMergeLog = pgTable('crm_merge_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  survivorAccountId: bigint('survivor_account_id', { mode: 'number' }).notNull(),
+  survivorNo: text('survivor_no').notNull(),
+  duplicateAccountId: bigint('duplicate_account_id', { mode: 'number' }).notNull(),
+  duplicateNo: text('duplicate_no').notNull(),
+  reassignedChildren: integer('reassigned_children').notNull().default(0),
+  filledFields: jsonb('filled_fields').notNull().default('[]'), // survivor fields backfilled from the duplicate
+  mergedBy: text('merged_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  bySurvivor: index('idx_crm_merge_log_survivor').on(t.tenantId, t.survivorAccountId),
+}));
+
 // CRM-12 (CRM-09, migration 0378): sales-forecasting depth over the REV-17 pipeline forecast.
 // A rep→manager manual OVERRIDE: per (period, owner) a rep submits their own commit / best-case number
 // (governed draft → submitted); the manager roll-up reconciles it against the system-weighted forecast.
@@ -458,3 +496,5 @@ export const crmFeedPosts = pgTable('crm_feed_posts', {
 }));
 
 export type CrmFeedPost = typeof crmFeedPosts.$inferSelect;
+export type CrmDqScore = typeof crmDqScores.$inferSelect;
+export type CrmMergeLog = typeof crmMergeLog.$inferSelect;
