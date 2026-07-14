@@ -38,6 +38,7 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
 import { MenuModule } from '../menu/menu.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { ReputationModule } from '../reputation/reputation.module';
+import { MmmModule } from '../mmm/mmm.module';
 
 // MessagingModule supplies MessagingService for scheduled-report email delivery (Phase 4). FinanceModule
 // (CollectionsService), EamModule (EamService), LedgerModule (LedgerService) and LeasesModule (LeasesService)
@@ -46,5 +47,5 @@ import { ReputationModule } from '../reputation/reputation.module';
 // (CrmPipelineService) supply the project_evm + crm_win_loss report types. DRIZZLE is global.
 // BudgetModule/ProcurementModule/MatchModule supply the residual-gap report types budget_variance,
 // supplier_scorecard and the exec_scorecard supply-chain leg (RG-1/2/3).
-@Module({ imports: [DiscoveryModule, MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, RevDisclosureModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule, MarketingModule, CampaignsModule, MenuModule, AnalyticsModule, ReputationModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService, BiReportRegistrarService], controllers: [BiController], exports: [BiService] })
+@Module({ imports: [DiscoveryModule, MessagingModule, FinanceModule, EamModule, AssetsModule, LedgerModule, LeasesModule, RevenueModule, RevDisclosureModule, ProjectsModule, RetentionModule, RealEstateModule, CrmPipelineModule, CrmModule, BudgetModule, FluxModule, ProcurementModule, MatchModule, BillingModule, GovernanceModule, TaxJobsModule, BiLiveModule, JourneysModule, NpsModule, LoyaltyModule, ScheduledChangesModule, PdpaModule, HcmModule, MarketingModule, CampaignsModule, MenuModule, AnalyticsModule, ReputationModule, MmmModule], providers: [BiService, BiGenerateService, BiScheduleService, SchedulerTickService, BiReportRegistrarService], controllers: [BiController], exports: [BiService] })
 export class BiModule {}
