@@ -48,7 +48,7 @@ type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 const RejectBody = z.object({ reason: z.string().optional() });
 
 // GL-17: reverse a posted JE with an optional reason and an optional reversal date (defaults to today).
-const ReverseBody = z.object({ reason: z.string().optional(), date: z.string().optional() });
+const ReverseBody = z.object({ reason: z.string().optional(), date: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 
 const RecurringBody = z.object({
   name: z.string().min(1),
@@ -209,7 +209,7 @@ export class LedgerController {
   @Permissions('gl_post')
   reverseJournal(@Param('id') id: string, @Body(new ZodValidationPipe(ReverseBody)) b: z.infer<typeof ReverseBody>, @CurrentUser() u: JwtUser) {
     // requireDistinctApprover: manual reversals enforce reverser ≠ original preparer (GL-05, audit G2).
-    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date, requireDistinctApprover: true });
+    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date, requireDistinctApprover: true }, u, b.self_approval_reason);
   }
 
   // Demonstrates the GL-17 immutability guard (for ops/tests): attempting to void/delete a posted entry is

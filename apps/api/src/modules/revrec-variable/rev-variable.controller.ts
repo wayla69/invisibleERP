@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Body, ParseIntPipe } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { RevVariableService } from './rev-variable.service';
 
 const ScenarioSchema = z.object({ amount: z.number(), probability: z.number().min(0).max(1) });
@@ -40,8 +41,8 @@ export class RevVariableController {
 
   // Approve an estimate (checker; must differ from the estimator → 403 SOD_SELF_APPROVAL).
   @Post(':id/variable-consideration/:vcId/approve')
-  approve(@Param('id', ParseIntPipe) id: number, @Param('vcId', ParseIntPipe) vcId: number, @CurrentUser() u: JwtUser) {
-    return this.svc.approveEstimate(id, vcId, u);
+  approve(@Param('id', ParseIntPipe) id: number, @Param('vcId', ParseIntPipe) vcId: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveEstimate(id, vcId, u, b?.self_approval_reason);
   }
 
   // Apply the latest approved estimate for the period — recompute price, re-allocate, rebuild the

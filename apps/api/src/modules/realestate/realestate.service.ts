@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
@@ -151,10 +152,10 @@ export class RealEstateService {
 
   // Approve a draft contract (maker-checker, approver ≠ creator → RE-02) → contract active: unit contracted,
   // booking converted, the down-payment posts to the contract liability (2410), installment schedule generated.
-  async approveContract(contractNo: string, user: JwtUser) {
+  async approveContract(contractNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const c = await this.contractRow(contractNo);
     if (c.status !== 'draft') throw new BadRequestException({ code: 'CONTRACT_NOT_DRAFT', message: `Contract ${contractNo} is ${c.status}, not draft`, messageTh: 'สัญญาไม่ได้อยู่ในสถานะร่าง' });
-    if (user.username && c.createdBy && user.username === c.createdBy) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'The contract preparer cannot approve their own contract (SoD)', messageTh: 'ผู้จัดทำสัญญาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: c.createdBy, event: 're.contract.approve', ref: contractNo, amount: n(c.price), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The contract preparer cannot approve their own contract (SoD)', messageTh: 'ผู้จัดทำสัญญาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     const [u] = await this.db.select().from(reUnits).where(eq(reUnits.id, Number(c.unitId))).limit(1);
     if (!u || (u.status !== 'available' && u.status !== 'reserved')) throw new BadRequestException({ code: 'UNIT_NOT_CONTRACTABLE', message: `Unit is ${u?.status}`, messageTh: 'ยูนิตนี้ทำสัญญาไม่ได้แล้ว' });
     const tenantId = c.tenantId ?? user.tenantId ?? null;

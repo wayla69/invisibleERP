@@ -11,6 +11,7 @@ import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
 import type { DocParty } from '../../common/doc-html';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
@@ -123,11 +124,10 @@ export class SubcontractsService {
 
   // Certify a draft valuation (maker-checker: certifier ≠ preparer → PROJ-17) → post the AP/WIP/retention JE
   // + withhold retention payable into the shared sub-ledger, atomically. Capped at the subcontract value.
-  async certifyValuation(valNo: string, user: JwtUser) {
+  async certifyValuation(valNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const v = await this.valRow(valNo);
     if (v.status !== 'draft') throw new BadRequestException({ code: 'VALUATION_NOT_DRAFT', message: `Valuation ${valNo} is ${v.status}, not draft`, messageTh: 'งวดงานไม่ได้อยู่ในสถานะร่าง' });
-    if (user.username && v.createdBy && user.username === v.createdBy)
-      throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'The valuation preparer cannot certify their own valuation (SoD)', messageTh: 'ผู้จัดทำงวดงานรับรองงวดของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: v.createdBy, event: 'proj.subcon.certify', ref: valNo, amount: n(v.grossThisVal), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The valuation preparer cannot certify their own valuation (SoD)', messageTh: 'ผู้จัดทำงวดงานรับรองงวดของตนเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     const s = await this.subRow((await this.db.select({ no: projectSubcontracts.subcontractNo }).from(projectSubcontracts).where(eq(projectSubcontracts.id, Number(v.subcontractId))).limit(1))[0]!.no as string);
     const projectId = Number(s.projectId);
     const tenantId = v.tenantId ?? s.tenantId ?? user.tenantId ?? null;

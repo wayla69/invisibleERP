@@ -9,6 +9,7 @@ import { WorkflowService } from '../workflow/workflow.service';
 import { LineNotifyService, buildApproveCard } from '../messaging/line-notify.service';
 import { ReservationsService } from '../reservations/reservations.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
@@ -156,10 +157,10 @@ export class PmrService {
 
   // Approve an over-budget PMR (maker-checker: approver ≠ requester → SOD_SELF_APPROVAL). On approval the
   // overage is authorised and a project-tagged Draft PO is auto-drafted (procurement then reviews + buys).
-  async approve(pmrNo: string, user: JwtUser) {
+  async approve(pmrNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const m = await this.pmrRow(pmrNo);
     if (m.status !== 'pending') throw new BadRequestException({ code: 'PMR_NOT_PENDING', message: `PMR is ${m.status}, not pending`, messageTh: 'ใบขอเบิกไม่ได้อยู่สถานะรออนุมัติ' });
-    if (m.requestedBy && m.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a PMR you requested', messageTh: 'ผู้ขอเบิกอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: m.requestedBy, event: 'pmr.approve', ref: pmrNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a PMR you requested', messageTh: 'ผู้ขอเบิกอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     // Route the decision through the engine when a PMR workflow instance is live (multi-step/SoD enforced there).
     if (this.workflow) {
       const inst = await this.workflow.pendingInstanceFor('PMR', pmrNo);
@@ -178,10 +179,10 @@ export class PmrService {
     return this.get(pmrNo);
   }
 
-  async reject(pmrNo: string, reason: string, user: JwtUser) {
+  async reject(pmrNo: string, reason: string, user: JwtUser, selfApprovalReason?: string | null) {
     const m = await this.pmrRow(pmrNo);
     if (m.status !== 'pending') throw new BadRequestException({ code: 'PMR_NOT_PENDING', message: `PMR is ${m.status}, not pending`, messageTh: 'ใบขอเบิกไม่ได้อยู่สถานะรออนุมัติ' });
-    if (m.requestedBy && m.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a PMR you requested', messageTh: 'ผู้ขอเบิกปฏิเสธเองไม่ได้' });
+    await assertMakerChecker(this.db, { user, maker: m.requestedBy, event: 'pmr.reject', ref: pmrNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a PMR you requested', messageTh: 'ผู้ขอเบิกปฏิเสธเองไม่ได้', httpStatus: 400 });
     if (this.workflow) {
       const inst = await this.workflow.pendingInstanceFor('PMR', pmrNo);
       if (inst) await this.workflow.act(Number(inst.id), { decision: 'reject' }, user);
@@ -307,10 +308,10 @@ export class PmrService {
 
   // Approve a scope-change (maker-checker: approver ≠ requester → SOD_SELF_APPROVAL). On approval a new
   // material line is appended to the approved BoQ and the project budget grows — the item is now shoppable.
-  async approveBoqRequest(reqNo: string, user: JwtUser) {
+  async approveBoqRequest(reqNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const m = await this.bqrRow(reqNo);
     if (m.status !== 'pending') throw new BadRequestException({ code: 'BQR_NOT_PENDING', message: `Request is ${m.status}, not pending`, messageTh: 'คำขอไม่ได้อยู่สถานะรออนุมัติ' });
-    if (m.requestedBy && m.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a budget change you requested', messageTh: 'ผู้ขอเพิ่มงบอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: m.requestedBy, event: 'pmr.boq-request.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a budget change you requested', messageTh: 'ผู้ขอเพิ่มงบอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     if (this.workflow) { const inst = await this.workflow.pendingInstanceFor('BQR', reqNo); if (inst) await this.workflow.act(Number(inst.id), { decision: 'approve' }, user); }
     const boqId = Number(m.boqId);
     const projectId = Number(m.projectId);
@@ -329,10 +330,10 @@ export class PmrService {
     return this.getBoqRequest(reqNo);
   }
 
-  async rejectBoqRequest(reqNo: string, reason: string, user: JwtUser) {
+  async rejectBoqRequest(reqNo: string, reason: string, user: JwtUser, selfApprovalReason?: string | null) {
     const m = await this.bqrRow(reqNo);
     if (m.status !== 'pending') throw new BadRequestException({ code: 'BQR_NOT_PENDING', message: `Request is ${m.status}, not pending`, messageTh: 'คำขอไม่ได้อยู่สถานะรออนุมัติ' });
-    if (m.requestedBy && m.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a budget change you requested', messageTh: 'ผู้ขอเพิ่มงบปฏิเสธเองไม่ได้' });
+    await assertMakerChecker(this.db, { user, maker: m.requestedBy, event: 'pmr.boq-request.reject', ref: reqNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a budget change you requested', messageTh: 'ผู้ขอเพิ่มงบปฏิเสธเองไม่ได้', httpStatus: 400 });
     if (this.workflow) { const inst = await this.workflow.pendingInstanceFor('BQR', reqNo); if (inst) await this.workflow.act(Number(inst.id), { decision: 'reject' }, user); else await this.workflow.cancel('BQR', reqNo); }
     await this.db.update(projectBoqChangeRequests).set({ status: 'rejected', approvedBy: user.username, approvedAt: new Date(), rejectionReason: reason || null }).where(eq(projectBoqChangeRequests.id, Number(m.id)));
     await this.lineNotify?.notifyUser(m.requestedBy ?? '', m.tenantId ?? null, `❌ คำขอเพิ่มวัสดุ ${reqNo} ถูกปฏิเสธ${reason ? ` — ${reason}` : ''}`);

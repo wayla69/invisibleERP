@@ -1,4 +1,5 @@
-import { Inject, Injectable, Optional, NotFoundException, ForbiddenException, BadRequestException, UnprocessableEntityException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, BadRequestException, UnprocessableEntityException, ConflictException } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { sql, eq, ne, and, desc, asc, isNull, isNotNull, or, ilike, inArray, notInArray, gte, lt } from 'drizzle-orm';
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
@@ -555,12 +556,10 @@ export class ProcurementService {
     return r;
   }
 
-  async approveBankChange(reqNo: string, approver: JwtUser) {
+  async approveBankChange(reqNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const r = await this.bankChangeByNo(reqNo);
-    if (r.requestedBy && r.requestedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own bank-detail change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: r.requestedBy, event: 'ap.vendor-bank-change.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'The requester cannot approve their own bank-detail change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
     const set: any = {};
     if (r.bankName !== null) set.bankName = r.bankName;
     if (r.bankAccount !== null) set.bankAccount = r.bankAccount;

@@ -1,5 +1,6 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { sql, eq, and, desc, lt } from 'drizzle-orm';
+import { assertMakerChecker } from '../../common/control-profile';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arAllowance, arInvoices } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
@@ -105,15 +106,13 @@ export class ArAllowanceService {
 
   // Maker-checker post: the poster MUST differ from the computer (SoD). Journals the DELTA vs the most-recent
   // PRIOR posted allowance for the tenant. Increase ⇒ Dr 5720 / Cr 1190; decrease ⇒ Dr 1190 / Cr 5720.
-  async postAllowance(id: number, user: JwtUser) {
+  async postAllowance(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     if (!this.ledger) throw new BadRequestException({ code: 'LEDGER_UNAVAILABLE', message: 'Ledger not available', messageTh: 'ระบบบัญชีไม่พร้อมใช้งาน' });
     const db = this.db;
     const [row] = await db.select().from(arAllowance).where(eq(arAllowance.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Allowance computation not found', messageTh: 'ไม่พบการคำนวณค่าเผื่อ' });
     if (row.posted) throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This allowance is already posted', messageTh: 'ค่าเผื่อนี้โพสต์แล้ว' });
-    if (row.computedBy && row.computedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_POST', message: 'Maker-checker: you cannot post an allowance you computed', messageTh: 'ผู้คำนวณค่าเผื่อโพสต์เองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user, maker: row.computedBy, event: 'ar.allowance.post', ref: String(id), amount: n(row.allowance), reason: selfApprovalReason, code: 'SOD_SELF_POST', message: 'Maker-checker: you cannot post an allowance you computed', messageTh: 'ผู้คำนวณค่าเผื่อโพสต์เองไม่ได้ (แบ่งแยกหน้าที่)' });
     // Prior posted allowance (most recent posted as-of before this one) sets the carrying balance of 1190.
     const [prior] = await db.select().from(arAllowance)
       .where(and(

@@ -179,16 +179,16 @@ describe('LedgerPostingService — reverseEntry immutability (GL-17)', () => {
 
   it('only Posted entries can be reversed (NOT_POSTED)', async () => {
     const svc = new LedgerPostingService(fakeDb([{ rows: [{ ...orig, status: 'Draft' }] }]) as any, docNo);
-    expect(await code(() => svc.reverseEntry({ entryId: 7, reversedBy: 'bob' }))).toBe('NOT_POSTED');
+    expect(await code(() => svc.reverseEntry({ entryId: 7, reversedBy: 'bob' }, user('bob')))).toBe('NOT_POSTED');
   });
 
   it('a second reversal is blocked (ALREADY_REVERSED)', async () => {
     const svc = new LedgerPostingService(fakeDb([{ rows: [{ ...orig, status: 'Posted', isReversed: true }] }]) as any, docNo);
-    expect(await code(() => svc.reverseEntry({ entryId: 7, reversedBy: 'bob' }))).toBe('ALREADY_REVERSED');
+    expect(await code(() => svc.reverseEntry({ entryId: 7, reversedBy: 'bob' }, user('bob')))).toBe('ALREADY_REVERSED');
   });
 
   it('the preparer cannot manually reverse their own approved entry (SOD_VIOLATION, audit G2)', async () => {
     const svc = new LedgerPostingService(fakeDb([{ rows: [{ ...orig, status: 'Posted' }] }]) as any, docNo);
-    expect(await code(() => svc.reverseEntry({ entryId: 7, reversedBy: 'alice', requireDistinctApprover: true }))).toBe('SOD_VIOLATION');
+    expect(await code(() => svc.reverseEntry({ entryId: 7, reversedBy: 'alice', requireDistinctApprover: true }, user('alice')))).toBe('SOD_VIOLATION');
   });
 });

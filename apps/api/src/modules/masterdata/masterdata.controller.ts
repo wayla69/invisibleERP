@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { MasterDataService } from './masterdata.service';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -36,7 +37,7 @@ export class MasterDataController {
   @Get('import-approvals') @Permissions('masterdata', 'exec', 'approvals')
   pendingBatches(@Query('status') status?: string) { return this.svc.listPendingBatches(status); }
   @Post('import-approvals/:reqNo/approve') @Permissions('exec', 'approvals')
-  approveBatch(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveBatch(reqNo, u); }
+  approveBatch(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveBatch(reqNo, u, b?.self_approval_reason); }
   @Post('import-approvals/:reqNo/reject') @Permissions('exec', 'approvals')
   rejectBatch(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectBatch(reqNo, u, b.reason); }
 

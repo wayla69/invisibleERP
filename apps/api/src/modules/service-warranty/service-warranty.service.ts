@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, sql, gte, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { warrantyTerms, installedBase, warrantyClaims } from '../../database/schema/service-warranty';
@@ -6,6 +6,7 @@ import { docCountersTenant } from '../../database/schema/system';
 import { n, fx, ymd } from '../../database/queries';
 import { isUniqueViolation } from '../../common/db-error';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // coverage_type / coverage_kind vocabulary. A 'full' term covers any claim kind; otherwise the term must
 // match the kind being claimed (a parts-only warranty does not cover a labor claim).
@@ -120,12 +121,11 @@ export class ServiceWarrantyService {
   // requester (SOD_SELF_APPROVAL) — this is what prevents a single person granting themselves free service /
   // goods on a non-covered unit. charge=0 on an out-of-coverage claim is a deliberate override, recorded in
   // the coverage-exceptions register.
-  async authorizeClaim(id: number, dto: { disposition?: string; charge?: number }, user: JwtUser) {
+  async authorizeClaim(id: number, dto: { disposition?: string; charge?: number }, user: JwtUser, selfApprovalReason?: string | null) {
     const claim = await this.assertClaim(id, user);
     if (claim.status !== 'pending')
       throw new BadRequestException({ code: 'CLAIM_NOT_PENDING', message: `Claim ${claim.claimNo} is not pending (status=${claim.status})`, messageTh: `เคลม ${claim.claimNo} ไม่อยู่สถานะรออนุมัติ` });
-    if (claim.requestedBy && claim.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The authorizer must differ from the claim requester (segregation of duties)', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้ยื่นเคลม (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: claim.requestedBy, event: 'svc.claim.authorize', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The authorizer must differ from the claim requester (segregation of duties)', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้ยื่นเคลม (แบ่งแยกหน้าที่)' });
     const disposition = dto.disposition ?? 'repair';
     if (!['repair', 'replace'].includes(disposition))
       throw new BadRequestException({ code: 'BAD_DISPOSITION', message: 'disposition must be repair or replace to authorize', messageTh: 'การจัดการต้องเป็น repair หรือ replace' });
@@ -137,14 +137,13 @@ export class ServiceWarrantyService {
   }
 
   // Reject a pending claim. Also a distinct-user action (a requester cannot reject-close their own to hide it).
-  async rejectClaim(id: number, dto: { reason?: string }, user: JwtUser) {
+  async rejectClaim(id: number, dto: { reason?: string }, user: JwtUser, selfApprovalReason?: string | null) {
     const claim = await this.assertClaim(id, user);
     if (claim.status !== 'pending')
       throw new BadRequestException({ code: 'CLAIM_NOT_PENDING', message: `Claim ${claim.claimNo} is not pending (status=${claim.status})`, messageTh: `เคลม ${claim.claimNo} ไม่อยู่สถานะรออนุมัติ` });
     if (!dto.reason?.trim())
       throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reject reason is required', messageTh: 'ต้องระบุเหตุผลการปฏิเสธ' });
-    if (claim.requestedBy && claim.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The rejector must differ from the claim requester (segregation of duties)', messageTh: 'ผู้ปฏิเสธต้องไม่ใช่ผู้ยื่นเคลม (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: claim.requestedBy, event: 'svc.claim.reject', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The rejector must differ from the claim requester (segregation of duties)', messageTh: 'ผู้ปฏิเสธต้องไม่ใช่ผู้ยื่นเคลม (แบ่งแยกหน้าที่)' });
     const [row] = await this.db.update(warrantyClaims)
       .set({ status: 'closed', disposition: 'reject', rejectReason: dto.reason, authorizedBy: user.username, decidedAt: new Date() })
       .where(eq(warrantyClaims.id, id)).returning();

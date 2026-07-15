@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Body, ParseIntPipe } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { RevModificationService } from './rev-modification.service';
 
 const ModPoSchema = z.object({
@@ -38,8 +39,8 @@ export class RevModificationController {
   // Approve a modification (checker; must differ from the maker → 403 SOD_SELF_APPROVAL). Approval APPLIES
   // the §18-21 effect (separate contract / prospective re-allocation / cumulative catch-up).
   @Post(':id/modifications/:modId/approve')
-  approve(@Param('id', ParseIntPipe) id: number, @Param('modId', ParseIntPipe) modId: number, @CurrentUser() u: JwtUser) {
-    return this.svc.approve(id, modId, u);
+  approve(@Param('id', ParseIntPipe) id: number, @Param('modId', ParseIntPipe) modId: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approve(id, modId, u, b?.self_approval_reason);
   }
 
   // List the contract's modifications (newest first).

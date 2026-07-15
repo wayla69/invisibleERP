@@ -1,9 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, lte, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { incomeTaxProvisions, deferredTaxRuns } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { currentTenantStore } from '../../common/tenant-context';
+import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { n } from '../../database/queries';
 
 // TAX-11 — Current income-tax provision + ETR reconciliation (ASC 740 / IAS 12, current side). A
@@ -178,13 +180,13 @@ export class TaxProvisionService {
 
   // postProvision — maker-checker post of an Open row (poster ≠ runner ⇒ SOD_SELF_APPROVAL). Posts the
   // CURRENT tax (Dr 5960 / Cr 2110); marks Posted. A Posted row throws ALREADY_POSTED.
-  async postProvision(dto: PostProvisionDto) {
+  async postProvision(dto: PostProvisionDto, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [row] = await db.select().from(incomeTaxProvisions).where(eq(incomeTaxProvisions.id, dto.id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'PROVISION_NOT_FOUND', message: `Income-tax provision ${dto.id} not found`, messageTh: `ไม่พบประมาณการภาษีเงินได้ ${dto.id}` });
     if (row.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This income-tax provision is already posted', messageTh: 'ประมาณการนี้โพสต์แล้ว' });
     if (row.runBy && row.runBy === dto.postedBy) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot post an income-tax provision you ran', messageTh: 'ผู้คำนวณโพสต์ประมาณการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'tax.provision.post', ref: `CIT-${Number(row.id)}`, amount: n(row.currentTax), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot post an income-tax provision you ran', messageTh: 'ผู้คำนวณโพสต์ประมาณการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const currentTax = round4(n(row.currentTax));
     let entryNo: string | null = null;

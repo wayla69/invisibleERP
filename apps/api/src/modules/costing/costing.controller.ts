@@ -2,6 +2,7 @@ import { Controller, Get, Put, Post, Param, Query, Body, HttpCode } from '@nestj
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { CostingService } from './costing.service';
 import { AtpService } from './atp.service';
 import { StdCostService } from './std-cost.service';
@@ -25,7 +26,7 @@ export class CostingController {
   @Get('std-cost/:no') @Permissions('masterdata', 'exec', 'planner')
   stdDetail(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.stdCost.detail(u.tenantId as number, no); }
   @Post('std-cost/:no/approve') @HttpCode(200) @Permissions('exec')
-  approveStd(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.stdCost.approve(u.tenantId as number, no, u); }
+  approveStd(@Param('no') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.stdCost.approve(u.tenantId as number, no, u, b?.self_approval_reason); }
 
   @Put('config') @Permissions('masterdata')
   setMethod(@Body(new ZodValidationPipe(ConfigBody)) b: any, @CurrentUser() u: JwtUser) { return this.costing.setMethod(u.tenantId as number, b.item_id ?? null, b.method, b.standard_cost ?? null, u); }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
@@ -7,6 +7,8 @@ import {
 } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -153,12 +155,15 @@ export class SubledgerTieoutService {
   // GL-14 SoD: the certifier MUST differ from the runner (SELF_CERTIFY). Certification records the
   // certifier + timestamp and sets status to 'Certified' regardless of variance (a variance may be
   // accepted with a note explaining the reconciling items).
-  async certify(dto: { id: number; certifiedBy: string; note?: string }) {
+  async certify(dto: { id: number; certifiedBy: string; note?: string }, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [run] = await db.select().from(subledgerTieoutRuns).where(eq(subledgerTieoutRuns.id, dto.id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'NOT_FOUND', message: `Tie-out run ${dto.id} not found`, messageTh: 'ไม่พบรายการกระทบยอด' });
     if (run.runBy === dto.certifiedBy) {
-      throw new BadRequestException({ code: 'SELF_CERTIFY', message: 'Cannot certify your own tie-out run', messageTh: 'ผู้จัดทำรับรองรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      // GL-14's SoD gate historically replies HTTP 400 (basics harness asserts it) — remap the helper's
+      // enterprise 403 back to a BadRequest with the identical body.
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.tieout.certify', ref: String(dto.id), reason: selfApprovalReason, code: 'SELF_CERTIFY', message: 'Cannot certify your own tie-out run', messageTh: 'ผู้จัดทำรับรองรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' })
+        .catch((e) => { throw e instanceof ForbiddenException ? new BadRequestException(e.getResponse()) : e; });
     }
     const [row] = await db.update(subledgerTieoutRuns).set({
       status: 'Certified',

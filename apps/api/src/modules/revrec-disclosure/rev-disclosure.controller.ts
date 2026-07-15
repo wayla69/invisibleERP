@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Body, Query, ParseIntPipe } from '@nestjs
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { RevFinancingService } from './rev-financing.service';
 import { RevDisclosureService } from './rev-disclosure.service';
 
@@ -40,8 +41,8 @@ export class RevDisclosureController {
 
   // Checker (≠ maker → 403 SOD_SELF_APPROVAL): approve the discount-rate judgement so it may post.
   @Post('contracts/:id/financing-component/approve')
-  approveFinancing(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
-    return this.financing.approveFinancingComponent(id, u);
+  approveFinancing(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.financing.approveFinancingComponent(id, u, b?.self_approval_reason);
   }
 
   @Get('contracts/:id/financing-component')

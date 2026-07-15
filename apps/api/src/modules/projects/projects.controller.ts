@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto, type PortfolioScenarioDto, type PortfolioItemDto, type PortfolioCommitDto, type PhaseGateDto, type GateDecisionDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
@@ -214,10 +215,10 @@ const PortfolioItemBody = z.object({
   priority_score: z.number().nonnegative().optional(),
   rationale: z.string().optional(),
 });
-const PortfolioCommitBody = z.object({ override: z.boolean().optional(), override_reason: z.string().optional() });
+const PortfolioCommitBody = z.object({ override: z.boolean().optional(), override_reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 // PROJ-26 project phase-gate governance (PPM Wave P4)
 const PhaseGateBody = z.object({ target_phase: z.string().min(1), gate_key: z.string().optional(), name: z.string().optional(), readiness: z.string().optional() });
-const GateDecisionBody = z.object({ decision: z.enum(['go', 'hold', 'kill']), notes: z.string().optional() });
+const GateDecisionBody = z.object({ decision: z.enum(['go', 'hold', 'kill']), notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')
@@ -322,8 +323,8 @@ export class ProjectsController {
 
   // Approve a BoQ (maker-checker: approver ≠ author). Syncs the project budget to the approved BoQ total.
   @Post('boq/:boqId/approve')
-  approveBoq(@Param('boqId') boqId: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveBoq(Number(boqId), u);
+  approveBoq(@Param('boqId') boqId: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveBoq(Number(boqId), u, b?.self_approval_reason);
   }
 
   @Post('boq/:boqId/lock')
@@ -470,8 +471,8 @@ export class ProjectsController {
 
   // Approve / reject — static 'change-orders' segment, so it never collides with :code. Approver ≠ requester.
   @Post('change-orders/:coId/approve')
-  approveChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveChangeOrder(Number(coId), u);
+  approveChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveChangeOrder(Number(coId), u, b?.self_approval_reason);
   }
 
   @Post('change-orders/:coId/reject')
@@ -688,7 +689,7 @@ export class ProjectsController {
   prepareCloseReview(@Query('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.prepareCloseReview(period, u); }
 
   @Post('close-review/:period/approve') @Permissions('exec')
-  approveCloseReview(@Param('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.approveCloseReview(period, u); }
+  approveCloseReview(@Param('period') period: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveCloseReview(period, u, b?.self_approval_reason); }
 
   @Post('close-review/:period/reject') @Permissions('exec')
   rejectCloseReview(@Param('period') period: string, @Body(new ZodValidationPipe(z.object({ reason: z.string().optional() }))) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCloseReview(period, b.reason ?? '', u); }

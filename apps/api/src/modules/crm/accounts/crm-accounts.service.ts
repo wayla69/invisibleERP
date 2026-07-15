@@ -5,6 +5,7 @@ import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { crmAccounts, crmContacts, crmOpportunities, crmActivities, crmMergeLog, users } from '../../../database/schema';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { type JwtUser } from '../../../common/decorators';
+import { assertMakerChecker } from '../../../common/control-profile';
 import { isUniqueViolation } from '../../../common/db-error';
 import { normalizeName, normalizeKey } from '../../../common/text-similarity';
 
@@ -32,7 +33,7 @@ export const AccountUpdateBody = z.object({
   email: z.string().nullish(), phone: z.string().nullish(), website: z.string().nullish(),
   owner: z.string().nullish(), customer_no: z.string().nullish(), status: z.enum(['active', 'inactive']).optional(), notes: z.string().nullish(),
 });
-export const MergeBody = z.object({ duplicate_account_no: z.string().min(1) });
+export const MergeBody = z.object({ duplicate_account_no: z.string().min(1), self_approval_reason: z.string().max(500).optional() });
 export const CONTACT_ROLES = ['decision_maker', 'billing', 'technical', 'other'] as const;
 export const ContactBody = z.object({
   account_no: z.string().min(1), name: z.string().min(1), email: z.string().optional(), phone: z.string().optional(),
@@ -155,7 +156,7 @@ export class CrmAccountsService {
   // duplicate (survivorship), soft-retire the duplicate. Maker-checker when children reassign: the caller
   // must differ from the duplicate's creator (SOD_VIOLATION). Atomic — a unique-key collision rolls back
   // and surfaces MERGE_CONFLICT for manual steward resolution.
-  async merge(survivorNo: string, duplicateNo: string, user: JwtUser) {
+  async merge(survivorNo: string, duplicateNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     if (survivorNo === duplicateNo) throw new BadRequestException({ code: 'SELF_MERGE', message: 'Cannot merge an account into itself', messageTh: 'ไม่สามารถรวมบัญชีเข้ากับตัวเองได้' });
     const survivor = await this.byNo(survivorNo, user);
     const dup = await this.byNo(duplicateNo, user);
@@ -164,12 +165,8 @@ export class CrmAccountsService {
     const [kidContacts] = await db.select({ c: sql<string>`count(*)` }).from(crmContacts).where(eq(crmContacts.accountId, Number(dup.id)));
     const [kidOpps] = await db.select({ c: sql<string>`count(*)` }).from(crmOpportunities).where(eq(crmOpportunities.accountId, Number(dup.id)));
     const childCount = Number(kidContacts?.c ?? 0) + Number(kidOpps?.c ?? 0);
-    if (childCount > 0 && dup.createdBy === user.username) {
-      throw new ForbiddenException({
-        code: 'SOD_VIOLATION',
-        message: 'Merging an account you created that has contacts/opportunities requires a different user (maker-checker)',
-        messageTh: 'การรวมบัญชีที่คุณสร้างเองและมีข้อมูลลูก ต้องให้ผู้ใช้อื่นเป็นผู้ดำเนินการ',
-      });
+    if (childCount > 0) {
+      await assertMakerChecker(db, { user, maker: dup.createdBy, event: 'crm.account.merge', ref: `${duplicateNo}->${survivorNo}`, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Merging an account you created that has contacts/opportunities requires a different user (maker-checker)', messageTh: 'การรวมบัญชีที่คุณสร้างเองและมีข้อมูลลูก ต้องให้ผู้ใช้อื่นเป็นผู้ดำเนินการ' });
     }
     try {
       await db.transaction(async (tx: any) => {

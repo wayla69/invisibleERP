@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { workflowDefinitions, workflowSteps, workflowInstances, approvalActions, approvalDelegations, users, notifications } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { SodService } from './sod.service';
 import { LineNotifyService, buildApproveCard } from '../messaging/line-notify.service';
 
@@ -220,7 +221,7 @@ export class WorkflowService {
   }
 
   // ── Approver action ──
-  async act(instanceId: number, args: { decision: 'approve' | 'reject'; comment?: string }, user: JwtUser) {
+  async act(instanceId: number, args: { decision: 'approve' | 'reject'; comment?: string; self_approval_reason?: string }, user: JwtUser) {
     const db = this.db;
     const [inst] = await db.select().from(workflowInstances).where(eq(workflowInstances.id, instanceId)).for('update').limit(1);
     if (!inst) throw new NotFoundException({ code: 'INSTANCE_NOT_FOUND', message: 'Workflow instance not found', messageTh: 'ไม่พบรายการอนุมัติ' });
@@ -233,10 +234,13 @@ export class WorkflowService {
     const who = await this.resolveActor(step, user, !!inst.escalated);
     if (!who.ok) throw new ForbiddenException({ code: 'NOT_AN_APPROVER', message: 'You are not an approver for this step', messageTh: 'คุณไม่มีสิทธิ์อนุมัติขั้นนี้' });
     // maker-checker (always on): NEITHER the caller NOR the person they act on behalf of may be the creator
-    // (closes the "delegate the approval back to yourself" bypass).
+    // (closes the "delegate the approval back to yourself" bypass). Under docs/49 an 'sme' tenant may
+    // self-act WITH a logged justification (assertMakerChecker writes the SME-01 evidence); the flag then
+    // tells the configurable SoD engine the same condition was already adjudicated (PERM_PAIR unaffected).
     const effectiveApprover = who.onBehalfOf ?? user.username;
-    if (user.username === inst.createdBy || effectiveApprover === inst.createdBy) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The maker cannot approve their own document', messageTh: 'ผู้สร้างเอกสารอนุมัติเองไม่ได้' });
-    await this.sod.assertActionAllowed({ tenantId: inst.tenantId, docType: inst.docType, createdBy: inst.createdBy, actor: effectiveApprover, actorPermissions: user.permissions ?? [], action: 'approve' });
+    const selfMaker = user.username === inst.createdBy || effectiveApprover === inst.createdBy;
+    if (selfMaker) await assertMakerChecker(db, { user, maker: user.username, event: 'workflow.act', ref: `${inst.docType}:${inst.docNo}`, amount: inst.amount != null ? String(inst.amount) : null, reason: args.self_approval_reason, code: 'SOD_VIOLATION', message: 'The maker cannot approve their own document', messageTh: 'ผู้สร้างเอกสารอนุมัติเองไม่ได้' });
+    await this.sod.assertActionAllowed({ tenantId: inst.tenantId, docType: inst.docType, createdBy: inst.createdBy, actor: effectiveApprover, actorPermissions: user.permissions ?? [], action: 'approve', selfApprovalAllowed: selfMaker });
 
     await db.insert(approvalActions).values({ tenantId: inst.tenantId, instanceId, stepNo: inst.currentStep!, actor: user.username, onBehalfOf: who.onBehalfOf, decision: args.decision, comment: args.comment ?? null });
     if (args.decision === 'reject') {

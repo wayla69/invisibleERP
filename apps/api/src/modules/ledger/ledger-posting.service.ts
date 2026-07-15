@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
@@ -320,7 +320,7 @@ export class LedgerPostingService {
   // The ONLY correction is a contra REVERSAL: a new, immediately-Posted entry that swaps every line's
   // debit/credit so original + reversal net to zero on every affected account. The original is flagged
   // is_reversed (the one column the DB trigger permits changing on a posted entry). Every action is logged.
-  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }) {
+  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [orig] = await db.select().from(journalEntries).where(eq(journalEntries.id, dto.entryId)).limit(1);
     if (!orig) throw new NotFoundException({ code: 'ENTRY_NOT_FOUND', message: `Journal entry ${dto.entryId} not found`, messageTh: `ไม่พบรายการบัญชี ${dto.entryId}` });
@@ -331,7 +331,7 @@ export class LedgerPostingService {
     // reverser must differ from the original preparer — the original preparer cannot unilaterally reverse
     // their own (independently-approved) entry. System/internal callers (e.g. FX reval) do not set the flag.
     if (dto.requireDistinctApprover && orig.createdBy && orig.createdBy === dto.reversedBy) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reverse a journal entry you prepared', messageTh: 'ผู้บันทึกกลับรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.je.reverse', ref: orig.entryNo ?? String(dto.entryId), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reverse a journal entry you prepared', messageTh: 'ผู้บันทึกกลับรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
 
     const lines = await db.select().from(journalLines).where(eq(journalLines.entryId, orig.id));

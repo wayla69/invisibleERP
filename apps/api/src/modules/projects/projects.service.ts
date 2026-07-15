@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar } from '../../database/schema';
@@ -9,6 +9,7 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
@@ -34,10 +35,10 @@ export interface CalendarExceptionDto { exception_date: string; description?: st
 // PROJ-25 portfolio selection scenarios (PPM Wave P4)
 export interface PortfolioScenarioDto { name: string; budget_envelope?: number; objective?: string; notes?: string }
 export interface PortfolioItemDto { project_code: string; decision?: 'include' | 'exclude'; priority_score?: number; rationale?: string }
-export interface PortfolioCommitDto { override?: boolean; override_reason?: string }
+export interface PortfolioCommitDto { override?: boolean; override_reason?: string; self_approval_reason?: string }
 // PROJ-26 project phase-gate governance (PPM Wave P4)
 export interface PhaseGateDto { target_phase: string; gate_key?: string; name?: string; readiness?: string }
-export interface GateDecisionDto { decision: 'go' | 'hold' | 'kill'; notes?: string }
+export interface GateDecisionDto { decision: 'go' | 'hold' | 'kill'; notes?: string; self_approval_reason?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -907,11 +908,11 @@ export class ProjectsService {
   // Approve a BoQ (maker-checker: approver ≠ author, SOD_SELF_APPROVAL). On approval the sum of line budgets
   // is snapshotted onto the BoQ and synced to the project's budget_amount — the enforceable material budget
   // baseline (M1's commitment ledger draws remaining = budget − actual − commitments against it).
-  async approveBoq(boqId: number, user: JwtUser) {
+  async approveBoq(boqId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const boq = await this.boqRow(boqId);
     if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is already ${boq.status}`, messageTh: 'BoQ ถูกดำเนินการแล้ว' });
-    if (boq.createdBy && boq.createdBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: boq.createdBy, event: 'proj.boq.approve', ref: String(boqId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     const [tot] = await db.select({ v: sql<string>`coalesce(sum(${projectBoqLines.budgetAmount}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
     const budgetTotal = r2(n(tot?.v));
     await db.update(projectBoq).set({ status: 'approved', budgetTotal: fx(budgetTotal, 2), approvedBy: user.username, approvedAt: new Date() }).where(eq(projectBoq.id, Number(boqId)));
@@ -962,12 +963,12 @@ export class ProjectsService {
   // Approve a change order (maker-checker): the approver MUST differ from the requester (SOD_SELF_APPROVAL).
   // On approval the contract/budget/EAC deltas are applied to the project AND a new baseline is auto-captured
   // (reason = the CO), so the scope/contract change is authorised, segregated, and re-baselined (ties to PROJ-07).
-  async approveChangeOrder(coId: number, user: JwtUser) {
+  async approveChangeOrder(coId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
     if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
     if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
-    if (co.requestedBy && co.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: co.requestedBy, event: 'proj.change-order.approve', ref: String(coId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
     const newContract = r2(Math.max(0, n(proj!.contractAmount) + n(co.contractDelta)));
     const newBudget = r2(Math.max(0, n(proj!.budgetAmount) + n(co.budgetDelta)));
@@ -1263,12 +1264,12 @@ export class ProjectsService {
 
   // Checker: sign off (SoD — approver ≠ preparer). Detective review, so no hard numeric gate; the independent
   // sign-off IS the control.
-  async approveCloseReview(period: string, user: JwtUser) {
+  async approveCloseReview(period: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    if (rp.preparedBy && rp.preparedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: rp.preparedBy, event: 'proj.close-review.approve', ref: period, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
     await db.update(projectCloseReviews).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectCloseReviews.id, rp.id));
     return this.getCloseReview(period, user);
   }

@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { investments, investmentPrices, investmentValuations } from '../../database/schema';
@@ -115,13 +116,11 @@ export class InvestmentService {
   }
 
   // Checker: approve a PendingApproval investment (approver ≠ requester ⇒ SOD_SELF_APPROVAL) → posts the buy JE.
-  async approveInvestment(id: number, user: JwtUser) {
+  async approveInvestment(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const inv = await this.loadInvestment(id);
     if (inv.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Investment is ${inv.status}, not pending approval`, messageTh: 'เงินลงทุนไม่ได้อยู่ในสถานะรออนุมัติ' });
-    if (inv.requestedBy && inv.requestedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve an investment you created', messageTh: 'ผู้สร้างอนุมัติเงินลงทุนของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user, maker: inv.requestedBy, event: 'tre.investment.approve', ref: String(id), amount: n(inv.cost), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve an investment you created', messageTh: 'ผู้สร้างอนุมัติเงินลงทุนของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const cls = inv.classification as Classification;
     const cost = n(inv.cost);
     const asset = this.classAsset(cls);
@@ -170,13 +169,13 @@ export class InvestmentService {
     return { symbol: dto.symbol, price_date: dto.priceDate, price, tenant_id: tenantId, status: pending ? 'PendingApproval' : 'Approved' };
   }
 
-  async approvePrice(symbol: string, priceDate: string, tenantId: number | null, user: JwtUser) {
+  async approvePrice(symbol: string, priceDate: string, tenantId: number | null, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const tid = this.tenant(tenantId, user);
     const tCond = tid != null ? eq(investmentPrices.tenantId, tid) : isNull(investmentPrices.tenantId);
     const [p] = await db.select().from(investmentPrices).where(and(tCond, eq(investmentPrices.symbol, symbol), eq(investmentPrices.priceDate, priceDate), eq(investmentPrices.status, 'PendingApproval'))).limit(1);
     if (!p) throw new BadRequestException({ code: 'NO_PENDING_PRICE', message: `No price pending approval for ${symbol} ${priceDate}`, messageTh: 'ไม่พบราคาที่รออนุมัติ' });
-    if (p.requestedBy && p.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a price you entered', messageTh: 'ผู้บันทึกอนุมัติราคาของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: p.requestedBy, event: 'tre.price.approve', ref: `${symbol}:${priceDate}`, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a price you entered', messageTh: 'ผู้บันทึกอนุมัติราคาของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await db.update(investmentPrices).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(investmentPrices.id, p.id));
     return { symbol, price_date: priceDate, price: n(p.price), tenant_id: tid ?? null, status: 'Approved', approved_by: user.username, requested_by: p.requestedBy };
   }

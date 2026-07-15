@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CoaService } from './coa.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 // Canonical-universe write bodies (docs/42 step 2 — the /chart-of-accounts manage UI posts these).
 // Codes are the 4-digit universe convention; type drives normal-balance defaulting in the service.
@@ -118,9 +119,9 @@ export class CoaController {
 
   @Post('change-requests/:id/approve')
   @HttpCode(200)
-  approveChange(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
+  approveChange(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
     this.assertPlatformAdmin(u);
-    return this.coa.approveChange(id, u);
+    return this.coa.approveChange(id, u, b?.self_approval_reason);
   }
 
   @Post('change-requests/:id/reject')

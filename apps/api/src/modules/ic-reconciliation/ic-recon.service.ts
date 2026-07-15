@@ -7,6 +7,7 @@ import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { icTransactions } from '../../database/schema/intercompany';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
@@ -62,13 +63,13 @@ export class IcReconService {
   }
 
   // Checker: approve (SoD — approver ≠ preparer; the IC balances MUST eliminate to be signed off).
-  async approvePeriod(groupId: number, period: string, user: JwtUser) {
+  async approvePeriod(groupId: number, period: string, user: JwtUser, selfApprovalReason?: string | null) {
     this.hqOnly(user);
     const db = this.db;
     const [rp] = await db.select().from(icReconPeriods).where(and(eq(icReconPeriods.groupId, groupId), eq(icReconPeriods.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `IC reconciliation for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการกระทบยอด' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `IC reconciliation is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    if (rp.preparedBy && rp.preparedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: rp.preparedBy, event: 'gl.icrecon.approve', ref: `${groupId}:${period}`, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
     if (!rp.eliminates) throw new BadRequestException({ code: 'IC_NOT_ELIMINATED', message: 'Intercompany balances do not eliminate (Due-From ≠ Due-To) — resolve before approving', messageTh: 'ยอดระหว่างกันไม่ตัดกัน (ลูกหนี้ ≠ เจ้าหนี้ระหว่างกัน) ต้องแก้ไขก่อนอนุมัติ' });
     await db.update(icReconPeriods).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(icReconPeriods.id, rp.id));
     return this.getStatus(groupId, period, user);

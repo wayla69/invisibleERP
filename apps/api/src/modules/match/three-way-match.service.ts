@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r3 = (x: number) => Math.round((Number(x) || 0) * 1000) / 1000;
 const PRICE_FLOOR = 0.005; // half-cent rounding floor on unit-price comparison
@@ -128,11 +129,11 @@ export class ThreeWayMatchService {
 
   // EXP-01 override is maker-checked: the person who RAN the match cannot also override its variance to force the
   // invoice payable — a different user must. Binds even Admin (no self-override). Mirrors GL-05/INV-07 SoD.
-  async override(txnNo: string, reason: string, user: JwtUser) {
+  async override(txnNo: string, reason: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [m] = await db.select().from(invoiceMatchResults).where(eq(invoiceMatchResults.txnNo, txnNo)).limit(1);
     if (!m) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No match to override', messageTh: 'ไม่พบการจับคู่' });
-    if (m.matchedBy && m.matchedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot override a 3-way match you performed', messageTh: 'ผู้จับคู่อนุมัติข้ามผลการตรวจของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: m.matchedBy, event: 'exp.match-override', ref: txnNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot override a 3-way match you performed', messageTh: 'ผู้จับคู่อนุมัติข้ามผลการตรวจของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await db.update(invoiceMatchResults).set({ override: true, overrideBy: user.username, overrideReason: reason ?? null, overrideAt: new Date() }).where(eq(invoiceMatchResults.id, m.id));
     await this.statusLog.log('MATCH', m.matchNo, m.matchStatus, 'Override', user.username);
     return { txn_no: txnNo, match_status: m.matchStatus, payable: m.payable, override: true, override_by: user.username, matched_by: m.matchedBy };

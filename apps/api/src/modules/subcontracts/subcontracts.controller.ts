@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { SubcontractsService, type CreateSubcontractDto, type CreateValuationDto } from './subcontracts.service';
 
 const CreateBody = z.object({
@@ -50,8 +51,8 @@ export class SubcontractsController {
   // Certify a draft valuation (certifier duty; ≠ preparer). Static 'valuations/…' path — no :subNo collision.
   @Post('valuations/:valNo/certify')
   @Permissions('proj_subcon_certify', 'gl_close', 'exec')
-  certify(@Param('valNo') valNo: string, @CurrentUser() u: JwtUser) {
-    return this.svc.certifyValuation(valNo, u);
+  certify(@Param('valNo') valNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.certifyValuation(valNo, u, b?.self_approval_reason);
   }
 
   @Get('project/:code')

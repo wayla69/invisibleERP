@@ -2,6 +2,7 @@ import { Controller, Get, Put, Post, Patch, Param, Query, Body } from '@nestjs/c
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { LoyaltyService, type LoyaltyConfigDto, type RedeemDto } from './loyalty.service';
 import { MemberService } from './member.service';
 import { MembershipService } from './membership.service';
@@ -137,7 +138,7 @@ export class LoyaltyController {
   @Get('transfers/pending') @Permissions('approvals', 'exec')
   pendingTransfers(@CurrentUser() u: JwtUser) { return this.member.listPendingTransfers(u); }
   @Post('transfers/:reqNo/approve') @Permissions('approvals', 'exec')
-  approveTransfer(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.member.approvePendingTransfer(u, reqNo); }
+  approveTransfer(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.member.approvePendingTransfer(u, reqNo, b?.self_approval_reason); }
   @Post('transfers/:reqNo/reject') @Permissions('approvals', 'exec')
   rejectTransfer(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectReceiptBody)) b: any, @CurrentUser() u: JwtUser) { return this.member.rejectPendingTransfer(u, reqNo, b?.reason); }
 

@@ -40,6 +40,8 @@ export interface MakerCheckerCtx {
   code?: string;
   message?: string;
   messageTh?: string;
+  /** A site whose historical block was a 400 BadRequest (e.g. ESS expense) keeps that status. Default 403. */
+  httpStatus?: 400 | 403;
 }
 
 const profileOf = (user: JwtUser): ControlProfile =>
@@ -56,11 +58,12 @@ export async function assertMakerChecker(db: { insert: Function }, ctx: MakerChe
   if (!ctx.maker || ctx.maker !== ctx.user.username) return; // different person — the normal checker path
 
   if (profileOf(ctx.user) !== 'sme' || ctx.user.tenantId == null) {
-    throw new ForbiddenException({
+    const body = {
       code: ctx.code ?? 'SOD_SELF_APPROVAL',
       message: ctx.message ?? 'Maker-checker: the requester cannot approve their own item — a different authorised user must approve',
       messageTh: ctx.messageTh ?? 'ผู้จัดทำไม่สามารถอนุมัติรายการของตนเองได้ ต้องให้ผู้อื่นอนุมัติ (แบ่งแยกหน้าที่)',
-    });
+    };
+    throw ctx.httpStatus === 400 ? new BadRequestException(body) : new ForbiddenException(body);
   }
 
   const reason = (ctx.reason ?? '').trim();

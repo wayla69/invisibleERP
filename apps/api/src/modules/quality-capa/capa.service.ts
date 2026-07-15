@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, sql, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { capas, capaActions } from '../../database/schema/quality-capa';
 import { docCountersTenant } from '../../database/schema/system';
 import { ymd } from '../../database/queries';
 import { isUniqueViolation } from '../../common/db-error';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 const ACTION_TYPES = ['corrective', 'preventive', 'both'] as const;
@@ -114,12 +115,14 @@ export class CapaService {
   // (verified_by ≠ owner/created_by → SOD_SELF_APPROVAL) AND every child action is 'done'
   // (else ACTIONS_INCOMPLETE), recording the effectiveness_result. An 'ineffective' verification REOPENS the
   // CAPA (in_progress) — the root cause was not resolved — rather than closing it.
-  async verify(id: number, dto: { result: string; note?: string }, user: JwtUser) {
+  async verify(id: number, dto: { result: string; note?: string; self_approval_reason?: string }, user: JwtUser) {
     const capa = await this.assertCapa(id, user);
     if (capa.status !== 'pending_verification')
       throw new BadRequestException({ code: 'NOT_PENDING_VERIFICATION', message: `CAPA ${capa.capaNo} is not pending verification (status=${capa.status})`, messageTh: `CAPA ${capa.capaNo} ไม่อยู่สถานะรอตรวจสอบประสิทธิผล` });
-    if (user.username === capa.owner || user.username === capa.createdBy)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The effectiveness verifier must differ from the CAPA owner/creator (segregation of duties)', messageTh: 'ผู้ตรวจสอบประสิทธิผลต้องไม่ใช่เจ้าของ/ผู้สร้าง CAPA (แบ่งแยกหน้าที่)' });
+    // Exception (docs/49): an 'sme' tenant may self-verify WITH self_approval_reason — logged, reviewed by SME-01.
+    if (user.username === capa.owner || user.username === capa.createdBy) {
+      await assertMakerChecker(this.db, { user, maker: user.username, event: 'qc.capa.verify', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The effectiveness verifier must differ from the CAPA owner/creator (segregation of duties)', messageTh: 'ผู้ตรวจสอบประสิทธิผลต้องไม่ใช่เจ้าของ/ผู้สร้าง CAPA (แบ่งแยกหน้าที่)' });
+    }
     const result = this.assertEffectiveness(dto.result);
     const openActions = await this.db.select({ n: sql<number>`count(*)` }).from(capaActions)
       .where(and(eq(capaActions.capaId, id), eq(capaActions.status, 'pending')));
@@ -134,14 +137,16 @@ export class CapaService {
 
   // Reject the verification (evidence insufficient) — sends the CAPA back to in_progress WITHOUT recording an
   // effectiveness result. Also a distinct-user action (an owner cannot reject-bounce their own to hide it).
-  async reject(id: number, dto: { reason?: string }, user: JwtUser) {
+  async reject(id: number, dto: { reason?: string; self_approval_reason?: string }, user: JwtUser) {
     const capa = await this.assertCapa(id, user);
     if (capa.status !== 'pending_verification')
       throw new BadRequestException({ code: 'NOT_PENDING_VERIFICATION', message: `CAPA ${capa.capaNo} is not pending verification (status=${capa.status})`, messageTh: `CAPA ${capa.capaNo} ไม่อยู่สถานะรอตรวจสอบประสิทธิผล` });
     if (!dto.reason?.trim())
       throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reject reason is required', messageTh: 'ต้องระบุเหตุผลการตีกลับ' });
-    if (user.username === capa.owner || user.username === capa.createdBy)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The verifier must differ from the CAPA owner/creator (segregation of duties)', messageTh: 'ผู้ตรวจสอบต้องไม่ใช่เจ้าของ/ผู้สร้าง CAPA (แบ่งแยกหน้าที่)' });
+    // Exception (docs/49): an 'sme' tenant may self-reject WITH self_approval_reason — logged, reviewed by SME-01.
+    if (user.username === capa.owner || user.username === capa.createdBy) {
+      await assertMakerChecker(this.db, { user, maker: user.username, event: 'qc.capa.reject', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The verifier must differ from the CAPA owner/creator (segregation of duties)', messageTh: 'ผู้ตรวจสอบต้องไม่ใช่เจ้าของ/ผู้สร้าง CAPA (แบ่งแยกหน้าที่)' });
+    }
     const [row] = await this.db.update(capas).set({ status: 'in_progress' }).where(eq(capas.id, id)).returning();
     return this.fmtCapa(row);
   }

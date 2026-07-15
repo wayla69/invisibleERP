@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { ScheduledChangesService, type ScheduleDto } from './scheduled-changes.service';
 
 const ScheduleBody = z.object({
@@ -24,7 +25,7 @@ export class ScheduledChangesController {
   schedule(@Body(new ZodValidationPipe(ScheduleBody)) b: ScheduleDto, @CurrentUser() u: JwtUser) { return this.svc.schedule(b, u); }
 
   @Post(':id/approve') @Permissions('approvals', 'exec')
-  approve(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.approve(+id, u); }
+  approve(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approve(+id, u, b?.self_approval_reason); }
 
   @Post(':id/cancel') @Permissions('masterdata', 'md_item', 'exec', 'ar')
   cancel(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.cancel(+id, u); }

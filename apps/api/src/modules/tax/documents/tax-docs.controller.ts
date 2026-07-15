@@ -10,6 +10,7 @@ import { getSigningMaterial, signEtaxXml } from './etax-sign';
 import { embedEtaxXmlInPdf } from './pdfa3';
 import { EtaxEmailService } from './etax-email.service';
 import { IssueFullBody, type IssueFullDto, ConvertAbbBody, type ConvertAbbDto } from './dto';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../../common/control-profile';
 import { normalizeA4Template, type A4TemplateConfig } from '../../../common/a4-template';
 import { DocumentTemplatesService } from '../../document-templates/document-templates.service';
 
@@ -94,8 +95,8 @@ export class TaxDocsController {
   }
   // Maker-checker (TAX-07): a DIFFERENT user (approvals/gl_close/exec) approves → posts the GL + flips to Issued.
   @Post(':docNo/approve-note') @Permissions('approvals', 'gl_close', 'exec')
-  approveNote(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveAdjustment(docNo, u);
+  approveNote(@Param('docNo') docNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveAdjustment(docNo, u, b?.self_approval_reason);
   }
   @Post(':docNo/reject-note') @Permissions('approvals', 'gl_close', 'exec')
   rejectNote(@Param('docNo') docNo: string, @Body(new ZodValidationPipe(RejectNoteBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {

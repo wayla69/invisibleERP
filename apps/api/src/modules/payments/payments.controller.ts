@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { qnum } from '../../common/query';
 import {
   PaymentService,
@@ -36,6 +37,8 @@ const OpenTillBody = z.object({ opening_float: z.number().nonnegative().optional
 const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number().nonnegative(), denominations: z.record(z.string(), z.number()).optional() });
 const CashMovementBody = z.object({ type: z.enum(['paid_in', 'paid_out', 'drop']), amount: z.number().positive(), reason: z.string().optional() });
 const RejectVarianceBody = z.object({ reason: z.string().max(500).optional() });
+// Refund reject: the rejection reason + the (optional) SME self-approval justification (docs/49).
+const RejectRefundBody = RejectVarianceBody.extend({ self_approval_reason: z.string().max(500).optional() });
 const SignZBody = z.object({ denominations: z.record(z.string(), z.number()).optional() });
 
 @Controller('api/payments')
@@ -79,12 +82,12 @@ export class PaymentsController {
     return this.svc.listRefundRequests(status, u);
   }
   @Post('refund-requests/:id/approve') @Permissions('pos_refund', 'ar', 'exec')
-  approveRefund(@Param('id') id: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveRefund(Number(id), u);
+  approveRefund(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveRefund(Number(id), u, b?.self_approval_reason);
   }
   @Post('refund-requests/:id/reject') @Permissions('pos_refund', 'ar', 'exec')
-  rejectRefund(@Param('id') id: string, @Body(new ZodValidationPipe(RejectVarianceBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
-    return this.svc.rejectRefund(Number(id), u, b?.reason);
+  rejectRefund(@Param('id') id: string, @Body(new ZodValidationPipe(RejectRefundBody)) b: { reason?: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectRefund(Number(id), u, b?.reason, b?.self_approval_reason);
   }
 
   // G14 (maker-checker audit — detective): void/refund exception report for independent periodic review.

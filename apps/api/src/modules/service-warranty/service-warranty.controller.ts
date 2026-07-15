@@ -13,8 +13,8 @@ import type { JwtUser } from '../../common/decorators';
 const TermBody = z.object({ term_code: z.string().min(1), name: z.string().min(1), coverage_months: z.number().int().positive(), coverage_type: z.enum(['parts', 'labor', 'full']).optional(), active: z.boolean().optional() });
 const UnitBody = z.object({ serial_no: z.string().min(1), item_code: z.string().min(1), item_id: z.number().int().optional(), customer_id: z.number().int().optional(), customer_name: z.string().optional(), sold_date: z.string().min(1), warranty_term_id: z.number().int(), warranty_start: z.string().optional() });
 const ClaimBody = z.object({ installed_base_id: z.number().int(), fault: z.string().min(1), coverage_kind: z.enum(['parts', 'labor', 'full']).optional(), reported_date: z.string().optional() });
-const AuthorizeBody = z.object({ disposition: z.enum(['repair', 'replace']).optional(), charge: z.number().nonnegative().optional() });
-const RejectBody = z.object({ reason: z.string().min(1) });
+const AuthorizeBody = z.object({ disposition: z.enum(['repair', 'replace']).optional(), charge: z.number().nonnegative().optional(), self_approval_reason: z.string().max(500).optional() });
+const RejectBody = z.object({ reason: z.string().min(1), self_approval_reason: z.string().max(500).optional() });
 
 @Controller('api/service/warranty')
 export class ServiceWarrantyController {
@@ -63,10 +63,10 @@ export class ServiceWarrantyController {
   @Post('claims/:id/authorize')
   @Permissions('approvals')
   @HttpCode(200)
-  authorizeClaim(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AuthorizeBody)) dto: z.infer<typeof AuthorizeBody>, @CurrentUser() user: JwtUser) { return this.svc.authorizeClaim(id, dto, user); }
+  authorizeClaim(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AuthorizeBody)) dto: z.infer<typeof AuthorizeBody>, @CurrentUser() user: JwtUser) { return this.svc.authorizeClaim(id, dto, user, dto.self_approval_reason); }
 
   @Post('claims/:id/reject')
   @Permissions('approvals')
   @HttpCode(200)
-  rejectClaim(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(RejectBody)) dto: z.infer<typeof RejectBody>, @CurrentUser() user: JwtUser) { return this.svc.rejectClaim(id, dto, user); }
+  rejectClaim(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(RejectBody)) dto: z.infer<typeof RejectBody>, @CurrentUser() user: JwtUser) { return this.svc.rejectClaim(id, dto, user, dto.self_approval_reason); }
 }

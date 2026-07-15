@@ -3,6 +3,7 @@ import { Observable } from 'rxjs';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { RequiresPlanFeature } from '../billing/plan-feature.decorator';
 import { AgentService } from './agent.service';
 import { AiActionService } from './ai-action.service';
@@ -96,7 +97,7 @@ export class AiActionController {
   get(@Param('id') id: string) { return this.actions.get(+id); }
 
   @Post(':id/approve') @Permissions('approvals')
-  approve(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.actions.approve(+id, u); }
+  approve(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.actions.approve(+id, u, b?.self_approval_reason); }
 
   @Post(':id/reject') @Permissions('approvals')
   reject(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.actions.reject(+id, b.reason, u); }

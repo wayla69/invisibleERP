@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, eq, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { masterdataChangeRequests, vendors } from '../../database/schema';
@@ -133,11 +133,9 @@ export class MasterdataChangeService {
   }
 
   // ── Checker: reject (discard) — the master is never touched ──
-  async reject(reqNo: string, approver: JwtUser, reason?: string) {
+  async reject(reqNo: string, approver: JwtUser, reason?: string, selfApprovalReason?: string | null) {
     const r = await this.pendingByNo(reqNo);
-    if (r.requestedBy && r.requestedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a master-data change you requested', messageTh: 'ผู้ขอไม่สามารถปฏิเสธคำขอของตนเองได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(this.db, { user: approver, maker: r.requestedBy, event: 'md.change.reject', ref: reqNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a master-data change you requested', messageTh: 'ผู้ขอไม่สามารถปฏิเสธคำขอของตนเองได้ (แบ่งแยกหน้าที่)' });
     await this.db.update(masterdataChangeRequests).set({ status: 'rejected', approvedBy: approver.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(masterdataChangeRequests.id, Number(r.id)));
     return { req_no: reqNo, status: 'rejected' as const, rejected_by: approver.username };
   }

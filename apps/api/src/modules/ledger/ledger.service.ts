@@ -249,7 +249,7 @@ export class LedgerService implements OnModuleInit {
   async pendingJournal(limit: number) { return this.posting.pendingJournal(limit); }
   async approveEntry(entryNo: string, approver: JwtUser, selfApprovalReason?: string | null) { return this.posting.approveEntry(entryNo, approver, selfApprovalReason); }
   async rejectEntry(entryNo: string, approver: JwtUser, reason?: string) { return this.posting.rejectEntry(entryNo, approver, reason); }
-  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }) { return this.posting.reverseEntry(dto); }
+  async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }, user: JwtUser, selfApprovalReason?: string | null) { return this.posting.reverseEntry(dto, user, selfApprovalReason); }
   async attemptVoidPosted(entryId: number, actor: string) { return this.posting.attemptVoidPosted(entryId, actor); }
   async listGlAudit(entryId?: number, limit = 100) { return this.posting.listGlAudit(entryId, limit); }
 

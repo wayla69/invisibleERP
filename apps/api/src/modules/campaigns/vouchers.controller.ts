@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { VouchersService } from './vouchers.service';
 
 const CampaignBody = z.object({
@@ -35,7 +36,7 @@ export class VouchersController {
   create(@Body(new ZodValidationPipe(CampaignBody)) b: z.infer<typeof CampaignBody>, @CurrentUser() u: JwtUser) { return this.vouchers.createCampaign(u, b); }
 
   @Post('campaigns/:id/approve') @Permissions('promos', 'pricelist', 'marketing', 'exec', 'approvals')
-  approve(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.vouchers.approveCampaign(u, +id); }
+  approve(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.vouchers.approveCampaign(u, +id, b?.self_approval_reason); }
 
   @Post('campaigns/:id/reject') @Permissions('promos', 'pricelist', 'marketing', 'exec', 'approvals')
   reject(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.vouchers.rejectCampaign(u, +id, b.reason); }

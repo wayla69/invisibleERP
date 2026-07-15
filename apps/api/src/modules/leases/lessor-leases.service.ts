@@ -9,6 +9,7 @@ import { postingDefault } from '../ledger/posting-events';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 export interface LessorLeaseDto {
   name: string;
@@ -124,14 +125,12 @@ export class LessorLeasesService {
   // Maker-checker approval (LSE-02): a DIFFERENT user approves the classification, which posts commencement.
   // FINANCE: derecognise the asset (Cr 1500 assetCost), book the net investment (Dr 1610 PV), selling
   //          profit/loss to 1510. OPERATING: no commencement GL — the asset stays on the lessor's books.
-  async approveLease(leaseNo: string, approver: JwtUser) {
+  async approveLease(leaseNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [l] = await db.select().from(lessorLeases).where(eq(lessorLeases.leaseNo, leaseNo)).limit(1);
     if (!l) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Lessor lease not found', messageTh: 'ไม่พบสัญญาเช่า (ผู้ให้เช่า)' });
     if (l.status !== 'pending') throw new BadRequestException({ code: 'NOT_PENDING', message: 'Lease is not pending approval', messageTh: 'สัญญาเช่าไม่อยู่ระหว่างรออนุมัติ' });
-    if (l.createdBy && approver.username && l.createdBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The classifier cannot approve their own lessor lease', messageTh: 'ผู้จัดประเภทไม่สามารถอนุมัติสัญญาเช่าของตนเองได้' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: l.createdBy, event: 'lease.approve', ref: leaseNo, amount: n(l.netInvestment), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The classifier cannot approve their own lessor lease', messageTh: 'ผู้จัดประเภทไม่สามารถอนุมัติสัญญาเช่าของตนเองได้' });
     const start = l.startDate ?? ymd();
     const assetCost = n(l.assetCost);
     const pv = n(l.netInvestment);

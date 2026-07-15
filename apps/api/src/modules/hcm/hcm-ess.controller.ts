@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { HcmEssService, type ProfileChangeDto, type DocumentDto } from './hcm-ess.service';
 
 const ProfileChangeBody = z.object({
@@ -41,10 +42,12 @@ export class HcmEssController {
     return this.svc.createRequest(b, u);
   }
 
+  // HR-08 — the approver must differ from the requester (SOD_SELF_APPROVAL).
+  // (an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01.)
   @Post('profile-requests/:id/approve')
   @Permissions('hr', 'hr_admin')
-  approveRequest(@Param('id') id: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveRequest(Number(id), u);
+  approveRequest(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveRequest(Number(id), u, b?.self_approval_reason);
   }
 
   @Post('profile-requests/:id/reject')

@@ -15,7 +15,7 @@ const StageBody = z.object({
   new_value: z.union([z.string(), z.number(), z.null()]).optional(),
   reason: z.string().max(500).optional(),
 });
-const RejectBody = z.object({ reason: z.string().max(500).optional() });
+const RejectBody = z.object({ reason: z.string().max(500).optional(), self_approval_reason: z.string().max(500).optional() });
 
 @Controller('api/masterdata/change-requests')
 export class MasterdataChangeController {
@@ -38,6 +38,6 @@ export class MasterdataChangeController {
   // Checker — discard the staged change (the master is never touched).
   @Post(':reqNo/reject') @Permissions('masterdata', 'exec')
   reject(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) {
-    return this.svc.reject(reqNo, u, b.reason);
+    return this.svc.reject(reqNo, u, b.reason, b.self_approval_reason);
   }
 }

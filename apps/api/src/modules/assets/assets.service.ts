@@ -10,6 +10,7 @@ import { QrService } from '../qr/qr.service';
 import { n, fx, ymd } from '../../database/queries';
 import { buildAssetQrPayload, parseQrPayload } from '@ierp/shared';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { CreateCategoryDto, AcquireAssetDto, DisposeAssetDto, RegisterFromGrDto, OpenCipDto, AddCipCostDto, SettleCipDto } from './dto';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -165,11 +166,10 @@ export class AssetsService {
 
   // Checker (FA-10 maker-checker): a DIFFERENT user approves → the fixed asset is created and the acquisition
   // JE (Dr 1500 / Cr 2000) posts EFFECTIVE. The asset is stamped with its source GR/PO for traceability.
-  async approveRegistration(regNo: string, user: JwtUser) {
+  async approveRegistration(regNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const req = await this.pendingRegistration(regNo);
-    if (req.requestedBy && req.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an asset registration you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
+    await assertMakerChecker(db, { user, maker: req.requestedBy, event: 'fa.registration.approve', ref: regNo, amount: n(req.acquireCost), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an asset registration you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
     const res = await this.acquire({
       name: req.name, category_id: req.categoryId ?? undefined, acquire_date: req.acquireDate ?? undefined,
       acquire_cost: n(req.acquireCost), salvage_value: n(req.salvageValue), useful_life_months: req.usefulLifeMonths ?? undefined,
@@ -550,12 +550,11 @@ export class AssetsService {
 
   // FA-13 maker-checker: a DIFFERENT user approves the settlement → the fixed asset is created and the
   // reclassification JE (Dr 1500 / Cr 1520) posts EFFECTIVE for the accumulated construction cost.
-  async approveCipSettlement(cipNo: string, user: JwtUser) {
+  async approveCipSettlement(cipNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const c = await this.openCipRow(cipNo, user);
     if (c.status !== 'PendingSettlement') throw new BadRequestException({ code: 'NO_PENDING_SETTLEMENT', message: `No settlement pending approval for ${cipNo}`, messageTh: 'ไม่มีรายการตั้งสินทรัพย์ที่รออนุมัติ' });
-    if (c.requestedBy && c.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a CIP settlement you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติการตั้งสินทรัพย์ของตนเองได้' });
+    await assertMakerChecker(db, { user, maker: c.requestedBy, event: 'fa.cip-settlement.approve', ref: cipNo, amount: n(c.accumulatedCost), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a CIP settlement you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติการตั้งสินทรัพย์ของตนเองได้' });
     const cost = round4(n(c.accumulatedCost));
     const res = await this.acquire({
       name: c.settleName ?? c.name, category_id: c.settleCategoryId ?? c.categoryId ?? undefined,
@@ -650,7 +649,7 @@ export class AssetsService {
   }
 
   // FA-11 — approve a pending custody change. Approver MUST differ from the requester (binds even Admin).
-  async approveCustody(reqNo: string, user: JwtUser) {
+  async approveCustody(reqNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     return db.transaction(async (tx: any) => {
       const conds = [eq(assetScanRequests.reqNo, reqNo)];
@@ -658,8 +657,7 @@ export class AssetsService {
       const [req] = await tx.select().from(assetScanRequests).where(and(...conds)).limit(1).for('update');
       if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: `Custody request ${reqNo} not found`, messageTh: 'ไม่พบคำขอย้ายทรัพย์สิน' });
       if (req.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request ${reqNo} is ${req.status}, not pending`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
-      if (req.requestedBy && req.requestedBy === user.username)
-        throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a custody change you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติการย้ายทรัพย์สินของตนเองได้' });
+      await assertMakerChecker(tx, { user, maker: req.requestedBy, event: 'fa.custody.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a custody change you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติการย้ายทรัพย์สินของตนเองได้' });
       const [a] = await tx.select().from(fixedAssets).where(eq(fixedAssets.id, Number(req.assetId))).limit(1).for('update');
       if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: `Asset ${req.assetNo} not found`, messageTh: 'ไม่พบสินทรัพย์' });
       await tx.update(fixedAssets).set({ location: req.toLocation, assignedTo: req.toAssignedTo }).where(eq(fixedAssets.id, a.id));
