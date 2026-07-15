@@ -118,6 +118,7 @@ export class BillingService {
   reactivateTenant(id: number, by: string) { return this.platformAdmin.reactivateTenant(id, by); }
   // SME single-user edition (docs/49) — upgrade-only profile transition + platform SME defaults.
   upgradeControlProfile(id: number, target: 'enterprise', actor: string) { return this.platformAdmin.upgradeControlProfile(id, target, actor); }
+  setTenantSmePrefs(id: number, b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) { return this.platformAdmin.setTenantSmePrefs(id, b, actor); }
   getSmeDefaults() { return this.platformAdmin.getSmeDefaults(); }
   setSmeDefaults(b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) { return this.platformAdmin.setSmeDefaults(b, actor); }
 

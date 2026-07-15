@@ -254,6 +254,10 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.sme_def_saving': { th: 'กำลังบันทึก…', en: 'Saving…' },
   'plt.sme_def_saved': { th: 'บันทึกค่าเริ่มต้น SME แล้ว', en: 'SME defaults saved' },
   'plt.sme_def_last_updated': { th: 'แก้ไขล่าสุดโดย {by}', en: 'Last updated by {by}' },
+  // Per-tenant SME settings card in the company drawer (docs/49 H1) — overrides the stamped defaults above.
+  'plt.sme_tenant_title': { th: 'ตั้งค่า SME ของบริษัทนี้', en: 'This company’s SME settings' },
+  'plt.sme_tenant_saved': { th: 'บันทึกการตั้งค่า SME แล้ว', en: 'SME settings saved' },
+  'plt.sme_tenant_sub_note': { th: 'อีเมลผู้ตรวจจะถูกปรับที่รายงาน SME-01 ของบริษัทนี้ให้อัตโนมัติ', en: 'The SME-01 review subscription for this company follows this email automatically.' },
 
   // ── Maintenance tab: global item-master garbage collection (unused shared-catalogue items) ──
   'plt.mnt_title': { th: 'ล้างสินค้าที่ไม่มีใครใช้แล้ว', en: 'Purge unused products' },

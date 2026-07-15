@@ -1,7 +1,8 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { eq, sql, desc } from 'drizzle-orm';
+import { and, eq, sql, desc } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
 import { subscriptions, tenants, users, branches, auditLog, aiTokenUsage, platformSmeDefaults } from '../../database/schema';
+import { reportSubscriptions } from '../../database/schema/bi';
 import { logger } from '../../observability/logger';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
@@ -100,6 +101,30 @@ export class PlatformAdminService {
     return { tenant_id: id, control_profile: 'enterprise', changed: true };
   }
 
+  // Per-tenant SME prefs edit (docs/49 v1.2, audit gap H1) — the platform defaults are only a stamp at
+  // creation; an EXISTING SME company's accountant routing / hidden nav groups are edited here. Changing
+  // the accountant email also re-points the auto-provisioned SME-01 subscription's recipients, so the
+  // detective control keeps operating against the live address (never a stale one).
+  async setTenantSmePrefs(id: number, b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) {
+    const [t] = await this.db.select({ id: tenants.id, profile: tenants.controlProfile, prefs: tenants.smePrefs }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    if (t.profile !== 'sme') throw new ForbiddenException({ code: 'NOT_SME_TENANT', message: 'SME prefs apply only to a control_profile=sme company', messageTh: 'ตั้งค่า SME ได้เฉพาะบริษัทโหมด SME เท่านั้น' });
+    const cur = (t.prefs ?? {}) as { hidden_nav_groups?: string[]; accountant_email?: string | null };
+    const hidden = b.hidden_nav_groups !== undefined
+      ? Array.from(new Set(b.hidden_nav_groups.map((s) => String(s).trim()).filter(Boolean))).slice(0, 50)
+      : (Array.isArray(cur.hidden_nav_groups) ? cur.hidden_nav_groups : []);
+    const email = b.accountant_email !== undefined ? b.accountant_email : (cur.accountant_email ?? null);
+    const prefs = { hidden_nav_groups: hidden, accountant_email: email };
+    await this.db.update(tenants).set({ smePrefs: prefs }).where(eq(tenants.id, id));
+    if (b.accountant_email !== undefined) {
+      await this.db.update(reportSubscriptions)
+        .set({ recipients: email ? [{ email }] : [] })
+        .where(and(eq(reportSubscriptions.tenantId, id), eq(reportSubscriptions.reportType, 'sme_self_approval_review')));
+    }
+    logger.info({ tenantId: id, actor, prefs }, 'sme prefs updated');
+    return { tenant_id: id, sme_prefs: prefs };
+  }
+
   // Platform-wide SME provisioning defaults — the single config row every NEW SME company is stamped from
   // (tenants.sme_prefs copy at provisionTenant). Changing it affects only future companies.
   async getSmeDefaults() {
@@ -174,6 +199,8 @@ export class PlatformAdminService {
       deleted: !!t.deletedAt, deleted_at: t.deletedAt ?? null, deleted_by: t.deletedBy ?? null,
       purged: !!t.purgedAt, purged_at: t.purgedAt ?? null, purged_by: t.purgedBy ?? null,
       tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
+      control_profile: t.controlProfile === 'sme' ? 'sme' : 'enterprise',
+      sme_prefs: t.controlProfile === 'sme' ? ((t.smePrefs ?? {}) as Record<string, unknown>) : null,
       subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
       ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },

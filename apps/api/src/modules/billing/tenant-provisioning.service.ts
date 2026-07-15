@@ -3,6 +3,7 @@ import { eq, sql, and, desc, gt, isNull } from 'drizzle-orm';
 import { randomBytes, createHash } from 'node:crypto';
 import type { DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, tenants, users, signupInvites, signupRequests, platformSmeDefaults } from '../../database/schema';
+import { reportSubscriptions } from '../../database/schema/bi';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
@@ -324,6 +325,21 @@ export class TenantProvisioningService {
     if (this.ledger) {
       await this.ledger.provisionFiscalYear(Number(ymd().slice(0, 4)), Number(tenant.id));
       await this.ledger.provisionTenantCoA(Number(tenant.id), industry);
+    }
+
+    // SME-01 auto-schedule (docs/49 v1.2, audit gap G2) — the detective compensating control must OPERATE
+    // by design, not by someone remembering to configure it: every SME company is born with an ACTIVE
+    // monthly `sme_self_approval_review` subscription. Recipients = the stamped external-accountant email
+    // (when the platform defaults carry one); the in-app notification always fires per run, and the
+    // governance generator additionally raises a god-inbox platform notification when self-approvals exist
+    // (the platform-owner leg). nextRunAt=now ⇒ the first sweep runs on the next scheduler tick.
+    if (controlProfile === 'sme') {
+      const accountantEmail = (smePrefs as { accountant_email?: string | null }).accountant_email ?? null;
+      await db.insert(reportSubscriptions).values({
+        tenantId: Number(tenant.id), name: 'ทบทวนการอนุมัติด้วยตนเอง (SME-01)', reportType: 'sme_self_approval_review',
+        filters: { days: 31 }, frequency: 'monthly', recipients: accountantEmail ? [{ email: accountantEmail }] : [],
+        isActive: true, nextRunAt: new Date(), createdBy: username,
+      });
     }
 
     // Onboarding #5 — operator-visible provisioning signal (the audit_log already records the mutation +

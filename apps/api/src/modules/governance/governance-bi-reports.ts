@@ -1,12 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { BiReportGenerator, BiReportSource } from '../bi/report-registry';
+import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 import { GovernanceService } from './governance.service';
 
 // docs/46 Phase 1 — module-owned BI report generators (discovered by BiReportRegistrarService;
 // moved verbatim out of bi-generate.service.ts, behaviour identical).
 @Injectable()
 export class GovernanceBiReports implements BiReportSource {
-  constructor(private readonly governance: GovernanceService) {}
+  constructor(
+    private readonly governance: GovernanceService,
+    // SME-01 platform-owner leg (docs/49 v1.2): each review run that FINDS self-approvals also raises a
+    // god-inbox notification, so the platform owner is always in the loop without a per-company email.
+    @Optional() private readonly platformNotifs?: PlatformNotificationsService,
+  ) {}
 
   biReports(): BiReportGenerator[] {
     return [
@@ -32,6 +38,9 @@ export class GovernanceBiReports implements BiReportSource {
           const summaryTh = r.count
             ? `ทบทวนการอนุมัติด้วยตนเอง (SME-01): ${r.count} รายการใน ${r.window_days} วัน รวม ฿${r.total_amount.toLocaleString()} — โปรดทบทวนเหตุผลทุกรายการ`
             : `ทบทวนการอนุมัติด้วยตนเอง (SME-01): ไม่มีรายการใน ${r.window_days} วันที่ผ่านมา`;
+          if (r.count > 0 && user.tenantId != null) {
+            await this.platformNotifs?.emit({ type: 'sme_self_approval_review', title: `SME-01: มีการอนุมัติด้วยตนเอง ${r.count} รายการ`, body: summaryTh, tenantId: user.tenantId, refType: 'report', refId: 'sme_self_approval_review' });
+          }
           return { data: r, summary, summaryTh };
         },
       },
