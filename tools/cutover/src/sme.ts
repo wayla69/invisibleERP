@@ -102,6 +102,9 @@ async function main() {
   });
   ok('God provisions an SME company (control_profile=sme) → 201', smeCreate.status === 201 && smeCreate.json.control_profile === 'sme', `${smeCreate.status} ${smeCreate.json.control_profile}`);
   const smeTid = Number(smeCreate.json.tenant_id);
+  // docs/49/docs/36 item 5 — an SME company with no explicit plan_code defaults to the 'sme' single-operator plan.
+  const smeSub = (await pg.query(`SELECT plan_code FROM subscriptions WHERE tenant_id=${smeTid} LIMIT 1`)).rows as any[];
+  ok('SME company defaults onto the sme plan (edition-aware provisioning)', smeSub[0]?.plan_code === 'sme', `plan=${smeSub[0]?.plan_code}`);
   const smeOwner = await login('sme_owner', 'admin123');
   const smeMe = await inj('GET', '/api/auth/me', smeOwner);
   ok('SME admin /api/auth/me carries control_profile=sme + the stamped hidden nav groups',
