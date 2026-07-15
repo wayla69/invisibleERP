@@ -372,6 +372,35 @@ purchases are flagged, confirmed or blocked at the point of approval.
 
 ---
 
+## 5b. Marketing Mix Modeling — MMM (`/mmm`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Mix (MMM)**. **Who:** `marketing` or `exec`.
+
+MMM estimates how much each marketing channel (Facebook, Google, TikTok, a promotion…)
+contributes to sales, then suggests how to split a budget for the best return. It reads
+signals you bring into the system — it never guesses from your live sales tables directly.
+
+The workspace has three tabs:
+
+1. **สัญญาณ (Signals)** — the marketing signals already ingested for the last 30 days:
+   revenue and units per channel, and social mention volume + average sentiment per
+   platform. (Signals are loaded by your integration/import via the `POST /api/mmm/ingest/*`
+   endpoints; this tab is read-only.)
+2. **รันโมเดล (Model)** — choose a **window (days)** and enter the **spend per channel**
+   (add a row per channel), then press **รันโมเดล (Run model)**. Every run is recorded with a
+   run number (`MMM-YYYYMMDD-NNN`), who ran it, and the exact inputs — so any budget
+   recommendation can be reviewed and reproduced later. Prior runs are listed below the form.
+3. **คำแนะนำ (Recommendation)** — the latest run's result: each channel's **ROI**, its
+   **share of the modelled lift**, and the **recommended budget** (the same total, re-split
+   toward the higher-ROI channels). A channel with no spend shows ROI **—** (undefined, never
+   a fake "infinite" number), and the recommended split always adds back to exactly your total.
+
+**Good to know:** MMM is analysis only — it posts nothing to the general ledger. Each company
+sees only its own signals and runs. The v1 model is a transparent lift-share heuristic (a
+statistical regression can replace it later without changing this screen).
+
+---
+
 ## 6. AI assistant (chat)
 
 **Screen:** `/assistant` · **Required permission:** `ai_chat` (also `dashboard`).
