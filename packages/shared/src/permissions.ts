@@ -66,6 +66,12 @@ export const PERMISSIONS = [
   //    and by SoD R23. `treasury_approve` is a standalone granular perm (NOT implied by a coarse perm) so a
   //    maker role can't inherit it. Endpoints gate `treasury[_approve] OR exec` so exec roles keep working. ──
   'treasury', 'treasury_approve',
+  // ── SME single-user edition review duty (docs/49, SME-02) — the independent-reviewer attestation of the
+  //    SME-01 self-approval review. `sme_review` is the external accountant's duty: sign off that a period's
+  //    self-approvals were reviewed. Standalone granular perm (NOT implied by a coarse perm) so the single
+  //    operator doesn't silently inherit it — independence is the point; it's granted to a separate limited
+  //    user (or the platform owner signs the other leg via act-as, needing no tenant permission). ──
+  'sme_review',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -84,6 +90,7 @@ export const SUB_PERMISSIONS: Permission[] = [
   'cpq', 'cpq_approve',
   'quality_approve',
   'treasury_approve',
+  'sme_review',
 ];
 
 // ── Module enable/disable (system-wide feature flags) ──────────────────────
@@ -102,7 +109,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify', 'treasury', 'treasury_approve'],
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon', 'quality', 'quality_approve'],
-  'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals'],
+  'Administration': ['masterdata', 'bom_master', 'users', 'ai_chat', 'approvals', 'sme_review'],
   'Self-Service & Suppliers': ['ess', 'vendor_portal'],
   'Human Resources': ['hr', 'hr_admin'],
   'Real Estate (Developer)': ['re_sales', 're_contract_approve', 're_transfer'],

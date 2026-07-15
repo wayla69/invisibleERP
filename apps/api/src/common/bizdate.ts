@@ -17,5 +17,6 @@ export function bizParts(d: Date = new Date()): BizParts {
 const pad = (n: number) => String(n).padStart(2, '0');
 export const bizYmdCompact = (d?: Date) => { const p = bizParts(d); return `${p.y}${pad(p.mo)}${pad(p.d)}`; };                       // YYYYMMDD
 export const bizYmdDash    = (d?: Date) => { const p = bizParts(d); return `${p.y}-${pad(p.mo)}-${pad(p.d)}`; };                     // YYYY-MM-DD
+export const bizYm         = (d?: Date) => { const p = bizParts(d); return `${p.y}-${pad(p.mo)}`; };                                 // YYYY-MM (business month)
 export const bizStamp      = (d?: Date) => { const p = bizParts(d); return `${bizYmdCompact(d)}${pad(p.h)}${pad(p.mi)}${pad(p.s)}`; }; // YYYYMMDDHHMMSS
 export const bizHourMin    = (d?: Date) => { const p = bizParts(d); return `${pad(p.h)}${pad(p.mi)}`; };                              // HHMM

@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 294,
+    "total": 295,
     "by_status": {
-      "Implemented": 291,
+      "Implemented": 292,
       "Partial": 3
     },
     "by_family": {
@@ -13,7 +13,7 @@
       "CRM — Loyalty": 25,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
-      "Entity-Level": 8,
+      "Entity-Level": 9,
       "Expenditure": 16,
       "Fixed Assets": 8,
       "General Ledger": 27,
@@ -187,6 +187,25 @@
       "tod": "Inspect: an enterprise tenant's self-approval → 403 SOD_*; an sme tenant's self-approval without reason → 400 SELF_APPROVAL_REASON_REQUIRED; with reason → allowed + self_approvals row; downgrade attempt → 403.",
       "toe": "Re-perform on the sme cutover harness: enterprise block unchanged, sme reason-gated allowance writes evidence, the SME-01 report lists it, cross-tenant reads return nothing.",
       "evidence": "self_approvals rows + audit_log self_approved markers + scheduled SME-01 report runs",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SME-02",
+      "cycle": "Entity-Level",
+      "category": "Entity",
+      "fsli": "All",
+      "risk": "SME single-user edition (docs/49): SME-01 PRODUCES the self-approval review, but a detective control has no assurance value unless someone actually operates it — an unreviewed report is indistinguishable from no control. Without evidence that an independent reviewer examined each period's self-approvals, the compensating control cannot be relied upon by the auditor.",
+      "assertion": "Authorization",
+      "description": "Period attestation over SME-01 (migration 0417): the two independent reviewers each SIGN OFF that they reviewed a period's self-approvals — the external accountant (a tenant user holding the dedicated `sme_review` duty, granted to a separate limited login so the review is independent of the single operator) signs the 'accountant' leg, and the platform owner (god, acting-as the tenant) signs the 'platform' leg. Each sign-off snapshots the reviewed count/amount and stamps who/when (sme_review_signoffs, unique per tenant/period/kind; leg DERIVED from the principal, never client input). A period with self-approvals is 'complete' only once BOTH legs sign; the SME-01 report surfaces the current-period attestation status and outstanding legs, and each report run raises the god-inbox nudge when a leg is still outstanding. The /sme-review screen shows the reviewer the period's self-approval evidence before they sign.",
+      "prev_det": "Det",
+      "nature": "Hybrid",
+      "frequency": "Monthly",
+      "owner": "External accountant / Platform owner",
+      "coso": "P10/P16",
+      "code_reference": "database/schema/sme-review-signoffs.ts (0417); governance/sme-review.service.ts (signoff/status/items/list; leg from isPlatformAdmin); governance/sme-review.controller.ts (api/sme-review/*, perms sme_review/exec/users); governance/governance-bi-reports.ts (attestation status + outstanding-leg nudge on sme_self_approval_review); shared/permissions.ts (sme_review duty); apps/web /sme-review page + nav; docs/49-sme-single-user-edition-plan.md",
+      "tod": "Inspect: for a period with self-approvals, status shows both legs outstanding; after the accountant signs, 'platform' remains outstanding and complete=false; after the platform owner signs, complete=true; a user without sme_review/exec/users → 403; cross-tenant status returns only the caller's own tenant.",
+      "toe": "Re-perform on the sme cutover harness: accountant leg signs (snapshots the period's self-approvals, platform outstanding), re-sign is idempotent, platform (god act-as) leg completes the period, the SME-01 report carries the attestation status, cross-tenant isolation holds, and an unauthorized principal is refused.",
+      "evidence": "sme_review_signoffs rows (who/when/count per leg) + audit_log sme_review_signoff markers + the SME-01 report's attestation block",
       "status": "Implemented"
     },
     {
