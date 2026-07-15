@@ -277,6 +277,28 @@ Keeps the **customer master** clean and de-duplicated — the data your revenue 
 
 ---
 
+## 16.4h Campaign attribution (การระบุที่มาแคมเปญ — on the deal page, CRM-15, control CRM-17)
+
+Gives **every** marketing campaign that touched a deal its fair share of the credit, instead of handing it all to
+the lead source. On a deal page (`/crm/deals/{oppNo}`) a **การระบุที่มาแคมเปญ (Campaign attribution)** card lets you:
+
+- **Record touchpoints** — add each campaign that influenced the deal, with a **type** (lead source, meeting,
+  email, event, webinar, content) and a **date**. They're kept in chronological order.
+- **See the split.** Once the deal is **won**, pick an attribution **model** and the card shows how the deal's
+  revenue is shared across its touchpoints:
+  - **First-touch** — all to the first campaign; **Last-touch** — all to the last.
+  - **Linear** — split evenly.
+  - **U-shaped** — 40 % to the first, 40 % to the last, 20 % across the middle.
+- Whatever model you pick, the amounts **always add up to exactly the deal value** — nothing is double-counted or
+  lost. An **open** deal shows no amounts yet (only won revenue is attributed).
+
+Across the whole book, the **CRM multi-touch attribution** report (schedulable) totals attributed revenue per
+campaign under a chosen model, so marketing ROI reflects the *whole* journey — not just who got there first.
+*Control CRM-17 (Detective): campaign ROI is no longer mis-stated by single-touch crediting; attribution is
+model-governed and revenue-conserving.* Read-only to the ledger.
+
+---
+
 ## 16.5 Analytics — the "why" behind the pipeline (CRM-5)
 
 Beyond the win/loss dashboard, three read-only analytics answer *why* deals move the way they do. Each looks
@@ -569,6 +591,7 @@ documented public API exists yet for pulling a business's own Wongnai reviews.
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.10 | 2026-07-15 | **Campaign attribution — multi-touch credit on the deal page (`/crm/deals/{oppNo}`) — CRM-15, control CRM-17:** new §16.4h + a *Campaign attribution* card. Record each campaign **touchpoint** that influenced a deal (type + date); once the deal is **won**, pick an attribution **model** (first-touch / last-touch / linear / U-shaped) and see the deal's revenue split across its touchpoints — the amounts always sum to exactly the deal value. A schedulable **CRM multi-touch attribution** report totals attributed revenue per campaign, so marketing ROI reflects the whole journey, not just the first touch. Read-only to the ledger. |
 | 2.9 | 2026-07-14 | **Data quality — score worklist + duplicate surveillance + merge audit (`/crm`) — CRM-17, control CRM-16:** new §16.4g + a new *Data quality* tab. Every account gets a 0–100 **data-quality score** from the completeness **and validity** of its key fields (tax ID must be 13 digits, email must parse, owner + a contact of record, etc. — junk scores like blank), banded good/fair/poor, listed **worst-first** with the missing/invalid fields as chips; **Snapshot now** (or the scheduled *CRM data-quality scan* report) records the trend. A **likely-duplicates** panel proactively surfaces near-duplicate account pairs (same tax/email/phone or near-identical name) to merge the governed (maker-checker) way, and a **merge audit log** records every merge. Read-only to the ledger. |
 | 2.8 | 2026-07-14 | **Unified timeline + team notes on the deal page (`/crm/deals/…`) — CRM-8, control CRM-14:** §16.2 timeline now merges **every** touch (all-channel activities incl. sent comms / inbound replies / cadence touches, stage changes, linked quotes, **team notes**) into one time-ordered stream (same stream available per lead/opportunity/account via `GET /api/crm/timeline`). New **collaboration feed** composer: post an **append-only** internal note (can't be edited/deleted) and **`@mention`** a teammate to send them a private notification. Read-only to the ledger. |
 | 2.7 | 2026-07-14 | **Stage playbooks — exit criteria & WIP limits (`/crm`) — CRM-7, control CRM-13:** new §16.1b. Each pipeline stage can require a set of **fields before a deal enters** it (blocked with `STAGE_REQUIREMENTS_UNMET` + the missing list) and cap how many open deals it holds (a **WIP limit**, `WIP_LIMIT_EXCEEDED`), enforced on every move path and shown as a WIP badge + *Requires* chips + guidance on the board columns. Supervisors (`crm`/`exec`) configure them from the new **Playbook ขั้นตอน** editor. List view gains a multi-select **bulk stage move** (per-item result, not all-or-nothing). Read-only to the ledger. |

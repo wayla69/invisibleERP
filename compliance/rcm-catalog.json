@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 290,
+    "total": 291,
     "by_status": {
-      "Implemented": 286,
+      "Implemented": 287,
       "Partial": 4
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 47,
+      "Revenue & Cash": 48,
       "Tax": 12
     }
   },
@@ -1783,6 +1783,25 @@
       "tod": "Inspect the DQ scoring (completeness + validity, present-but-invalid scored not-ok), the worst-first worklist + band counts, the idempotent snapshot + BI report, the proactive near-duplicate surveillance vs the create-time exact check, and the append-only merge log written atomically with the maker-checked merge.",
       "toe": "Re-perform (pipeline harness, CRM-17 checks): a complete account scores good, a name-only account scores poor listing its missing fields, an invalid tax_id/email is scored not-ok; the worklist ranks worst-first with band counts; the snapshot is idempotent per account/day and feeds the trend + a registered crm_dq_scan report; a near-duplicate pair (shared phone + near-identical name) surfaces with reasons; the earlier maker-checked merge is recorded in the merge log (survivor + children reassigned + who); a second tenant's accounts are absent from the first tenant's worklist (RLS).",
       "evidence": "CRM data-quality score + worklist + breakdown; idempotent snapshot + BI report; near-duplicate surveillance pairs; append-only merge audit log",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-17",
+      "cycle": "Revenue & Cash",
+      "category": "Application",
+      "fsli": "Revenue (marketing/campaign attribution accuracy)",
+      "risk": "A won deal's revenue is credited to a SINGLE marketing touch — the lead source that first captured it — so campaigns that influenced the deal later in the cycle get no credit while the source campaign is over-credited. Campaign ROI is therefore mis-stated, and multi-touch marketing-spend decisions rest on inaccurate attribution: there is no way to distribute a deal's value across all the campaigns that touched it, and no assurance that attributed campaign revenue even reconciles to the won revenue it is derived from (double-counting or leakage would go unnoticed).",
+      "assertion": "Completeness/Accuracy",
+      "description": "MULTI-TOUCH campaign attribution (CRM-15, migration 0413). Each campaign TOUCHPOINT on an opportunity is recorded in crm_campaign_influence (campaign_name is CRM-owned free text — no cross-domain FK/join into the marketing tables; touch_type + touched_at order the journey; POST /api/crm/attribution/opportunity/:oppNo/touch, OPP_NOT_FOUND guard). A WON deal's amount is then distributed across its touchpoints under an explicit, selectable attribution MODEL — first_touch / last_touch / linear / u_shaped (position-based 40/20/40) — and GET /api/crm/attribution?model=&months= aggregates attributed revenue per campaign over a server-bounded window (default 6mo, clamped 1..24), with a per-opportunity breakdown at GET …/opportunity/:oppNo. CRITICALLY every model CONSERVES the total: the weights sum to 1 and the rounding residual is absorbed by the last touch, so Σ attributed = the deal amount, and the report exposes a reconciled invariant (total_attributed == won-with-touches revenue) — attribution can neither double-count nor leak. An OPEN deal attributes nothing (only won revenue is distributed). Extends the single-touch crm_source_roi read; the report is a schedulable BI report (crm_attribution, module-owned BiReportSource). Reads gate crm/exec/ar. One tenant table (0232 RLS, tenant-leading index). No GL post.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / per marketing review",
+      "owner": "Marketing / Sales Ops / CRM",
+      "coso": "P13",
+      "code_reference": "crm/attribution/crm-attribution.service.ts (addTouch OPP_NOT_FOUND; weightsFor first/last/linear/u_shaped + distribute residual-absorbing conservation; opportunityInfluence per-deal per-model breakdown; attribution per-campaign roll-up + reconciled invariant, server-bounded window); crm-attribution.controller.ts (GET /api/crm/attribution[?model&months], GET …/opportunity/:oppNo, POST …/opportunity/:oppNo/touch — crm/exec/ar); crm-attribution-bi-reports.ts (crm_attribution BiReportSource); schema/crm-pipeline.ts crm_campaign_influence + migration 0413; bi report-registry crm_attribution; crm.module wiring; web deal-client.tsx attribution card; cutover/pipeline.ts (ToE, CRM-15 checks)",
+      "tod": "Inspect the touchpoint recording (chronological, OPP_NOT_FOUND guard), the four attribution models' weightings, the revenue-conservation (residual absorbed so Σ attributed = deal amount), the reconciled invariant on the report, and the open-deal-attributes-nothing rule.",
+      "toe": "Re-perform (pipeline harness, CRM-15 checks): three touchpoints on a 100,000 deal are recorded chronologically; a touch on an unknown opp -> OPP_NOT_FOUND; before Won the deal attributes 0; on Won u_shaped splits 40k/20k/40k, first_touch 100k on the first, last_touch 100k on the last, linear conserves exactly (33,333.33+33,333.33+33,333.34=100,000); the report aggregates per campaign with total_attributed == won-with-touches and reconciled=true under both u_shaped and linear; the registry exposes the crm_attribution report type.",
+      "evidence": "Per-campaign attributed-revenue report (per model) + the reconciled (revenue-conservation) invariant; per-opportunity touchpoint breakdown; schedulable crm_attribution BI report",
       "status": "Implemented"
     },
     {

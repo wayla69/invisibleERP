@@ -17,6 +17,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   crm_funnel: { label: 'วิเคราะห์กรวยการขาย + ความเร็ว', labelEn: 'CRM funnel conversion + velocity' },
   // Lead source → won revenue (win rate + average deal size per channel).
   crm_source_roi: { label: 'ผลตอบแทนตามแหล่งที่มา (Source ROI)', labelEn: 'CRM source ROI (won revenue by source)' },
+  // CRM-15 (docs/44) — multi-touch campaign attribution: won revenue distributed across campaign touchpoints
+  // under an attribution model (first/last/linear/U-shaped); revenue-conserving (control CRM-17).
+  crm_attribution: { label: 'การระบุที่มาแบบหลายจุดสัมผัส (multi-touch attribution)', labelEn: 'CRM multi-touch campaign attribution' },
   // G4 (docs/45): one exec view of marketing spend → lift → margin (campaign attribution + vouchers + B2B + budget)
   marketing_roi: { label: 'ผลตอบแทนการตลาด (spend → lift → margin)', labelEn: 'Marketing ROI (spend → lift → margin)' },
   // G2 (docs/45): market-basket affinity — which menu items sell together (support/confidence/lift)
