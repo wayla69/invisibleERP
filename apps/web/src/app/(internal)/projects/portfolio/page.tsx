@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, ShieldAlert, ShieldCheck, Users, Wallet, Receipt, Clock, TrendingUp, FolderKanban, BellRing, Scale, Plus, Lock, Trash2, CheckCircle2 } from 'lucide-react';
+import { Activity, ShieldAlert, ShieldCheck, Users, Wallet, Receipt, Clock, TrendingUp, FolderKanban, BellRing, Scale, Plus, Lock, Trash2, CheckCircle2, Repeat, Check } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -76,6 +76,9 @@ export default function PortfolioPage() {
 
           {/* Portfolio selection scenarios (PPM Wave P4, PROJ-25) */}
           <PortfolioScenarios projects={d?.projects ?? []} />
+
+          {/* CRM↔PPM back-flow — delivered-project renewal motion (CRM-18) */}
+          <RenewalBackflow />
 
           <div className="grid gap-4 lg:grid-cols-5">
             {/* pipeline → delivery funnel */}
@@ -401,6 +404,49 @@ function PortfolioScenarios({ projects }: { projects: any[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </Card>
+  );
+}
+
+// CRM↔PPM back-flow (control CRM-18) — delivered projects (phase gate at 'closed') that lack a renewal
+// opportunity are surfaced as GAPS so recurring revenue doesn't silently lapse; raise the renewal from here.
+// Inlined in this already-'use client' page (no new client-first file → use-client ratchet flat).
+function RenewalBackflow() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['projects', 'renewals'], queryFn: () => api('/api/crm/project-renewals') });
+  const raise = useMutation({
+    mutationFn: (code: string) => api(`/api/crm/project-renewals/${encodeURIComponent(code)}/raise`, { method: 'POST', body: '{}' }),
+    onSuccess: (r: any) => { notifySuccess(t('pj.renewal_raised', { opp: r.opportunity_no })); qc.invalidateQueries({ queryKey: ['projects', 'renewals'] }); }, onError: (e: any) => notifyError(e.message),
+  });
+  const d = q.data;
+  const rows = d?.delivered ?? [];
+  if (!rows.length) return null;
+
+  return (
+    <Card className="gap-3 p-5">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-base font-semibold"><Repeat className="size-4" /> {t('pj.renewal_title')}</h3>
+        {(d?.counts?.gaps ?? 0) > 0 && <Badge variant="warning">{t('pj.renewal_gaps_n', { n: d.counts.gaps })}</Badge>}
+      </div>
+      <p className="text-xs text-muted-foreground">{t('pj.renewal_desc')}</p>
+      <ul className="divide-y divide-border/50">
+        {rows.map((r: any) => (
+          <li key={r.project_code} className="flex items-center justify-between gap-2 py-2 text-sm">
+            <span className="min-w-0 truncate">
+              <span className="font-medium">{r.project_code}</span> <span className="text-muted-foreground">{r.name}</span>
+              <span className="ml-2 text-xs text-muted-foreground">{r.account_name ? `${r.account_name} · ${baht(r.contract_amount)}` : t('pj.renewal_no_account')}</span>
+            </span>
+            {r.renewal_raised ? (
+              <Badge variant="success"><Check className="mr-1 size-3" />{r.renewal_opp_no}</Badge>
+            ) : r.is_gap ? (
+              <Button size="sm" variant="outline" disabled={raise.isPending} onClick={() => raise.mutate(r.project_code)}><Repeat className="size-4" /> {t('pj.renewal_raise')}</Button>
+            ) : (
+              <Badge variant="muted">{t('pj.renewal_no_account_badge')}</Badge>
+            )}
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }

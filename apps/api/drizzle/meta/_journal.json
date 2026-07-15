@@ -2717,6 +2717,13 @@
       "when": 2023820000353,
       "tag": "0414_sme_control_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 389,
+      "version": "7",
+      "when": 2023820000354,
+      "tag": "0415_project_renewals",
+      "breakpoints": true
     }
   ]
 }

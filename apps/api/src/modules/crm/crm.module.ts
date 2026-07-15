@@ -11,6 +11,7 @@ import { CrmTerritoryModule } from './territory/crm-territory.module';
 import { CrmSequencesModule } from './sequences/crm-sequences.module';
 import { CrmDqModule } from './dq/crm-dq.module';
 import { CrmAttributionModule } from './attribution/crm-attribution.module';
+import { CrmProjectRenewalsModule } from './project-renewals/crm-project-renewals.module';
 import { CrmInboundModule } from './inbound/crm-inbound.module';
 import { FinanceModule } from '../finance/finance.module';
 import { CrmBiReports } from './crm-bi-reports';
@@ -23,9 +24,9 @@ import { CrmBiReports } from './crm-bi-reports';
 // (crm_accounts/crm_contacts with duplicate governance + audited merge). Re-exported so importers (bi)
 // can keep resolving.
 @Module({
-  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmDqModule, CrmAttributionModule, CrmInboundModule, FinanceModule],
+  imports: [CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmDqModule, CrmAttributionModule, CrmProjectRenewalsModule, CrmInboundModule, FinanceModule],
   controllers: [CrmController],
   providers: [CrmBiReports, CrmService],
-  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmDqModule, CrmAttributionModule, CrmInboundModule],
+  exports: [CrmService, CrmPipelineModule, PipelineModule, CrmAccountsModule, CrmAccountDepthModule, CrmAccountHealthModule, CrmForecastModule, CrmTerritoryModule, CrmSequencesModule, CrmDqModule, CrmAttributionModule, CrmProjectRenewalsModule, CrmInboundModule],
 })
 export class CrmModule {}
