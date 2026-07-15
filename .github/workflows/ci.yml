@@ -149,7 +149,7 @@ jobs:
           - shard: analytics
             run: >-
               cutover:epm-planning cutover:bi cutover:demand-ml cutover:customers
-              cutover:branch cutover:channel cutover:offline-sync cutover:workflow cutover:reputation
+              cutover:branch cutover:channel cutover:offline-sync cutover:workflow cutover:reputation cutover:mmm
           # ── AI / HR / portal ──
           - shard: ai-hr
             run: >-

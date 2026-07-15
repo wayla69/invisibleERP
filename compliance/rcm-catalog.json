@@ -4,8 +4,8 @@
   "census": {
     "total": 293,
     "by_status": {
-      "Implemented": 289,
-      "Partial": 4
+      "Implemented": 290,
+      "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
@@ -2419,17 +2419,17 @@
       "fsli": "All",
       "risk": "A marketing-mix (MMM) channel ROI / budget-reallocation recommendation is produced with no record of the inputs it used (per-channel spend, window, who ran it) or with opaque non-reproducible math, so a budget-shift decision cannot be audited or re-performed; or one tenant's MMM staging/model data (social feeds, per-channel sales, sentiment, channel results) surfaces for a different tenant.",
       "assertion": "Occurrence/Accuracy/Authorization",
-      "description": "Marketing Mix Modeling (docs/48): every model run persists an AUDITABLE header (mmm_model_runs — window_days, total_spend, spend_by_channel inputs, created_by, created_at) with its per-channel result rows (mmm_channel_results), so any budget recommendation is reproducible from the recorded inputs. The attribution itself is a PURE, deterministic, unit-tested function (mmm-model.ts computeMmm — v1 lift-share heuristic: contribution = attributed revenue × a bounded positive-buzz uplift; ROI = contribution ÷ spend, null when spend is 0; ROI-proportional budget split summing to exactly the total) — no hidden state, identical inputs give identical outputs. Every table in the staging→core→analytics pipeline (mmm_social_raw_feeds, mmm_sales_daily, mmm_sentiment_trends, mmm_customer_behavior, mmm_model_runs, mmm_channel_results) is tenant-scoped (canonical org-clause RLS + explicit tenant_id filter + leading tenant index) so a signal/result row can never surface for another tenant; the derived customer roll-up is keyed by the customer master's business key (customer_no), never a cross-tenant-colliding string PK. Gated to marketing/exec (no GL posting — an analytical read model). NB: unit tests cover the math; the end-to-end ToE (cross-tenant boundary + audit-trail re-performance) via a dedicated cutover harness is a phase-2 follow-up — hence Partial.",
+      "description": "Marketing Mix Modeling (docs/48): every model run persists an AUDITABLE header (mmm_model_runs — window_days, total_spend, spend_by_channel inputs, created_by, created_at) with its per-channel result rows (mmm_channel_results), so any budget recommendation is reproducible from the recorded inputs. The attribution itself is a PURE, deterministic, unit-tested function (mmm-model.ts computeMmm — v1 lift-share heuristic: contribution = attributed revenue × a bounded positive-buzz uplift; ROI = contribution ÷ spend, null when spend is 0; ROI-proportional budget split summing to exactly the total) — no hidden state, identical inputs give identical outputs. Every table in the staging→core→analytics pipeline (mmm_social_raw_feeds, mmm_sales_daily, mmm_sentiment_trends, mmm_customer_behavior, mmm_model_runs, mmm_channel_results) is tenant-scoped (canonical org-clause RLS + explicit tenant_id filter + leading tenant index) so a signal/result row can never surface for another tenant; the derived customer roll-up is keyed by the customer master's business key (customer_no), never a cross-tenant-colliding string PK. Gated to marketing/exec (no GL posting — an analytical read model). The end-to-end ToE (a dedicated cutover harness) now re-performs the full control: ingest → run → the pure-model invariants (ROI null at zero spend, allocations sum to exactly the budget, lift shares sum to 100, buzz uplift), the reproducible audited run header + the append-only audit_log row, BOLA safety (cross-tenant getRun → 404) and the multi-tenant isolation/leak protocol.",
       "prev_det": "Prev",
       "nature": "Automated",
       "frequency": "Per model run",
       "owner": "Marketing / Exec",
       "coso": "P10/P16",
-      "code_reference": "mmm/mmm-model.ts (pure deterministic attribution — unit-tested test/mmm-model.test.ts); mmm/mmm-model.service.ts (audited run header + per-channel results, tenant-scoped, BOLA-safe getRun); mmm/mmm-ingest.service.ts (idempotent staging/core upserts); mmm/mmm-reads.service.ts + mmm-bi-reports.ts (tenant-scoped reads + mmm_run/mmm_summary report types); schema/mmm.ts + migration 0405 (RLS, tenant-leading indexes); bi mmm-summary live read",
-      "tod": "Inspect the persisted run header (inputs + actor + timestamp), the pure attribution function + its unit tests, and the tenant_id filter on every MMM query + the RLS policy on all six tables.",
-      "toe": "Re-perform: run the model → a mmm_model_runs row records the spend/window/actor and mmm_channel_results holds the per-channel ROI/allocation; computeMmm is deterministic and ROI is null (not Infinity) at zero spend (unit-tested); a T2 tenant's MMM reads/getRun return zero T1 rows (RLS org-sharing hard-asserted by the pg-core harness for all six tables).",
-      "evidence": "mmm_model_runs audit header + mmm_channel_results; MMM staging/core tenant isolation; computeMmm unit tests",
-      "status": "Partial"
+      "code_reference": "mmm/mmm-model.ts (pure deterministic attribution — unit-tested test/mmm-model.test.ts); mmm/mmm-model.service.ts (audited run header + per-channel results, tenant-scoped, BOLA-safe getRun); mmm/mmm-ingest.service.ts (idempotent staging/core upserts); mmm/mmm-reads.service.ts + mmm-bi-reports.ts (tenant-scoped reads + mmm_run/mmm_summary report types); schema/mmm.ts + migration 0405 (RLS, tenant-leading indexes); bi mmm-summary live read; web /mmm workspace (Signals/Model/Recommendation tabs); cutover/mmm.ts (end-to-end ToE, 16 checks)",
+      "tod": "Inspect the persisted run header (inputs + actor + timestamp), the pure attribution function + its unit tests, the tenant_id filter on every MMM query + the RLS policy on all six tables, and the cutover ToE harness.",
+      "toe": "Re-perform (mmm harness, 16 checks): run the model → a mmm_model_runs row records the spend/window/actor + an append-only audit_log row is written and mmm_channel_results holds the per-channel ROI/allocation; computeMmm is deterministic (a re-run reproduces identical per-channel ROI/allocation) and ROI is null (not Infinity) at zero spend, allocations sum to exactly the budget, lift shares sum to 100; a non-marketing user is refused 403; a T2 tenant's MMM reads/getRun return zero T1 rows / 404 (RLS org-sharing also hard-asserted by the pg-core harness for all six tables).",
+      "evidence": "mmm_model_runs audit header + mmm_channel_results + audit_log run row; MMM staging/core tenant isolation; computeMmm unit tests + cutover/mmm.ts ToE",
+      "status": "Implemented"
     },
     {
       "control_id": "EXP-01",
