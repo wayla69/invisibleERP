@@ -3,7 +3,9 @@
 // app.listen().
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { HttpException, HttpStatus } from '@nestjs/common';
+import zlib from 'node:zlib';
 import helmet from '@fastify/helmet';
+import compress from '@fastify/compress';
 import rateLimit from '@fastify/rate-limit';
 import { rateLimitRedis } from './rate-limit-store';
 
@@ -36,6 +38,30 @@ const LEAD_MAX = Number(process.env.RATE_LIMIT_WEB_LEAD_MAX ?? 20); // public we
 
 export async function registerEdge(app: NestFastifyApplication): Promise<void> {
   const fastify = app.getHttpAdapter().getInstance();
+
+  // Response compression (gzip/brotli). This is a JSON API whose largest reads are unbounded, highly
+  // repetitive text — GL account-ledger detail, master-data / audit CSV exports, consolidation run lines,
+  // BI report generation, the sales cube — which compress by ~70-90%. Register FIRST so its onSend hook
+  // wraps every downstream reply. Content-type gating is `mime-db`-driven (the plugin's default): it only
+  // compresses `compressible: true` types (application/json, text/csv, text/plain, …) and skips the already-
+  // zipped xlsx/pdf attachment downloads (compressible: false) and `text/event-stream` (SSE) — no per-route
+  // allow-list needed. SSE also bypasses reply.send (Nest writes @Sse straight to reply.raw), so the hook
+  // never touches those streams. Brotli quality is pinned to a moderate level: these are dynamic, per-request
+  // compressions, and Node's brotli default (quality 11) is far too CPU-heavy for that — q4 keeps most of the
+  // ratio at a fraction of the cost. Below `threshold` bytes the payload is sent uncompressed (the overhead
+  // would exceed the saving). Opt out entirely with DISABLE_HTTP_COMPRESSION=1.
+  if (process.env.DISABLE_HTTP_COMPRESSION !== '1') {
+    const threshold = Math.max(0, Math.floor(Number(process.env.COMPRESSION_THRESHOLD ?? 1024)) || 0);
+    const brotliQuality = Math.min(11, Math.max(0, Math.floor(Number(process.env.COMPRESSION_BROTLI_QUALITY ?? 4)) || 0));
+    await fastify.register(compress, {
+      global: true,
+      threshold,
+      // Prefer brotli when the client advertises it (better ratio than gzip), else gzip, else deflate.
+      encodings: ['br', 'gzip', 'deflate'],
+      brotliOptions: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: brotliQuality } },
+      zlibOptions: { level: 6 }, // gzip/deflate sweet spot (Node default) — good ratio, low CPU.
+    });
+  }
 
   // Security headers. This is a JSON API that serves no HTML/scripts, so lock CSP all the way down
   // (the web app's own CSP — which governs script execution / XSS — lives in apps/web/next.config.mjs).

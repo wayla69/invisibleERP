@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
+    "@fastify/compress": "^8.0.0",
     "@fastify/helmet": "^13.0.0",
     "@fastify/rate-limit": "^11.0.0",
     "@ierp/shared": "workspace:*",

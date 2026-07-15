@@ -116,6 +116,18 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 > of reverse proxies in front of the API: without it Fastify's `req.ip` is the proxy's address, so the edge
 > limiter buckets *every* client together — the same knob fixes the spoofable audit IP (L-12).
 
+> **Response compression is ON by default** (`common/edge.ts`, `@fastify/compress`, registered ahead of
+> helmet/rate-limit). The API's largest reads are unbounded, repetitive text — GL account-ledger detail,
+> master-data/audit CSV exports, consolidation run lines, BI report generation, the sales cube — which
+> compress ~70-97% (a 383 KB account-ledger JSON drops to ~12 KB brotli / ~21 KB gzip). Content-type gating
+> is mime-db-driven, so the already-zipped **xlsx/pdf** downloads and **`text/event-stream`** SSE streams are
+> skipped automatically (no per-route allow-list). Brotli quality is pinned to a moderate **4** (dynamic,
+> per-request compression — Node's default 11 is far too CPU-heavy). Knobs: `DISABLE_HTTP_COMPRESSION=1`
+> (rollback without redeploy), `COMPRESSION_THRESHOLD` (default 1024 B), `COMPRESSION_BROTLI_QUALITY`
+> (default 4). Prefer this over a binary wire format (protobuf/gRPC): the surface is browser-facing REST/JSON
+> and all tooling — golden master, harnesses, DevTools — is JSON-native; compression captures the bandwidth
+> win at near-zero engineering cost.
+
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.
   Two queue-pressure guards against the ~20-concurrent-job account limit (both root-caused from the
@@ -160,6 +172,7 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 ## 6. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 2.0 | 2026-07-15 | Platform | §4: response compression ON by default (`@fastify/compress` in `common/edge.ts`) — gzip/brotli over the large repetitive JSON/CSV reads (~70-97%; 383 KB account-ledger JSON → ~12 KB brotli), mime-db gated so xlsx/pdf downloads + SSE are skipped; knobs `DISABLE_HTTP_COMPRESSION` / `COMPRESSION_THRESHOLD` / `COMPRESSION_BROTLI_QUALITY`. Chosen over a protobuf/gRPC rewrite (browser-facing REST/JSON; JSON-native tooling). |
 | 1.8 | 2026-07-10 | Platform | §5: `ci.yml` per-ref `concurrency` group (cancel superseded PR runs; main keeps in-flight + newest pending) — fixes the 2026-07-10 Actions queue freeze (26 runs / ~2,000 jobs backlogged, 0 in progress). |
 | 1.9 | 2026-07-10 | Platform | §5: harness matrix sharded ~89 jobs → 11 domain shards (balanced by measured runtime; per-harness log groups + full-shard run-through on failure preserved) — a full CI run is now ~18 jobs and fits one ~20-job concurrency wave; branch-protection required checks must reference the shard names. |
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
