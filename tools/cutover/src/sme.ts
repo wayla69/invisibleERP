@@ -43,7 +43,7 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   // god1 (platform owner) lives in HQ
-  await db.insert(s.users).values([{ username: 'god1', passwordHash: await pw.hash('god1pass1234'), role: 'Admin' }]).onConflictDoNothing();
+  await db.insert(s.users).values([{ username: 'god1', passwordHash: await pw.hash('admin123'), role: 'Admin' }]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -59,7 +59,7 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const year = new Date().getFullYear();
-  const god = await login('god1', 'god1pass1234');
+  const god = await login('god1', 'admin123');
 
   const postJe = (token: string, amount: number) =>
     inj('POST', '/api/ledger/journal', token, { date: `${year}-06-15`, source: 'TEST', lines: [{ account_code: '1000', debit: amount }, { account_code: '4000', credit: amount }] });
@@ -74,14 +74,14 @@ async function main() {
 
   // ── 1. Enterprise regression (UAT-ADM-157): maker ≠ checker binds exactly as before ──
   const entCreate = await inj('POST', '/api/admin/tenants', god, {
-    company_name: 'EntCo', tenant_code: 'entco1', admin_username: 'ent_admin', admin_password: 'entadmin12345', email: 'ent@x.co',
+    company_name: 'EntCo', tenant_code: 'entco1', admin_username: 'ent_admin', admin_password: 'admin123', email: 'ent@x.co',
   });
   ok('God provisions a default company → 201 control_profile=enterprise', entCreate.status === 201 && entCreate.json.control_profile === 'enterprise', `${entCreate.status} ${entCreate.json.control_profile}`);
   const entTid = Number(entCreate.json.tenant_id);
   // a second (different) approver in the same enterprise company, seeded directly
-  await db.insert(s.users).values([{ username: 'ent_approver', passwordHash: await pw.hash('entappr12345'), role: 'Admin', tenantId: entTid, orgId: entTid }]);
-  const entAdmin = await login('ent_admin', 'entadmin12345');
-  const entApprover = await login('ent_approver', 'entappr12345');
+  await db.insert(s.users).values([{ username: 'ent_approver', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: entTid, orgId: entTid }]);
+  const entAdmin = await login('ent_admin', 'admin123');
+  const entApprover = await login('ent_approver', 'admin123');
   const entJe = await postJe(entAdmin, 1000);
   const entJeNo = entJe.json.entry_no;
   const entSelf = await inj('POST', `/api/ledger/journal/${entJeNo}/approve`, entAdmin);
@@ -98,11 +98,11 @@ async function main() {
     setDefaults.status === 200 && getDefaults.status === 200 && (getDefaults.json.hidden_nav_groups ?? []).includes('nav.group.projects') && getDefaults.json.accountant_email === 'acc@x.co',
     JSON.stringify(getDefaults.json).slice(0, 120));
   const smeCreate = await inj('POST', '/api/admin/tenants', god, {
-    company_name: 'ร้านเจ้าของคนเดียว', tenant_code: 'smeco1', admin_username: 'sme_owner', admin_password: 'smeowner12345', email: 'sme@x.co', control_profile: 'sme',
+    company_name: 'ร้านเจ้าของคนเดียว', tenant_code: 'smeco1', admin_username: 'sme_owner', admin_password: 'admin123', email: 'sme@x.co', control_profile: 'sme',
   });
   ok('God provisions an SME company (control_profile=sme) → 201', smeCreate.status === 201 && smeCreate.json.control_profile === 'sme', `${smeCreate.status} ${smeCreate.json.control_profile}`);
   const smeTid = Number(smeCreate.json.tenant_id);
-  const smeOwner = await login('sme_owner', 'smeowner12345');
+  const smeOwner = await login('sme_owner', 'admin123');
   const smeMe = await inj('GET', '/api/auth/me', smeOwner);
   ok('SME admin /api/auth/me carries control_profile=sme + the stamped hidden nav groups',
     smeMe.json.control_profile === 'sme' && (smeMe.json.sme_hidden_nav_groups ?? []).includes('nav.group.projects'),
@@ -150,11 +150,11 @@ async function main() {
 
   // ── 7. Public signup NEVER honours control_profile (UAT-ADM-160) ──
   const su = await inj('POST', '/api/auth/signup', undefined, {
-    company_name: 'SneakySME', tenant_code: 'sneaky1', admin_username: 'sneaky_admin', admin_password: 'sneaky12345', email: 'sn@x.co', control_profile: 'sme',
+    company_name: 'SneakySME', tenant_code: 'sneaky1', admin_username: 'sneaky_admin', admin_password: 'admin123', email: 'sn@x.co', control_profile: 'sme',
   });
   const suRow = (await pg.query(`SELECT control_profile FROM tenants WHERE id=${Number(su.json.tenant_id) || 0}`)).rows as any[];
   ok('Public signup with control_profile=sme → provisioned tenant is ENTERPRISE', su.status === 201 && suRow[0]?.control_profile === 'enterprise', `${su.status} ${suRow[0]?.control_profile}`);
-  const sneaky = await login('sneaky_admin', 'sneaky12345');
+  const sneaky = await login('sneaky_admin', 'admin123');
   const sneakyMe = await inj('GET', '/api/auth/me', sneaky);
   ok('Signup admin /api/auth/me carries NO sme profile (no self-approval relaxation)', sneakyMe.status === 200 && sneakyMe.json.control_profile !== 'sme', `cp=${sneakyMe.json.control_profile}`);
 
