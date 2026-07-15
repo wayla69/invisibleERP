@@ -1,5 +1,6 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { sql, eq, and, desc, asc, inArray } from 'drizzle-orm';
+import { assertMakerChecker } from '../../common/control-profile';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, arReceipts, arReceiptApplications, tenants, taxInvoices } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -307,12 +308,12 @@ export class ArCashApplicationService {
   }
 
   // ── POST /api/finance/ar/cash-application/:batchNo/approve — checker applies a parked batch (SoD) ──
-  async approveBatch(batchNo: string, approver: JwtUser) {
+  async approveBatch(batchNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const rows = await db.select().from(arReceiptApplications).where(and(eq(arReceiptApplications.batchNo, batchNo), eq(arReceiptApplications.status, 'PendingApproval')));
     if (!rows.length) throw new BadRequestException({ code: 'NOT_PENDING', message: `No pending applications in batch ${batchNo}`, messageTh: 'ไม่มีรายการรออนุมัติในชุดนี้' });
     if (rows.some((r: any) => r.appliedBy && r.appliedBy === approver.username)) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a cash application you posted', messageTh: 'ผู้บันทึกตัดชำระอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user: approver, maker: approver.username, event: 'ar.cash-application.approve', ref: batchNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a cash application you posted', messageTh: 'ผู้บันทึกตัดชำระอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const first = rows[0]!;
     const tenantId = first.tenantId != null ? Number(first.tenantId) : null;

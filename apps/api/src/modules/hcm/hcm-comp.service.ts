@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, isNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payGrades, compChanges, benefitPlans, benefitEnrollments } from '../../database/schema';
 import { StatusLogService } from '../../common/status-log.service';
 import { isUniqueViolation } from '../../common/db-error';
+import { assertMakerChecker } from '../../common/control-profile';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -140,13 +141,13 @@ export class HcmCompService {
 
   // HR-06 maker-checker — approved_by MUST differ from requested_by; only hr_admin/exec approve (enforced by
   // the controller). The employee master (monthlySalary + jobGrade) is written ONLY here, on approval.
-  async approveChange(id: number, user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-approve WITH self_approval_reason — logged, reviewed by SME-01.
+  async approveChange(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const [r] = await this.db.select().from(compChanges).where(eq(compChanges.id, Number(id))).limit(1);
     if (!r) throw new NotFoundException({ code: 'COMP_CHANGE_NOT_FOUND', message: `Comp change ${id} not found`, messageTh: 'ไม่พบรายการปรับค่าตอบแทน' });
     if (r.status === 'approved') return { id: Number(id), status: 'approved', already: true };
     if (r.status === 'rejected') throw new BadRequestException({ code: 'COMP_CHANGE_REJECTED', message: 'Comp change already rejected', messageTh: 'รายการถูกปฏิเสธแล้ว' });
-    if (r.requestedBy && r.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own comp change', messageTh: 'ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
+    await assertMakerChecker(this.db, { user, maker: r.requestedBy, event: 'hcm.comp-change.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own comp change', messageTh: 'ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
 
     await this.db.update(compChanges).set({ status: 'approved', approvedBy: user.username }).where(eq(compChanges.id, Number(id)));
     // Write the new salary/grade to the employee master ONLY on approval.

@@ -1,5 +1,6 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { sql, eq, and, desc, inArray } from 'drizzle-orm';
+import { assertMakerChecker } from '../../common/control-profile';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, arReceipts, arDunningLog, creditEvents, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -288,16 +289,14 @@ export class CollectionsService {
   }
 
   // Release a manual hold. SoD: the releaser must differ from whoever placed the active hold (maker-checker).
-  async releaseHold(tenantId: number, reason: string | undefined, user: JwtUser) {
+  async releaseHold(tenantId: number, reason: string | undefined, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [t] = await db.select({ id: tenants.id, code: tenants.code, creditHold: tenants.creditHold }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
     if (t.creditHold !== true) throw new BadRequestException({ code: 'NOT_ON_HOLD', message: 'Customer is not on credit hold', messageTh: 'ลูกค้าไม่ได้ถูกระงับเครดิต' });
     const [lastHold] = await db.select({ by: creditEvents.actionedBy }).from(creditEvents)
       .where(and(eq(creditEvents.tenantId, tenantId), eq(creditEvents.eventType, 'hold'))).orderBy(desc(creditEvents.id)).limit(1);
-    if (lastHold?.by && lastHold.by === user.username) {
-      throw new BadRequestException({ code: 'SOD_SELF_RELEASE', message: 'You cannot release a hold you placed — release requires an independent approver', messageTh: 'ผู้ตั้งระงับเครดิตปลดระงับเองไม่ได้ (ต้องให้ผู้อื่นอนุมัติ)' });
-    }
+    await assertMakerChecker(db, { user, maker: lastHold?.by, event: 'ar.credit-hold.release', ref: String(tenantId), reason: selfApprovalReason, code: 'SOD_SELF_RELEASE', message: 'You cannot release a hold you placed — release requires an independent approver', messageTh: 'ผู้ตั้งระงับเครดิตปลดระงับเองไม่ได้ (ต้องให้ผู้อื่นอนุมัติ)', httpStatus: 400 });
     await db.update(tenants).set({ creditHold: false }).where(eq(tenants.id, tenantId));
     await db.insert(creditEvents).values({ tenantId, eventType: 'release', reason: reason ?? null, actionedBy: user.username });
     return { tenant_id: tenantId, customer: t.code, credit_hold: false, by: user.username };
@@ -319,11 +318,11 @@ export class CollectionsService {
 
   // Approve a staged credit-limit change — a DIFFERENT user than the requester applies the new limit
   // (self-approval → 403 SOD_VIOLATION). Only on approval does the customer's ceiling actually move.
-  async approveLimitChange(reqNo: string, user: JwtUser) {
+  async approveLimitChange(reqNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [ev] = await db.select().from(creditEvents).where(and(eq(creditEvents.reqNo, reqNo), eq(creditEvents.status, 'PendingApproval'))).limit(1);
     if (!ev) throw new NotFoundException({ code: 'NOT_PENDING', message: `No credit-limit change pending approval for ${reqNo}`, messageTh: 'ไม่มีคำขอเปลี่ยนวงเงินที่รออนุมัติ' });
-    if (ev.actionedBy && ev.actionedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a credit-limit change you requested', messageTh: 'ผู้ขอเปลี่ยนวงเงินอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: ev.actionedBy, event: 'ar.credit-limit.approve', ref: reqNo, amount: n(ev.newLimit), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a credit-limit change you requested', messageTh: 'ผู้ขอเปลี่ยนวงเงินอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const newLimit = round2(n(ev.newLimit));
     await db.update(tenants).set({ creditLimit: String(newLimit) }).where(eq(tenants.id, Number(ev.tenantId)));
     await db.update(creditEvents).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(creditEvents.id, Number(ev.id)));

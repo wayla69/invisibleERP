@@ -1,10 +1,12 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, lt, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dtaValuationAllowances, uncertainTaxPositions, deferredTaxRuns } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
+import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { n } from '../../database/queries';
 
 // TAX-12 — ASC 740 income-tax disclosures on top of the deferred-tax engine (TAX-06):
@@ -97,13 +99,13 @@ export class TaxUtpService {
 
   // postValuationAllowance — maker-checker post of an Open row (poster ≠ runner ⇒ SELF_POST). Posts the DELTA
   // (allowance increase = a charge: Dr 5950 / Cr 1700; a release: Dr 1700 / Cr 5950). Marks the row Posted.
-  async postValuationAllowance(dto: PostVaDto) {
+  async postValuationAllowance(dto: PostVaDto, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [row] = await db.select().from(dtaValuationAllowances).where(eq(dtaValuationAllowances.id, dto.id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'VA_NOT_FOUND', message: `Valuation allowance ${dto.id} not found`, messageTh: `ไม่พบรายการค่าเผื่อการด้อยค่า ${dto.id}` });
     if (row.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This valuation allowance is already posted', messageTh: 'รายการนี้โพสต์แล้ว' });
     if (row.runBy && row.runBy === dto.postedBy) {
-      throw new ForbiddenException({ code: 'SELF_POST', message: 'Maker-checker: you cannot post a valuation allowance you ran', messageTh: 'ผู้คำนวณโพสต์รายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'tax.utp.va.post', ref: `VA-${Number(row.id)}`, amount: n(row.deltaPosted), reason: selfApprovalReason, code: 'SELF_POST', message: 'Maker-checker: you cannot post a valuation allowance you ran', messageTh: 'ผู้คำนวณโพสต์รายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const delta = round4(n(row.deltaPosted));
     let entryNo: string | null = null;
@@ -151,13 +153,13 @@ export class TaxUtpService {
   }
 
   // settleUtp — maker-checker close of a position (settler ≠ creator ⇒ SELF_SETTLE). Sets Settled | Lapsed.
-  async settleUtp(dto: SettleUtpDto) {
+  async settleUtp(dto: SettleUtpDto, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [row] = await db.select().from(uncertainTaxPositions).where(eq(uncertainTaxPositions.id, dto.id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'UTP_NOT_FOUND', message: `Uncertain tax position ${dto.id} not found`, messageTh: `ไม่พบสถานะภาษีที่ไม่แน่นอน ${dto.id}` });
     if (row.status !== 'Open') throw new BadRequestException({ code: 'NOT_OPEN', message: 'Only an Open position can be settled', messageTh: 'ปิดได้เฉพาะสถานะที่ยังเปิดอยู่' });
     if (row.createdBy && row.createdBy === dto.settledBy) {
-      throw new ForbiddenException({ code: 'SELF_SETTLE', message: 'Maker-checker: you cannot settle a position you created', messageTh: 'ผู้บันทึกปิดรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'tax.utp.settle', ref: String(row.positionNo), amount: n(row.reserve), reason: selfApprovalReason, code: 'SELF_SETTLE', message: 'Maker-checker: you cannot settle a position you created', messageTh: 'ผู้บันทึกปิดรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const status = dto.status ?? 'Settled';
     await db.update(uncertainTaxPositions).set({

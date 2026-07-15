@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { InventoryLedgerService } from '../inventory/inventory-ledger.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -61,7 +62,7 @@ export class StockOpsService {
 
   // Post a Draft stocktake → status Posted + an audit movement per non-zero variance line
   // (Stock In if counted high, Stock Out if counted low). Idempotent: re-posting is a no-op.
-  async postStocktake(stNo: string, user: JwtUser) {
+  async postStocktake(stNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const tenantId = this.tid(user);
     const res = await db.transaction(async (tx: any) => {
@@ -72,9 +73,7 @@ export class StockOpsService {
       // own count, so the variance is independently reviewed before it adjusts stock + GL. The poster IS the
       // approver; the audit_log records them. (Posting is permission-gated at the controller.)
       const counter = lines[0]?.countedBy;
-      if (counter && counter === user.username) {
-        throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The counter cannot approve/post their own stocktake — an independent reviewer must post the variance', messageTh: 'ผู้นับสต๊อกไม่สามารถอนุมัติ/โพสต์ใบนับของตนเองได้ (ต้องมีผู้ตรวจทานอิสระ)' });
-      }
+      await assertMakerChecker(tx, { user, maker: counter, event: 'inv.stocktake.post', ref: stNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The counter cannot approve/post their own stocktake — an independent reviewer must post the variance', messageTh: 'ผู้นับสต๊อกไม่สามารถอนุมัติ/โพสต์ใบนับของตนเองได้ (ต้องมีผู้ตรวจทานอิสระ)' });
       const now = new Date();
       let movements = 0;
       for (const l of lines) {

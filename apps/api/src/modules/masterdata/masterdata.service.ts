@@ -6,6 +6,7 @@ import { masterdataImportBatches } from '../../database/schema';
 import { fx } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { MASTER_REGISTRY, findEntity, type MdEntity, type MdCol, type MdType } from './master-registry';
 import { Optional } from '@nestjs/common';
 import { PostingService } from '../ledger/posting.service';
@@ -366,9 +367,9 @@ export class MasterDataService {
 
   // Approve a staged sensitive import — a DIFFERENT user than the requester (self-approval → 403 SOD_VIOLATION)
   // commits it. The rows are re-applied in the requesting user's tenant context so they land in the right tenant.
-  async approveBatch(reqNo: string, user: JwtUser) {
+  async approveBatch(reqNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const b = await this.pendingBatch(reqNo);
-    if (b.requestedBy && b.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an import you requested', messageTh: 'ผู้ขอนำเข้าอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: b.requestedBy, event: 'md.import-batch.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an import you requested', messageTh: 'ผู้ขอนำเข้าอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const e = this.entOrThrow(b.entityKey);
     const rows = JSON.parse(b.rows) as Record<string, any>[];
     const asRequester = { username: b.requestedBy ?? user.username, tenantId: b.tenantId ?? null } as JwtUser;

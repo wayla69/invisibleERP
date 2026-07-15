@@ -5,6 +5,7 @@ import { reconPeriods, reconItems } from '../../database/schema/reconciliation';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
@@ -140,15 +141,13 @@ export class ReconciliationService {
 
   // ── Certify (SoD: certifier ≠ preparer) ──
 
-  async certify(reconPeriodId: number, user: JwtUser) {
+  async certify(reconPeriodId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
     if (rp.status === 'Open') throw new BadRequestException({ code: 'NOT_RECONCILED', message: 'Period must be reconciled before certification', messageTh: 'ต้องกระทบยอดก่อนรับรอง' });
     if (rp.status === 'Certified') throw new BadRequestException({ code: 'ALREADY_CERTIFIED', message: 'Period already certified', messageTh: 'รับรองแล้ว' });
-    if (rp.preparedBy && rp.preparedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Certifier must be different from preparer (SoD)', messageTh: 'ผู้รับรองต้องไม่ใช่คนเดียวกับผู้จัดทำ (SoD)' });
-    }
+    await assertMakerChecker(db, { user, maker: rp.preparedBy, event: 'gl.recon.certify', ref: String(reconPeriodId), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Certifier must be different from preparer (SoD)', messageTh: 'ผู้รับรองต้องไม่ใช่คนเดียวกับผู้จัดทำ (SoD)' });
 
     const [updated] = await db.update(reconPeriods)
       .set({ status: 'Certified', certifiedBy: user.username, certifiedAt: new Date() })

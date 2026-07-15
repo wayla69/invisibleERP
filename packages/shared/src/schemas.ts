@@ -54,6 +54,11 @@ export const AuthUser = z.object({
   // True when this account is a configured platform owner ("god", PLATFORM_ADMIN_USERNAMES) — the web uses
   // it to show the cross-company switcher. Server-derived from env; never a client-settable claim.
   is_platform_owner: z.boolean().optional(),
+  // SME single-user edition (docs/49) — the tenant's control profile, resolved live from the DB (never a
+  // claim). Drives the persistent "โหมด SME" badge; absent/'enterprise' shows nothing.
+  control_profile: z.enum(['enterprise', 'sme']).optional(),
+  // Nav group title keys hidden for this SME tenant (from tenants.sme_prefs, stamped at provisioning).
+  sme_hidden_nav_groups: z.array(z.string()).optional(),
 });
 export type AuthUser = z.infer<typeof AuthUser>;
 

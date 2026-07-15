@@ -32,7 +32,7 @@ const ResultsBody = z.object({
     actual_value: z.number(),
   })).min(1),
 });
-const ReleaseBody = z.object({ deviation_reason: z.string().optional() });
+const ReleaseBody = z.object({ deviation_reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 const RejectBody = z.object({ reason: z.string().optional() });
 
 @Controller('api/quality')

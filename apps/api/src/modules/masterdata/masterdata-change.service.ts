@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, eq, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { masterdataChangeRequests, vendors } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // ── GRC-3 — Sensitive master-data single-record maker-checker (control MDM-01) ──
 // A change to a SENSITIVE master-data field (esp. a vendor's payee bank details, its credit limit, or its
@@ -119,11 +120,9 @@ export class MasterdataChangeService {
   }
 
   // ── Checker: a DISTINCT user applies the staged change to the master ──
-  async approve(reqNo: string, approver: JwtUser) {
+  async approve(reqNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const r = await this.pendingByNo(reqNo);
-    if (r.requestedBy && r.requestedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a master-data change you requested', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(this.db, { user: approver, maker: r.requestedBy, event: 'md.change.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a master-data change you requested', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้ (แบ่งแยกหน้าที่)' });
     const { ent, fs } = this.specOrThrow(r.entityType, r.field);
     // Apply to the entity — the DB trigger trg_dcl_<table> (0116/0274) captures the before/after field-level
     // audit on the master row itself; this row records the full staging trail (who requested / who released).
@@ -134,11 +133,9 @@ export class MasterdataChangeService {
   }
 
   // ── Checker: reject (discard) — the master is never touched ──
-  async reject(reqNo: string, approver: JwtUser, reason?: string) {
+  async reject(reqNo: string, approver: JwtUser, reason?: string, selfApprovalReason?: string | null) {
     const r = await this.pendingByNo(reqNo);
-    if (r.requestedBy && r.requestedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a master-data change you requested', messageTh: 'ผู้ขอไม่สามารถปฏิเสธคำขอของตนเองได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(this.db, { user: approver, maker: r.requestedBy, event: 'md.change.reject', ref: reqNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject a master-data change you requested', messageTh: 'ผู้ขอไม่สามารถปฏิเสธคำขอของตนเองได้ (แบ่งแยกหน้าที่)' });
     await this.db.update(masterdataChangeRequests).set({ status: 'rejected', approvedBy: approver.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(masterdataChangeRequests.id, Number(r.id)));
     return { req_no: reqNo, status: 'rejected' as const, rejected_by: approver.username };
   }

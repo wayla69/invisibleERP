@@ -65,6 +65,6 @@ describe('CoaService — GL-27 canonical CoA maker-checker', () => {
 
   it('creator self-approval → SOD_VIOLATION (binds even Admin)', async () => {
     const svc = new CoaService(fakeDb([[{ id: 9, status: 'PendingApproval', createdBy: 'maker', action: 'create', accountCode: '9990', payload: CREATE_DTO }]], []) as any);
-    expect(await code(() => svc.approveChange(9, { username: 'maker' }))).toBe('SOD_VIOLATION');
+    expect(await code(() => svc.approveChange(9, { username: 'maker' } as any))).toBe('SOD_VIOLATION');
   });
 });

@@ -29,13 +29,16 @@ export class SodService {
   }
 
   // Throws ForbiddenException{SOD_VIOLATION} when the actor breaches a configured rule. Reusable by ANY
-  // module before a sensitive action.
-  async assertActionAllowed(ctx: { tenantId: number | null; docType: string; createdBy: string; actor: string; actorPermissions: string[]; action: string }) {
+  // module before a sensitive action. `selfApprovalAllowed` is set ONLY by the workflow engine after
+  // assertMakerChecker (docs/49) has already permitted a justified, evidence-logged SME self-approval —
+  // it skips the MAKER_CHECKER kind (same condition, already adjudicated) but never PERM_PAIR.
+  async assertActionAllowed(ctx: { tenantId: number | null; docType: string; createdBy: string; actor: string; actorPermissions: string[]; action: string; selfApprovalAllowed?: boolean }) {
     const db = this.db;
     const rules = await db.select().from(sodRules).where(eq(sodRules.active, true));
     const perms = new Set(ctx.actorPermissions ?? []);
     for (const r of rules) {
       if (r.kind === 'MAKER_CHECKER') {
+        if (ctx.selfApprovalAllowed) continue;
         if ((r.docType == null || r.docType === ctx.docType) && ctx.actor === ctx.createdBy) {
           throw new ForbiddenException({ code: 'SOD_VIOLATION', message: `Maker-checker: ${ctx.actor} cannot ${ctx.action} their own ${ctx.docType}`, messageTh: 'ผู้สร้างเอกสารทำรายการเองไม่ได้ (แบ่งแยกหน้าที่)' });
         }

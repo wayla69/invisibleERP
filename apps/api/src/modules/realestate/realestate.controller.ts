@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { RealEstateService, type CreateDevDto, type AddUnitDto, type BookDto, type CreateContractDto, type PayDto } from './realestate.service';
 
 const DevBody = z.object({ dev_code: z.string().min(1), name: z.string().min(1), location: z.string().optional(), sbt_rate: z.number().min(0).max(10).optional() }); // 5.5 — SBT rate % (e.g. 3.3); omit = no SBT accrual
@@ -53,7 +54,7 @@ export class RealEstateController {
   // Approve a draft contract (independent approver ≠ drafter, RE-02). Static segment — never collides with :no.
   @Post('contracts/:no/approve')
   @Permissions('re_contract_approve', 'exec')
-  approve(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveContract(no, u); }
+  approve(@Param('no') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveContract(no, u, b?.self_approval_reason); }
 
   @Post('installments/:id/pay')
   @Permissions('re_sales', 'ar', 'exec')

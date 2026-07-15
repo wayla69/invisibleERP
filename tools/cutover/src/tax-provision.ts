@@ -99,7 +99,7 @@ async function main() {
   const dtSvc = app.get(DeferredTaxService);
   const dtRun = await dtSvc.runDeferredTax({ period: '2026-12', taxRate: 0.20, runBy: 'accountant', tenantId: hq });
   ok('deferred-tax run: DTL 20,000, net −20,000, delta −20,000', near(dtRun.dtl, 20000) && near(dtRun.net_deferred, -20000) && near(dtRun.delta_posted, -20000), JSON.stringify({ dtl: dtRun.dtl, net: dtRun.net_deferred, delta: dtRun.delta_posted }));
-  await dtSvc.postDeferredTax({ id: dtRun.id, postedBy: 'controller' });
+  await dtSvc.postDeferredTax({ id: dtRun.id, postedBy: 'controller' }, { username: 'controller' } as any);
 
   // ── Run the current provision. permanent add-back 50,000 (non-deductible); temp adj = delta/rate = −100,000.
   const run = await inj('POST', '/api/tax/provision/run', accountant, { period: '2026-12', from: '2026-01-01', to: '2026-12-31', fiscal_year: 2026, statutory_rate: 0.20, permanent_diffs: [{ name: 'Non-deductible entertainment', amount: 50000 }] });

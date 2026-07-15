@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, eq, lte, sql, desc, asc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { fluxAnalyses, fluxLines, glPeriodBalances, accounts, budgets } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const bad = (code: string, message: string, messageTh: string) => new BadRequestException({ code, message, messageTh });
@@ -161,7 +162,7 @@ export class FluxService {
   }
 
   // ───────────────────── Review / sign-off (maker-checker) ─────────────────────
-  async review(analysisId: number, dto: { note?: string }, user: JwtUser) {
+  async review(analysisId: number, dto: { note?: string }, user: JwtUser, selfApprovalReason?: string | null) {
     const a = await this.header(analysisId);
     if (a.status === 'Certified') throw bad('ALREADY_CERTIFIED', 'This flux analysis is already certified', 'การวิเคราะห์นี้ได้รับการรับรองแล้ว');
     const lines = await this.db.select().from(fluxLines).where(eq(fluxLines.analysisId, analysisId));
@@ -170,9 +171,7 @@ export class FluxService {
       throw bad('UNEXPLAINED_LINES', `${unexplained.length} threshold-breaching line(s) must be explained before sign-off`, `มีรายการที่เกินเกณฑ์ ${unexplained.length} รายการที่ต้องอธิบายก่อนลงนามรับรอง`);
     }
     // Maker-checker (SoD): the reviewer must differ from the preparer.
-    if (a.preparedBy && a.preparedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot sign off a flux analysis you prepared', messageTh: 'ผู้จัดทำลงนามรับรองการวิเคราะห์ของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(this.db, { user, maker: a.preparedBy, event: 'gl.flux.review', ref: String(analysisId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot sign off a flux analysis you prepared', messageTh: 'ผู้จัดทำลงนามรับรองการวิเคราะห์ของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await this.db.update(fluxAnalyses).set({ status: 'Certified', reviewedBy: user.username, reviewedAt: new Date(), note: dto.note?.trim() ?? a.note ?? null }).where(eq(fluxAnalyses.id, analysisId));
     return this.get(analysisId);
   }

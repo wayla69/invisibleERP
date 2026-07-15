@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { GiftCardService } from './gift-card.service';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { IssueGiftCardBody, type IssueGiftCardDto, RedeemGiftCardBody, type RedeemGiftCardDto } from './dto';
 import { qint } from '../../common/query';
 
@@ -13,9 +14,10 @@ export class GiftCardController {
   issue(@Body(new ZodValidationPipe(IssueGiftCardBody)) b: IssueGiftCardDto, @CurrentUser() u: JwtUser) { return this.svc.issue(b, u); }
 
   // Approve a high-value PendingApproval issuance (audit G1 maker-checker) — a DIFFERENT user (finance
-  // oversight of the 2200 liability) activates the card and posts the GL. Self-approval → 403 SOD_VIOLATION.
+  // oversight of the 2200 liability) activates the card and posts the GL. Self-approval → 403 SOD_VIOLATION
+  // (an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01).
   @Post(':card_no/approve') @Permissions('creditors', 'exec')
-  approveIssue(@Param('card_no') cardNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveIssue(cardNo, u); }
+  approveIssue(@Param('card_no') cardNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveIssue(cardNo, u, b?.self_approval_reason); }
 
   // Gift-card register — all cards + outstanding (Active-balance) liability. Visible to POS + finance.
   @Get() @Permissions('pos', 'creditors', 'exec')

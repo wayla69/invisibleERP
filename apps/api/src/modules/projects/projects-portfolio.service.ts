@@ -5,6 +5,7 @@ import { portfolioScenarios, portfolioScenarioItems, projects } from '../../data
 import { n } from '../../database/queries';
 import { r2 } from './projects.helpers';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { PortfolioScenarioDto, PortfolioItemDto, PortfolioCommitDto } from './projects.service';
 
 // Portfolio selection sub-service (PPM Wave P4, PROJ-25) — a PLAIN class built in the ProjectsService ctor
@@ -157,7 +158,7 @@ export class ProjectsPortfolioService {
     const db = this.db;
     const s = await this.scenarioByNo(scenarioNo);
     if (s.status !== 'draft') throw new BadRequestException({ code: 'SCENARIO_NOT_DRAFT', message: `Scenario is already ${s.status}`, messageTh: 'สถานการณ์ถูกยืนยันแล้ว' });
-    if (s.createdBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'The committer must differ from the scenario author (segregation of duties)', messageTh: 'ผู้ยืนยันต้องไม่ใช่ผู้สร้าง (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: s.createdBy, event: 'proj.portfolio.commit', ref: scenarioNo, reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The committer must differ from the scenario author (segregation of duties)', messageTh: 'ผู้ยืนยันต้องไม่ใช่ผู้สร้าง (แบ่งแยกหน้าที่)', httpStatus: 400 });
 
     const analysis = await this.analyze(scenarioNo);
     if (analysis.totals.included_count === 0) throw new BadRequestException({ code: 'NOTHING_SELECTED', message: 'Select at least one project before committing', messageTh: 'ต้องเลือกอย่างน้อยหนึ่งโครงการก่อนยืนยัน' });

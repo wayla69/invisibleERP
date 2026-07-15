@@ -2,7 +2,7 @@ import { ConflictException, NotFoundException, BadRequestException, ForbiddenExc
 import { eq, sql, and, desc, gt, isNull } from 'drizzle-orm';
 import { randomBytes, createHash } from 'node:crypto';
 import type { DrizzleDb } from '../../database/database.module';
-import { plans, subscriptions, tenants, users, signupInvites, signupRequests } from '../../database/schema';
+import { plans, subscriptions, tenants, users, signupInvites, signupRequests, platformSmeDefaults } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
@@ -54,6 +54,10 @@ export interface SignupDto {
   // Invite-link onboarding (#2): a valid single-use token lets a company sign up even when public signup
   // is disabled. Consumed on success. Absent ⇒ normal PUBLIC_SIGNUP_ENABLED gate applies.
   invite_token?: string;
+  // SME single-user edition (docs/49) — the control environment chosen AT CREATION (default 'enterprise').
+  // Honoured only from the @PlatformAdmin create-company path; the public signup/request paths always
+  // provision 'enterprise' (a self-served outsider must not opt out of maker-checker).
+  control_profile?: 'enterprise' | 'sme';
 }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -87,7 +91,8 @@ export class TenantProvisioningService {
         messageTh: 'ปิดรับสมัครบัญชีใหม่แบบสาธารณะ — โปรดติดต่อผู้ดูแลระบบเพื่อเปิดบัญชี',
       });
     }
-    const result = await this.provisionTenant({ ...dto, plan_code: dto.plan_code ?? invite?.planCode ?? undefined });
+    // Public signup NEVER honours control_profile (docs/49) — only the god create-company path may set 'sme'.
+    const result = await this.provisionTenant({ ...dto, control_profile: undefined, plan_code: dto.plan_code ?? invite?.planCode ?? undefined });
     if (invite) await this.consumeInvite(invite.id, result.tenant_id);
     return result;
   }
@@ -272,10 +277,23 @@ export class TenantProvisioningService {
     const passwordHash = opts?.passwordHash ?? await this.password.hash(dto.admin_password);
     const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
     const industry = isIndustryKey(dto.industry) ? dto.industry : 'general';
+    // SME single-user edition (docs/49) — the edition chosen at creation. An SME company is stamped with
+    // a per-tenant COPY of the platform SME defaults (hidden nav groups, SME-01 accountant routing), so
+    // later default changes affect only future companies. Transition is upgrade-only afterwards.
+    const controlProfile = dto.control_profile === 'sme' ? 'sme' : 'enterprise';
+    let smePrefs: Record<string, unknown> = {};
+    if (controlProfile === 'sme') {
+      const [d] = await db.select().from(platformSmeDefaults).where(eq(platformSmeDefaults.id, 1)).limit(1);
+      smePrefs = {
+        hidden_nav_groups: Array.isArray(d?.hiddenNavGroups) ? d!.hiddenNavGroups : [],
+        accountant_email: d?.accountantEmail ?? null,
+      };
+    }
 
     const tenant = await db.transaction(async (tx: any) => {
       const [t] = await tx.insert(tenants).values({
         code, name: dto.company_name, contactName: username, email: dto.email, industry,
+        controlProfile, smePrefs,
         // tax identity — legalName defaults to the company name; the rest the setup wizard completes
         legalName: dto.legal_name ?? dto.company_name,
         taxId: dto.tax_id ?? null,
@@ -320,6 +338,7 @@ export class TenantProvisioningService {
       admin_username: username,
       plan: planCode,
       industry,
+      control_profile: controlProfile,
       trial_ends_at: trialEndsAt.toISOString(),
       fiscal_year_provisioned: Number(ymd().slice(0, 4)),
     };

@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, HttpCode, ParseIntPipe } fro
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { PoolService } from './pool.service';
 
 const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,7 +96,7 @@ export class PoolController {
   @Post('ic-loans/:id/approve')
   @HttpCode(200)
   @Permissions('treasury_approve', 'exec')
-  approveLoan(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) { return this.svc.approveLoan(id, u); }
+  approveLoan(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveLoan(id, u, b?.self_approval_reason); }
 
   @Post('ic-loans/:id/reject')
   @HttpCode(200)

@@ -37,6 +37,9 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'common.logout': { th: 'ออกจากระบบ', en: 'Log out', ms: 'Log keluar', vi: 'Đăng xuất', id: 'Keluar' },
   'common.settings': { th: 'ตั้งค่า', en: 'Settings', ms: 'Tetapan', vi: 'Cài đặt', id: 'Pengaturan' },
   'common.user_account': { th: 'บัญชีผู้ใช้', en: 'User account', ms: 'Akaun pengguna', vi: 'Tài khoản', id: 'Akun pengguna' },
+  // SME single-user edition (docs/49) — persistent mode banner shown to every user of an 'sme' tenant.
+  'sme.mode_badge': { th: 'โหมด SME (คนเดียวทำได้ทุกงาน)', en: 'SME Mode (single operator)' },
+  'sme.mode_banner_desc': { th: 'อนุมัติรายการของตนเองได้โดยระบุเหตุผล ทุกครั้งถูกบันทึกและส่งให้ผู้ตรวจอิสระทบทวน', en: 'Self-approval allowed with a logged reason — every instance is recorded and independently reviewed.' },
   // Shared doc-reference picker (DocSelect) — pending-list dropdowns replacing typed doc numbers.
   'common.doc_select_ph': { th: 'เลือกเอกสาร…', en: 'Select a document…' },
   'common.doc_none': { th: 'ไม่มีเอกสารให้เลือก', en: 'No documents to select' },

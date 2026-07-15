@@ -6,6 +6,7 @@ import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 
 const PeriodBody = z.object({ period: z.string().min(1) });
+const ApproveBody = PeriodBody.extend({ self_approval_reason: z.string().max(500).optional() });
 const RejectBody = z.object({ period: z.string().min(1), reason: z.string().min(1) });
 
 // REC-03 — per-period intercompany reconciliation sign-off (gates consolidation elimination). HQ/exec only.
@@ -21,8 +22,8 @@ export class IcReconController {
 
   // Checker — approve (SoD: approver ≠ preparer; IC must eliminate).
   @Post('groups/:groupId/approve') @HttpCode(200) @Permissions('exec')
-  approve(@Param('groupId', ParseIntPipe) groupId: number, @Body(new ZodValidationPipe(PeriodBody)) b: z.infer<typeof PeriodBody>, @CurrentUser() u: JwtUser) {
-    return this.svc.approvePeriod(groupId, b.period, u);
+  approve(@Param('groupId', ParseIntPipe) groupId: number, @Body(new ZodValidationPipe(ApproveBody)) b: z.infer<typeof ApproveBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.approvePeriod(groupId, b.period, u, b.self_approval_reason);
   }
 
   @Post('groups/:groupId/reject') @HttpCode(200) @Permissions('exec')

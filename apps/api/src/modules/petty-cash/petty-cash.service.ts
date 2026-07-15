@@ -10,6 +10,7 @@ import { LineNotifyService } from '../messaging/line-notify.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { EstablishFundDto, ReplenishDto, ExpenseRequestDto, SettleExpenseDto } from './dto';
 
 const n = (v: unknown) => Number(v ?? 0);
@@ -127,11 +128,10 @@ export class PettyCashService {
 
   // ── Approve (checker ≠ maker): post GL + decrement the fund. Expense → Dr <acct> / Cr 1015;
   //    advance → Dr 1180 / Cr 1015. Re-checks the fund still has the cash. ──
-  async approveRequest(reqNo: string, user: JwtUser) {
+  async approveRequest(reqNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const req = await this.pendingRequest(reqNo, user);
-    if (req.requestedBy && req.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an expense you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
+    await assertMakerChecker(db, { user, maker: req.requestedBy, event: 'exp.pettycash.approve', ref: reqNo, amount: n(req.amount), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an expense you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติรายการของตนเองได้' });
     // EXP-08 (audit G3): a FUNDING request (fund establishment / replenishment) posts the cash-in — Dr the
     // petty-cash account / Cr 1000 Cash — and lifts the fund balance, only on this independent approval.
     if (req.kind === 'funding') {

@@ -1,8 +1,8 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and, desc, ne, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, ne, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { ethicsAcknowledgements, whistleblowerCases, delegationOfAuthority, fraudRisks, governanceOversight, users } from '../../database/schema';
+import { ethicsAcknowledgements, whistleblowerCases, delegationOfAuthority, fraudRisks, governanceOversight, users, selfApprovals } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -197,6 +197,33 @@ export class GovernanceService {
       ethics: { coverage_pct: coveragePct, acknowledged: total - outstanding.length, total_active_staff: total, outstanding },
       oversight: { last_meeting: lastDate, last_icfr_review: lastIcfrDate, next_due: nextDue, overdue: oversightOverdue, cadence_days: OVERSIGHT_CADENCE_DAYS },
       hotline: { open_cases: openCases.length, oldest_open_age_days: oldestOpen, overdue_cases: overdueCases, sla_days: HOTLINE_SLA_DAYS },
+    };
+  }
+
+  // SME-01 (docs/49) — the detective compensating control for the SME single-user edition: every ALLOWED
+  // self-approval (maker === checker under control_profile='sme', recorded by assertMakerChecker) in the
+  // review window, for independent review by the external accountant + the platform owner. Tenant-scoped
+  // by RLS + the explicit filter; a caller with no self-approvals gets a clean, affirmative empty report.
+  async selfApprovalReview(user: JwtUser, days = 31) {
+    const db = this.db;
+    const today = ymd();
+    const since = new Date(Date.now() - Math.min(Math.max(Number(days) || 31, 1), 366) * 86400000);
+    const conds = [gte(selfApprovals.createdAt, since)];
+    if (user.tenantId != null) conds.push(eq(selfApprovals.tenantId, user.tenantId));
+    const rows = await db.select().from(selfApprovals).where(and(...conds)).orderBy(desc(selfApprovals.createdAt)).limit(1000);
+    const totalAmount = rows.reduce((s: number, r: any) => s + (r.amount != null ? Number(r.amount) : 0), 0);
+    const byEvent = new Map<string, number>();
+    for (const r of rows) byEvent.set(r.event, (byEvent.get(r.event) ?? 0) + 1);
+    return {
+      as_of: today,
+      window_days: Math.min(Math.max(Number(days) || 31, 1), 366),
+      count: rows.length,
+      total_amount: Math.round(totalAmount * 100) / 100,
+      by_event: [...byEvent.entries()].map(([event, count]) => ({ event, count })),
+      items: rows.map((r: any) => ({
+        at: r.createdAt, event: r.event, ref: r.ref, username: r.username,
+        amount: r.amount != null ? Number(r.amount) : null, reason: r.reason,
+      })),
     };
   }
 }

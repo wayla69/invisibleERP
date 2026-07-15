@@ -1,4 +1,5 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { fxRates, arInvoices, apTransactions } from '../../database/schema';
@@ -51,12 +52,12 @@ export class FxService {
   }
 
   // Approve a pending manual rate (checker; approver ≠ requester, binds even Admin).
-  async approveRate(currency: string, rateDate: string, tenantId: number | null, user: JwtUser) {
+  async approveRate(currency: string, rateDate: string, tenantId: number | null, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const tCond = tenantId != null ? eq(fxRates.tenantId, tenantId) : isNull(fxRates.tenantId);
     const [r] = await db.select().from(fxRates).where(and(tCond, eq(fxRates.currency, currency), eq(fxRates.rateDate, rateDate), eq(fxRates.status, 'PendingApproval'))).limit(1);
     if (!r) throw new BadRequestException({ code: 'NO_PENDING_RATE', message: `No FX rate pending approval for ${currency} ${rateDate}`, messageTh: 'ไม่พบอัตราแลกเปลี่ยนที่รออนุมัติ' });
-    if (r.requestedBy && r.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an FX rate you entered', messageTh: 'ผู้บันทึกอนุมัติอัตราแลกเปลี่ยนของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: r.requestedBy, event: 'tre.fxrate.approve', ref: `${currency}:${rateDate}`, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an FX rate you entered', messageTh: 'ผู้บันทึกอนุมัติอัตราแลกเปลี่ยนของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await db.update(fxRates).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(fxRates.id, r.id));
     return { currency, rate_date: rateDate, rate: n(r.rate), tenant_id: tenantId ?? null, status: 'Approved', approved_by: user.username, requested_by: r.requestedBy };
   }

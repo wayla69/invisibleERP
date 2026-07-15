@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { ProcurementService, type CreatePrDto, type CreatePoDto, type CreateGrDto, type UpsertSupplierPriceDto } from './procurement.service';
 import { AttachmentsService, type AddAttachmentDto } from './attachments.service';
 import { PoPdfService } from './po-pdf.service';
@@ -298,7 +299,7 @@ export class ProcurementController {
   @Get('vendor-bank-changes') @Permissions('md_vendor', 'exec', 'approvals')
   pendingBankChanges(@CurrentUser() u: JwtUser) { return this.svc.pendingBankChanges(u); }
   @Post('vendor-bank-changes/:reqNo/approve') @Permissions('exec', 'approvals')
-  approveBankChange(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveBankChange(reqNo, u); }
+  approveBankChange(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveBankChange(reqNo, u, b?.self_approval_reason); }
   @Post('vendor-bank-changes/:reqNo/reject') @Permissions('exec', 'approvals')
   rejectBankChange(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectBankChange(reqNo, u, b.reason); }
 

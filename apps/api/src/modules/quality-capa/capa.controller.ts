@@ -22,10 +22,10 @@ const CreateBody = z.object({
   source_ref: z.string().optional(),
 });
 const ActionBody = z.object({ description: z.string().min(1), owner: z.string().optional(), due_date: z.string().optional() });
-const VerifyBody = z.object({ result: z.enum(['effective', 'ineffective']), note: z.string().optional() });
+const VerifyBody = z.object({ result: z.enum(['effective', 'ineffective']), note: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 // reason is validated in the service (REASON_REQUIRED with a Thai message) rather than at the Zod layer, so
 // the documented QC-02 error code surfaces on an empty/whitespace reason.
-const ReasonBody = z.object({ reason: z.string().optional() });
+const ReasonBody = z.object({ reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 const CancelBody = z.object({ reason: z.string().optional() });
 
 @Controller('api/quality/capa')

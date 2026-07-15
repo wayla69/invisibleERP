@@ -211,7 +211,7 @@ describe('LedgerPostingService — reverseEntry write path (GL-17 contra reversa
   it('reverses a Posted entry: contra swaps every leg, posts via the normal path, flags is_reversed, REVERSE audit', async () => {
     const { db, cap } = reverseDb(POSTED, POSTED_LINES);
     const svc = new LedgerPostingService(db, docNo);
-    const r = await svc.reverseEntry({ entryId: 7, reversedBy: 'bob', reason: 'duplicate' });
+    const r = await svc.reverseEntry({ entryId: 7, reversedBy: 'bob', reason: 'duplicate' }, { username: 'bob' } as any);
     expect(r).toEqual({ reversalId: 99, originalId: 7, reversal_entry_no: 'JE-TEST-001', original_entry_no: 'JE-7' });
 
     // The contra header posts immediately (source REVERSAL, back-linked via reversal_of).
@@ -243,7 +243,7 @@ describe('LedgerPostingService — reverseEntry write path (GL-17 contra reversa
   it('an entry with no lines cannot be reversed (NOT_POSTED) — nothing written', async () => {
     const { db, cap } = reverseDb(POSTED, []);
     const svc = new LedgerPostingService(db, docNo);
-    await expect(svc.reverseEntry({ entryId: 7, reversedBy: 'bob' })).rejects.toMatchObject({ response: { code: 'NOT_POSTED' } });
+    await expect(svc.reverseEntry({ entryId: 7, reversedBy: 'bob' }, { username: 'bob' } as any)).rejects.toMatchObject({ response: { code: 'NOT_POSTED' } });
     expect(cap.headers).toHaveLength(0);
     expect(cap.dbUpdates).toHaveLength(0);
     expect(cap.dbAudits).toHaveLength(0);

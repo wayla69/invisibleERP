@@ -1,4 +1,5 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc, asc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits, apPaymentRuns, apPaymentRunLines } from '../../database/schema';
@@ -104,13 +105,13 @@ export class BankService {
   }
 
   // Approve a pending bank account (checker; approver ≠ requester → 403 SOD_VIOLATION). Activates it for use.
-  async approveBankAccount(id: number, user: JwtUser) {
+  async approveBankAccount(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const conds = [eq(bankAccounts.id, id)];
     if (user.tenantId != null) conds.push(eq(bankAccounts.tenantId, user.tenantId));
     const [b] = await db.select().from(bankAccounts).where(and(...conds)).limit(1);
     if (!b || b.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_BANK_ACCOUNT', message: 'No bank account pending approval', messageTh: 'ไม่พบบัญชีธนาคารที่รออนุมัติ' });
-    if (b.requestedBy && b.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own bank account', messageTh: 'ผู้ขอไม่สามารถอนุมัติบัญชีธนาคารของตนเองได้' });
+    await assertMakerChecker(db, { user, maker: b.requestedBy, event: 'tre.bank-account.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'The requester cannot approve their own bank account', messageTh: 'ผู้ขอไม่สามารถอนุมัติบัญชีธนาคารของตนเองได้' });
     const [u] = await db.update(bankAccounts).set({ status: 'Approved', active: 'true', approvedBy: user.username, approvedAt: new Date() }).where(eq(bankAccounts.id, id)).returning();
     return { ...shapeAcct(u), status: 'Approved', approved_by: user.username, requested_by: b.requestedBy };
   }

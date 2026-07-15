@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import {
   HcmRecruitingService,
   type RequisitionDto, type CandidateDto, type ApplicationDto, type StageDto, type OfferDto,
@@ -48,9 +49,10 @@ export class HcmRecruitingController {
   createRequisition(@Body(new ZodValidationPipe(RequisitionBody)) b: RequisitionDto, @CurrentUser() u: JwtUser) { return this.svc.createRequisition(b, u); }
 
   // HR-04 — the approver must differ from the requester (SOD_SELF_APPROVAL).
+  // (an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01.)
   @Post('requisitions/:reqNo/approve')
   @Permissions('hr_admin', 'exec')
-  approveRequisition(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveRequisition(reqNo, u); }
+  approveRequisition(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveRequisition(reqNo, u, b?.self_approval_reason); }
 
   @Post('requisitions/:reqNo/reject')
   @Permissions('hr_admin', 'exec')
@@ -87,9 +89,10 @@ export class HcmRecruitingController {
   createOffer(@Body(new ZodValidationPipe(OfferBody)) b: OfferDto, @CurrentUser() u: JwtUser) { return this.svc.createOffer(b, u); }
 
   // HR-04 — the approver must differ from the offer creator (SOD_SELF_APPROVAL).
+  // (an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01.)
   @Post('offers/:id/approve')
   @Permissions('hr_admin', 'exec')
-  approveOffer(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.approveOffer(Number(id), u); }
+  approveOffer(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveOffer(Number(id), u, b?.self_approval_reason); }
 
   // HR-04 — an approved offer converts into a payroll.employees row (OFFER_NOT_APPROVED / HEADCOUNT_EXCEEDED gates).
   @Post('offers/:id/convert')
