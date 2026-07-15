@@ -4,7 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto, type PortfolioScenarioDto, type PortfolioItemDto, type PortfolioCommitDto, type PhaseGateDto, type GateDecisionDto } from './projects.service';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto, type PortfolioScenarioDto, type PortfolioItemDto, type PortfolioCommitDto, type PhaseGateDto, type GateDecisionDto, type BenefitDto, type BenefitMeasurementDto, type BenefitConfirmDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
 const BoqLineBody = z.object({
@@ -219,6 +219,10 @@ const PortfolioCommitBody = z.object({ override: z.boolean().optional(), overrid
 // PROJ-26 project phase-gate governance (PPM Wave P4)
 const PhaseGateBody = z.object({ target_phase: z.string().min(1), gate_key: z.string().optional(), name: z.string().optional(), readiness: z.string().optional() });
 const GateDecisionBody = z.object({ decision: z.enum(['go', 'hold', 'kill']), notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
+// PROJ-27 program benefits realization (PPM Wave P4)
+const BenefitBody = z.object({ name: z.string().min(1), category: z.enum(['financial', 'non_financial']).optional(), unit: z.string().optional(), baseline_value: z.number().optional(), target_value: z.number(), target_date: z.string().optional(), owner: z.string().optional() });
+const BenefitMeasurementBody = z.object({ measured_value: z.number(), measured_at: z.string().optional(), note: z.string().optional() });
+const BenefitConfirmBody = z.object({ result: z.enum(['realized', 'not_realized']), notes: z.string().optional() });
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')
@@ -536,6 +540,29 @@ export class ProjectsController {
   @Post('gates/:gateId/decide')
   decidePhaseGate(@Param('gateId') gateId: string, @Body(new ZodValidationPipe(GateDecisionBody)) b: GateDecisionDto, @CurrentUser() u: JwtUser) {
     return this.svc.decidePhaseGate(Number(gateId), b, u);
+  }
+
+  // ── Program benefits realization (PPM Wave P4, PROJ-27) — declare expected benefits, log actuals over time,
+  // and close each realized/not-realized as a maker-checker sign-off (confirmer ≠ author). Inherits the class
+  // gate (exec/planner/ar); the segregation-of-duties check is enforced in the service. ──
+  @Get('programs/:programCode/benefits')
+  listProgramBenefits(@Param('programCode') programCode: string) {
+    return this.svc.listProgramBenefits(programCode);
+  }
+
+  @Post('programs/:programCode/benefits')
+  declareProgramBenefit(@Param('programCode') programCode: string, @Body(new ZodValidationPipe(BenefitBody)) b: BenefitDto, @CurrentUser() u: JwtUser) {
+    return this.svc.declareProgramBenefit(programCode, b, u);
+  }
+
+  @Post('benefits/:benefitId/measurements')
+  recordBenefitMeasurement(@Param('benefitId') benefitId: string, @Body(new ZodValidationPipe(BenefitMeasurementBody)) b: BenefitMeasurementDto, @CurrentUser() u: JwtUser) {
+    return this.svc.recordBenefitMeasurement(Number(benefitId), b, u);
+  }
+
+  @Post('benefits/:benefitId/confirm')
+  confirmProgramBenefit(@Param('benefitId') benefitId: string, @Body(new ZodValidationPipe(BenefitConfirmBody)) b: BenefitConfirmDto, @CurrentUser() u: JwtUser) {
+    return this.svc.confirmProgramBenefit(Number(benefitId), b, u);
   }
 
   // ── Risk & issue register (B4, PROJ-08) ──

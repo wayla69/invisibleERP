@@ -63,7 +63,7 @@ export const tenants = pgTable('tenants', {
   purgedBy: text('purged_by'),
   // Platform Console tags/segments (migration 0246) — free-form labels for fleet organisation/filtering.
   tags: jsonb('tags').notNull().default([]),
-  // ── SME single-user edition (docs/49, migration 0412) — the control profile chosen at company creation.
+  // ── SME single-user edition (docs/49, migration 0413) — the control profile chosen at company creation.
   // 'enterprise' (default): full maker-checker; 'sme': one operator may self-approve WITH a mandatory
   // logged reason (evidence → self_approvals, reviewed by SME-01). Upgrade-only: sme→enterprise allowed,
   // enterprise→sme forbidden (PROFILE_DOWNGRADE_FORBIDDEN — a full-SoD entity may not weaken later). ──

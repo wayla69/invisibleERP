@@ -1,4 +1,4 @@
--- 0412 — SME single-user edition (docs/49, SME-01): per-tenant control profile + self-approval evidence
+-- 0413 — SME single-user edition (docs/49, SME-01): per-tenant control profile + self-approval evidence
 -- + platform-wide SME provisioning defaults.
 -- tenants.control_profile: 'enterprise' (full maker-checker, default) | 'sme' (single operator may
 -- self-approve WITH a mandatory logged reason; every such approval lands in self_approvals for the

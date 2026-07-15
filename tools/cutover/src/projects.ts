@@ -960,6 +960,44 @@ async function main() {
   const gBadDecision = await inj('POST', `/api/projects/gates/999999/decide`, mgr, { decision: 'go' });
   ok('PROJ-26 guards: unknown phase → BAD_PHASE, unknown gate → GATE_NOT_FOUND', gUnknownPhase.status === 400 && gUnknownPhase.json.error?.code === 'BAD_PHASE' && gBadDecision.status === 404 && gBadDecision.json.error?.code === 'GATE_NOT_FOUND', `${gUnknownPhase.json.error?.code}/${gBadDecision.json.error?.code}`);
 
+  // ── 24e. Program benefits realization (PPM Wave P4, PROJ-27) — declare expected benefits, log actuals over
+  // time, and close each realized/not-realized as a maker-checker sign-off (confirmer ≠ author). ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-BEN', name: 'โครงการวัดผลประโยชน์', billing_type: 'TM' });
+  await inj('PATCH', '/api/projects/PRJ-BEN/program', admin, { program_code: 'PGBEN' });
+
+  const bUnknownProg = await inj('POST', '/api/projects/programs/NOPE/benefits', admin, { name: 'x', target_value: 100 });
+  ok('PROJ-27 declaring a benefit under an unknown program → 404 PROGRAM_NOT_FOUND', bUnknownProg.status === 404 && bUnknownProg.json.error?.code === 'PROGRAM_NOT_FOUND', `${bUnknownProg.status}/${bUnknownProg.json.error?.code}`);
+
+  const bDecl = await inj('POST', '/api/projects/programs/PGBEN/benefits', admin, { name: 'ลดต้นทุนต่อหน่วย', category: 'financial', unit: 'THB', baseline_value: 0, target_value: 1000000, target_date: '2027-12-31', owner: 'CFO' });
+  ok('PROJ-27 declare a benefit → open, PB-#### numbered, 0% realized against a 1,000,000 target',
+    bDecl.status < 300 && bDecl.json.benefits.length === 1 && /^PB-\d{4}$/.test(bDecl.json.benefits[0].benefit_no) && bDecl.json.benefits[0].status === 'open' && near(bDecl.json.benefits[0].realization_pct, 0) && near(bDecl.json.rollup.financial_target, 1000000),
+    JSON.stringify({ no: bDecl.json.benefits[0]?.benefit_no, pct: bDecl.json.benefits[0]?.realization_pct }));
+  const benId = bDecl.json.benefits[0].id;
+
+  const bMeasure = await inj('POST', `/api/projects/benefits/${benId}/measurements`, admin, { measured_value: 600000, measured_at: '2027-06-30' });
+  ok('PROJ-27 record an actual measurement → realization tracks to 60% (600,000 of 1,000,000)',
+    bMeasure.status < 300 && near(bMeasure.json.benefits[0].current_actual, 600000) && near(bMeasure.json.benefits[0].realization_pct, 60) && bMeasure.json.benefits[0].health === 'on_track' && bMeasure.json.benefits[0].measurements_count === 1,
+    JSON.stringify({ actual: bMeasure.json.benefits[0]?.current_actual, pct: bMeasure.json.benefits[0]?.realization_pct }));
+
+  const bMeasure2 = await inj('POST', `/api/projects/benefits/${benId}/measurements`, admin, { measured_value: 300000, measured_at: '2027-09-30' });
+  ok('PROJ-27 the latest measurement is current (300,000 → 30%, at_risk); count reflects both entries',
+    bMeasure2.status < 300 && near(bMeasure2.json.benefits[0].current_actual, 300000) && near(bMeasure2.json.benefits[0].realization_pct, 30) && bMeasure2.json.benefits[0].health === 'at_risk' && bMeasure2.json.benefits[0].measurements_count === 2,
+    JSON.stringify({ actual: bMeasure2.json.benefits[0]?.current_actual, health: bMeasure2.json.benefits[0]?.health }));
+
+  const bSelf = await inj('POST', `/api/projects/benefits/${benId}/confirm`, admin, { result: 'realized' });
+  ok('PROJ-27 the benefit author cannot sign off their own benefit → SOD_SELF_APPROVAL', bSelf.status === 400 && bSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${bSelf.status}/${bSelf.json.error?.code}`);
+
+  const bConfirm = await inj('POST', `/api/projects/benefits/${benId}/confirm`, mgr, { result: 'not_realized', notes: 'ไม่ถึงเป้าหมาย' });
+  ok('PROJ-27 an independent reviewer signs off (not_realized); status + confirmed_by recorded',
+    bConfirm.status < 300 && bConfirm.json.benefits[0].status === 'not_realized' && bConfirm.json.benefits[0].confirmed_by === 'mgr' && bConfirm.json.rollup.not_realized_count === 1,
+    JSON.stringify({ st: bConfirm.json.benefits[0]?.status, by: bConfirm.json.benefits[0]?.confirmed_by }));
+
+  const bClosedMeasure = await inj('POST', `/api/projects/benefits/${benId}/measurements`, admin, { measured_value: 1 });
+  const bReconfirm = await inj('POST', `/api/projects/benefits/${benId}/confirm`, mgr, { result: 'realized' });
+  ok('PROJ-27 a closed benefit rejects new measurements (BENEFIT_CLOSED) and re-confirmation (BENEFIT_ALREADY_CONFIRMED)',
+    bClosedMeasure.status === 400 && bClosedMeasure.json.error?.code === 'BENEFIT_CLOSED' && bReconfirm.status === 400 && bReconfirm.json.error?.code === 'BENEFIT_ALREADY_CONFIRMED',
+    `${bClosedMeasure.json.error?.code}/${bReconfirm.json.error?.code}`);
+
   // ── 25. time-phased resource capacity calendar (PPM upgrade) ──
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAP', name: 'งานวางกำลังคน', billing_type: 'TM' });
   // Bob: 60% Jul–Aug, +60% Aug–Sep → August double-booked to 120%.
