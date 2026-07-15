@@ -204,6 +204,47 @@ async function main() {
   ok('MKT-14: revoking a connection marks it revoked and clears its stored tokens (has_refresh_token → false)',
     revoke.json.ok === true && mapsAfter.status === 'revoked' && mapsAfter.has_refresh_token === false, JSON.stringify(mapsAfter));
 
+  // ── 11. MKT-16 — review-response SLA governance (per-tenant policy + breach worklist) ──
+  const DAY = 86400_000;
+  await db.insert(s.externalReviews).values([
+    { tenantId: t1, platform: 'google_maps', locationRef: 'accounts/1/locations/9', externalReviewId: 'sla-old', rating: 2, comment: 'บริการช้ามาก', reviewCreateTime: new Date(Date.now() - 10 * DAY) },
+    { tenantId: t1, platform: 'google_maps', locationRef: 'accounts/1/locations/9', externalReviewId: 'sla-recent', rating: 2, comment: 'เพิ่งมารีวิว', reviewCreateTime: new Date(Date.now() - 3600_000) },
+    { tenantId: t1, platform: 'google_maps', locationRef: 'accounts/1/locations/9', externalReviewId: 'sla-good', rating: 5, comment: 'อร่อยดี', reviewCreateTime: new Date(Date.now() - 10 * DAY) },
+    { tenantId: t2, platform: 'google_maps', locationRef: 'loc-t2', externalReviewId: 'sla-t2', rating: 1, comment: 'T2 review', reviewCreateTime: new Date(Date.now() - 10 * DAY) },
+  ]).onConflictDoNothing();
+
+  const wh1NoSla = await inj('GET', '/api/reputation/response-sla', wh1);
+  ok('MKT-16: a user without marketing/exec cannot read the response-SLA worklist (403)', wh1NoSla.status === 403, JSON.stringify(wh1NoSla.status));
+
+  const defSettings = await inj('GET', '/api/reputation/response-settings', mkt1);
+  ok('MKT-16: response-settings defaults to ≤3★ within 48h when unset', defSettings.json.sla_rating_threshold === 3 && defSettings.json.sla_hours === 48 && defSettings.json.is_default === true, JSON.stringify(defSettings.json));
+
+  const sla1 = await inj('GET', '/api/reputation/response-sla', mkt1);
+  const inBreach = (j: any, c: string) => j.breaches.some((b: any) => b.comment === c);
+  const inOpen = (j: any, c: string) => j.open.some((b: any) => b.comment === c);
+  ok('MKT-16: the worklist flags an OLD unreplied ≤3★ review as breached, a RECENT one as open, and excludes a 5★ review',
+    inBreach(sla1.json, 'บริการช้ามาก') && inOpen(sla1.json, 'เพิ่งมารีวิว') &&
+    !inBreach(sla1.json, 'อร่อยดี') && !inOpen(sla1.json, 'อร่อยดี'),
+    JSON.stringify({ breach: sla1.json.breach_count, open: sla1.json.open_count }));
+
+  // Tighten the policy: threshold 1 excludes the 2★ reviews entirely.
+  const put1 = await inj('PUT', '/api/reputation/response-settings', mkt1, { slaRatingThreshold: 1, slaHours: 24 });
+  const sla2 = await inj('GET', '/api/reputation/response-sla', mkt1);
+  ok('MKT-16: putting the policy to ≤1★ persists (updated_by set) and drops the 2★ reviews from the worklist',
+    put1.json.sla_rating_threshold === 1 && put1.json.updated_by === 'mkt1' && !inBreach(sla2.json, 'บริการช้ามาก') && !inOpen(sla2.json, 'เพิ่งมารีวิว'),
+    JSON.stringify({ thr: put1.json.sla_rating_threshold, breach: sla2.json.breach_count }));
+
+  // Restore ≤3★, then a reply clears the breach.
+  await inj('PUT', '/api/reputation/response-settings', mkt1, { slaRatingThreshold: 3, slaHours: 48 });
+  await db.update(s.externalReviews).set({ replyComment: 'ขออภัยค่ะ' }).where(eq(s.externalReviews.externalReviewId, 'sla-old'));
+  const sla3 = await inj('GET', '/api/reputation/response-sla', mkt1);
+  ok('MKT-16: replying to the breached review clears it from the breach worklist', !inBreach(sla3.json, 'บริการช้ามาก'), JSON.stringify({ breach: sla3.json.breach_count }));
+
+  const t2Sla = await inj('GET', '/api/reputation/response-sla', mkt2);
+  ok('MKT-16 (Multi-Tenant Test Protocol): T2 sees only its OWN breach (T2 review), never any of T1\'s reviews',
+    inBreach(t2Sla.json, 'T2 review') && !inBreach(t2Sla.json, 'เพิ่งมารีวิว') && !inOpen(t2Sla.json, 'เพิ่งมารีวิว') && !inBreach(t2Sla.json, 'อร่อยดี'),
+    JSON.stringify({ breach: t2Sla.json.breach_count }));
+
   global.fetch = realFetch;
   delete process.env.GOOGLE_OAUTH_CLIENT_ID;
   delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;

@@ -551,6 +551,22 @@ Your Google OAuth tokens are encrypted at rest and never shown back to you or an
 connected account's email and sync status are visible. **Wongnai reviews are not supported** — no
 documented public API exists yet for pulling a business's own Wongnai reviews.
 
+### 16.14a Response-SLA tab — don't let a bad review sit unanswered (docs/47, control MKT-16)
+
+A negative review left unanswered quietly drags your public rating down. The **Response-SLA** tab turns
+that into a managed worklist. Set your **policy** once — *respond to reviews rated **≤ N★** within **H
+hours*** (default ≤3★ within 48h) — and the tab then shows, over the reviews you've already synced:
+
+- **SLA breached** — low-rated, still-unreplied reviews that are **older than your window**. These are the
+  ones hurting you right now; reply from the **Reviews** tab and they drop off the list.
+- **Open (within SLA)** — low-rated unreplied reviews that are still inside the window (respond before they
+  breach). A 5★ review, or any review you've already replied to, never appears here.
+
+Tighten or loosen the policy anytime (changing the threshold to ≤1★, say, hides 2★/3★ reviews from the
+list). To be alerted automatically, add a **`reputation_response_sla`** subscription on **Scheduled
+Reports** — you'll get the breach count on your usual schedule. Each company sees only its own reviews and
+policy. This is a monitoring view — it posts nothing to the ledger.
+
 ---
 
 ## Common errors on these screens
