@@ -128,6 +128,42 @@ async function main() {
     Number(smeReport.data?.count) >= 1 && smeReport.data?.items?.[0]?.reason === 'เจ้าของอนุมัติเอง' && smeReport.data?.items?.[0]?.ref === smeJeNo,
     JSON.stringify({ count: smeReport.data?.count, item0: smeReport.data?.items?.[0] }).slice(0, 160));
 
+  // ── 4b. docs/49 v1.2 (audit G2/H1): SME-01 operates BY DESIGN — auto-scheduled at birth; per-tenant edit re-points it ──
+  // NB filter by the provisioning-stamped NAME — §4's runReport helper creates its own ad-hoc subscription
+  // of the same type, and this check must see exactly the auto-provisioned one.
+  const autoSub = (await pg.query(`SELECT report_type, frequency, is_active, recipients FROM report_subscriptions WHERE tenant_id=${smeTid} AND report_type='sme_self_approval_review' AND name='ทบทวนการอนุมัติด้วยตนเอง (SME-01)'`)).rows as any[];
+  ok('G2: an ACTIVE monthly sme_self_approval_review subscription exists from provisioning, recipient = stamped accountant',
+    autoSub.length === 1 && autoSub[0].frequency === 'monthly' && autoSub[0].is_active === true && JSON.stringify(autoSub[0].recipients).includes('acc@x.co'),
+    JSON.stringify(autoSub[0] ?? {}));
+  const prefsEdit = await inj('POST', `/api/admin/tenants/${smeTid}/sme-prefs`, god, { accountant_email: 'new-acc@x.co' });
+  const subAfter = (await pg.query(`SELECT recipients FROM report_subscriptions WHERE tenant_id=${smeTid} AND report_type='sme_self_approval_review' AND name='ทบทวนการอนุมัติด้วยตนเอง (SME-01)'`)).rows as any[];
+  ok('H1: editing the tenant accountant (POST admin/tenants/:id/sme-prefs) re-points the SME-01 recipient',
+    prefsEdit.status === 200 && JSON.stringify(subAfter[0]?.recipients ?? []).includes('new-acc@x.co'),
+    `${prefsEdit.status} ${JSON.stringify(subAfter[0]?.recipients ?? [])}`);
+  const prefsOnEnt = await inj('POST', `/api/admin/tenants/${entTid}/sme-prefs`, god, { accountant_email: 'x@x.co' });
+  ok('H1: sme-prefs on an ENTERPRISE company → 403 NOT_SME_TENANT',
+    prefsOnEnt.status === 403 && prefsOnEnt.json.error?.code === 'NOT_SME_TENANT', `${prefsOnEnt.status} ${prefsOnEnt.json.error?.code}`);
+
+  // ── 4c. docs/49 v1.2 (audit G1): PROJ-27 benefit confirm rides the seam — 2nd event, DTO pattern, 400 contract ──
+  await pg.query(`INSERT INTO projects (tenant_id, project_code, name, program_code) VALUES (${smeTid}, 'SMEPRJ1', 'SME project', 'PRG-SME')`);
+  const declared = await inj('POST', '/api/projects/programs/PRG-SME/benefits', smeOwner, { name: 'ลดต้นทุนโปรแกรม', target_value: 100 });
+  const benefitId = Number(declared.json?.benefits?.[0]?.id ?? 0);
+  ok('G1 setup: SME owner declares a program benefit', declared.status === 201 || declared.status === 200, `${declared.status} id=${benefitId}`);
+  const confNoReason = await inj('POST', `/api/projects/benefits/${benefitId}/confirm`, smeOwner, { result: 'realized' });
+  ok('G1: SME self-confirm with NO reason → 400 SELF_APPROVAL_REASON_REQUIRED (was a hard 400 SOD_SELF_APPROVAL)',
+    confNoReason.status === 400 && confNoReason.json.error?.code === 'SELF_APPROVAL_REASON_REQUIRED', `${confNoReason.status} ${confNoReason.json.error?.code}`);
+  const confWithReason = await inj('POST', `/api/projects/benefits/${benefitId}/confirm`, smeOwner, { result: 'realized', self_approval_reason: 'เจ้าของยืนยันเอง' });
+  const benefitEvid = (await pg.query(`SELECT event, ref, reason FROM self_approvals WHERE tenant_id=${smeTid} AND event='proj.benefit.confirm'`)).rows as any[];
+  ok('G1: SME self-confirm WITH a reason → success (200/201) + proj.benefit.confirm evidence row',
+    (confWithReason.status === 200 || confWithReason.status === 201) && benefitEvid.length === 1 && benefitEvid[0].ref === String(benefitId) && benefitEvid[0].reason === 'เจ้าของยืนยันเอง',
+    `${confWithReason.status} ${JSON.stringify(benefitEvid[0] ?? {})}`);
+  await pg.query(`INSERT INTO projects (tenant_id, project_code, name, program_code) VALUES (${entTid}, 'ENTPRJ1', 'Ent project', 'PRG-ENT')`);
+  const entDeclared = await inj('POST', '/api/projects/programs/PRG-ENT/benefits', entAdmin, { name: 'ent benefit', target_value: 50 });
+  const entBenefitId = Number(entDeclared.json?.benefits?.[0]?.id ?? 0);
+  const entConf = await inj('POST', `/api/projects/benefits/${entBenefitId}/confirm`, entAdmin, { result: 'realized', self_approval_reason: 'x' });
+  ok('G1 enterprise regression: self-confirm stays a hard 400 SOD_SELF_APPROVAL (reason or not)',
+    entConf.status === 400 && entConf.json.error?.code === 'SOD_SELF_APPROVAL', `${entConf.status} ${entConf.json.error?.code}`);
+
   // ── 5. Cross-tenant boundary: the enterprise tenant's review sees ZERO SME rows ──
   const entReport = await runReport(entAdmin, 'sme_self_approval_review');
   ok('Cross-tenant: enterprise admin\'s sme_self_approval_review → count 0 (no leakage of the SME tenant\'s rows)',
@@ -145,8 +181,10 @@ async function main() {
     upgradedSelf.status === 403 && upgradedSelf.json.error?.code === 'SOD_VIOLATION', `${upgradedSelf.status} ${upgradedSelf.json.error?.code}`);
   const upgradeAgain = await inj('POST', `/api/admin/tenants/${smeTid}/control-profile`, god, { control_profile: 'enterprise' });
   ok('Re-upgrading an enterprise company → 200 changed:false (idempotent)', upgradeAgain.status === 200 && upgradeAgain.json.changed === false, `${upgradeAgain.status} ${JSON.stringify(upgradeAgain.json)}`);
+  // Two ALLOWED self-approvals exist by now (gl.je.approve §3 + proj.benefit.confirm §4c) — the blocked
+  // post-upgrade attempt must not have added a third.
   const evidAfter = (await pg.query(`SELECT count(*)::int n FROM self_approvals WHERE tenant_id=${smeTid}`)).rows as any[];
-  ok('The blocked post-upgrade attempt wrote NO new evidence row (evidence only on ALLOWED self-approvals)', evidAfter[0].n === 1, `n=${evidAfter[0].n}`);
+  ok('The blocked post-upgrade attempt wrote NO new evidence row (evidence only on ALLOWED self-approvals)', evidAfter[0].n === 2, `n=${evidAfter[0].n}`);
 
   // ── 7. Public signup NEVER honours control_profile (UAT-ADM-160) ──
   const su = await inj('POST', '/api/auth/signup', undefined, {

@@ -1,5 +1,6 @@
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { DrizzleDb } from '../../database/database.module';
 import { programBenefits, programBenefitMeasurements, projects } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
@@ -71,7 +72,7 @@ export class ProgramBenefitsService {
     if (b.status !== 'open') throw new BadRequestException({ code: 'BENEFIT_ALREADY_CONFIRMED', message: `Benefit is already ${b.status}`, messageTh: 'ผลประโยชน์ถูกยืนยันแล้ว' });
     const result = dto.result === 'not_realized' ? 'not_realized' : dto.result === 'realized' ? 'realized' : null;
     if (!result) throw new BadRequestException({ code: 'BAD_RESULT', message: "result must be 'realized' or 'not_realized'", messageTh: 'ผลต้องเป็น realized หรือ not_realized' });
-    if (b.createdBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'The confirmer must differ from the benefit author (segregation of duties)', messageTh: 'ผู้ยืนยันต้องไม่ใช่ผู้สร้าง (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: b.createdBy, event: 'proj.benefit.confirm', ref: String(benefitId), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The confirmer must differ from the benefit author (segregation of duties)', messageTh: 'ผู้ยืนยันต้องไม่ใช่ผู้สร้าง (แบ่งแยกหน้าที่)', httpStatus: 400 });
     await db.update(programBenefits).set({
       status: result, confirmedBy: user.username, confirmedAt: sql`now()`, confirmNotes: dto.notes ?? null, updatedAt: sql`now()`,
     }).where(eq(programBenefits.id, Number(b.id)));

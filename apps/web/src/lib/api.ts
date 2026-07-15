@@ -1,6 +1,8 @@
 // API client. Auth is a server-set httpOnly cookie (the JWT is NOT readable from JS — XSS can't steal it),
 // paired with a readable double-submit CSRF token cookie (`ierp_csrf`) that we echo in the X-CSRF-Token
 // header on mutating requests. Every call sends credentials so the browser attaches the auth cookie.
+import { requestSmeReason } from './sme-reason';
+
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 /** API origin (or same-origin proxy base). Exported for non-JSON fetches — e.g. the POS terminal bridge
  *  pulling raw ESC/POS receipt bytes / the HTML slip, which can't go through the JSON `api()` helper. */
@@ -136,12 +138,8 @@ function buildHeaders(init: RequestInit): Record<string, string> {
 // button in the app gains the reason prompt without per-screen changes: prompt once, merge
 // `self_approval_reason` into the JSON body, and replay the request a single time. Approve endpoints are
 // state-guarded (an already-approved doc replays as NOT_PENDING), so the one-shot retry is safe.
-function promptSelfApprovalReason(serverMsg: string): string | null {
-  if (typeof window === 'undefined') return null;
-  const answer = window.prompt(`${serverMsg}\n\nกรุณาระบุเหตุผลการอนุมัติรายการของตนเอง (โหมด SME):`);
-  const reason = (answer ?? '').trim();
-  return reason || null;
-}
+// The UI is the SmeReasonDialog mounted in AppShell (registered as host in lib/sme-reason.ts); pages
+// without AppShell (portal/diner) fall back to window.prompt inside requestSmeReason itself.
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   let res = await fetchWithTimeout(`${BASE}${path}`, { ...init, headers: buildHeaders(init) });
@@ -153,7 +151,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   }
   let body = await res.json().catch(() => ({}));
   if (res.status === 400 && body?.error?.code === 'SELF_APPROVAL_REASON_REQUIRED') {
-    const reason = promptSelfApprovalReason(body.error.messageTh ?? body.error.message ?? '');
+    const reason = await requestSmeReason(body.error.messageTh ?? body.error.message ?? '');
     if (reason) {
       let merged: Record<string, unknown> = {};
       try { merged = init.body ? JSON.parse(String(init.body)) : {}; } catch { merged = {}; }
