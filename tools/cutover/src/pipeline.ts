@@ -44,6 +44,7 @@ async function main() {
   const [hq, t1] = [await tid('HQ'), await tid('T1')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'mgr', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // CRM-18: independent HQ approver for the phase-gate maker-checker
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t1 }, // CRM-1: distinct actor for the account-merge maker-checker
   ]).onConflictDoNothing();
@@ -65,6 +66,7 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, sales1, sales2] = [await login('admin', 'admin123'), await login('sales1', 'pw1'), await login('sales2', 'pw2')];
+  const mgr = await login('mgr', 'admin123');
 
   // 1. List stages auto-seeds 6 default stages
   const stages = await inj('GET', '/api/pipeline/stages', sales1);
@@ -937,6 +939,53 @@ async function main() {
 
   const rtypesAttr = await inj('GET', '/api/bi/report-types', sales1);
   ok('CRM-15 BI: registry exposes the crm_attribution report type', (rtypesAttr.json.report_types ?? []).some((r: any) => r.key === 'crm_attribution'), 'crm_attribution');
+
+  // ── CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0414) — a DELIVERED project (phase gate at 'closed')
+  // raises a renewal opportunity for its account so recurring revenue doesn't silently lapse. Runs on HQ
+  // (admin creates + submits the gate; mgr independently GOes it). ──
+  await inj('POST', '/api/crm/accounts', admin, { name: 'Renewal Customer', customer_no: 'CUST-REN' });
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-REN', name: 'ระบบลูกค้าต่ออายุ', billing_type: 'Fixed', customer_no: 'CUST-REN', contract_amount: 500000 });
+
+  const renEarly = await inj('POST', '/api/crm/project-renewals/PRJ-REN/raise', admin, {});
+  ok('CRM-18 a renewal cannot be raised from a project that is not delivered → PROJECT_NOT_DELIVERED', renEarly.status === 400 && renEarly.json.error?.code === 'PROJECT_NOT_DELIVERED', `${renEarly.status}/${renEarly.json.error?.code}`);
+
+  // Deliver the project: one phase gate straight to 'closed', independently GO-approved (PROJ-26).
+  const gate = await inj('POST', '/api/projects/PRJ-REN/gates', admin, { target_phase: 'closed', gate_key: 'G-DELIVER' });
+  const gateId = gate.json.pending_gate.id;
+  await inj('POST', `/api/projects/gates/${gateId}/decide`, mgr, { decision: 'go', notes: 'delivered' });
+
+  const renList1 = await inj('GET', '/api/crm/project-renewals', admin);
+  const renRow = (renList1.json.delivered ?? []).find((r: any) => r.project_code === 'PRJ-REN');
+  ok('CRM-18 the delivered project surfaces as a renewal GAP (has an account, no renewal yet)',
+    renList1.status < 300 && !!renRow && renRow.is_gap === true && renRow.renewal_raised === false && renRow.account_no != null && renList1.json.counts.gaps >= 1,
+    JSON.stringify({ gap: renRow?.is_gap, acct: renRow?.account_no, gaps: renList1.json.counts?.gaps }));
+
+  const raise = await inj('POST', '/api/crm/project-renewals/PRJ-REN/raise', admin, {});
+  ok('CRM-18 raise renewal → a renewal opportunity is created for the account (deal_type renewal, amount from contract)',
+    raise.status < 300 && /^OPP-/.test(raise.json.opportunity_no) && raise.json.deal_type === 'renewal' && near(raise.json.amount, 500000) && raise.json.account_no != null,
+    JSON.stringify({ opp: raise.json.opportunity_no, dt: raise.json.deal_type }));
+
+  // the created opportunity is a real renewal deal — it appears in the CRM-08 renewal pipeline (deal_type=renewal filter)
+  const backflowPipe = await inj('GET', '/api/crm/account-health/renewals', admin);
+  ok('CRM-18 the raised opportunity is a live renewal deal (appears in the renewal pipeline)',
+    backflowPipe.status < 300 && (backflowPipe.json.renewals ?? []).some((o: any) => o.opp_no === raise.json.opportunity_no && o.deal_type === 'renewal'),
+    JSON.stringify({ found: (backflowPipe.json.renewals ?? []).map((o: any) => o.opp_no) }));
+
+  const renDup = await inj('POST', '/api/crm/project-renewals/PRJ-REN/raise', admin, {});
+  ok('CRM-18 raising a renewal twice is rejected → RENEWAL_EXISTS (idempotent)', renDup.status === 400 && renDup.json.error?.code === 'RENEWAL_EXISTS', `${renDup.status}/${renDup.json.error?.code}`);
+
+  const renList2 = await inj('GET', '/api/crm/project-renewals', admin);
+  const renRow2 = (renList2.json.delivered ?? []).find((r: any) => r.project_code === 'PRJ-REN');
+  ok('CRM-18 after raising, the project is no longer a gap (renewal_raised, gap cleared)',
+    renRow2?.renewal_raised === true && renRow2?.is_gap === false && renList2.json.counts.raised >= 1,
+    JSON.stringify({ raised: renRow2?.renewal_raised, gap: renRow2?.is_gap }));
+
+  // A delivered project whose customer has no CRM account can't raise a renewal.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-REN2', name: 'ไม่มีบัญชี', billing_type: 'Fixed', customer_no: 'CUST-NONE', contract_amount: 10000 });
+  const g2 = await inj('POST', '/api/projects/PRJ-REN2/gates', admin, { target_phase: 'closed', gate_key: 'G2' });
+  await inj('POST', `/api/projects/gates/${g2.json.pending_gate.id}/decide`, mgr, { decision: 'go' });
+  const renNoAcct = await inj('POST', '/api/crm/project-renewals/PRJ-REN2/raise', admin, {});
+  ok('CRM-18 a delivered project with no CRM account → ACCOUNT_NOT_FOUND', renNoAcct.status === 404 && renNoAcct.json.error?.code === 'ACCOUNT_NOT_FOUND', `${renNoAcct.status}/${renNoAcct.json.error?.code}`);
 
   await app.close();
 }

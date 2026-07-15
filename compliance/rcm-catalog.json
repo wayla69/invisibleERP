@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 291,
+    "total": 292,
     "by_status": {
-      "Implemented": 287,
+      "Implemented": 288,
       "Partial": 4
     },
     "by_family": {
@@ -32,7 +32,7 @@
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
-      "Revenue & Cash": 48,
+      "Revenue & Cash": 49,
       "Tax": 12
     }
   },
@@ -1802,6 +1802,25 @@
       "tod": "Inspect the touchpoint recording (chronological, OPP_NOT_FOUND guard), the four attribution models' weightings, the revenue-conservation (residual absorbed so Σ attributed = deal amount), the reconciled invariant on the report, and the open-deal-attributes-nothing rule.",
       "toe": "Re-perform (pipeline harness, CRM-15 checks): three touchpoints on a 100,000 deal are recorded chronologically; a touch on an unknown opp -> OPP_NOT_FOUND; before Won the deal attributes 0; on Won u_shaped splits 40k/20k/40k, first_touch 100k on the first, last_touch 100k on the last, linear conserves exactly (33,333.33+33,333.33+33,333.34=100,000); the report aggregates per campaign with total_attributed == won-with-touches and reconciled=true under both u_shaped and linear; the registry exposes the crm_attribution report type.",
       "evidence": "Per-campaign attributed-revenue report (per model) + the reconciled (revenue-conservation) invariant; per-opportunity touchpoint breakdown; schedulable crm_attribution BI report",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "CRM-18",
+      "cycle": "Revenue & Cash",
+      "category": "Detective",
+      "fsli": "Delivered-project renewal completeness (recurring revenue leakage)",
+      "risk": "A project is DELIVERED and then nothing happens on the commercial side — the customer represents a renewal / expansion opportunity, but no one systematically ensures a renewal motion exists, so recurring revenue silently lapses. Delivered-project business has no back-flow into the sales pipeline, and there is no worklist of delivered projects that lack a renewal, so churn goes unnoticed until the customer is gone.",
+      "assertion": "Completeness/Accuracy",
+      "description": "CRM↔PPM back-flow (CRM-18, migration 0414). A project counts as DELIVERED when it has passed its final phase gate to the 'closed' lifecycle phase (PROJ-26: the current phase = the target of the latest GO gate). GET /api/crm/project-renewals lists every delivered project, correlated to its CRM account by customer_no, and flags a GAP — a delivered project that has an account but no renewal raised yet — as the detective worklist (with delivered/raised/gap counts). POST /api/crm/project-renewals/:projectCode/raise raises the renewal as a governed, IDEMPOTENT action: the project must be delivered (PROJECT_NOT_DELIVERED otherwise), it must have a CRM account for its customer (ACCOUNT_NOT_FOUND otherwise), and a project can raise only ONE renewal (RENEWAL_EXISTS on a repeat). The renewal opportunity itself is created through the CRM pipeline service (CRM-domain write — the projects module is untouched, no golden-master drift) and tagged deal_type='renewal', so it flows into the CRM-08 renewal pipeline; the project->opportunity link is recorded in project_renewals (the idempotency key). So delivered-project business is systematically surfaced for renewal — none silently lapses. Reads gate crm/exec/ar. One tenant table (0232 RLS, tenant-leading index). No GL post; no project row mutated.",
+      "prev_det": "Detect",
+      "nature": "Automated",
+      "frequency": "Continuous / per delivered project",
+      "owner": "Sales Ops / Account Management / PMO",
+      "coso": "P13",
+      "code_reference": "crm/project-renewals/crm-project-renewals.service.ts (deliveredProjectIds via the latest GO phase-gate = 'closed'; listRenewals delivered + account correlation + gap flag + counts; raiseRenewal PROJECT_NOT_DELIVERED/ACCOUNT_NOT_FOUND/RENEWAL_EXISTS, creates the opp via CrmPipelineService + deal_type='renewal' + records project_renewals); crm-project-renewals.controller.ts (GET /api/crm/project-renewals, POST …/:projectCode/raise — crm/exec/ar); crm-project-renewals.module.ts (imports CrmPipelineModule; no cycle); schema/crm-pipeline.ts project_renewals + migration 0414; crm.module wiring; web portfolio-page renewal back-flow panel; cutover/pipeline.ts (ToE, CRM-18 checks)",
+      "tod": "Inspect the delivered-project derivation (final phase gate at 'closed'), the account correlation by customer_no, the detective gap flag, and the idempotent maker of the renewal opportunity through the CRM pipeline service (PROJECT_NOT_DELIVERED / ACCOUNT_NOT_FOUND / RENEWAL_EXISTS guards).",
+      "toe": "Re-perform (pipeline harness, CRM-18 checks): a project that is not delivered -> PROJECT_NOT_DELIVERED; deliver it (a phase gate to 'closed', independently GO-approved); the delivered project surfaces as a renewal GAP (has an account, no renewal); raising creates a renewal opportunity (deal_type='renewal', amount from the contract) that appears in the CRM-08 renewal pipeline; raising again -> RENEWAL_EXISTS; the project is then no longer a gap; a delivered project whose customer has no CRM account -> ACCOUNT_NOT_FOUND.",
+      "evidence": "Delivered-project renewal worklist (delivered + gap counts, per-project renewal status); the raised renewal opportunity (deal_type renewal) + the project->opportunity link",
       "status": "Implemented"
     },
     {

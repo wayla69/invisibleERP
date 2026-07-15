@@ -518,3 +518,22 @@ export type CrmFeedPost = typeof crmFeedPosts.$inferSelect;
 export type CrmDqScore = typeof crmDqScores.$inferSelect;
 export type CrmMergeLog = typeof crmMergeLog.$inferSelect;
 export type CrmCampaignInfluence = typeof crmCampaignInfluence.$inferSelect;
+
+// CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0414). Links a DELIVERED project to the renewal
+// opportunity raised from it (idempotent, one per project), so delivered-project business gets a renewal
+// motion instead of silently lapsing, and a detective gap list can be computed. The opportunity itself is
+// created through the CRM pipeline service (CRM-domain write); this is the CRM-owned link + idempotency key.
+export const projectRenewals = pgTable('project_renewals', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  projectCode: text('project_code').notNull(),           // delivered project (projects.project_code)
+  opportunityNo: text('opportunity_no').notNull(),       // raised renewal opportunity (crm_opportunities.opp_no)
+  accountNo: text('account_no'),
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  raisedBy: text('raised_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqProject: unique('uq_project_renewal').on(t.tenantId, t.projectCode),
+  byTenant: index('idx_project_renewals_tenant').on(t.tenantId, t.projectCode),
+}));
+export type ProjectRenewal = typeof projectRenewals.$inferSelect;
