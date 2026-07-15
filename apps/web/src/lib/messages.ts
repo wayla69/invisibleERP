@@ -40,6 +40,11 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // SME single-user edition (docs/49) — persistent mode banner shown to every user of an 'sme' tenant.
   'sme.mode_badge': { th: 'โหมด SME (คนเดียวทำได้ทุกงาน)', en: 'SME Mode (single operator)' },
   'sme.mode_banner_desc': { th: 'อนุมัติรายการของตนเองได้โดยระบุเหตุผล ทุกครั้งถูกบันทึกและส่งให้ผู้ตรวจอิสระทบทวน', en: 'Self-approval allowed with a logged reason — every instance is recorded and independently reviewed.' },
+  // SME self-approval reason dialog (docs/49 H2) — replaces the window.prompt justification flow.
+  'sme.reason_title': { th: 'ระบุเหตุผลการอนุมัติด้วยตนเอง (โหมด SME)', en: 'Self-approval justification (SME mode)' },
+  'sme.reason_ph': { th: 'เหตุผลที่อนุมัติรายการของตนเอง เช่น เจ้าของกิจการเป็นผู้ปฏิบัติงานคนเดียว…', en: 'Why you are approving your own item…' },
+  'sme.reason_cancel': { th: 'ยกเลิก', en: 'Cancel' },
+  'sme.reason_confirm': { th: 'ยืนยันการอนุมัติ', en: 'Confirm approval' },
   // Shared doc-reference picker (DocSelect) — pending-list dropdowns replacing typed doc numbers.
   'common.doc_select_ph': { th: 'เลือกเอกสาร…', en: 'Select a document…' },
   'common.doc_none': { th: 'ไม่มีเอกสารให้เลือก', en: 'No documents to select' },

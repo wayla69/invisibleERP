@@ -157,6 +157,13 @@ export class BillingController {
     return this.svc.upgradeControlProfile(Number(id), b.control_profile, u.username);
   }
 
+  // Per-tenant SME prefs (docs/49 v1.2) — edit an EXISTING SME company's stamped accountant routing /
+  // hidden nav groups; changing the accountant also re-points its auto-provisioned SME-01 subscription.
+  @Post('admin/tenants/:id/sme-prefs') @PlatformAdmin() @HttpCode(200)
+  setTenantSmePrefs(@Param('id') id: string, @Body(new ZodValidationPipe(SmeDefaultsBody)) b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, @CurrentUser() u: JwtUser) {
+    return this.svc.setTenantSmePrefs(Number(id), b, u.username);
+  }
+
   // Platform-wide SME provisioning defaults (docs/49) — what every NEW SME company is stamped with at
   // creation (tenants.sme_prefs). Changing these affects only future companies.
   @Get('admin/sme-defaults') @PlatformAdmin()

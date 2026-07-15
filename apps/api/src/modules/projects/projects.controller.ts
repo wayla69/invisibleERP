@@ -222,7 +222,7 @@ const GateDecisionBody = z.object({ decision: z.enum(['go', 'hold', 'kill']), no
 // PROJ-27 program benefits realization (PPM Wave P4)
 const BenefitBody = z.object({ name: z.string().min(1), category: z.enum(['financial', 'non_financial']).optional(), unit: z.string().optional(), baseline_value: z.number().optional(), target_value: z.number(), target_date: z.string().optional(), owner: z.string().optional() });
 const BenefitMeasurementBody = z.object({ measured_value: z.number(), measured_at: z.string().optional(), note: z.string().optional() });
-const BenefitConfirmBody = z.object({ result: z.enum(['realized', 'not_realized']), notes: z.string().optional() });
+const BenefitConfirmBody = z.object({ result: z.enum(['realized', 'not_realized']), notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')

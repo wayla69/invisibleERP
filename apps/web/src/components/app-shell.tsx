@@ -56,6 +56,7 @@ import {
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
+import { SmeReasonDialog } from '@/components/sme-reason-dialog';
 import { AssistantWidget } from '@/components/assistant-widget';
 import { NotificationBell } from '@/components/notification-bell';
 
@@ -960,6 +961,10 @@ export function AppShell({
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
       />
+
+      {/* SME self-approval reason dialog (docs/49 H2) — invisible until api() dispatches a
+          SELF_APPROVAL_REASON_REQUIRED request to it via lib/sme-reason.ts. Mounted unconditionally. */}
+      <SmeReasonDialog />
 
       {/* Global floating AI helper — contextual assistance from any screen, for users who can use the
           assistant (self-hides otherwise). Shares chat logic with the full /assistant page. */}

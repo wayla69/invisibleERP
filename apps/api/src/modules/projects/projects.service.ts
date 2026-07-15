@@ -43,7 +43,7 @@ export interface GateDecisionDto { decision: 'go' | 'hold' | 'kill'; notes?: str
 // PROJ-27 program benefits realization (PPM Wave P4)
 export interface BenefitDto { name: string; category?: 'financial' | 'non_financial'; unit?: string; baseline_value?: number; target_value: number; target_date?: string; owner?: string }
 export interface BenefitMeasurementDto { measured_value: number; measured_at?: string; note?: string }
-export interface BenefitConfirmDto { result: 'realized' | 'not_realized'; notes?: string }
+export interface BenefitConfirmDto { result: 'realized' | 'not_realized'; notes?: string; self_approval_reason?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }

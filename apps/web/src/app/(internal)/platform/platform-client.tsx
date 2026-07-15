@@ -109,7 +109,14 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const [resetConfirm, setResetConfirm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [purgeConfirm, setPurgeConfirm] = useState('');
+  // docs/49 H1 — per-tenant SME settings (this company's own copy, editable after provisioning).
+  const [smeEmail, setSmeEmail] = useState('');
+  const [smeHiddenGroups, setSmeHiddenGroups] = useState<string[]>([]);
   useEffect(() => { setTagsInput((detail.data?.tags ?? []).join(', ')); }, [detail.data]);
+  useEffect(() => {
+    setSmeEmail(detail.data?.sme_prefs?.accountant_email ?? '');
+    setSmeHiddenGroups(detail.data?.sme_prefs?.hidden_nav_groups ?? []);
+  }, [detail.data]);
   useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); setPurgeConfirm(''); }, [id]);
 
   const saveTags = useMutation({
@@ -126,6 +133,13 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const extendTrial = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
     onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // docs/49 H1 — save this company's SME overrides (hidden nav groups + accountant email; the server
+  // re-points the SME-01 review subscription to the new email automatically).
+  const saveSmePrefs = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/sme-prefs`, { method: 'POST', body: JSON.stringify({ hidden_nav_groups: smeHiddenGroups, accountant_email: smeEmail.trim() || null }) }),
+    onSuccess: () => { notifySuccess(t('plt.sme_tenant_saved')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
   // Factory reset — the danger-zone section renders only for a SUSPENDED company (mirrors the server's
@@ -243,6 +257,41 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                   <Button size="sm" variant="outline" onClick={() => extendTrial.mutate()} disabled={extendTrial.isPending}>{t('plt.drawer_extend_trial_btn')}</Button>
                 </div>
               </div>
+
+              {/* docs/49 H1 — per-tenant SME settings (only for an 'sme' control profile). This company's
+                  own copy of the SME prefs, editable after provisioning; the SME-01 review subscription
+                  follows the accountant email automatically on the server. */}
+              {d.control_profile === 'sme' && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center gap-1.5 text-xs font-medium">
+                    <BadgeCheck className="size-3.5 text-sky-600 dark:text-sky-400" /> {t('plt.sme_tenant_title')}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('plt.sme_tenant_sub_note')}</p>
+                  <div className="grid gap-1">
+                    <Label className="text-xs">{t('plt.sme_def_accountant_email')}</Label>
+                    <Input type="email" value={smeEmail} onChange={(e) => setSmeEmail(e.target.value)} placeholder="accountant@example.com" />
+                    <p className="text-xs text-muted-foreground">{t('plt.sme_def_accountant_hint')}</p>
+                  </div>
+                  <div className="grid gap-1">
+                    <Label className="text-xs">{t('plt.sme_def_hidden_groups')}</Label>
+                    <div className="grid gap-1.5 sm:grid-cols-2">
+                      {INTERNAL_NAV.map((g) => (
+                        <label key={g.title} className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={smeHiddenGroups.includes(g.title)}
+                            onChange={(e) => setSmeHiddenGroups(e.target.checked ? [...smeHiddenGroups, g.title] : smeHiddenGroups.filter((k) => k !== g.title))}
+                          />
+                          <span className="truncate">{t(g.title)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={() => saveSmePrefs.mutate()} disabled={saveSmePrefs.isPending}>
+                    {saveSmePrefs.isPending ? t('plt.sme_def_saving') : t('plt.drawer_save')}
+                  </Button>
+                </div>
+              )}
 
               {/* Tags/segments */}
               <div className="space-y-1">
