@@ -14,6 +14,7 @@ import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
 import { ProjectsPortfolioService } from './projects-portfolio.service';
 import { ProjectsGateService } from './projects-gate.service';
+import { ProgramBenefitsService } from './program-benefits.service';
 import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, depsCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
 import { shapeTemplateItem, shapeRisk, shapeChangeOrder, shapeBoqLine } from './projects.shapes';
 
@@ -38,6 +39,10 @@ export interface PortfolioCommitDto { override?: boolean; override_reason?: stri
 // PROJ-26 project phase-gate governance (PPM Wave P4)
 export interface PhaseGateDto { target_phase: string; gate_key?: string; name?: string; readiness?: string }
 export interface GateDecisionDto { decision: 'go' | 'hold' | 'kill'; notes?: string }
+// PROJ-27 program benefits realization (PPM Wave P4)
+export interface BenefitDto { name: string; category?: 'financial' | 'non_financial'; unit?: string; baseline_value?: number; target_value: number; target_date?: string; owner?: string }
+export interface BenefitMeasurementDto { measured_value: number; measured_at?: string; note?: string }
+export interface BenefitConfirmDto { result: 'realized' | 'not_realized'; notes?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -65,6 +70,7 @@ export class ProjectsService {
   private readonly evmSvc: ProjectsEvmService;
   private readonly portfolio: ProjectsPortfolioService;
   private readonly gates: ProjectsGateService;
+  private readonly benefits: ProgramBenefitsService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -86,6 +92,7 @@ export class ProjectsService {
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
     this.portfolio = new ProjectsPortfolioService(db);
     this.gates = new ProjectsGateService(db, (code) => this.row(code));
+    this.benefits = new ProgramBenefitsService(db);
   }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -370,6 +377,12 @@ export class ProjectsService {
   async listPhaseGates(code: string) { return this.gates.listGates(code); }
   async submitPhaseGate(code: string, dto: PhaseGateDto, user: JwtUser) { return this.gates.submitGate(code, dto, user); }
   async decidePhaseGate(gateId: number, dto: GateDecisionDto, user: JwtUser) { return this.gates.decideGate(gateId, dto, user); }
+
+  // ── PROJ-27 (PPM Wave P4): program benefits realization lives in ProgramBenefitsService; thin delegators. ──
+  async listProgramBenefits(programCode: string) { return this.benefits.listBenefits(programCode); }
+  async declareProgramBenefit(programCode: string, dto: BenefitDto, user: JwtUser) { return this.benefits.declareBenefit(programCode, dto, user); }
+  async recordBenefitMeasurement(benefitId: number, dto: BenefitMeasurementDto, user: JwtUser) { return this.benefits.recordMeasurement(benefitId, dto, user); }
+  async confirmProgramBenefit(benefitId: number, dto: BenefitConfirmDto, user: JwtUser) { return this.benefits.confirmBenefit(benefitId, dto, user); }
 
   // ── docs/38 projects PR-3: WBS (tasks/milestones/RACI) lives in ProjectsWbsService; thin delegators. ──
   async addTask(code: string, dto: TaskDto, user: JwtUser) { return this.wbs.addTask(code, dto, user); }
