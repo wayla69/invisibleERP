@@ -10,9 +10,24 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
     en: 'Model channel ROI from sales + social signals, then recommend an optimal budget split',
   },
 
+  'mmm.tab_ingest': { th: 'นำเข้าข้อมูล', en: 'Ingest' },
   'mmm.tab_signals': { th: 'สัญญาณ', en: 'Signals' },
   'mmm.tab_model': { th: 'รันโมเดล', en: 'Model' },
   'mmm.tab_rec': { th: 'คำแนะนำ', en: 'Recommendation' },
+
+  // Ingest (manual data entry for a store without an ETL)
+  'mmm.ing_hint': { th: 'ไม่มีระบบเชื่อมต่ออัตโนมัติ? กรอกยอดขายและกระแสโซเชียลรายวันที่นี่ — ข้อมูลจะไปอยู่ในแท็บสัญญาณและใช้รันโมเดลได้ทันที', en: 'No integration yet? Enter daily channel sales + sentiment here — they land in the Signals tab and feed the model immediately.' },
+  'mmm.ing_sales': { th: 'ยอดขายตามช่องทาง', en: 'Channel sales' },
+  'mmm.ing_sentiment': { th: 'กระแสโซเชียล', en: 'Social sentiment' },
+  'mmm.ing_add_row': { th: 'เพิ่มแถว', en: 'Add row' },
+  'mmm.ing_submit': { th: 'นำเข้า', en: 'Ingest' },
+  'mmm.ing_done': { th: 'นำเข้า {{n}} แถวแล้ว', en: 'Ingested {{n}} row(s)' },
+  'mmm.ing_need_row': { th: 'กรอกอย่างน้อยหนึ่งแถวให้ครบ (วันที่ + ช่องทาง + ค่าตัวเลข)', en: 'Fill at least one complete row (date + channel + value)' },
+  'mmm.ing_sentiment_ph': { th: 'คะแนน -1..1', en: 'score -1..1' },
+
+  // Run drill-down
+  'mmm.runs_hint': { th: 'คลิกที่รายการเพื่อดูผลรายช่องทางของการรันนั้น', en: 'Click a run to see its per-channel results' },
+  'mmm.run_detail': { th: 'ผลการรัน', en: 'Run detail' },
 
   // Signals
   'mmm.sales_by_channel': { th: 'ยอดขายตามช่องทาง (30 วัน)', en: 'Sales by channel (30 days)' },
