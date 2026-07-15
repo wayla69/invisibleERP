@@ -495,6 +495,26 @@ export const crmFeedPosts = pgTable('crm_feed_posts', {
   byEntity: index('idx_crm_feed_post_entity').on(t.tenantId, t.entityType, t.entityNo),
 }));
 
+// CRM-15 multi-touch campaign attribution (control CRM-17, migration 0413). Each row is a campaign TOUCHPOINT
+// that influenced an opportunity; campaign_name is CRM-owned free text (no cross-domain FK/join). A won deal's
+// amount is distributed across its touchpoints under an attribution model (first/last/linear/u_shaped) — every
+// model conserves the total, so attributed campaign revenue reconciles to won revenue.
+export const crmCampaignInfluence = pgTable('crm_campaign_influence', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  opportunityId: bigint('opportunity_id', { mode: 'number' }).notNull().references(() => crmOpportunities.id),
+  campaignName: text('campaign_name').notNull(),
+  touchType: text('touch_type').notNull().default('other'), // lead_source | meeting | email | event | webinar | content | other
+  touchedAt: date('touched_at').notNull(),
+  note: text('note'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_crm_campaign_influence_tenant').on(t.tenantId, t.opportunityId),
+  byOpp: index('idx_crm_campaign_influence_opp').on(t.opportunityId, t.touchedAt),
+}));
+
 export type CrmFeedPost = typeof crmFeedPosts.$inferSelect;
 export type CrmDqScore = typeof crmDqScores.$inferSelect;
 export type CrmMergeLog = typeof crmMergeLog.$inferSelect;
+export type CrmCampaignInfluence = typeof crmCampaignInfluence.$inferSelect;
