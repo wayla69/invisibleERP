@@ -184,6 +184,40 @@ async function main() {
   const smeWizEvid = (await pg.query(`SELECT count(*)::int n FROM self_approvals WHERE tenant_id=${smeTid} AND event='tenant.profile-change.approve'`)).rows as any[];
   ok('Item 4: the wizard tax_id self-approval left an SME-01 evidence row (audit trail preserved)', smeWizEvid[0].n === 1, `n=${smeWizEvid[0].n}`);
 
+  // ── 4e. docs/49 item 1 (SME-02): independent-review ATTESTATION of the SME-01 self-approval review. Two
+  //    legs — 'accountant' (a tenant user with the sme_review duty) + 'platform' (god acting-as) — sign a
+  //    period; the period is "complete" only once both legs sign. The leg is DERIVED from the principal. ──
+  // 3 self-approvals were recorded this business month (gl.je.approve + proj.benefit.confirm + profile-change).
+  const acctSign = await inj('POST', '/api/sme-review/signoff', smeOwner, { note: 'ทบทวนแล้ว' });
+  const period = acctSign.json?.period;
+  ok('SME-02: tenant reviewer (sme_owner) signs off → leg=accountant, snapshots the 3 self-approvals, platform outstanding',
+    (acctSign.status === 200 || acctSign.status === 201) && acctSign.json.item_count === 3 && acctSign.json.signoffs?.some((s: any) => s.kind === 'accountant' && s.item_count === 3) && acctSign.json.outstanding?.includes('platform') && acctSign.json.complete === false,
+    JSON.stringify({ st: acctSign.status, p: period, n: acctSign.json.item_count, out: acctSign.json.outstanding, done: acctSign.json.complete }));
+  const acctAgain = await inj('POST', '/api/sme-review/signoff', smeOwner, { note: 'ทบทวนอีกครั้ง' });
+  const acctRows = (await pg.query(`SELECT count(*)::int n FROM sme_review_signoffs WHERE tenant_id=${smeTid} AND period='${period}' AND reviewer_kind='accountant'`)).rows as any[];
+  ok('SME-02: re-signing the same leg is idempotent (one row per tenant/period/kind, snapshot refreshed)',
+    (acctAgain.status === 200 || acctAgain.status === 201) && acctRows[0].n === 1, `n=${acctRows[0].n}`);
+  const godSign = await app.inject({ method: 'POST', url: '/api/sme-review/signoff', headers: { authorization: `Bearer ${god}`, 'x-act-as-tenant': String(smeTid) }, payload: {} });
+  const godJson = (() => { try { return godSign.json(); } catch { return {}; } })();
+  ok('SME-02: platform owner (god acting-as) signs off → leg=platform, period now fully attested (complete)',
+    (godSign.statusCode === 200 || godSign.statusCode === 201) && godJson.signoffs?.some((s: any) => s.kind === 'platform') && (godJson.outstanding ?? []).length === 0 && godJson.complete === true,
+    JSON.stringify({ st: godSign.statusCode, out: godJson.outstanding, done: godJson.complete }));
+  const status = await inj('GET', `/api/sme-review/status?period=${period}`, smeOwner);
+  ok('SME-02: status endpoint reflects both legs signed + complete', status.status === 200 && status.json.complete === true && status.json.signoffs?.length === 2, JSON.stringify({ st: status.status, done: status.json.complete, legs: status.json.signoffs?.length }));
+  const smeReport2 = await runReport(smeOwner, 'sme_self_approval_review');
+  ok('SME-02: the SME-01 report now carries the current-period attestation status (complete)',
+    smeReport2.run.json.status === 'success' && smeReport2.data?.attestation?.complete === true && smeReport2.data?.attestation?.period === period,
+    JSON.stringify({ att: smeReport2.data?.attestation ? { p: smeReport2.data.attestation.period, done: smeReport2.data.attestation.complete } : null }));
+  // Cross-tenant: the enterprise tenant's status sees ZERO of the SME tenant's sign-offs (RLS-scoped).
+  const entStatus = await inj('GET', `/api/sme-review/status?period=${period}`, entAdmin);
+  ok('SME-02 cross-tenant: enterprise admin sees its OWN empty period (no leakage of the SME tenant\'s sign-offs)',
+    entStatus.status === 200 && entStatus.json.item_count === 0 && (entStatus.json.signoffs ?? []).length === 0, JSON.stringify({ st: entStatus.status, n: entStatus.json.item_count, legs: (entStatus.json.signoffs ?? []).length }));
+  // A principal with none of sme_review/exec/users is refused the attestation surface.
+  await db.insert(s.users).values([{ username: 'sme_clerk', passwordHash: await pw.hash('admin123'), role: 'Cashier', tenantId: smeTid }]).onConflictDoNothing();
+  const clerk = await login('sme_clerk', 'admin123');
+  const clerkSign = await inj('POST', '/api/sme-review/signoff', clerk, {});
+  ok('SME-02: a user without sme_review/exec/users cannot attest (403)', clerkSign.status === 403, `${clerkSign.status} ${clerkSign.json.error?.code ?? ''}`);
+
   // ── 5. Cross-tenant boundary: the enterprise tenant's review sees ZERO SME rows ──
   const entReport = await runReport(entAdmin, 'sme_self_approval_review');
   ok('Cross-tenant: enterprise admin\'s sme_self_approval_review → count 0 (no leakage of the SME tenant\'s rows)',

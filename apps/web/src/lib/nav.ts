@@ -54,6 +54,7 @@ import {
   GraduationCap,
   Goal,
   Landmark,
+  PenLine,
   Layers,
   ListTree,
   LayoutDashboard,
@@ -586,6 +587,9 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.controls', href: '/controls', icon: ShieldAlert, perms: ['exec', 'users', 'creditors'] },
       { label: 'nav.control_console', href: '/controls/rcm', icon: ClipboardCheck, perms: ['exec', 'users'] },
       { label: 'nav.governance', href: '/governance', icon: Landmark, perms: ['exec', 'users'] },
+      // SME-02 (docs/49) — the external accountant's independent-review attestation surface (gated on the
+      // dedicated sme_review duty so a limited reviewer login reaches only this, plus exec/users oversight).
+      { label: 'nav.sme_review', href: '/sme-review', icon: PenLine, perms: ['sme_review', 'exec', 'users'] },
       { label: 'nav.ops', href: '/ops', icon: Activity, perms: ['exec', 'users'] },
     ],
   },
