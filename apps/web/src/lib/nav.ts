@@ -564,6 +564,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.budget', href: '/budget', icon: PiggyBank, perms: ['exec', 'planner'] },
       { label: 'nav.demand', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },
       { label: 'nav.profitability', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
+      { label: 'nav.mmm', href: '/mmm', icon: BarChart3, perms: ['marketing', 'exec'] },
       { label: 'nav.insights', href: '/insights', icon: Lightbulb, perms: ['exec', 'dashboard', 'planner', 'warehouse'] },
       { label: 'nav.bi', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
       { label: 'nav.query', href: '/query', icon: BarChart3, perms: ['exec', 'dashboard', 'masterdata'] },

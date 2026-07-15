@@ -34,20 +34,20 @@ evidenced over an audit period or tested by an independent firm. Those are separ
 
 | Status | Count | Share | Meaning |
 |--------|-------|-------|---------|
-| Implemented | **<!-- rcm-implemented -->289<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
-| Partial | **<!-- rcm-partial -->4<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
+| Implemented | **<!-- rcm-implemented -->290<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
+| Partial | **<!-- rcm-partial -->3<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
 | Gap | **<!-- rcm-gap -->0<!-- /rcm-gap -->** | 0% | — every control now has at least system scaffolding |
 | **Total** | **<!-- rcm-total -->293<!-- /rcm-total -->** | | |
-| Implemented | **<!-- rcm-implemented -->289<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
-| Partial | **<!-- rcm-partial -->4<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
+| Implemented | **<!-- rcm-implemented -->290<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
+| Partial | **<!-- rcm-partial -->3<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
 | Gap | **<!-- rcm-gap -->0<!-- /rcm-gap -->** | 0% | — every control now has at least system scaffolding |
 | **Total** | **<!-- rcm-total -->293<!-- /rcm-total -->** | | |
-| Implemented | **<!-- rcm-implemented -->289<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
-| Partial | **<!-- rcm-partial -->4<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
+| Implemented | **<!-- rcm-implemented -->290<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
+| Partial | **<!-- rcm-partial -->3<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
 | Gap | **<!-- rcm-gap -->0<!-- /rcm-gap -->** | 0% | — every control now has at least system scaffolding |
 | **Total** | **<!-- rcm-total -->293<!-- /rcm-total -->** | | |
-| Implemented | **<!-- rcm-implemented -->289<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
-| Partial | **<!-- rcm-partial -->4<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
+| Implemented | **<!-- rcm-implemented -->290<!-- /rcm-implemented -->** | 98% | Exists + automated ToE harness re-performs it |
+| Partial | **<!-- rcm-partial -->3<!-- /rcm-partial -->** | 2% | Capability present; must be formalized/extended |
 | Gap | **<!-- rcm-gap -->0<!-- /rcm-gap -->** | 0% | — every control now has at least system scaffolding |
 | **Total** | **<!-- rcm-total -->293<!-- /rcm-total -->** | | |
 

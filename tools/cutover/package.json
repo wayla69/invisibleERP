@@ -118,6 +118,7 @@
     "branch": "tsx src/branch.ts",
     "channel": "tsx src/channel.ts",
     "reputation": "tsx src/reputation.ts",
+    "mmm": "tsx src/mmm.ts",
     "workflow": "tsx src/workflow.ts",
     "compliance": "tsx src/compliance.ts",
     "control-exceptions": "tsx src/control-exceptions.ts",
