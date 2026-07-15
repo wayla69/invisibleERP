@@ -896,6 +896,48 @@ async function main() {
   const t1List = await inj('GET', '/api/crm/dq', sales1);
   ok('CRM-17 RLS: an HQ account is absent from a T1 user\'s DQ worklist', !(t1List.json.accounts ?? []).some((a: any) => a.name === 'HQ Only DQ Co'), `names=${(t1List.json.accounts ?? []).map((a: any) => a.name).slice(0, 8).join('|')}`);
 
+  // ── CRM-15 multi-touch campaign attribution (control CRM-17, migration 0413) — distribute a won deal's
+  // revenue across its campaign touchpoints under an attribution model; every model conserves the total. ──
+  const attrAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Attribution Co' });
+  const attrOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Attribution Deal', amount: 100000, account_no: attrAcc.json.account_no });
+  const attrNo = attrOpp.json.opp_no;
+  await inj('POST', `/api/crm/attribution/opportunity/${attrNo}/touch`, sales1, { campaign_name: 'C-First', touch_type: 'lead_source', touched_at: '2027-01-01' });
+  await inj('POST', `/api/crm/attribution/opportunity/${attrNo}/touch`, sales1, { campaign_name: 'C-Mid', touch_type: 'webinar', touched_at: '2027-02-01' });
+  const attrAdd = await inj('POST', `/api/crm/attribution/opportunity/${attrNo}/touch`, sales1, { campaign_name: 'C-Last', touch_type: 'meeting', touched_at: '2027-03-01' });
+  ok('CRM-15 record campaign touchpoints on an opportunity (chronological)', attrAdd.status < 300 && attrAdd.json.touch_count === 3 && attrAdd.json.touches[0].campaign === 'C-First' && attrAdd.json.touches[2].campaign === 'C-Last', JSON.stringify({ n: attrAdd.json.touch_count }));
+
+  const attrBadOpp = await inj('POST', '/api/crm/attribution/opportunity/OPP-NOPE/touch', sales1, { campaign_name: 'X' });
+  ok('CRM-15 a touchpoint on an unknown opportunity → 404 OPP_NOT_FOUND', attrBadOpp.status === 404 && attrBadOpp.json.error?.code === 'OPP_NOT_FOUND', `${attrBadOpp.status}/${attrBadOpp.json.error?.code}`);
+
+  // Before the deal is Won, its touchpoints attribute nothing.
+  const attrPre = await inj('GET', `/api/crm/attribution/opportunity/${attrNo}`, sales1);
+  ok('CRM-15 an OPEN deal attributes 0 (only won revenue is distributed)', attrPre.status < 300 && attrPre.json.status !== 'Won' && attrPre.json.attributed.linear.every((x: any) => near(x.amount, 0)), JSON.stringify({ st: attrPre.json.status }));
+
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${attrNo}/stage`, sales1, { stage: 'won', win_reason: 'attribution test' });
+  const attrWon = await inj('GET', `/api/crm/attribution/opportunity/${attrNo}`, sales1);
+  const uShaped = attrWon.json.attributed.u_shaped, linear = attrWon.json.attributed.linear, first = attrWon.json.attributed.first_touch, last = attrWon.json.attributed.last_touch;
+  ok('CRM-15 u_shaped attributes 40/20/40 of a won deal (100,000 → 40k/20k/40k)',
+    near(uShaped[0].amount, 40000) && near(uShaped[1].amount, 20000) && near(uShaped[2].amount, 40000), JSON.stringify(uShaped.map((x: any) => x.amount)));
+  ok('CRM-15 first_touch → 100k on the first campaign; last_touch → 100k on the last',
+    near(first[0].amount, 100000) && near(first[2].amount, 0) && near(last[0].amount, 0) && near(last[2].amount, 100000), JSON.stringify({ first: first.map((x: any) => x.amount), last: last.map((x: any) => x.amount) }));
+  ok('CRM-15 linear conserves revenue exactly (33,333.33 + 33,333.33 + 33,333.34 = 100,000)',
+    near(linear[0].amount + linear[1].amount + linear[2].amount, 100000) && near(linear[2].amount, 33333.34), JSON.stringify(linear.map((x: any) => x.amount)));
+
+  const attrRep = await inj('GET', '/api/crm/attribution?model=u_shaped&months=24', sales1);
+  const cFirst = (attrRep.json.campaigns ?? []).find((c: any) => c.campaign === 'C-First');
+  const cMid = (attrRep.json.campaigns ?? []).find((c: any) => c.campaign === 'C-Mid');
+  ok('CRM-15 attribution report: per-campaign attributed revenue + revenue-conservation invariant reconciles',
+    attrRep.status < 300 && near(cFirst?.attributed_revenue, 40000) && near(cMid?.attributed_revenue, 20000) &&
+    near(attrRep.json.totals.total_attributed, 100000) && near(attrRep.json.totals.won_with_touches_revenue, 100000) && attrRep.json.totals.reconciled === true && attrRep.json.totals.deals_with_touches === 1,
+    JSON.stringify({ total: attrRep.json.totals?.total_attributed, recon: attrRep.json.totals?.reconciled }));
+
+  const attrLinRep = await inj('GET', '/api/crm/attribution?model=linear&months=24', sales1);
+  ok('CRM-15 the linear model also reconciles (total attributed == won-with-touches)',
+    near(attrLinRep.json.totals.total_attributed, attrLinRep.json.totals.won_with_touches_revenue) && attrLinRep.json.totals.reconciled === true, JSON.stringify({ t: attrLinRep.json.totals?.total_attributed }));
+
+  const rtypesAttr = await inj('GET', '/api/bi/report-types', sales1);
+  ok('CRM-15 BI: registry exposes the crm_attribution report type', (rtypesAttr.json.report_types ?? []).some((r: any) => r.key === 'crm_attribution'), 'crm_attribution');
+
   await app.close();
 }
 

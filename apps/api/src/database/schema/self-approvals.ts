@@ -1,7 +1,7 @@
 import { pgTable, bigserial, bigint, text, numeric, timestamp } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
-// SME-01 evidence (docs/49, migration 0413) — one row per ALLOWED self-approval: a maker-checker step
+// SME-01 evidence (docs/49, migration 0414) — one row per ALLOWED self-approval: a maker-checker step
 // where maker === checker under tenants.control_profile='sme'. Written ONLY by
 // ControlProfileService.recordSelfApproval (common/control-profile.service.ts); read by the
 // `sme_self_approval_review` BI report routed to the external accountant + the platform owner.

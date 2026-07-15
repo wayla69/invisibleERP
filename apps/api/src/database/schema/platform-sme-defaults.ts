@@ -1,6 +1,6 @@
 import { pgTable, smallint, text, jsonb, timestamp } from 'drizzle-orm/pg-core';
 
-// Platform-level single-row config (docs/49, migration 0413) — the defaults every NEW SME company is
+// Platform-level single-row config (docs/49, migration 0414) — the defaults every NEW SME company is
 // stamped with at provisioning (tenants.sme_prefs copy). God-only via @PlatformAdmin routes; changing
 // these later affects only future companies. Deliberately NO tenant_id-named column so the generic RLS
 // loop + the tenant-index guard skip it (pattern: platform_notifications / signup_requests).
