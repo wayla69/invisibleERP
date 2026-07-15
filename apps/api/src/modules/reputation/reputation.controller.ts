@@ -7,10 +7,15 @@ import { ReputationConnectionsService } from './reputation-connections.service';
 import { ReputationReviewSyncService } from './reputation-review-sync.service';
 import { ReputationAnalyticsSyncService } from './reputation-analytics-sync.service';
 import { ReputationReadsService } from './reputation-reads.service';
+import { ReputationSlaService } from './reputation-sla.service';
 
 const PLATFORMS = ['google_maps', 'google_analytics'] as const;
 const TargetsBody = z.object({ targets: z.array(z.object({ ref: z.string().min(1), label: z.string() })) });
 const ReplyBody = z.object({ comment: z.string().min(1).max(4000) });
+const ResponseSettingsBody = z.object({
+  slaRatingThreshold: z.number().int().min(1).max(5).optional(),
+  slaHours: z.number().int().min(1).max(720).optional(),
+});
 
 function parsePlatform(v: string | undefined): ReputationPlatform {
   if (!v || !(PLATFORMS as readonly string[]).includes(v)) throw new BadRequestException({ code: 'BAD_PLATFORM', message: 'platform must be google_maps or google_analytics', messageTh: 'platform ต้องเป็น google_maps หรือ google_analytics' });
@@ -28,6 +33,7 @@ export class ReputationController {
     private readonly reviewSync: ReputationReviewSyncService,
     private readonly analyticsSync: ReputationAnalyticsSyncService,
     private readonly reads: ReputationReadsService,
+    private readonly sla: ReputationSlaService,
   ) {}
 
   @Get('oauth/start')
@@ -95,5 +101,25 @@ export class ReputationController {
   @Permissions('marketing', 'exec')
   analytics(@Query('property_ref') propertyRef: string | undefined, @Query('days') days: string | undefined, @CurrentUser() user: JwtUser) {
     return this.reads.analytics(user, { propertyRef, days: days != null ? Number(days) : undefined });
+  }
+
+  // ── Review-response SLA governance (MKT-16) ──────────────────────────────────────────────────────────
+  @Get('response-sla')
+  @Permissions('marketing', 'exec')
+  responseSla(@CurrentUser() user: JwtUser) {
+    return this.sla.responseSla(user);
+  }
+
+  @Get('response-settings')
+  @Permissions('marketing', 'exec')
+  getResponseSettings(@CurrentUser() user: JwtUser) {
+    return this.sla.getSettings(user);
+  }
+
+  @Put('response-settings')
+  @Permissions('marketing', 'exec')
+  putResponseSettings(@Body() body: unknown, @CurrentUser() user: JwtUser) {
+    const dto = ResponseSettingsBody.parse(body);
+    return this.sla.putSettings(user, dto);
   }
 }

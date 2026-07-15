@@ -5,6 +5,7 @@ import { ReputationConnectionsService } from './reputation-connections.service';
 import { ReputationReviewSyncService } from './reputation-review-sync.service';
 import { ReputationAnalyticsSyncService } from './reputation-analytics-sync.service';
 import { ReputationReadsService } from './reputation-reads.service';
+import { ReputationSlaService } from './reputation-sla.service';
 import { ReputationBiReports } from './reputation-bi-reports';
 
 // docs/47 — reputation & external analytics ingestion (Google Maps reviews, GA4). New bounded context:
@@ -14,7 +15,7 @@ import { ReputationBiReports } from './reputation-bi-reports';
   controllers: [ReputationController],
   providers: [
     GoogleOAuthService, ReputationConnectionsService, ReputationReviewSyncService,
-    ReputationAnalyticsSyncService, ReputationReadsService, ReputationBiReports,
+    ReputationAnalyticsSyncService, ReputationReadsService, ReputationSlaService, ReputationBiReports,
   ],
   exports: [GoogleOAuthService, ReputationConnectionsService, ReputationReviewSyncService, ReputationAnalyticsSyncService, ReputationBiReports],
 })

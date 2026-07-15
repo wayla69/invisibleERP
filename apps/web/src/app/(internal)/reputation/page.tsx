@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Star, MapPin, BarChart3, RefreshCw, Unplug, Settings2, MessageSquareReply, TrendingUp, Users, Wallet } from 'lucide-react';
+import { Star, MapPin, BarChart3, RefreshCw, Unplug, Settings2, MessageSquareReply, TrendingUp, Users, Wallet, AlarmClock, Clock, Save } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, baht } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -219,6 +219,78 @@ function AnalyticsPanel() {
   );
 }
 
+function SlaPanel() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const settingsQ = useQuery<{ sla_rating_threshold: number; sla_hours: number; is_default: boolean; updated_by: string | null }>({
+    queryKey: ['rep-sla-settings'], queryFn: () => api('/api/reputation/response-settings'),
+  });
+  const slaQ = useQuery<{ settings: { sla_rating_threshold: number; sla_hours: number }; breach_count: number; open_count: number; breaches: any[]; open: any[] }>({
+    queryKey: ['rep-sla'], queryFn: () => api('/api/reputation/response-sla'),
+  });
+  const [threshold, setThreshold] = useState<string>('');
+  const [hours, setHours] = useState<string>('');
+  // Seed the form from the loaded policy once it arrives.
+  const s = settingsQ.data;
+  useEffect(() => {
+    if (s) { setThreshold((prev) => (prev === '' ? String(s.sla_rating_threshold) : prev)); setHours((prev) => (prev === '' ? String(s.sla_hours) : prev)); }
+  }, [s]);
+
+  const save = useMutation({
+    mutationFn: () => api('/api/reputation/response-settings', { method: 'PUT', body: JSON.stringify({ slaRatingThreshold: Number(threshold), slaHours: Number(hours) }) }),
+    onSuccess: () => { notifySuccess(t('rep.sla_saved')); qc.invalidateQueries({ queryKey: ['rep-sla-settings'] }); qc.invalidateQueries({ queryKey: ['rep-sla'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  const worklistCols = [
+    { key: 'author', label: t('rep.col_author'), render: (r: any) => r.author_name ?? '—' },
+    { key: 'rating', label: t('rep.col_rating'), render: (r: any) => (r.rating ? '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) : '—') },
+    { key: 'comment', label: t('rep.col_comment'), render: (r: any) => <span className="line-clamp-2 max-w-md">{r.comment ?? '—'}</span> },
+    { key: 'age', label: t('rep.sla_col_age'), align: 'right' as const, render: (r: any) => `${Math.round(r.age_hours)}h` },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card className="gap-3">
+        <CardHeader><CardTitle className="text-base">{t('rep.sla_policy')}</CardTitle></CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <div className="mb-1 text-muted-foreground">{t('rep.sla_threshold')}</div>
+            <select value={threshold} onChange={(e) => setThreshold(e.target.value)} className="w-40 rounded border px-2 py-1">
+              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{'★'.repeat(n)} {t('rep.sla_or_below')}</option>)}
+            </select>
+          </label>
+          <label className="text-sm">
+            <div className="mb-1 text-muted-foreground">{t('rep.sla_hours')}</div>
+            <input type="number" min={1} max={720} value={hours} onChange={(e) => setHours(e.target.value)} className="w-32 rounded border px-2 py-1" />
+          </label>
+          <Button size="sm" disabled={save.isPending || !threshold || !hours} onClick={() => save.mutate()}><Save className="mr-1 size-3.5" />{t('rep.save')}</Button>
+        </CardContent>
+      </Card>
+
+      <StateView q={slaQ}>
+        {slaQ.data && (
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard label={t('rep.sla_breached')} value={num(slaQ.data.breach_count)} icon={AlarmClock} tone={slaQ.data.breach_count > 0 ? 'danger' : 'success'} />
+              <StatCard label={t('rep.sla_open')} value={num(slaQ.data.open_count)} icon={Clock} tone={slaQ.data.open_count > 0 ? 'warning' : 'success'} />
+              <StatCard label={t('rep.sla_policy_active')} value={`≤${slaQ.data.settings.sla_rating_threshold}★ · ${slaQ.data.settings.sla_hours}h`} icon={Settings2} tone="primary" />
+            </div>
+            <div>
+              <h3 className="mb-2 text-sm font-medium">{t('rep.sla_breached')}</h3>
+              <DataTable rows={slaQ.data.breaches} rowKey={(r: any) => r.id} emptyState={{ icon: AlarmClock, title: t('rep.sla_none_breached') }} columns={worklistCols} />
+            </div>
+            <div>
+              <h3 className="mb-2 text-sm font-medium">{t('rep.sla_open')}</h3>
+              <DataTable rows={slaQ.data.open} rowKey={(r: any) => r.id} emptyState={{ icon: Clock, title: t('rep.sla_none_open') }} columns={worklistCols} />
+            </div>
+          </div>
+        )}
+      </StateView>
+    </div>
+  );
+}
+
 export default function ReputationPage() {
   const { t } = useLang();
   return (
@@ -227,6 +299,7 @@ export default function ReputationPage() {
       <Tabs tabs={[
         { key: 'conn', label: t('rep.tab_connections'), content: <Connections /> },
         { key: 'rev', label: t('rep.tab_reviews'), content: <Reviews /> },
+        { key: 'sla', label: t('rep.tab_sla'), content: <SlaPanel /> },
         { key: 'an', label: t('rep.tab_analytics'), content: <AnalyticsPanel /> },
       ]} />
     </div>

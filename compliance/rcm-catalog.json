@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 293,
+    "total": 294,
     "by_status": {
-      "Implemented": 290,
+      "Implemented": 291,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 24,
+      "CRM — Loyalty": 25,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 8,
@@ -2429,6 +2429,25 @@
       "tod": "Inspect the persisted run header (inputs + actor + timestamp), the pure attribution function + its unit tests, the tenant_id filter on every MMM query + the RLS policy on all six tables, and the cutover ToE harness.",
       "toe": "Re-perform (mmm harness, 16 checks): run the model → a mmm_model_runs row records the spend/window/actor + an append-only audit_log row is written and mmm_channel_results holds the per-channel ROI/allocation; computeMmm is deterministic (a re-run reproduces identical per-channel ROI/allocation) and ROI is null (not Infinity) at zero spend, allocations sum to exactly the budget, lift shares sum to 100; a non-marketing user is refused 403; a T2 tenant's MMM reads/getRun return zero T1 rows / 404 (RLS org-sharing also hard-asserted by the pg-core harness for all six tables).",
       "evidence": "mmm_model_runs audit header + mmm_channel_results + audit_log run row; MMM staging/core tenant isolation; computeMmm unit tests + cutover/mmm.ts ToE",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-16",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A negative external review (Google Maps) is left unanswered past a reasonable response window, silently damaging the business's public rating, with no worklist surfacing which reviews have breached a response SLA; or one tenant's review-response worklist/policy surfaces for another tenant.",
+      "assertion": "Completeness/Timeliness",
+      "description": "Review-response SLA governance (docs/47 next-level, MKT-16): a per-tenant policy (reputation_response_settings — sla_rating_threshold, sla_hours; defaults ≤3★ within 48h) defines WHICH external reviews need a timely response and HOW FAST. The detective worklist (GET /api/reputation/response-sla) computes, over the existing external_reviews rows, the reviews that are at/below the rating threshold AND still unreplied, splitting them into BREACHED (older than sla_hours from the review's create time) vs OPEN (within the window) — a review above the threshold or already replied is excluded, and a reply clears it. The policy is upserted via GET/PUT /api/reputation/response-settings (change gated marketing/exec). The same worklist is a schedulable digest (reputation_response_sla BI report, module-owned BiReportSource — same shape as ar_collections_dunning) so a store can be alerted to overdue negative reviews. reputation_response_settings is tenant-scoped (canonical 0232 org-clause RLS + explicit tenant_id filter + leading tenant index) and the worklist reads only the caller's own reviews, so no cross-tenant leak. A read/aggregate model — no GL posting, no review data written.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Continuous / per review",
+      "owner": "Marketing / Exec",
+      "coso": "P13",
+      "code_reference": "reputation/reputation-sla.service.ts (getSettings/putSettings policy upsert with range clamps; responseSla breach worklist over external_reviews — rating<=threshold AND unreplied AND age>=sla_hours, split breached/open); reputation.controller.ts GET /api/reputation/response-sla + GET/PUT /response-settings (marketing/exec); reputation-bi-reports.ts reputation_response_sla schedulable digest + bi report-registry entry; schema/reputation.ts reputation_response_settings + migration 0416 (canonical RLS, tenant-leading index); apps/web reputation/page.tsx Response-SLA tab; cutover/reputation.ts (MKT-16 ToE)",
+      "tod": "Inspect the per-tenant SLA policy (rating threshold + hours), the breach computation (unreplied <=threshold review older than the window), the exclusion of replied/high-rated reviews, and the tenant_id filter on the worklist.",
+      "toe": "Re-perform (reputation harness, MKT-16 checks): an OLD unreplied 2★ review is flagged breached, a RECENT one open, a 5★ review excluded; tightening the threshold to <=1★ drops the 2★ reviews; a reply clears the breach; a non-marketing user is refused 403; a T2 tenant sees only its OWN breach, never any of T1's reviews.",
+      "evidence": "reputation_response_settings policy; the breach/open worklist (counts + rows); the schedulable reputation_response_sla digest",
       "status": "Implemented"
     },
     {
