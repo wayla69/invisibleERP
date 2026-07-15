@@ -380,17 +380,23 @@ MMM estimates how much each marketing channel (Facebook, Google, TikTok, a promo
 contributes to sales, then suggests how to split a budget for the best return. It reads
 signals you bring into the system — it never guesses from your live sales tables directly.
 
-The workspace has three tabs:
+The workspace has four tabs:
 
-1. **สัญญาณ (Signals)** — the marketing signals already ingested for the last 30 days:
-   revenue and units per channel, and social mention volume + average sentiment per
-   platform. (Signals are loaded by your integration/import via the `POST /api/mmm/ingest/*`
-   endpoints; this tab is read-only.)
-2. **รันโมเดล (Model)** — choose a **window (days)** and enter the **spend per channel**
+1. **นำเข้าข้อมูล (Ingest)** — if you don't have an automatic integration feeding the model,
+   enter data by hand here: **Channel sales** (date · channel · revenue · units) and **Social
+   sentiment** (date · platform · mention count · sentiment score −1…1). Add a row per line and
+   press **นำเข้า (Ingest)** — the rows land in the Signals tab immediately and are re-ingestable
+   (re-entering the same day/channel updates rather than duplicates). Skip this tab entirely if an
+   integration already loads your signals.
+2. **สัญญาณ (Signals)** — the marketing signals ingested for the last 30 days: revenue and units
+   per channel, and social mention volume + average sentiment per platform. Read-only view of
+   whatever the Ingest tab or your integration has loaded.
+3. **รันโมเดล (Model)** — choose a **window (days)** and enter the **spend per channel**
    (add a row per channel), then press **รันโมเดล (Run model)**. Every run is recorded with a
    run number (`MMM-YYYYMMDD-NNN`), who ran it, and the exact inputs — so any budget
-   recommendation can be reviewed and reproduced later. Prior runs are listed below the form.
-3. **คำแนะนำ (Recommendation)** — the latest run's result: each channel's **ROI**, its
+   recommendation can be reviewed and reproduced later. Prior runs are listed below the form;
+   **click any run** to open its full per-channel results (ROI / lift / recommended budget).
+4. **คำแนะนำ (Recommendation)** — the latest run's result: each channel's **ROI**, its
    **share of the modelled lift**, and the **recommended budget** (the same total, re-split
    toward the higher-ROI channels). A channel with no spend shows ROI **—** (undefined, never
    a fake "infinite" number), and the recommended split always adds back to exactly your total.
