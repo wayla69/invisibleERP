@@ -216,7 +216,30 @@ async function main() {
   await db.insert(s.users).values([{ username: 'sme_clerk', passwordHash: await pw.hash('admin123'), role: 'Cashier', tenantId: smeTid }]).onConflictDoNothing();
   const clerk = await login('sme_clerk', 'admin123');
   const clerkSign = await inj('POST', '/api/sme-review/signoff', clerk, {});
-  ok('SME-02: a user without sme_review/exec/users cannot attest (403)', clerkSign.status === 403, `${clerkSign.status} ${clerkSign.json.error?.code ?? ''}`);
+  ok('SME-02: a user without sme_review/exec/users cannot attest (403)', clerkSign.status === 403, `${clerkSign.json.error?.code ?? clerkSign.status}`);
+
+  // ── 4f. docs/49 item 2 (self-approval REGISTRY): cross-period filterable browse + CSV export ──
+  const regAll = await inj('GET', '/api/sme-review/registry', smeOwner);
+  ok('Item 2: registry lists all self-approvals with by-event + by-period rollups (period attestation status carried)',
+    regAll.status === 200 && regAll.json.count === 3 && (regAll.json.by_event ?? []).length >= 1 && (regAll.json.by_period ?? []).some((p: any) => p.period === period && p.complete === true),
+    JSON.stringify({ n: regAll.json.count, ev: (regAll.json.by_event ?? []).length, per: (regAll.json.by_period ?? []).map((p: any) => `${p.period}:${p.complete}`) }));
+  const regEvent = await inj('GET', '/api/sme-review/registry?event=gl.je.approve', smeOwner);
+  ok('Item 2: registry event filter narrows to the matching self-approvals only',
+    regEvent.status === 200 && regEvent.json.count === 1 && regEvent.json.items?.[0]?.event === 'gl.je.approve', JSON.stringify({ n: regEvent.json.count }));
+  const regSearch = await inj('GET', `/api/sme-review/registry?q=${encodeURIComponent('เจ้าของอนุมัติเอง')}`, smeOwner);
+  ok('Item 2: registry text search matches on the reason (ILIKE across reason/ref/user/event)',
+    regSearch.status === 200 && regSearch.json.count === 1 && regSearch.json.items?.[0]?.reason === 'เจ้าของอนุมัติเอง', JSON.stringify({ n: regSearch.json.count }));
+  const regFuture = await inj('GET', '/api/sme-review/registry?from=2099-01-01', smeOwner);
+  ok('Item 2: registry date filter (from=2099) returns an empty set', regFuture.status === 200 && regFuture.json.count === 0, JSON.stringify({ n: regFuture.json.count }));
+  const csv = await app.inject({ method: 'GET', url: '/api/sme-review/registry/export', headers: { authorization: `Bearer ${smeOwner}` } });
+  const csvBody = csv.body ?? '';
+  ok('Item 2: registry CSV export streams text/csv with a header row + one line per self-approval',
+    csv.statusCode === 200 && String(csv.headers['content-type'] ?? '').includes('text/csv') && csvBody.startsWith('at,period,event,ref,username,amount,reason') && csvBody.split('\n').length === 4,
+    JSON.stringify({ st: csv.statusCode, ct: csv.headers['content-type'], lines: csvBody.split('\n').length }));
+  const regEnt = await inj('GET', '/api/sme-review/registry', entAdmin);
+  ok('Item 2 cross-tenant: enterprise admin\'s registry returns 0 of the SME tenant\'s rows (RLS)', regEnt.status === 200 && regEnt.json.count === 0, JSON.stringify({ n: regEnt.json.count }));
+  const regClerk = await inj('GET', '/api/sme-review/registry', clerk);
+  ok('Item 2: a user without sme_review/exec/users cannot read the registry (403)', regClerk.status === 403, `${regClerk.status}`);
 
   // ── 5. Cross-tenant boundary: the enterprise tenant's review sees ZERO SME rows ──
   const entReport = await runReport(entAdmin, 'sme_self_approval_review');
