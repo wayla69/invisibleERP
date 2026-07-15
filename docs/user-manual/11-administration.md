@@ -735,6 +735,30 @@ the industry Chart of Accounts — and the action is recorded in the [Audit trai
 Anyone not on the platform-owner list gets **`403 PLATFORM_ADMIN_REQUIRED`**; if the list is empty, nobody
 can (secure default) — set `PLATFORM_ADMIN_USERNAMES` first.
 
+**เลือกเอดิชันตอนสร้างบริษัท — Enterprise หรือ SME (docs/49).** In the Platform Console's create-company
+dialog (แท็บ **บริษัท** → เปิดบริษัทใหม่) the **เอดิชัน** selector picks the company's control profile:
+
+- **Enterprise** (default) — full segregation of duties: the maker and the checker must always be
+  different people, on every approval, with no exception.
+- **SME — คนเดียวทำได้ทุกงาน** — for a company run by a single operator. The operator may approve their
+  **own** items across **every maker-checker step in the system** (journals and reversals, period
+  lock/reopen, AP payments and payment runs, petty cash, master-data changes, quotes, stocktakes and
+  write-offs, projects/BoQ/claims, HR approvals, quality dispositions, tax postings, refunds, treasury,
+  workflow items, and more) **only** by supplying a justification each time (without one the API answers
+  `400 SELF_APPROVAL_REASON_REQUIRED`; the web prompts for the reason automatically). Two exceptions stay
+  blocked even in SME mode: approving an access exception that grants **yourself**, and configured
+  permission-pair (PERM_PAIR) conflicts. Every self-approval is recorded in the `self_approvals`
+  evidence register and reviewed independently via the scheduled **Self-approval review (SME-01)**
+  report — schedule it monthly to the company's external accountant (set the default address in the
+  **ค่าเริ่มต้น SME** tab) and to yourself. Every user of an SME company sees a persistent
+  **"โหมด SME"** banner so the relaxed control environment is never mistaken for the enterprise one.
+
+An SME company can be **upgraded to Enterprise at any time** (บริษัท tab → อัพเกรด, or
+`POST /api/admin/tenants/:id/control-profile`), but the transition is **one-way**: an Enterprise company
+can never be downgraded to SME (`403 PROFILE_DOWNGRADE_FORBIDDEN`). New SME companies are stamped with
+the platform-wide defaults from the **ค่าเริ่มต้น SME** tab (hidden menu groups + the accountant's email)
+at creation — changing the defaults later affects only companies created afterwards.
+
 **Invite a company to sign up themselves (optional).** If you'd rather the new company fill in their own
 details, issue a **single-use invite link** instead: `POST /api/admin/signup-invites` (returns a token +
 expiry once; review them at `GET /api/admin/signup-invites`). Send the invitee the link; they complete

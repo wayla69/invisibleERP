@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import {
   HcmCompService,
   type PayGradeDto, type CompChangeDto, type BenefitPlanDto, type EnrollmentDto,
@@ -51,9 +52,11 @@ export class HcmCompController {
   @Permissions('hr', 'hr_admin')
   createChange(@Body(new ZodValidationPipe(ChangeBody)) b: CompChangeDto, @CurrentUser() u: JwtUser) { return this.svc.createChange(b, u); }
 
+  // HR-06 — the approver must differ from the requester (SOD_SELF_APPROVAL).
+  // (an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01.)
   @Post('changes/:id/approve')
   @Permissions('hr_admin', 'exec')
-  approveChange(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.approveChange(Number(id), u); }
+  approveChange(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveChange(Number(id), u, b?.self_approval_reason); }
 
   @Post('changes/:id/reject')
   @Permissions('hr_admin', 'exec')

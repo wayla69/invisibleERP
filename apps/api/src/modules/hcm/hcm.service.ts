@@ -5,6 +5,7 @@ import { employees, timesheets, leaveRequests, leaveBalances, projects } from '.
 import { ProjectsService } from '../projects/projects.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { HcmLeaveService } from './hcm-leave.service';
 
@@ -53,13 +54,12 @@ export class HcmService {
   // Approve a timesheet (maker-checker — PROJ-04). The approver must differ from the submitter (SoD; binds even
   // Admin). On approval, if the timesheet targets a project, its labor cost (total hours × the employee's hourly
   // rate) posts into the project's WIP through the existing authorized PRJ-COST path (billable → 1260, else 5800).
-  async approveTimesheet(id: number, user: JwtUser) {
+  async approveTimesheet(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [ts] = await db.select().from(timesheets).where(eq(timesheets.id, Number(id))).limit(1);
     if (!ts) throw new NotFoundException({ code: 'TIMESHEET_NOT_FOUND', message: `Timesheet ${id} not found`, messageTh: 'ไม่พบใบลงเวลา' });
     if (ts.status === 'Approved') return { id: Number(id), status: 'Approved', already: true, entry_no: ts.entryNo ?? null };
-    if (ts.submittedBy && ts.submittedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The submitter cannot approve their own timesheet', messageTh: 'ผู้บันทึกอนุมัติใบลงเวลาของตนเองไม่ได้' });
+    await assertMakerChecker(db, { user, maker: ts.submittedBy, event: 'hcm.timesheet.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The submitter cannot approve their own timesheet', messageTh: 'ผู้บันทึกอนุมัติใบลงเวลาของตนเองไม่ได้' });
     let entryNo: string | null = null;
     let laborCost = 0;
     if (ts.projectId != null) {
@@ -118,7 +118,7 @@ export class HcmService {
     return { id: Number(row!.id), emp_code: dto.emp_code, leave_type: dto.leave_type ?? 'annual', days: n(dto.days), paid: dto.paid ?? true, status: 'Pending' };
   }
 
-  async approveLeave(id: number, user: JwtUser) {
+  async approveLeave(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [lr] = await db.select().from(leaveRequests).where(eq(leaveRequests.id, id)).limit(1);
     if (!lr) throw new NotFoundException({ code: 'LEAVE_NOT_FOUND', message: 'Leave request not found', messageTh: 'ไม่พบใบลา' });
@@ -126,8 +126,7 @@ export class HcmService {
     // Maker-checker (security review M-3): the requester cannot approve their own paid leave (mirrors
     // approveTimesheet's SOD_SELF_APPROVAL). Without this, one holder of the shared exec/users/creditors
     // permission could request leave and self-approve, bumping their own paid-leave balance.
-    if (lr.createdBy && lr.createdBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own leave request', messageTh: 'ผู้ยื่นใบลาอนุมัติใบลาของตนเองไม่ได้' });
+    await assertMakerChecker(db, { user, maker: lr.createdBy, event: 'hcm.leave.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own leave request', messageTh: 'ผู้ยื่นใบลาอนุมัติใบลาของตนเองไม่ได้' });
     await db.update(leaveRequests).set({ status: 'Approved' }).where(eq(leaveRequests.id, id));
     // bump leave-balance "used" for paid leave types
     if (lr.paid !== false) {

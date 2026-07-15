@@ -1,4 +1,4 @@
--- 0414_project_renewals — CRM↔PPM back-flow (control CRM-18).
+-- 0415_project_renewals — CRM↔PPM back-flow (control CRM-18).
 -- When a project is DELIVERED (status Closed), the customer represents a renewal / expansion motion — but
 -- nothing today ensures a renewal opportunity exists, so recurring revenue silently lapses. This table links a
 -- delivered project to the renewal opportunity raised from it (idempotent, one per project), so the back-flow

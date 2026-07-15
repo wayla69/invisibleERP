@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, HttpCode, ParseIntPipe } from '@nes
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { FxRevalService } from './fx-reval.service';
 
 const RunBody = z.object({
@@ -36,7 +37,7 @@ export class FxRevalController {
   @Post(':id/post')
   @HttpCode(200)
   @Permissions('gl_close', 'gl_post')
-  post(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
-    return this.svc.postReval({ id, postedBy: u.username });
+  post(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.postReval({ id, postedBy: u.username }, u, b?.self_approval_reason);
   }
 }

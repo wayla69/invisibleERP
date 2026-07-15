@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, HttpCode, ParseIntPipe } from '@nes
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { TaxUtpService } from './tax-utp.service';
 
 // TAX-12 — DTA valuation allowance (MLTN recoverability, maker-checker run→post) + Uncertain Tax Positions
@@ -31,6 +32,7 @@ const SettleUtpBody = z.object({
   status: z.enum(['Settled', 'Lapsed']).optional(),
   settlement_amount: z.number().min(0).optional(),
   settlement_note: z.string().max(2000).optional(),
+  self_approval_reason: z.string().max(500).optional(),
 });
 type SettleUtpBodyT = z.infer<typeof SettleUtpBody>;
 
@@ -53,8 +55,8 @@ export class TaxUtpController {
   @Post('valuation-allowance/:id/post')
   @HttpCode(200)
   @Permissions('gl_close', 'gl_post')
-  postVa(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
-    return this.svc.postValuationAllowance({ id, postedBy: u.username });
+  postVa(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.postValuationAllowance({ id, postedBy: u.username }, u, b?.self_approval_reason);
   }
 
   // ── Uncertain Tax Positions (FIN 48) ──
@@ -72,6 +74,6 @@ export class TaxUtpController {
   @HttpCode(200)
   @Permissions('gl_close', 'gl_post')
   settleUtp(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(SettleUtpBody)) b: SettleUtpBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.settleUtp({ id, status: b.status, settlementAmount: b.settlement_amount, settlementNote: b.settlement_note, settledBy: u.username });
+    return this.svc.settleUtp({ id, status: b.status, settlementAmount: b.settlement_amount, settlementNote: b.settlement_note, settledBy: u.username }, u, b.self_approval_reason);
   }
 }

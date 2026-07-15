@@ -7,6 +7,7 @@ import { postingDefault } from '../ledger/posting-events';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const EPS = 1e-6;
@@ -335,12 +336,11 @@ export class InventoryLedgerService {
   }
 
   // INV-07: a DIFFERENT user approves → the real valued adjustment runs atomically against current state.
-  async approveWriteOff(requestId: number, user: JwtUser) {
-    const tenantId = this.tenant(user);
-    const db = this.db;
+  async approveWriteOff(requestId: number, user: JwtUser, selfApprovalReason?: string | null) {
+    const tenantId = this.tenant(user); const db = this.db;
     const [req] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.id, requestId), eq(invWriteoffRequests.tenantId, tenantId))).limit(1);
     if (!req || req.status !== 'PendingApproval') throw bad('NO_PENDING_WRITEOFF', `No write-off pending approval (#${requestId})`, 'ไม่พบรายการตัดสต๊อกที่รออนุมัติ');
-    if (req.requestedBy && req.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a write-off you requested', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: req.requestedBy, event: 'inv.writeoff.approve', ref: String(requestId), amount: n(req.estValue), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a write-off you requested', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const res = await this.applyAdjust({ item_id: req.itemId, location_id: req.locationId, qty_delta: n(req.qtyDelta), reason: req.reason }, user);
     await db.update(invWriteoffRequests).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date(), moveNo: res.move_no, glEntryNo: res.gl_entry_no ?? null }).where(eq(invWriteoffRequests.id, requestId));
     return { ...res, request_id: requestId, status: 'Posted', approved_by: user.username, requested_by: req.requestedBy };

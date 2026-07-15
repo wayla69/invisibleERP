@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { qint, qintOpt } from '../../common/query';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { LedgerService } from './ledger.service';
 
 // Only HQ/Admin may target ANOTHER tenant's books via an explicit tenant_id. Everyone else is pinned to
@@ -47,7 +48,7 @@ type OpeningBalancesBody = z.infer<typeof OpeningBalancesBody>;
 const RejectBody = z.object({ reason: z.string().optional() });
 
 // GL-17: reverse a posted JE with an optional reason and an optional reversal date (defaults to today).
-const ReverseBody = z.object({ reason: z.string().optional(), date: z.string().optional() });
+const ReverseBody = z.object({ reason: z.string().optional(), date: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 
 const RecurringBody = z.object({
   name: z.string().min(1),
@@ -188,11 +189,12 @@ export class LedgerController {
   @Permissions('gl_post', 'gl_close', 'approvals')
   pendingJournal(@Query('limit') limit?: string) { return this.svc.pendingJournal(qint('limit', limit, 50)); }
 
-  // Approve / reject a pending JE — approver must differ from preparer (enforced in the service).
+  // Approve / reject a pending JE — approver must differ from preparer (enforced in the service;
+  // an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01).
   @Post('journal/:entryNo/approve')
   @HttpCode(200)
   @Permissions('gl_close', 'approvals')
-  approveJournal(@Param('entryNo') entryNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveEntry(entryNo, u); }
+  approveJournal(@Param('entryNo') entryNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveEntry(entryNo, u, b?.self_approval_reason); }
 
   @Post('journal/:entryNo/reject')
   @HttpCode(200)
@@ -207,7 +209,7 @@ export class LedgerController {
   @Permissions('gl_post')
   reverseJournal(@Param('id') id: string, @Body(new ZodValidationPipe(ReverseBody)) b: z.infer<typeof ReverseBody>, @CurrentUser() u: JwtUser) {
     // requireDistinctApprover: manual reversals enforce reverser ≠ original preparer (GL-05, audit G2).
-    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date, requireDistinctApprover: true });
+    return this.svc.reverseEntry({ entryId: parseInt(id, 10), reversedBy: u.username, reason: b.reason, date: b.date, requireDistinctApprover: true }, u, b.self_approval_reason);
   }
 
   // Demonstrates the GL-17 immutability guard (for ops/tests): attempting to void/delete a posted entry is

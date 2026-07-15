@@ -6,6 +6,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { InventoryLedgerService, type LayerSlice } from '../inventory/inventory-ledger.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const bad = (code: string, message: string, messageTh: string) => new BadRequestException({ code, message, messageTh });
@@ -85,16 +86,14 @@ export class TransferOrderService {
   }
 
   // Receive: land the shipped snapshot at the destination + book Dr 1200 / Cr 1255. Custody SoD: receiver ≠ shipper.
-  async receive(toNo: string, user: JwtUser) {
+  async receive(toNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const tenantId = this.tid(user);
     const h = await this.header(tenantId, toNo);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: `Transfer order ${toNo} not found`, messageTh: 'ไม่พบใบโอนสินค้า' });
     if (h.status !== 'Shipped') throw bad('NOT_SHIPPED', `Transfer order ${toNo} is ${h.status}; only a Shipped order can be received`, 'รับได้เฉพาะใบที่ส่งของแล้วเท่านั้น');
     // INV-16 custody segregation (SoD): the person who SHIPPED may not also receive the same transfer — an
     // independent custodian confirms arrival, so in-transit stock cannot be shipped and self-confirmed by one hand.
-    if (h.shippedBy && h.shippedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The shipper cannot receive their own transfer — an independent custodian must confirm arrival', messageTh: 'ผู้ส่งสินค้าไม่สามารถรับสินค้าของตนเองได้ (ต้องมีผู้รับอิสระยืนยัน)' });
-    }
+    await assertMakerChecker(this.db, { user, maker: h.shippedBy, event: 'inv.transfer.receive', ref: toNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The shipper cannot receive their own transfer — an independent custodian must confirm arrival', messageTh: 'ผู้ส่งสินค้าไม่สามารถรับสินค้าของตนเองได้ (ต้องมีผู้รับอิสระยืนยัน)' });
     const lines = await this.db.select().from(transferOrderLines).where(and(eq(transferOrderLines.tenantId, tenantId), eq(transferOrderLines.toNo, toNo)));
     let totalValue = 0; let valuedLines = 0; const jeNos: string[] = [];
     for (const l of lines) {

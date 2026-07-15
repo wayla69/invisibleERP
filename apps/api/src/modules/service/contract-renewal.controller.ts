@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe, HttpCode 
 import { z } from 'zod';
 import { ContractRenewalService } from './contract-renewal.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 
@@ -47,8 +48,8 @@ export class ContractRenewalController {
   @Post('renewals/:id/approve')
   @Permissions('approvals', 'exec')
   @HttpCode(200)
-  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
-    return this.svc.approveRenewal(id, user);
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveRenewal(id, user, b?.self_approval_reason);
   }
 
   @Post('renewals/:id/reject')

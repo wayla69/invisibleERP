@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { DrizzleDb } from '../../database/database.module';
 import { projectPhaseGates, projects } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { PhaseGateDto, GateDecisionDto } from './projects.service';
 
 // Ordered project lifecycle. A gate advances the project FORWARD along this ladder; the current phase is the
@@ -93,7 +94,7 @@ export class ProjectsGateService {
     if (g.status !== 'pending') throw new BadRequestException({ code: 'GATE_ALREADY_DECIDED', message: `Gate is already ${g.status}`, messageTh: 'เกตถูกตัดสินแล้ว' });
     const decision = String(dto.decision ?? '');
     if (!['go', 'hold', 'kill'].includes(decision)) throw new BadRequestException({ code: 'BAD_DECISION', message: "Decision must be 'go', 'hold', or 'kill'", messageTh: 'การตัดสินต้องเป็น go / hold / kill' });
-    if (g.submittedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'The reviewer must differ from the gate submitter (segregation of duties)', messageTh: 'ผู้พิจารณาต้องไม่ใช่ผู้ยื่นเกต (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: g.submittedBy, event: 'proj.gate.decide', ref: String(gateId), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The reviewer must differ from the gate submitter (segregation of duties)', messageTh: 'ผู้พิจารณาต้องไม่ใช่ผู้ยื่นเกต (แบ่งแยกหน้าที่)', httpStatus: 400 });
     await db.update(projectPhaseGates).set({
       status: decision, decidedBy: user.username, decidedAt: sql`now()`, decisionNotes: dto.notes ?? null, updatedAt: sql`now()`,
     }).where(eq(projectPhaseGates.id, Number(g.id)));

@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { taxInvoices, taxInvoiceLines, custPosSales, custPosItems, arInvoices, tenants } from '../../../database/schema';
@@ -8,6 +8,7 @@ import { LedgerService } from '../../ledger/ledger.service';
 import { postingDefault } from '../../ledger/posting-events';
 import { n, fx, ymd } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
+import { assertMakerChecker } from '../../../common/control-profile';
 import { appendAuditMeta } from '../../../common/tenant-context';
 import { isUniqueViolation } from '../../../common/db-error';
 import { sellerSnapshot, isValidTaxId } from './tax-docs.snapshot';
@@ -357,17 +358,15 @@ export class TaxInvoiceService {
 
   // Checker approves the note: SoD-blocked if approver === maker (also re-enforced by the ledger). Posts the
   // linked Draft GL entry (→ VAT/GL land) and flips the note PendingApproval → Issued (→ hits the VAT report).
-  async approveAdjustment(docNo: string, approver: JwtUser) {
+  async approveAdjustment(docNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [head] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, docNo)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Note not found', messageTh: 'ไม่พบเอกสาร' });
     if (head.type !== 'credit_note' && head.type !== 'debit_note') throw new BadRequestException({ code: 'NOT_A_NOTE', message: 'Not a credit/debit note', messageTh: 'ไม่ใช่ใบลดหนี้/เพิ่มหนี้' });
     if (head.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Note is ${head.status}, not pending`, messageTh: 'เอกสารไม่ได้รออนุมัติ' });
-    if (head.createdBy && head.createdBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a note you issued', messageTh: 'ผู้ออกเอกสารอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: head.createdBy, event: 'tax.adjustment.approve', ref: docNo, amount: n(head.grandTotal), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a note you issued', messageTh: 'ผู้ออกเอกสารอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     let gl: any = null;
-    if (head.glEntryNo && this.ledger) gl = await this.ledger.approveEntry(head.glEntryNo, approver); // posts GL + re-enforces SoD
+    if (head.glEntryNo && this.ledger) gl = await this.ledger.approveEntry(head.glEntryNo, approver, selfApprovalReason); // posts GL + re-enforces SoD
     await db.update(taxInvoices).set({ status: 'Issued' }).where(eq(taxInvoices.id, head.id));
     return { doc_no: docNo, status: 'Issued', gl: gl ? { entry_no: gl.entry_no, status: gl.status } : null };
   }

@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { revContracts, revFinancingSchedules } from '../../database/schema';
@@ -6,6 +6,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // ── Track D — Wave 4 (REV-27, FINAL): significant financing component (TFRS 15 / IFRS 15 / ASC 606 §60-65) ──
 // When the TIMING of payment gives the customer or the entity a MATERIAL financing benefit, the promised
@@ -121,14 +122,13 @@ export class RevFinancingService {
 
   // ── POST :id/financing-component/approve — CHECKER (≠ the maker, else SOD_SELF_APPROVAL) approves the
   //    discount-rate judgement, flipping the Pending schedule to Approved so run-financing may post it. ──
-  async approveFinancingComponent(contractId: number, user: JwtUser) {
+  async approveFinancingComponent(contractId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const c = await this.assertContract(contractId);
     const rows = await db.select().from(revFinancingSchedules).where(and(eq(revFinancingSchedules.contractId, contractId), eq(revFinancingSchedules.status, 'Pending')));
     if (!rows.length) throw new NotFoundException({ code: 'FINANCING_NOT_PENDING', message: `No pending financing component for contract ${contractId}`, messageTh: 'ไม่มีองค์ประกอบทางการเงินที่รออนุมัติ' });
     const maker = rows[0]!.createdBy;
-    if (maker && maker === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The user who set the financing component (discount rate) cannot approve it (segregation of duties)', messageTh: 'ผู้กำหนดองค์ประกอบทางการเงิน (อัตราคิดลด) ไม่สามารถอนุมัติเองได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker, event: 'rev.financing.approve', ref: String(contractId), amount: n(rows[0]!.nominal), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The user who set the financing component (discount rate) cannot approve it (segregation of duties)', messageTh: 'ผู้กำหนดองค์ประกอบทางการเงิน (อัตราคิดลด) ไม่สามารถอนุมัติเองได้ (แบ่งแยกหน้าที่)' });
     const when = new Date();
     for (const rrow of rows)
       await db.update(revFinancingSchedules).set({ status: 'Approved', approvedBy: user.username, approvedAt: when }).where(eq(revFinancingSchedules.id, Number(rrow.id)));

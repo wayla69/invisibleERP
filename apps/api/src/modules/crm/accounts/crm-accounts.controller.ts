@@ -15,7 +15,7 @@ export class CrmAccountsController {
   @Get() list(@Query('search') search: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.list({ search }, u); }
   // Consequential + audited → steward duties (mirrors POST /api/customer-master/:no/merge).
   @Post(':survivorNo/merge') @HttpCode(200) @Permissions('crm', 'exec', 'masterdata')
-  merge(@Param('survivorNo') no: string, @Body(new ZodValidationPipe(MergeBody)) b: z.infer<typeof MergeBody>, @CurrentUser() u: JwtUser) { return this.svc.merge(no, b.duplicate_account_no, u); }
+  merge(@Param('survivorNo') no: string, @Body(new ZodValidationPipe(MergeBody)) b: z.infer<typeof MergeBody>, @CurrentUser() u: JwtUser) { return this.svc.merge(no, b.duplicate_account_no, u, b.self_approval_reason); }
   @Get(':accountNo') get(@Param('accountNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.get(no, u); }
   @Patch(':accountNo') update(@Param('accountNo') no: string, @Body(new ZodValidationPipe(AccountUpdateBody)) b: z.infer<typeof AccountUpdateBody>, @CurrentUser() u: JwtUser) { return this.svc.update(no, b, u); }
 }

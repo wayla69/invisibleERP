@@ -1,5 +1,6 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { sql, eq, and, or, asc, desc } from 'drizzle-orm';
+import { assertMakerChecker } from '../../common/control-profile';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { arInvoices, apTransactions, tenants, vendors, nettingAgreements, nettingSettlements, nettingSettlementLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -222,14 +223,12 @@ export class ArApNettingService {
   }
 
   // ── POST /api/finance/netting/settlements/:no/approve — checker applies the contra settlement (SoD) ──
-  async approve(settlementNo: string, approver: JwtUser) {
+  async approve(settlementNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [head] = await db.select().from(nettingSettlements).where(eq(nettingSettlements.settlementNo, settlementNo)).limit(1);
     if (!head) throw new NotFoundException({ code: 'NOT_FOUND', message: `Settlement ${settlementNo} not found`, messageTh: 'ไม่พบรายการหักกลบ' });
     if (head.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Settlement ${settlementNo} is ${head.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
-    if (head.proposedBy && head.proposedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a netting settlement you proposed', messageTh: 'ผู้เสนอหักกลบอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: head.proposedBy, event: 'ar.netting.approve', ref: settlementNo, amount: n(head.netAmount), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a netting settlement you proposed', messageTh: 'ผู้เสนอหักกลบอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const tenantId = head.tenantId != null ? Number(head.tenantId) : null;
     // Recompute from CURRENT open balances (a doc may have settled since propose) capped at the proposed net,
     // so the contra JE + both sub-ledger reliefs always tie out exactly.

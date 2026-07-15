@@ -11,6 +11,7 @@ import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
 import type { DocParty } from '../../common/doc-html';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
@@ -124,11 +125,10 @@ export class ProgressBillingService {
 
   // Certify a draft claim (maker-checker: certifier ≠ preparer → PROJ-16) → post the billing JE + withhold
   // retention into the shared sub-ledger, atomically. Fixed-price contracts can't be certified beyond contract.
-  async certifyClaim(claimNo: string, user: JwtUser) {
+  async certifyClaim(claimNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const c = await this.claimRow(claimNo);
     if (c.status !== 'draft') throw new BadRequestException({ code: 'CLAIM_NOT_DRAFT', message: `Claim ${claimNo} is ${c.status}, not draft`, messageTh: 'งวดงานไม่ได้อยู่ในสถานะร่าง' });
-    if (user.username && c.createdBy && user.username === c.createdBy)
-      throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'The claim preparer cannot certify their own claim (SoD)', messageTh: 'ผู้จัดทำงวดงานรับรองงวดของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: c.createdBy, event: 'proj.claim.certify', ref: claimNo, amount: n(c.grossThisClaim), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The claim preparer cannot certify their own claim (SoD)', messageTh: 'ผู้จัดทำงวดงานรับรองงวดของตนเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
 
     const p = await this.projectRow((await this.db.select({ code: projects.projectCode }).from(projects).where(eq(projects.id, Number(c.projectId))).limit(1))[0]!.code as string);
     const tenantId = c.tenantId ?? p.tenantId ?? user.tenantId ?? null;

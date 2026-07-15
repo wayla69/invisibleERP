@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { createHash } from 'node:crypto';
 import { eq, and, ne, or, isNull, sql, lte, desc, asc, inArray, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -281,13 +282,11 @@ export class ApPaymentRunService {
   }
 
   // ── Approve (checker, `approvals`/`gl_close`) — approver ≠ proposer, binds even Admin (EXP-13) ──
-  async approve(runNo: string, approver: JwtUser) {
+  async approve(runNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const run = await this.loadRun(runNo);
     if (run.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Run ${runNo} is ${run.status}, not pending approval`, messageTh: 'รอบจ่ายนี้ไม่ได้รออนุมัติ' });
-    if (run.createdBy && run.createdBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a payment run you proposed', messageTh: 'ผู้จัดทำรอบจ่ายอนุมัติรอบของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: run.createdBy, event: 'ap.payment-run.approve', ref: runNo, amount: n(run.totalAmount), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a payment run you proposed', messageTh: 'ผู้จัดทำรอบจ่ายอนุมัติรอบของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     // Re-run the 3-way-match gate per line at approval — a bill blocked since proposal must not ride through.
     const lines = await db.select().from(apPaymentRunLines).where(eq(apPaymentRunLines.runId, Number(run.id)));
     for (const l of lines) {
@@ -327,16 +326,14 @@ export class ApPaymentRunService {
   // independent checker (row-locked paid_amount + the SAME GL/WHT posting as a manual payment). Idempotent
   // per line (`run:<runNo>:<lineId>` idempotency key + Paid-line skip); a partial failure leaves the run
   // 'Approved' with per-line status so a re-execute retries only the failed lines. ──
-  async execute(runNo: string, executor: JwtUser) {
+  async execute(runNo: string, executor: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const run = await this.loadRun(runNo);
     if (run.status !== 'Approved' && run.status !== 'Executed') {
       throw new BadRequestException({ code: 'NOT_APPROVED', message: `Run ${runNo} is ${run.status}, not approved for execution`, messageTh: 'รอบจ่ายยังไม่ได้รับอนุมัติ' });
     }
     if (run.status === 'Executed') return { ...(await this.get(runNo)), idempotent: true };
-    if (run.createdBy && run.createdBy === executor.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: the proposer cannot execute the run (cash release is a checker act)', messageTh: 'ผู้จัดทำรอบจ่ายสั่งจ่ายเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user: executor, maker: run.createdBy, event: 'ap.payment-run.execute', ref: runNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: the proposer cannot execute the run (cash release is a checker act)', messageTh: 'ผู้จัดทำรอบจ่ายสั่งจ่ายเองไม่ได้ (แบ่งแยกหน้าที่)' });
     // Per-line maker/checker identities for the existing path: the request is attributed to the run's
     // PROPOSER (maker), the approval to the independent EXECUTOR (checker ≠ proposer, enforced above and
     // re-enforced per payment by approveApPayment's own SoD check).
@@ -356,7 +353,7 @@ export class ApPaymentRunService {
         const [p] = await db.select().from(apPayments).where(eq(apPayments.paymentNo, paymentNo)).limit(1);
         if (p?.status === 'Approved') { whtAmount = n(p.whtAmount); }
         else {
-          const ap = await this.finance.approveApPayment(paymentNo, executor);
+          const ap = await this.finance.approveApPayment(paymentNo, executor, selfApprovalReason);
           whtAmount = n(ap.wht_amount);
         }
         // FIN-9 (EXP-14) — capture the early-payment discount locked on the line at approval. The manual
@@ -464,14 +461,12 @@ export class ApPaymentRunService {
     return this.getDiscountTerm(Number(row!.id));
   }
 
-  async approveDiscountTerm(id: number, approver: JwtUser) {
+  async approveDiscountTerm(id: number, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [t] = await db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
     if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
     if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
-    if (t.createdBy && t.createdBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a discount policy you created', messageTh: 'ผู้จัดทำนโยบายส่วนลดอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: t.createdBy, event: 'ap.discount-term.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a discount policy you created', messageTh: 'ผู้จัดทำนโยบายส่วนลดอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     // Supersede the prior Active policy for the SAME vendor scope so only one Active policy governs a vendor.
     const scope = t.vendorId != null ? eq(apDiscountTerms.vendorId, Number(t.vendorId)) : isNull(apDiscountTerms.vendorId);
     const scopeConds: SQL[] = [eq(apDiscountTerms.status, 'Active'), scope, ne(apDiscountTerms.id, Number(id))];

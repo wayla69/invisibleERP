@@ -1,4 +1,5 @@
-import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests, xzReports, xzReportDenominations, posTipAdjustments } from '../../database/schema';
@@ -341,12 +342,12 @@ export class PaymentService {
   }
 
   // POST /api/payments/refund-requests/:id/approve — a DIFFERENT user approves a parked refund → runs it.
-  async approveRefund(requestId: number, approver: JwtUser) {
+  async approveRefund(requestId: number, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [req] = await db.select().from(refundRequests).where(eq(refundRequests.id, requestId)).limit(1);
     if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Refund request not found', messageTh: 'ไม่พบคำขอคืนเงิน' });
     if (String(req.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request is ${req.status}`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
-    if (req.requestedBy && req.requestedBy === approver.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a refund you requested', messageTh: 'ผู้ขออนุมัติคืนเงินของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user: approver, maker: req.requestedBy, event: 'pay.refund.approve', ref: String(requestId), amount: n(req.amount), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a refund you requested', messageTh: 'ผู้ขออนุมัติคืนเงินของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     // run the real refund past the gate (force), crediting it to the approver (who authorizes the money-out).
     const res: any = await this.refund({ payment_no: req.paymentNo, amount: n(req.amount), reason: req.reason ?? undefined }, approver, undefined, { force: true });
     await db.update(refundRequests).set({ status: 'Approved', approvedBy: approver.username, refundNo: res.refund_no, approvedAt: new Date() }).where(eq(refundRequests.id, requestId));
@@ -354,12 +355,12 @@ export class PaymentService {
   }
 
   // POST /api/payments/refund-requests/:id/reject
-  async rejectRefund(requestId: number, approver: JwtUser, reason?: string) {
+  async rejectRefund(requestId: number, approver: JwtUser, reason?: string, selfApprovalReason?: string | null) {
     const db = this.db;
     const [req] = await db.select().from(refundRequests).where(eq(refundRequests.id, requestId)).limit(1);
     if (!req) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Refund request not found', messageTh: 'ไม่พบคำขอคืนเงิน' });
     if (String(req.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request is ${req.status}`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
-    if (req.requestedBy && req.requestedBy === approver.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reject a refund you requested', messageTh: 'ผู้ขอปฏิเสธคำขอของตนเองไม่ได้' });
+    await assertMakerChecker(db, { user: approver, maker: req.requestedBy, event: 'pay.refund.reject', ref: String(requestId), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot reject a refund you requested', messageTh: 'ผู้ขอปฏิเสธคำขอของตนเองไม่ได้' });
     await db.update(refundRequests).set({ status: 'Rejected', approvedBy: approver.username, approvedAt: new Date() }).where(eq(refundRequests.id, requestId));
     return { request_id: requestId, status: 'Rejected', rejected_by: approver.username, reason: reason ?? null };
   }

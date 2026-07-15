@@ -72,8 +72,8 @@ const PromoteBody = z.object({
   qty: z.number().nonnegative().optional(), unit_cost: z.number().nonnegative().optional(),
   description: z.string().optional(), proposed_disposition: DISPOSITION.optional(),
 });
-const DispositionBody = z.object({ disposition: z.enum(['scrap', 'use_as_is', 'return']).optional(), notes: z.string().optional() });
-const RejectBody = z.object({ notes: z.string().optional() });
+const DispositionBody = z.object({ disposition: z.enum(['scrap', 'use_as_is', 'return']).optional(), notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
+const RejectBody = z.object({ notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 const DefectCodeBody = z.object({ code: z.string().min(1), name: z.string().optional(), category: z.string().optional(), active: z.boolean().optional() });
 
 @Controller('api/quality')

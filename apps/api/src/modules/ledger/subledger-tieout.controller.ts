@@ -10,7 +10,7 @@ const RunBody = z.object({
 });
 type RunBodyT = z.infer<typeof RunBody>;
 
-const CertifyBody = z.object({ note: z.string().optional() });
+const CertifyBody = z.object({ note: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 type CertifyBodyT = z.infer<typeof CertifyBody>;
 
 // GL-14 — Sub-ledger tie-out / reconciliation. Run reconciles a control account's GL balance vs its
@@ -41,6 +41,6 @@ export class SubledgerTieoutController {
   @HttpCode(200)
   @Permissions('gl_close')
   certify(@Param('id') id: string, @Body(new ZodValidationPipe(CertifyBody)) b: CertifyBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.certify({ id: Number(id), certifiedBy: u.username, note: b.note });
+    return this.svc.certify({ id: Number(id), certifiedBy: u.username, note: b.note }, u, b.self_approval_reason);
   }
 }

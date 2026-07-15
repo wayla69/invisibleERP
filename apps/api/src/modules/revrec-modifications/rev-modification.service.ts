@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { revContracts, performanceObligations, revrecSchedules, revContractModifications } from '../../database/schema';
@@ -6,6 +6,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // ── Track D — Wave 3 (REV-26): contract modifications (TFRS 15 / IFRS 15 / ASC 606 §18-21) ──────────────────
 // A change to a contract (added/changed goods or services, or a price change) must be CLASSIFIED and accounted
@@ -138,15 +139,14 @@ export class RevModificationService {
 
   // ── POST :id/modifications/:modId/approve — CHECKER (≠ the maker, else SOD_SELF_APPROVAL) approves the
   //    modification, which APPLIES the §18-21 effect (the classification only drives revenue once reviewed).
-  async approve(contractId: number, modId: number, user: JwtUser) {
+  async approve(contractId: number, modId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const c = await this.assertContract(contractId);
     const [m] = await db.select().from(revContractModifications).where(and(eq(revContractModifications.id, modId), eq(revContractModifications.contractId, contractId))).limit(1);
     if (!m) throw new NotFoundException({ code: 'MODIFICATION_NOT_FOUND', message: `Contract modification ${modId} not found for contract ${contractId}`, messageTh: 'ไม่พบการแก้ไขสัญญา' });
     if (m.status !== 'Pending') throw new BadRequestException({ code: 'MODIFICATION_NOT_PENDING', message: `Modification ${modId} is ${m.status}, not Pending`, messageTh: 'การแก้ไขสัญญาไม่ได้อยู่ในสถานะรอการอนุมัติ' });
     // Maker-checker (SoD): the person who classified the modification cannot approve their own judgement.
-    if (m.createdBy && m.createdBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The user who recorded a contract modification cannot approve it (segregation of duties)', messageTh: 'ผู้บันทึกการแก้ไขสัญญาไม่สามารถอนุมัติเองได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: m.createdBy, event: 'rev.modification.approve', ref: `${contractId}:${modId}`, amount: n(m.addedPrice), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The user who recorded a contract modification cannot approve it (segregation of duties)', messageTh: 'ผู้บันทึกการแก้ไขสัญญาไม่สามารถอนุมัติเองได้ (แบ่งแยกหน้าที่)' });
 
     const type = m.type as ModType;
     let result: any;

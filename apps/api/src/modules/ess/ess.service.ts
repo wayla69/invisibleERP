@@ -8,6 +8,7 @@ import { FinanceService } from '../finance/finance.service';
 import { PayrollService } from '../payroll/payroll.service';
 import type { PayslipPrintData } from '../payroll/payslip-pdf.service';
 import { n, ymd } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 import { LineNotifyService } from '../messaging/line-notify.service';
 
@@ -140,7 +141,8 @@ export class EssService {
   // (Dr 5100 Operating Expense / Cr 2000 AP) AND creates the AP sub-ledger row, so the reimbursement shows
   // in AP aging, is settled through the normal AP pay flow, and keeps the AP sub-ledger ↔ GL control
   // account (2000) reconciled. Reimbursements carry no claimable input VAT (vat_treatment 'exempt').
-  async approveExpense(id: number, approve: boolean, user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-approve WITH self_approval_reason — logged, reviewed by SME-01.
+  async approveExpense(id: number, approve: boolean, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [c] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Claim not found', messageTh: 'ไม่พบรายการเบิก' });
@@ -148,7 +150,9 @@ export class EssService {
     const [emp] = await db.select().from(employees).where(eq(employees.id, Number(c.employeeId))).limit(1);
     // SoD: block self-approval. me() resolves a user to their employee by user_name OR emp_code, so match
     // on BOTH here — otherwise an employee linked only by emp_code (user_name null) could approve their own.
-    if (emp && (emp.userName === user.username || emp.empCode === user.username)) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Cannot approve your own expense claim', messageTh: 'อนุมัติรายการเบิกของตนเองไม่ได้' });
+    if (emp && (emp.userName === user.username || emp.empCode === user.username)) {
+      await assertMakerChecker(db, { user, maker: user.username, event: 'hcm.expense.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Cannot approve your own expense claim', messageTh: 'อนุมัติรายการเบิกของตนเองไม่ได้', httpStatus: 400 });
+    }
     if (!approve) {
       await db.update(expenseClaims).set({ status: 'Rejected', decidedBy: user.username, decidedAt: new Date() }).where(eq(expenseClaims.id, id));
       return { id, status: 'Rejected' };

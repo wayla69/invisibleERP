@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { serviceContracts, contractRenewals, contractRenewalSettings } from '../../database/schema/service';
@@ -6,6 +6,7 @@ import { docCountersTenant } from '../../database/schema/system';
 import { n, fx } from '../../database/queries';
 import { bizYmdDash } from '../../common/bizdate';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const round3 = (x: number) => Math.round((Number(x) || 0) * 1000) / 1000;
@@ -114,12 +115,11 @@ export class ContractRenewalService {
   }
 
   // ── Approve a pending renewal (SVC-02: approver ≠ requester) ──
-  async approveRenewal(renewalId: number, user: JwtUser) {
+  async approveRenewal(renewalId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const [r] = await this.db.select().from(contractRenewals).where(eq(contractRenewals.id, renewalId)).limit(1);
     if (!r) throw new NotFoundException({ code: 'RENEWAL_NOT_FOUND', message: `Renewal ${renewalId} not found`, messageTh: `ไม่พบคำขอต่ออายุ ${renewalId}` });
     if (r.status !== 'pending') throw new BadRequestException({ code: 'RENEWAL_NOT_PENDING', message: `Renewal ${r.renewalNo} is ${r.status}, not pending`, messageTh: `คำขอต่ออายุ ${r.renewalNo} ไม่ได้อยู่ในสถานะรออนุมัติ` });
-    if (r.requestedBy && r.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a renewal you proposed', messageTh: 'ผู้เสนอต่ออายุอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: r.requestedBy, event: 'svc.renewal.approve', ref: String(renewalId), amount: n(r.newValue), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a renewal you proposed', messageTh: 'ผู้เสนอต่ออายุอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
 
     const contract = await this.assertContract(Number(r.contractId));
     if (contract.renewalStatus === 'renewed' || contract.renewedToContractId)

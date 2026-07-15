@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and, isNull, sql, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { budgets, budgetReviews, journalLines, journalEntries, accounts } from '../../database/schema';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
@@ -49,7 +50,7 @@ export class BudgetService {
 
   // Approve (or reject) a pending budget for (fiscal_year, account_code, [cost_center], [period]). Approver ≠
   // requester, binds even Admin. Approval makes it count in budget-vs-actual; reject marks it Rejected (excluded).
-  private async decideBudget(decision: 'Approved' | 'Rejected', q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) {
+  private async decideBudget(decision: 'Approved' | 'Rejected', q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const tenantId = q.tenantId ?? null;
     const conds: any[] = [eq(budgets.fiscalYear, q.fiscal_year), eq(budgets.accountCode, q.account_code), eq(budgets.status, 'PendingApproval')];
@@ -59,13 +60,13 @@ export class BudgetService {
     const pending = await db.select().from(budgets).where(and(...conds));
     if (!pending.length) throw new BadRequestException({ code: 'NO_PENDING_BUDGET', message: 'No budget pending approval for this selection', messageTh: 'ไม่พบงบประมาณที่รออนุมัติ' });
     if (decision === 'Approved' && pending.some((r: any) => r.requestedBy && r.requestedBy === user.username)) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a budget you prepared', messageTh: 'ผู้บันทึกอนุมัติงบประมาณของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'budget.approve', ref: `${q.fiscal_year}:${q.account_code}:${q.cost_center_code ?? ''}:${q.period ?? ''}`, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a budget you prepared', messageTh: 'ผู้บันทึกอนุมัติงบประมาณของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     await db.update(budgets).set({ status: decision, approvedBy: user.username, approvedAt: new Date() }).where(and(...conds));
     return { fiscal_year: q.fiscal_year, account_code: q.account_code, cost_center_code: q.cost_center_code ?? null, period: q.period ?? null, lines: pending.length, status: decision, approved_by: user.username, requested_by: pending[0]?.requestedBy ?? null };
   }
-  async approveBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) { return this.decideBudget('Approved', q, user); }
-  async rejectBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser) { return this.decideBudget('Rejected', q, user); }
+  async approveBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser, selfApprovalReason?: string | null) { return this.decideBudget('Approved', q, user, selfApprovalReason); }
+  async rejectBudget(q: { fiscal_year: number; account_code: string; cost_center_code?: string | null; period?: string; tenantId?: number | null }, user: JwtUser, selfApprovalReason?: string | null) { return this.decideBudget('Rejected', q, user, selfApprovalReason); }
 
   async listBudgets(q: { fiscal_year?: number; account_code?: string; cost_center_code?: string; status?: string }) {
     const db = this.db;

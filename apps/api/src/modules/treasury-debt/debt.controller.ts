@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, HttpCode, ParseIntPipe } fro
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { DebtService } from './debt.service';
 
 const FacilityBody = z.object({
@@ -110,7 +111,7 @@ export class DebtController {
   @Post('facilities/:id/approve')
   @HttpCode(200)
   @Permissions('treasury_approve', 'exec')
-  approveFacility(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) { return this.svc.approveFacility(id, u); }
+  approveFacility(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveFacility(id, u, b?.self_approval_reason); }
 
   @Post('facilities/:id/reject')
   @HttpCode(200)

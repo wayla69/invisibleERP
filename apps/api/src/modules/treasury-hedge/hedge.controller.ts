@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, HttpCode, ParseIntPipe } from '@nes
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { HedgeService } from './hedge.service';
 
 const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -96,7 +97,7 @@ export class HedgeController {
   @Post('hedges/:id/approve')
   @HttpCode(200)
   @Permissions('treasury_approve', 'exec')
-  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) { return this.svc.approve(id, u); }
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approve(id, u, b?.self_approval_reason); }
 
   @Post('hedges/:id/reject')
   @HttpCode(200)

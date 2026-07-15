@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, HttpCode, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, HttpCode, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { tenants, branches, users, menuItems, tenantProfileChangeRequests } from '../../database/schema';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { assertMakerChecker, SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { BillingService } from './billing.service';
 import { TaxService } from '../tax/tax.service';
 import { isValidPromptPayTarget } from '../payments/promptpay-qr';
@@ -121,12 +122,12 @@ export class TenantController {
   @Post('profile-approvals/:reqNo/approve')
   @HttpCode(200)
   @Permissions('exec', 'approvals')
-  async approveProfileChange(@Param('reqNo') reqNo: string, @CurrentUser() user: JwtUser) {
+  async approveProfileChange(@Param('reqNo') reqNo: string, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
     const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
     const [r] = await this.db.select().from(tenantProfileChangeRequests)
       .where(and(eq(tenantProfileChangeRequests.tenantId, id), eq(tenantProfileChangeRequests.reqNo, reqNo))).limit(1);
     if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_PROFILE_CHANGE', message: 'No profile change pending approval', messageTh: 'ไม่พบคำขอเปลี่ยนข้อมูลที่รออนุมัติ' });
-    if (r.requestedBy && r.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own profile change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
+    await assertMakerChecker(this.db, { user, maker: r.requestedBy, event: 'tenant.profile-change.approve', ref: reqNo, reason: b?.self_approval_reason, code: 'SOD_VIOLATION', message: 'The requester cannot approve their own profile change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
     const patch: Record<string, unknown> = {};
     if (r.taxId !== null) patch.taxId = r.taxId;
     if (r.promptpayId !== null) patch.promptpayId = r.promptpayId;

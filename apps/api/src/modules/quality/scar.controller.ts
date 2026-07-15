@@ -20,9 +20,9 @@ const RespondBody = z.object({
   preventive_action: z.string().optional(),
   responder: z.string().optional(),
 });
-const CloseBody = z.object({ effectiveness: z.enum(['effective', 'ineffective']).optional() });
+const CloseBody = z.object({ effectiveness: z.enum(['effective', 'ineffective']).optional(), self_approval_reason: z.string().max(500).optional() });
 // reason is validated in the service (REASON_REQUIRED) so the precise QC-04 error code surfaces.
-const RejectBody = z.object({ reason: z.string().optional() });
+const RejectBody = z.object({ reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 
 // QMS-4 — Supplier Corrective Action Request (SCAR / 8D). Reads gate quality/quality_approve/creditors/exec
 // (procurement roles keep read access); raising gates quality/creditors; closure review gates

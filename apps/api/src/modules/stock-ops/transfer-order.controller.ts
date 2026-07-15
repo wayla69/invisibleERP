@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { TransferOrderService } from './transfer-order.service';
 import { qint } from '../../common/query';
 
@@ -36,5 +37,5 @@ export class TransferOrderController {
 
   @Get(':no') detail(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.svc.get(no, u); }
   @Post(':no/ship') ship(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.svc.ship(no, u); }
-  @Post(':no/receive') receive(@Param('no') no: string, @CurrentUser() u: JwtUser) { return this.svc.receive(no, u); }
+  @Post(':no/receive') receive(@Param('no') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.receive(no, u, b?.self_approval_reason); }
 }

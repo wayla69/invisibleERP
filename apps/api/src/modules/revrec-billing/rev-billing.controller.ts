@@ -8,7 +8,7 @@ const MilestoneSchema = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/), am
 const DefineScheduleBody = z.object({ milestones: z.array(MilestoneSchema).min(1), replace: z.boolean().optional() });
 type DefineScheduleBodyT = z.infer<typeof DefineScheduleBody>;
 
-const BillBody = z.object({ billing_schedule_id: z.number().int().positive(), invoice_ref: z.string().optional(), date: z.string().optional() });
+const BillBody = z.object({ billing_schedule_id: z.number().int().positive(), invoice_ref: z.string().optional(), date: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 type BillBodyT = z.infer<typeof BillBody>;
 
 // Track D — Wave 1 (REV-24): independent billing schedule + contract-asset / contract-liability split under
@@ -34,7 +34,7 @@ export class RevBillingController {
   // parks any over-billing in 2410.
   @Post(':id/bill')
   bill(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(BillBody)) b: BillBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.bill(id, b, u);
+    return this.svc.bill(id, b, u, b.self_approval_reason);
   }
 
   // Cumulative recognized vs billed with the derived contract-asset / contract-liability balance.

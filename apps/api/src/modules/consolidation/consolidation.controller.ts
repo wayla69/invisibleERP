@@ -2,6 +2,7 @@ import { Controller, Get, Post, Delete, Body, Param, Query, ParseIntPipe, HttpCo
 import { z } from 'zod';
 import { ConsolidationService } from './consolidation.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 
@@ -75,8 +76,8 @@ export class ConsolidationController {
   @Post('runs/:runId/post')
   @Permissions('approvals')
   @HttpCode(200)
-  postRun(@Param('runId', ParseIntPipe) runId: number, @CurrentUser() user: JwtUser) {
-    return this.svc.postConsolidation(runId, { postedBy: user.username }, user);
+  postRun(@Param('runId', ParseIntPipe) runId: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.postConsolidation(runId, { postedBy: user.username }, user, b?.self_approval_reason);
   }
 
   // ── WS3.3: elimination rules ──

@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { ProgressBillingService, type CreateClaimDto } from './progress-billing.service';
 
 const CreateBody = z.object({
@@ -36,8 +37,8 @@ export class ProgressBillingController {
   // Certify a draft claim (certifier duty; ≠ preparer). Static segment — never collides with :claimNo below.
   @Post(':claimNo/certify')
   @Permissions('proj_billing_certify', 'gl_close', 'exec')
-  certify(@Param('claimNo') claimNo: string, @CurrentUser() u: JwtUser) {
-    return this.svc.certifyClaim(claimNo, u);
+  certify(@Param('claimNo') claimNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.certifyClaim(claimNo, u, b?.self_approval_reason);
   }
 
   @Get('project/:code')

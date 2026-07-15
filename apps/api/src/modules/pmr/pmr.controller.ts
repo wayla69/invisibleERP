@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { PmrService, type PmrSubmitDto, type BoqChangeDto } from './pmr.service';
 
 const SubmitBody = z.object({
@@ -15,7 +16,7 @@ const SubmitBody = z.object({
     unit_cost: z.number().nonnegative(),
   })).min(1),
 });
-const RejectBody = z.object({ reason: z.string().optional() });
+const RejectBody = z.object({ reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 // A request to add a material item to a project's approved BoQ budget (PROJ-15).
 const BoqChangeBody = z.object({
   project_code: z.string().min(1),
@@ -71,14 +72,14 @@ export class PmrController {
 
   @Post('boq-request/:reqNo/approve')
   @Permissions('planner', 'exec')
-  approveBoqRequest(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveBoqRequest(reqNo, u);
+  approveBoqRequest(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveBoqRequest(reqNo, u, b?.self_approval_reason);
   }
 
   @Post('boq-request/:reqNo/reject')
   @Permissions('planner', 'exec')
-  rejectBoqRequest(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
-    return this.svc.rejectBoqRequest(reqNo, b.reason ?? '', u);
+  rejectBoqRequest(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectBoqRequest(reqNo, b.reason ?? '', u, b.self_approval_reason);
   }
 
   @Get('project/:code')
@@ -96,13 +97,13 @@ export class PmrController {
   // Approve / reject an over-budget PMR (authoriser ≠ requester, maker-checker).
   @Post(':pmrNo/approve')
   @Permissions('procurement', 'exec')
-  approve(@Param('pmrNo') pmrNo: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approve(pmrNo, u);
+  approve(@Param('pmrNo') pmrNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approve(pmrNo, u, b?.self_approval_reason);
   }
 
   @Post(':pmrNo/reject')
   @Permissions('procurement', 'exec')
-  reject(@Param('pmrNo') pmrNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
-    return this.svc.reject(pmrNo, b.reason ?? '', u);
+  reject(@Param('pmrNo') pmrNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.reject(pmrNo, b.reason ?? '', u, b.self_approval_reason);
   }
 }

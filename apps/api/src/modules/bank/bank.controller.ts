@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, Body, HttpCode } from '@nestjs/com
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { z } from 'zod';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { BankService } from './bank.service';
 import { CreateBankAccountBody, ImportStatementBody, ImportStatementFileBody, ManualMatchBody, AdjustmentBody, type CreateBankAccountDto, type ImportStatementDto, type ImportStatementFileDto, type AdjustmentDto } from './dto';
 
@@ -27,7 +28,7 @@ export class BankController {
   // G9 maker-checker: a new bank account is created PendingApproval; a DIFFERENT approver activates it
   // (approver ≠ requester → 403 SOD_VIOLATION) before it can bank cash.
   @Get('accounts/pending') @Permissions('approvals', 'exec') pendingAccounts(@CurrentUser() u: JwtUser) { return this.svc.listPendingBankAccounts(u); }
-  @Post('accounts/:id/approve') @HttpCode(200) @Permissions('approvals', 'exec') approveAccount(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.approveBankAccount(+id, u); }
+  @Post('accounts/:id/approve') @HttpCode(200) @Permissions('approvals', 'exec') approveAccount(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveBankAccount(+id, u, b?.self_approval_reason); }
   @Post('accounts/:id/reject') @HttpCode(200) @Permissions('approvals', 'exec') rejectAccount(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.rejectBankAccount(+id, u); }
 
   @Post('accounts/:id/statements') importStatement(@Param('id') id: string, @Body(new ZodValidationPipe(ImportStatementBody)) b: ImportStatementDto, @CurrentUser() u: JwtUser) { return this.svc.importStatement(+id, b, u); }

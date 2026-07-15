@@ -10,7 +10,7 @@ const MatchRunBody = z.object({
   lines: z.array(z.object({ item_id: z.string().min(1), qty: z.number(), unit_price: z.number().nonnegative() })).optional(),
 });
 const ToleranceBody = z.object({ qty_pct: z.number().min(0).optional(), price_pct: z.number().min(0).optional(), amount_pct: z.number().min(0).optional(), amount_abs: z.number().min(0).optional() });
-const OverrideBody = z.object({ reason: z.string().min(1) });
+const OverrideBody = z.object({ reason: z.string().min(1), self_approval_reason: z.string().max(500).optional() });
 
 @Controller('api/procurement/match')
 export class MatchController {
@@ -35,5 +35,5 @@ export class MatchController {
   // EXP-01 override is maker-checked in the service (overrider ≠ matcher, binds Admin). Allow approval-authority
   // roles (controller/approvals) as well as creditors — an override is a checker action, not a clerk's.
   @Post(':txnNo/override') @Permissions('creditors', 'approvals', 'gl_close')
-  override(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(OverrideBody)) b: { reason: string }, @CurrentUser() u: JwtUser) { return this.svc.override(txnNo, b.reason, u); }
+  override(@Param('txnNo') txnNo: string, @Body(new ZodValidationPipe(OverrideBody)) b: { reason: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.override(txnNo, b.reason, u, b.self_approval_reason); }
 }

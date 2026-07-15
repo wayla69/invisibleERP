@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { hedgeRelationships, hedgeDerivatives, hedgeEffectivenessTests, hedgeOciMovements } from '../../database/schema';
@@ -116,13 +117,11 @@ export class HedgeService {
   }
 
   // Checker: approve a PendingApproval relationship (approver ≠ requester ⇒ SOD_SELF_APPROVAL).
-  async approve(id: number, user: JwtUser) {
+  async approve(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const rel = await this.load(id);
     if (rel.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Hedge is ${rel.status}, not pending approval`, messageTh: 'ความสัมพันธ์การป้องกันความเสี่ยงไม่ได้อยู่ในสถานะรออนุมัติ' });
-    if (rel.requestedBy && rel.requestedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a hedge designation you created', messageTh: 'ผู้กำหนดอนุมัติความสัมพันธ์ของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user, maker: rel.requestedBy, event: 'tre.hedge.approve', ref: String(id), amount: n(rel.notional), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a hedge designation you created', messageTh: 'ผู้กำหนดอนุมัติความสัมพันธ์ของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await db.update(hedgeRelationships).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(hedgeRelationships.id, id));
     return this.getHedge(id);
   }

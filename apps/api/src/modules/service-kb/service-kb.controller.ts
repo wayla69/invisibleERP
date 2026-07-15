@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, HttpCode } from '@nes
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { ServiceKbService } from './service-kb.service';
 
 const CreateBody = z.object({
@@ -38,7 +39,7 @@ export class ServiceKbController {
   @Get('articles/:id') get(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.getArticle(u, +id); }
   @Post('articles') @HttpCode(201) create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>, @CurrentUser() u: JwtUser) { return this.svc.createArticle(u, b); }
   @Patch('articles/:id') update(@Param('id') id: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>, @CurrentUser() u: JwtUser) { return this.svc.updateArticle(u, +id, b); }
-  @Post('articles/:id/publish') @HttpCode(200) publish(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.publishArticle(u, +id); }
+  @Post('articles/:id/publish') @HttpCode(200) publish(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.publishArticle(u, +id, b?.self_approval_reason); }
   @Post('articles/:id/archive') @HttpCode(200) archive(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.archiveArticle(u, +id); }
   @Post('articles/:id/feedback') @HttpCode(200) feedback(@Param('id') id: string, @Body(new ZodValidationPipe(FeedbackBody)) b: { helpful: boolean }, @CurrentUser() u: JwtUser) { return this.svc.feedback(u, +id, b); }
   @Post('deflect') @HttpCode(201) deflect(@Body(new ZodValidationPipe(DeflectBody)) b: z.infer<typeof DeflectBody>, @CurrentUser() u: JwtUser) { return this.svc.logDeflection(u, b); }

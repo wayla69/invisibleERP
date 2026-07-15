@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { LandedCostService } from './landed-cost.service';
 
 const ChargeSchema = z.object({
@@ -64,7 +65,7 @@ export class LandedCostController {
   @Post(':no/post')
   @HttpCode(200)
   @Permissions('gl_post', 'exec')
-  post(@Param('no') no: string, @CurrentUser() u: JwtUser) {
-    return this.svc.post(no, u);
+  post(@Param('no') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.post(no, u, b?.self_approval_reason);
   }
 }

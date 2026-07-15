@@ -10,6 +10,7 @@ import { ArCashApplicationService, type CashApplicationDto, type ApplyOnAccountD
 import { ApPaymentRunService, type ProposeRunDto, type EditRunLinesDto, type DiscountTermDto } from './ap-payment-run.service';
 import { ArApNettingService, type NettingAgreementDto, type ProposeNettingDto } from './arap-netting.service';
 import { qint, qintOpt } from '../../common/query';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero', 'reverse_charge']).optional(), tax_code: z.string().optional(), idempotency_key: z.string().optional() });
@@ -122,7 +123,7 @@ export class FinanceController {
 
   // Checker approves (approver ≠ proposer enforced in the service, even for Admin) → contra JE + clears both sub-ledgers.
   @Post('netting/settlements/:settlementNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveNetting(@Param('settlementNo') settlementNo: string, @CurrentUser() u: JwtUser) { return this.netting.approve(settlementNo, u); }
+  approveNetting(@Param('settlementNo') settlementNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.netting.approve(settlementNo, u, b?.self_approval_reason); }
 
   @Post('netting/settlements/:settlementNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectNetting(@Param('settlementNo') settlementNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.netting.reject(settlementNo, u, b.reason); }
@@ -155,7 +156,7 @@ export class FinanceController {
 
   // Checker approves/rejects a parked batch (approver ≠ poster enforced in the service, even for Admin).
   @Post('ar/cash-application/:batchNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveCashApplication(@Param('batchNo') batchNo: string, @CurrentUser() u: JwtUser) { return this.cashApp.approveBatch(batchNo, u); }
+  approveCashApplication(@Param('batchNo') batchNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.cashApp.approveBatch(batchNo, u, b?.self_approval_reason); }
 
   @Post('ar/cash-application/:batchNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectCashApplication(@Param('batchNo') batchNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.cashApp.rejectBatch(batchNo, u, b.reason); }
@@ -170,7 +171,7 @@ export class FinanceController {
   computeAllowance(@Body(new ZodValidationPipe(AllowanceComputeBody)) b: ComputeAllowanceDto, @CurrentUser() u: JwtUser) { return this.allowance.computeAllowance(b, u); }
 
   @Post('ar-allowance/:id/post') @HttpCode(200) @Permissions('gl_post', 'exec')
-  postAllowance(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.allowance.postAllowance(Number(id), u); }
+  postAllowance(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.allowance.postAllowance(Number(id), u, b?.self_approval_reason); }
 
   @Get('ar-allowance') @Permissions('creditors', 'ar', 'gl_post', 'exec')
   listAllowance(@Query('tenant_id') tenantId?: string, @CurrentUser() u?: JwtUser) { return this.allowance.list(tenantId ? Number(tenantId) : (u?.tenantId ?? undefined)); }
@@ -314,7 +315,7 @@ export class FinanceController {
 
   // Approve a pending payment (checker; approver ≠ requester enforced in the service, even for Admin).
   @Post('ap/payments/:paymentNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveApPayment(@Param('paymentNo') paymentNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveApPayment(paymentNo, u); }
+  approveApPayment(@Param('paymentNo') paymentNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveApPayment(paymentNo, u, b?.self_approval_reason); }
 
   // Reject a pending payment (checker).
   @Post('ap/payments/:paymentNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
@@ -343,7 +344,7 @@ export class FinanceController {
   submitPaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.submit(runNo, u); }
 
   @Post('ap/payment-runs/:runNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approvePaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.approve(runNo, u); }
+  approvePaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.payRuns.approve(runNo, u, b?.self_approval_reason); }
 
   @Post('ap/payment-runs/:runNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectPaymentRun(@Param('runNo') runNo: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.payRuns.reject(runNo, u, b.reason); }
@@ -352,7 +353,7 @@ export class FinanceController {
   cancelPaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.cancel(runNo, u); }
 
   @Post('ap/payment-runs/:runNo/execute') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  executePaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser) { return this.payRuns.execute(runNo, u); }
+  executePaymentRun(@Param('runNo') runNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.payRuns.execute(runNo, u, b?.self_approval_reason); }
 
   // Thai bank bulk-transfer file (generic CSV + scb|kbank|bbl presets, or minimal ISO 20022 pain.001 XML).
   // The file's SHA-256 is recorded on the run and status-logged (audit evidence).
@@ -378,7 +379,7 @@ export class FinanceController {
   getDiscountTerm(@Param('id') id: string) { return this.payRuns.getDiscountTerm(qint('id', id, 0)); }
 
   @Post('ap/discount-terms/:id/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveDiscountTerm(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.payRuns.approveDiscountTerm(qint('id', id, 0), u); }
+  approveDiscountTerm(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.payRuns.approveDiscountTerm(qint('id', id, 0), u, b?.self_approval_reason); }
 
   @Post('ap/discount-terms/:id/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectDiscountTerm(@Param('id') id: string, @Body(new ZodValidationPipe(RejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.payRuns.rejectDiscountTerm(qint('id', id, 0), u, b.reason); }

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, SlidersHorizontal, Star } from 'lucide-react';
+import { BadgeCheck, Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, SlidersHorizontal, Star } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -204,6 +204,21 @@ function GodScopeBanner() {
     <div className="flex items-center gap-2 border-b border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground">
       <Globe className="size-3.5 shrink-0" />
       <span>{t('plt.scope_combined_mode_pre')} <b>{t('plt.scope_all_companies')}</b> {t('plt.scope_combined_mode_post')}</span>
+    </div>
+  );
+}
+
+/**
+ * Persistent SME-mode banner (docs/49) — shown to EVERY user of a control_profile='sme' tenant so nobody
+ * mistakes the relaxed single-operator control environment for the full enterprise maker-checker one.
+ * Names the compensating control: self-approvals require a logged reason and are independently reviewed.
+ */
+function SmeModeBanner() {
+  const { t } = useLang();
+  return (
+    <div className="flex items-center gap-2 border-b border-sky-500/40 bg-sky-500/10 px-4 py-1 text-[11px]">
+      <BadgeCheck className="size-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
+      <span className="truncate"><b>{t('sme.mode_badge')}</b> — {t('sme.mode_banner_desc')}</span>
     </div>
   );
 }
@@ -572,12 +587,14 @@ export function AppShell({
   const groupOrder = moduleFlags.data?.groupOrder;
   const itemOrder = moduleFlags.data?.itemOrder;
   const isGod = me.data?.is_platform_owner ?? false;
+  // SME edition (docs/49): hide the group title-keys the tenant was stamped with at provisioning.
+  const smeHidden = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_hidden_nav_groups ?? [] : []), [me.data]);
   const groups = React.useMemo(() => {
-    const filtered = filterByPerm(wsNav);
+    const filtered = filterByPerm(wsNav).filter((g) => !smeHidden.has(g.title));
     const base = filtered.length ? filtered : wsNav; // fall back while loading
     const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
     return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
-  }, [filterByPerm, wsNav, groupOrder, isGod]);
+  }, [filterByPerm, wsNav, groupOrder, isGod, smeHidden]);
   // "Show advanced menus" — kept in the synced fold map under a reserved key (see ADVANCED_FOLD_KEY). Off by
   // default: infrequent/expert domains (Controls, Customise, Integrations, Intercompany) stay hidden.
   const showAdvanced = navFold[ADVANCED_FOLD_KEY] ?? false;
@@ -932,6 +949,7 @@ export function AppShell({
         </header>
 
         {isGod && <GodScopeBanner />}
+        {me.data?.control_profile === 'sme' && <SmeModeBanner />}
         <div className={cn('flex-1 pt-4 sm:pt-6 app-content-pad')}>{children}</div>
       </SidebarInset>
 

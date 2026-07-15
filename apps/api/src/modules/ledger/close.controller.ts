@@ -14,10 +14,10 @@ const StepBody = z.object({
 });
 type StepBodyT = z.infer<typeof StepBody>;
 
-const LockBody = z.object({ close_run_id: z.number().int().positive() });
+const LockBody = z.object({ close_run_id: z.number().int().positive(), self_approval_reason: z.string().max(500).optional() });
 type LockBodyT = z.infer<typeof LockBody>;
 
-const ReopenBody = z.object({ close_run_id: z.number().int().positive(), reason: z.string().optional() });
+const ReopenBody = z.object({ close_run_id: z.number().int().positive(), reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 type ReopenBodyT = z.infer<typeof ReopenBody>;
 
 // WS2.1 — Hard period close + checklist (GL-15/GL-16). startClose seeds the checklist; completeStep marks
@@ -64,7 +64,7 @@ export class CloseController {
   @HttpCode(200)
   @Permissions('gl_close')
   lock(@Body(new ZodValidationPipe(LockBody)) b: LockBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.lockPeriod({ closeRunId: b.close_run_id, lockedBy: u.username });
+    return this.svc.lockPeriod({ closeRunId: b.close_run_id, lockedBy: u.username }, u, b.self_approval_reason);
   }
 
   // GL-16b — controlled emergency reopen of a Locked period (mandatory reason; reopener ≠ locker; audited).
@@ -72,6 +72,6 @@ export class CloseController {
   @HttpCode(200)
   @Permissions('gl_close')
   reopen(@Body(new ZodValidationPipe(ReopenBody)) b: ReopenBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.reopenPeriod({ closeRunId: b.close_run_id, reopenedBy: u.username, reason: b.reason ?? '' });
+    return this.svc.reopenPeriod({ closeRunId: b.close_run_id, reopenedBy: u.username, reason: b.reason ?? '' }, u, b.self_approval_reason);
   }
 }

@@ -1,8 +1,14 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { glPeriodBalances, closeRuns, closeRunSteps, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
+
+// GL-16/GL-16b SoD gates historically reply HTTP 400 (SELF_LOCK/SELF_REOPEN — the basics harness asserts the
+// status), while assertMakerChecker's enterprise block is a 403. Remap, keeping the body byte-identical.
+const as400 = (e: unknown): never => { throw e instanceof ForbiddenException ? new BadRequestException(e.getResponse()) : e; };
 
 const num = (x: unknown) => Number(x) || 0;
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
@@ -105,7 +111,7 @@ export class CloseService {
   // GL-16: require ReadyToLock (else STEPS_INCOMPLETE listing the pending required steps). The locker MUST
   // differ from the starter (SELF_LOCK). Sets the run Locked AND marks fiscal_periods.status = 'Locked' so
   // postEntry hard-blocks the period.
-  async lockPeriod(dto: { closeRunId: number; lockedBy: string }) {
+  async lockPeriod(dto: { closeRunId: number; lockedBy: string }, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const tenantId = this.tenantId();
     const run = await this.getRun(dto.closeRunId);
@@ -119,7 +125,7 @@ export class CloseService {
       throw new BadRequestException({ code: 'STEPS_INCOMPLETE', message: `Close steps incomplete: ${pending.join(', ')}`, messageTh: 'ขั้นตอนการปิดงวดยังไม่ครบถ้วน', pending });
     }
     if (run.startedBy === dto.lockedBy) {
-      throw new BadRequestException({ code: 'SELF_LOCK', message: 'Maker-checker: you cannot lock a close run you started', messageTh: 'ผู้เริ่มปิดงวดล็อกงวดของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.period.lock', ref: String(dto.closeRunId), reason: selfApprovalReason, code: 'SELF_LOCK', message: 'Maker-checker: you cannot lock a close run you started', messageTh: 'ผู้เริ่มปิดงวดล็อกงวดของตนเองไม่ได้ (แบ่งแยกหน้าที่)' }).catch(as400);
     }
     const [locked] = await db.update(closeRuns).set({
       status: 'Locked',
@@ -149,7 +155,7 @@ export class CloseService {
   // stay Done) and the fiscal period back to Open so corrective postings are allowed; a different user must
   // then re-lock. The POST is captured by the append-only audit_log (tamper-evident hash chain) with the
   // actor + reason, so every reopen is attributable.
-  async reopenPeriod(dto: { closeRunId: number; reopenedBy: string; reason: string }) {
+  async reopenPeriod(dto: { closeRunId: number; reopenedBy: string; reason: string }, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const tenantId = this.tenantId();
     const run = await this.getRun(dto.closeRunId);
@@ -160,7 +166,8 @@ export class CloseService {
       throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reason is required to reopen a locked period', messageTh: 'ต้องระบุเหตุผลในการเปิดงวดที่ล็อกแล้ว' });
     }
     if (run.lockedBy === dto.reopenedBy) {
-      throw new BadRequestException({ code: 'SELF_REOPEN', message: 'Maker-checker: the user who locked the period cannot reopen it', messageTh: 'ผู้ที่ล็อกงวดเปิดงวดเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      // NB dto.reason is the mandatory REOPEN justification (REASON_REQUIRED above); self_approval_reason is separate.
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.period.reopen', ref: String(dto.closeRunId), reason: selfApprovalReason, code: 'SELF_REOPEN', message: 'Maker-checker: the user who locked the period cannot reopen it', messageTh: 'ผู้ที่ล็อกงวดเปิดงวดเองไม่ได้ (แบ่งแยกหน้าที่)' }).catch(as400);
     }
     const [reopened] = await db.update(closeRuns).set({
       status: 'ReadyToLock',

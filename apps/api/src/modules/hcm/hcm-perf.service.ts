@@ -1,8 +1,9 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, perfCycles, perfGoals, perfReviews } from '../../database/schema';
 import { n, fx } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 // HR-3 Performance management — appraisal cycles, OKR-style goals (weights validated ≤100% per employee/cycle),
@@ -14,8 +15,8 @@ export interface CycleDto { name: string; period_start?: string; period_end?: st
 export interface GoalDto { cycle_id: number; emp_code: string; title: string; description?: string; weight_pct?: number; metric?: string; target?: string; status?: string }
 export interface GoalPatchDto { progress_pct?: number; status?: string }
 export interface ReviewDto { cycle_id: number; emp_code: string; self_rating?: number; comments?: string }
-export interface ManagerRatingDto { manager_emp_code: string; manager_rating: number; comments?: string }
-export interface SignDto { calibrated_rating?: number }
+export interface ManagerRatingDto { manager_emp_code: string; manager_rating: number; comments?: string; self_approval_reason?: string }
+export interface SignDto { calibrated_rating?: number; self_approval_reason?: string }
 
 // Which read scope the caller gets: HR/exec see everything; a bare `ess` employee sees only their own rows.
 const HR_READ = ['hr', 'hr_admin', 'exec'];
@@ -147,12 +148,14 @@ export class HcmPerfService {
   }
 
   // Manager rating — HR-03: the manager (manager_emp_code) must differ from the reviewee.
-  async managerRate(id: number, dto: ManagerRatingDto, _user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-rate WITH self_approval_reason — logged, reviewed by SME-01.
+  async managerRate(id: number, dto: ManagerRatingDto, user: JwtUser) {
     const [r] = await this.db.select().from(perfReviews).where(eq(perfReviews.id, Number(id))).limit(1);
     if (!r) throw new NotFoundException({ code: 'REVIEW_NOT_FOUND', message: `Review ${id} not found`, messageTh: 'ไม่พบใบประเมิน' });
     if (r.status === 'signed') throw new BadRequestException({ code: 'REVIEW_SIGNED', message: 'Review already signed', messageTh: 'ใบประเมินลงนามแล้ว' });
-    if (dto.manager_emp_code === r.empCode)
-      throw new ForbiddenException({ code: 'SOD_SELF_REVIEW', message: 'The reviewee cannot rate/sign their own review', messageTh: 'ผู้ถูกประเมินให้คะแนน/ลงนามใบประเมินของตนเองไม่ได้' });
+    if (dto.manager_emp_code === r.empCode) {
+      await assertMakerChecker(this.db, { user, maker: user.username, event: 'hcm.review.rate', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_REVIEW', message: 'The reviewee cannot rate/sign their own review', messageTh: 'ผู้ถูกประเมินให้คะแนน/ลงนามใบประเมินของตนเองไม่ได้' });
+    }
     await this.db.update(perfReviews).set({
       managerRating: fx(dto.manager_rating, 2), managerEmpCode: dto.manager_emp_code,
       comments: dto.comments ?? r.comments, status: 'manager',
@@ -161,6 +164,7 @@ export class HcmPerfService {
   }
 
   // Sign-off — HR-03: (1) the review must carry a manager rating; (2) the signer's own employee ≠ the reviewee.
+  // Exception (docs/49): an 'sme' tenant may self-sign WITH self_approval_reason — logged, reviewed by SME-01.
   async signReview(id: number, dto: SignDto, user: JwtUser) {
     const [r] = await this.db.select().from(perfReviews).where(eq(perfReviews.id, Number(id))).limit(1);
     if (!r) throw new NotFoundException({ code: 'REVIEW_NOT_FOUND', message: `Review ${id} not found`, messageTh: 'ไม่พบใบประเมิน' });
@@ -168,8 +172,9 @@ export class HcmPerfService {
     if (r.managerRating == null)
       throw new BadRequestException({ code: 'NO_MANAGER_RATING', message: 'Review has no manager rating to sign off', messageTh: 'ยังไม่มีคะแนนจากผู้จัดการ ให้ลงนามไม่ได้' });
     const signerEmp = await this.callerEmpCode(user);
-    if (signerEmp && signerEmp === r.empCode)
-      throw new ForbiddenException({ code: 'SOD_SELF_REVIEW', message: 'The reviewee cannot sign off their own review', messageTh: 'ผู้ถูกประเมินลงนามใบประเมินของตนเองไม่ได้' });
+    if (signerEmp && signerEmp === r.empCode) {
+      await assertMakerChecker(this.db, { user, maker: user.username, event: 'hcm.review.sign', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_REVIEW', message: 'The reviewee cannot sign off their own review', messageTh: 'ผู้ถูกประเมินลงนามใบประเมินของตนเองไม่ได้' });
+    }
     const calibrated = dto.calibrated_rating != null ? fx(dto.calibrated_rating, 2) : (r.calibratedRating ?? r.managerRating);
     await this.db.update(perfReviews).set({
       calibratedRating: calibrated, status: 'signed', signedBy: user.username, signedAt: new Date(),

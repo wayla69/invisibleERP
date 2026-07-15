@@ -15,6 +15,7 @@ import { normalizeA4Template } from '../../common/a4-template';
 import { DocumentTemplatesService } from '../document-templates/document-templates.service';
 import { CpqPricebookService } from './cpq-pricebook.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
@@ -230,13 +231,11 @@ export class CpqService {
 
   // CPQ-01 (SVC-1): approve a floor-breaching quote (PendingApproval → Sent). The approver MUST differ from
   // the quote's author — one person may not both discount below the floor and approve it (SOD_SELF_APPROVAL).
-  async approveDiscount(quoteId: number, user: JwtUser) {
+  async approveDiscount(quoteId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const q = await this.assertQuote(quoteId);
     if (q.status !== 'PendingApproval') throw new BadRequestException({ code: 'INVALID_TRANSITION', message: `Quote ${q.quoteNo} is not pending approval (status ${q.status})` });
-    if (q.createdBy && q.createdBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot approve their own discount/margin breach — a different authorised user must approve', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติส่วนลด/มาร์จิ้นของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
-    }
+    await assertMakerChecker(db, { user, maker: q.createdBy, event: 'cpq.discount.approve', ref: q.quoteNo, amount: n(q.total), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot approve their own discount/margin breach — a different authorised user must approve', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติส่วนลด/มาร์จิ้นของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
     // CRM-14 (CRM-12): a breach tiered to 'exec' needs a caller holding `exec` specifically — a plain
     // cpq_approve holder (manager tier) may not clear it, even though the /approve route admits both.
     const [pending] = await db.select({ requiredTier: quoteApprovals.requiredTier }).from(quoteApprovals)
@@ -253,7 +252,7 @@ export class CpqService {
     return this.fmtQuote(updated);
   }
 
-  async acceptQuote(quoteId: number, user: JwtUser) {
+  async acceptQuote(quoteId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const q = await this.assertQuote(quoteId);
     if (q.expiresDate && new Date(q.expiresDate) < new Date()) {
       throw new BadRequestException({ code: 'QUOTE_EXPIRED', message: 'Cannot accept expired quote', messageTh: 'ใบเสนอราคาหมดอายุแล้ว' });
@@ -263,8 +262,8 @@ export class CpqService {
     // self-recognise its revenue. Enforced only when revenue actually posts (ledger wired + billable total),
     // which is always so in production (CpqModule provides the ledger); the ledger-less standalone quote
     // pipeline (no GL) is a pure status transition and is unaffected.
-    if (this.ledger && n(q.total) > 0 && q.createdBy && q.createdBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Quote author cannot accept their own quote — revenue recognition needs a second person', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติรับใบเสนอราคาของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
+    if (this.ledger && n(q.total) > 0) {
+      await assertMakerChecker(this.db, { user, maker: q.createdBy, event: 'cpq.quote.accept', ref: q.quoteNo, amount: n(q.total), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Quote author cannot accept their own quote — revenue recognition needs a second person', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติรับใบเสนอราคาของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
     }
     const res = await this.transitionQuote(quoteId, 'Accepted', ['Sent'], user);
     // quote-to-cash: book the won quote to AR + revenue (idempotent per quote)
@@ -288,13 +287,11 @@ export class CpqService {
   // Rejecting a quote in 'PendingApproval' is the CHECKER declining the discount/margin breach (CPQ-01): the
   // quote returns to Draft for re-work and the approver must differ from the author (SOD_SELF_APPROVAL). A
   // quote in Sent/Draft is rejected the classic way (→ Rejected).
-  async rejectQuote(quoteId: number, user: JwtUser) {
+  async rejectQuote(quoteId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const q = await this.assertQuote(quoteId);
     if (q.status === 'PendingApproval') {
-      if (q.createdBy && q.createdBy === user.username) {
-        throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot decide their own discount/margin breach — a different authorised user must approve/reject', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติ/ปฏิเสธส่วนลดของตนเองได้ ต้องให้ผู้อื่นดำเนินการ' });
-      }
+      await assertMakerChecker(db, { user, maker: q.createdBy, event: 'cpq.quote.reject', ref: q.quoteNo, amount: n(q.total), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot decide their own discount/margin breach — a different authorised user must approve/reject', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติ/ปฏิเสธส่วนลดของตนเองได้ ต้องให้ผู้อื่นดำเนินการ' });
       await db.update(quoteApprovals)
         .set({ status: 'rejected', approvedBy: user.username, decidedAt: new Date() })
         .where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending')));

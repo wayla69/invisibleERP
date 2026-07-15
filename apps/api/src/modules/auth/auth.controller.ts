@@ -138,6 +138,6 @@ export class AuthController {
       role: user.role as AuthUser['role'],
       customer_name: user.customerName,
       permissions: user.permissions,
-    });
+    }, { controlProfile: user.controlProfile, tenantId: user.tenantId });
   }
 }

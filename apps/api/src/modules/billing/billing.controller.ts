@@ -14,6 +14,10 @@ const SignupBody = z.object({
   email: z.string().email(),
   plan_code: z.string().optional(),
   industry: z.enum(['restaurant', 'retail', 'distribution', 'services', 'general']).optional(),
+  // SME single-user edition (docs/49) — the control environment chosen AT CREATION. Default 'enterprise'.
+  // Only the @PlatformAdmin create-company path may set 'sme' (enforced in provisionTenant, not here,
+  // because this body is shared with the public signup/request forms).
+  control_profile: z.enum(['enterprise', 'sme']).optional(),
   legal_name: z.string().optional(),
   tax_id: z.string().optional(),
   vat_registered: z.boolean().optional(),
@@ -40,6 +44,12 @@ const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum([
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
+// docs/49 — control-profile transition is UPGRADE-ONLY, so the only accepted target is 'enterprise'.
+const ControlProfileBody = z.object({ control_profile: z.literal('enterprise') });
+const SmeDefaultsBody = z.object({
+  hidden_nav_groups: z.array(z.string().max(100)).max(50).optional(),
+  accountant_email: z.string().email().nullable().optional(),
+});
 
 @Controller('api')
 export class BillingController {
@@ -137,6 +147,26 @@ export class BillingController {
   @Post('admin/tenants/:id/tags') @PlatformAdmin() @HttpCode(200)
   setTenantTags(@Param('id') id: string, @Body(new ZodValidationPipe(TagsBody)) b: { tags: string[] }) {
     return this.svc.setTenantTags(Number(id), b.tags);
+  }
+
+  // SME single-user edition (docs/49) — UPGRADE-ONLY control-profile transition (sme → enterprise).
+  // A downgrade (enterprise → sme) is rejected in the service with 403 PROFILE_DOWNGRADE_FORBIDDEN:
+  // an entity that has operated under full SoD may not weaken its control environment later.
+  @Post('admin/tenants/:id/control-profile') @PlatformAdmin() @HttpCode(200)
+  upgradeControlProfile(@Param('id') id: string, @Body(new ZodValidationPipe(ControlProfileBody)) b: { control_profile: 'enterprise' }, @CurrentUser() u: JwtUser) {
+    return this.svc.upgradeControlProfile(Number(id), b.control_profile, u.username);
+  }
+
+  // Platform-wide SME provisioning defaults (docs/49) — what every NEW SME company is stamped with at
+  // creation (tenants.sme_prefs). Changing these affects only future companies.
+  @Get('admin/sme-defaults') @PlatformAdmin()
+  getSmeDefaults() {
+    return this.svc.getSmeDefaults();
+  }
+
+  @Post('admin/sme-defaults') @PlatformAdmin() @HttpCode(200)
+  setSmeDefaults(@Body(new ZodValidationPipe(SmeDefaultsBody)) b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, @CurrentUser() u: JwtUser) {
+    return this.svc.setSmeDefaults(b, u.username);
   }
 
   // Tenant lifecycle (#5) — a platform owner suspends a company (its users are then blocked,

@@ -7,6 +7,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { IssueGiftCardDto } from './dto';
 
 // Gift cards / store credit. A card is a 2200 Customer-Deposits liability. Issue posts GL (Dr 1000 /
@@ -54,13 +55,14 @@ export class GiftCardService {
   }
 
   // Approve a PendingApproval issuance (audit G1) — a DIFFERENT user than the issuer activates the card and
-  // posts the Dr 1000 / Cr 2200 GL. Self-approval (issuer === approver) → 403 SOD_VIOLATION.
-  async approveIssue(cardNo: string, user: JwtUser): Promise<{ card_no: string; status: string; balance: number; journal_no: string | null; approved_by: string; issued_by: string | null }> {
+  // posts the Dr 1000 / Cr 2200 GL. Self-approval (issuer === approver) → 403 SOD_VIOLATION, except a
+  // control_profile='sme' tenant with a logged justification (docs/49; evidence → self_approvals, SME-01).
+  async approveIssue(cardNo: string, user: JwtUser, selfApprovalReason?: string | null): Promise<{ card_no: string; status: string; balance: number; journal_no: string | null; approved_by: string; issued_by: string | null }> {
     const db = this.db;
     const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).limit(1);
     if (!c) throw new NotFoundException({ code: 'GIFT_CARD_NOT_FOUND', message: 'Gift card not found', messageTh: 'ไม่พบบัตรของขวัญ' });
     if (String(c.status) !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Gift card ${cardNo} is ${c.status}, not pending approval`, messageTh: 'บัตรนี้ไม่ได้รออนุมัติ' });
-    if (c.createdBy && c.createdBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a gift card you issued', messageTh: 'ผู้ออกบัตรอนุมัติบัตรของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: c.createdBy, event: 'giftcard.issue.approve', ref: cardNo, amount: n(c.initialAmount), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a gift card you issued', messageTh: 'ผู้ออกบัตรอนุมัติบัตรของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const face = n(c.initialAmount);
     const journalNo = await this.postIssuance(cardNo, face, c.tenantId ?? user.tenantId ?? null, user.username);
     await db.update(giftCards).set({ status: 'Active', updatedAt: new Date() }).where(eq(giftCards.id, c.id));

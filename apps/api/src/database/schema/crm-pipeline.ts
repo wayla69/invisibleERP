@@ -519,7 +519,7 @@ export type CrmDqScore = typeof crmDqScores.$inferSelect;
 export type CrmMergeLog = typeof crmMergeLog.$inferSelect;
 export type CrmCampaignInfluence = typeof crmCampaignInfluence.$inferSelect;
 
-// CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0414). Links a DELIVERED project to the renewal
+// CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0415). Links a DELIVERED project to the renewal
 // opportunity raised from it (idempotent, one per project), so delivered-project business gets a renewal
 // motion instead of silently lapsing, and a detective gap list can be computed. The opportunity itself is
 // created through the CRM pipeline service (CRM-domain write); this is the CRM-owned link + idempotency key.

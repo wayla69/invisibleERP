@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { nonConformances, defectCodes, qualityInspections } from '../../database/schema';
@@ -7,6 +7,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { StatusLogService } from '../../common/status-log.service';
 import { n, fx } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
@@ -27,7 +28,7 @@ export interface RaiseNcrDto {
   description?: string;
   proposed_disposition?: Disposition;
 }
-export interface DispositionDto { disposition?: Disposition; notes?: string }
+export interface DispositionDto { disposition?: Disposition; notes?: string; self_approval_reason?: string }
 export interface DefectCodeDto { code: string; name?: string; category?: string; active?: boolean }
 
 // QMS-1 (QC-01) — Non-Conformance (NCR) register with maker-checker disposition. A failed inspection or a
@@ -124,8 +125,8 @@ export class NcrService {
     const ncr = await this.assertNcr(id);
     if (ncr.status !== 'pending_disposition')
       throw new BadRequestException({ code: 'NCR_NOT_PENDING', message: `NCR ${ncr.ncrNo} is ${ncr.status}, not pending_disposition`, messageTh: `NCR ${ncr.ncrNo} ไม่ได้อยู่ในสถานะรอจัดการ` });
-    if (ncr.raisedBy && ncr.raisedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot disposition an NCR you raised', messageTh: 'ผู้ออก NCR อนุมัติการจัดการเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    // Exception (docs/49): an 'sme' tenant may self-disposition WITH self_approval_reason — logged, reviewed by SME-01.
+    await assertMakerChecker(this.db, { user, maker: ncr.raisedBy, event: 'qc.ncr.disposition', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot disposition an NCR you raised', messageTh: 'ผู้ออก NCR อนุมัติการจัดการเองไม่ได้ (แบ่งแยกหน้าที่)' });
 
     const disposition = (dto.disposition ?? ncr.proposedDisposition) as Disposition | null;
     if (!disposition || !(FINANCIAL_DISPOSITIONS as readonly string[]).includes(disposition))
@@ -167,8 +168,8 @@ export class NcrService {
     const ncr = await this.assertNcr(id);
     if (ncr.status !== 'pending_disposition')
       throw new BadRequestException({ code: 'NCR_NOT_PENDING', message: `NCR ${ncr.ncrNo} is ${ncr.status}, not pending_disposition`, messageTh: `NCR ${ncr.ncrNo} ไม่ได้อยู่ในสถานะรอจัดการ` });
-    if (ncr.raisedBy && ncr.raisedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject an NCR you raised', messageTh: 'ผู้ออก NCR ปฏิเสธการจัดการเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    // Exception (docs/49): an 'sme' tenant may self-reject WITH self_approval_reason — logged, reviewed by SME-01.
+    await assertMakerChecker(this.db, { user, maker: ncr.raisedBy, event: 'qc.ncr.reject', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot reject an NCR you raised', messageTh: 'ผู้ออก NCR ปฏิเสธการจัดการเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const [updated] = await this.db.update(nonConformances).set({
       status: 'open', proposedDisposition: null,
       dispositionNotes: dto.notes ?? ncr.dispositionNotes,

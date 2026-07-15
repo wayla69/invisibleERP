@@ -17,7 +17,7 @@ const ExplainBody = z.object({ explanation: z.string().min(1) });
 type ExplainBodyT = z.infer<typeof ExplainBody>;
 
 // Review has no required fields — tolerate an empty POST body (Fastify yields undefined / '').
-const ReviewBody = z.preprocess((v) => (v == null || v === '' ? {} : v), z.object({ note: z.string().optional() }));
+const ReviewBody = z.preprocess((v) => (v == null || v === '' ? {} : v), z.object({ note: z.string().optional(), self_approval_reason: z.string().max(500).optional() }));
 type ReviewBodyT = z.infer<typeof ReviewBody>;
 
 // CLS-01 (GL-25) — Flux / variance analysis with forced explanation + sign-off. A management-review control
@@ -62,6 +62,6 @@ export class FluxController {
   @HttpCode(200)
   @Permissions('gl_close', 'exec')
   review(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(ReviewBody)) b: ReviewBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.review(id, b, u);
+    return this.svc.review(id, b, u, b.self_approval_reason);
   }
 }

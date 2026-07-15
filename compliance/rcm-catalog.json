@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 292,
+    "total": 293,
     "by_status": {
-      "Implemented": 288,
+      "Implemented": 289,
       "Partial": 4
     },
     "by_family": {
@@ -13,7 +13,7 @@
       "CRM — Loyalty": 24,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
-      "Entity-Level": 7,
+      "Entity-Level": 8,
       "Expenditure": 16,
       "Fixed Assets": 8,
       "General Ledger": 27,
@@ -168,6 +168,25 @@
       "tod": "Inspect the KPI scorecard: each KPI's value, comparatives (prior-period/prior-year/budget), RAG rating, and that a red KPI drills to the GL account rows behind it.",
       "toe": "Re-perform: on a known seeded ledger every KPI equals its hand-computed value, RAG turns red past its threshold (e.g. overdue-AR %), the drill rows tie to the sub-ledger, and a non-finance role is denied the scorecard (finance-kpi harness).",
       "evidence": "CFO KPI scorecard (finance/metrics/pack) + drill/trend",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SME-01",
+      "cycle": "Entity-Level",
+      "category": "Entity",
+      "fsli": "All",
+      "risk": "SME single-user edition (docs/49): a control_profile='sme' company legitimately lets ONE operator hold every duty, so preventive maker-checker segregation cannot operate — an unreviewed self-approval could conceal error or fraud.",
+      "assertion": "Authorization",
+      "description": "Compensating detective control for the relaxed SoD: (1) self-approval is fail-closed — only a tenant explicitly provisioned 'sme' (god-only, chosen at creation, upgrade-only to enterprise, never downgradable — 403 PROFILE_DOWNGRADE_FORBIDDEN) may self-approve, and ONLY through the single assertMakerChecker seam with a mandatory justification (400 SELF_APPROVAL_REASON_REQUIRED without one); every other principal (enterprise tenants, API keys, members, HQ) keeps the hard SOD block. (2) Every allowed self-approval writes an immutable evidence row (self_approvals: event/ref/user/amount/reason) plus a self_approved marker in the hash-chained audit_log. (3) The scheduled sme_self_approval_review BI report (SME-01) delivers every logged self-approval in the window to the INDEPENDENT reviewers — the company's external accountant and the platform owner — for after-the-fact review. (4) A persistent SME-mode banner tells every user the environment runs relaxed SoD.",
+      "prev_det": "Det",
+      "nature": "Hybrid",
+      "frequency": "Monthly",
+      "owner": "External accountant / Platform owner",
+      "coso": "P10/P16",
+      "code_reference": "common/control-profile.ts (assertMakerChecker + SelfApprovalBody); common/guards.ts (live control_profile); database/schema/self-approvals.ts + platform-sme-defaults.ts (0414); billing/platform-admin.service.ts (upgradeControlProfile, PROFILE_DOWNGRADE_FORBIDDEN); governance/governance-bi-reports.ts (sme_self_approval_review); apps/web app-shell.tsx (SmeModeBanner); docs/49-sme-single-user-edition-plan.md",
+      "tod": "Inspect: an enterprise tenant's self-approval → 403 SOD_*; an sme tenant's self-approval without reason → 400 SELF_APPROVAL_REASON_REQUIRED; with reason → allowed + self_approvals row; downgrade attempt → 403.",
+      "toe": "Re-perform on the sme cutover harness: enterprise block unchanged, sme reason-gated allowance writes evidence, the SME-01 report lists it, cross-tenant reads return nothing.",
+      "evidence": "self_approvals rows + audit_log self_approved markers + scheduled SME-01 report runs",
       "status": "Implemented"
     },
     {
@@ -1811,13 +1830,13 @@
       "fsli": "Delivered-project renewal completeness (recurring revenue leakage)",
       "risk": "A project is DELIVERED and then nothing happens on the commercial side — the customer represents a renewal / expansion opportunity, but no one systematically ensures a renewal motion exists, so recurring revenue silently lapses. Delivered-project business has no back-flow into the sales pipeline, and there is no worklist of delivered projects that lack a renewal, so churn goes unnoticed until the customer is gone.",
       "assertion": "Completeness/Accuracy",
-      "description": "CRM↔PPM back-flow (CRM-18, migration 0414). A project counts as DELIVERED when it has passed its final phase gate to the 'closed' lifecycle phase (PROJ-26: the current phase = the target of the latest GO gate). GET /api/crm/project-renewals lists every delivered project, correlated to its CRM account by customer_no, and flags a GAP — a delivered project that has an account but no renewal raised yet — as the detective worklist (with delivered/raised/gap counts). POST /api/crm/project-renewals/:projectCode/raise raises the renewal as a governed, IDEMPOTENT action: the project must be delivered (PROJECT_NOT_DELIVERED otherwise), it must have a CRM account for its customer (ACCOUNT_NOT_FOUND otherwise), and a project can raise only ONE renewal (RENEWAL_EXISTS on a repeat). The renewal opportunity itself is created through the CRM pipeline service (CRM-domain write — the projects module is untouched, no golden-master drift) and tagged deal_type='renewal', so it flows into the CRM-08 renewal pipeline; the project->opportunity link is recorded in project_renewals (the idempotency key). So delivered-project business is systematically surfaced for renewal — none silently lapses. Reads gate crm/exec/ar. One tenant table (0232 RLS, tenant-leading index). No GL post; no project row mutated.",
+      "description": "CRM↔PPM back-flow (CRM-18, migration 0415). A project counts as DELIVERED when it has passed its final phase gate to the 'closed' lifecycle phase (PROJ-26: the current phase = the target of the latest GO gate). GET /api/crm/project-renewals lists every delivered project, correlated to its CRM account by customer_no, and flags a GAP — a delivered project that has an account but no renewal raised yet — as the detective worklist (with delivered/raised/gap counts). POST /api/crm/project-renewals/:projectCode/raise raises the renewal as a governed, IDEMPOTENT action: the project must be delivered (PROJECT_NOT_DELIVERED otherwise), it must have a CRM account for its customer (ACCOUNT_NOT_FOUND otherwise), and a project can raise only ONE renewal (RENEWAL_EXISTS on a repeat). The renewal opportunity itself is created through the CRM pipeline service (CRM-domain write — the projects module is untouched, no golden-master drift) and tagged deal_type='renewal', so it flows into the CRM-08 renewal pipeline; the project->opportunity link is recorded in project_renewals (the idempotency key). So delivered-project business is systematically surfaced for renewal — none silently lapses. Reads gate crm/exec/ar. One tenant table (0232 RLS, tenant-leading index). No GL post; no project row mutated.",
       "prev_det": "Detect",
       "nature": "Automated",
       "frequency": "Continuous / per delivered project",
       "owner": "Sales Ops / Account Management / PMO",
       "coso": "P13",
-      "code_reference": "crm/project-renewals/crm-project-renewals.service.ts (deliveredProjectIds via the latest GO phase-gate = 'closed'; listRenewals delivered + account correlation + gap flag + counts; raiseRenewal PROJECT_NOT_DELIVERED/ACCOUNT_NOT_FOUND/RENEWAL_EXISTS, creates the opp via CrmPipelineService + deal_type='renewal' + records project_renewals); crm-project-renewals.controller.ts (GET /api/crm/project-renewals, POST …/:projectCode/raise — crm/exec/ar); crm-project-renewals.module.ts (imports CrmPipelineModule; no cycle); schema/crm-pipeline.ts project_renewals + migration 0414; crm.module wiring; web portfolio-page renewal back-flow panel; cutover/pipeline.ts (ToE, CRM-18 checks)",
+      "code_reference": "crm/project-renewals/crm-project-renewals.service.ts (deliveredProjectIds via the latest GO phase-gate = 'closed'; listRenewals delivered + account correlation + gap flag + counts; raiseRenewal PROJECT_NOT_DELIVERED/ACCOUNT_NOT_FOUND/RENEWAL_EXISTS, creates the opp via CrmPipelineService + deal_type='renewal' + records project_renewals); crm-project-renewals.controller.ts (GET /api/crm/project-renewals, POST …/:projectCode/raise — crm/exec/ar); crm-project-renewals.module.ts (imports CrmPipelineModule; no cycle); schema/crm-pipeline.ts project_renewals + migration 0415; crm.module wiring; web portfolio-page renewal back-flow panel; cutover/pipeline.ts (ToE, CRM-18 checks)",
       "tod": "Inspect the delivered-project derivation (final phase gate at 'closed'), the account correlation by customer_no, the detective gap flag, and the idempotent maker of the renewal opportunity through the CRM pipeline service (PROJECT_NOT_DELIVERED / ACCOUNT_NOT_FOUND / RENEWAL_EXISTS guards).",
       "toe": "Re-perform (pipeline harness, CRM-18 checks): a project that is not delivered -> PROJECT_NOT_DELIVERED; deliver it (a phase gate to 'closed', independently GO-approved); the delivered project surfaces as a renewal GAP (has an account, no renewal); raising creates a renewal opportunity (deal_type='renewal', amount from the contract) that appears in the CRM-08 renewal pipeline; raising again -> RENEWAL_EXISTS; the project is then no longer a gap; a delivered project whose customer has no CRM account -> ACCOUNT_NOT_FOUND.",
       "evidence": "Delivered-project renewal worklist (delivered + gap counts, per-project renewal status); the raised renewal opportunity (deal_type renewal) + the project->opportunity link",

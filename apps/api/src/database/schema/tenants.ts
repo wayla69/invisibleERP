@@ -63,6 +63,13 @@ export const tenants = pgTable('tenants', {
   purgedBy: text('purged_by'),
   // Platform Console tags/segments (migration 0246) — free-form labels for fleet organisation/filtering.
   tags: jsonb('tags').notNull().default([]),
+  // ── SME single-user edition (docs/49, migration 0414) — the control profile chosen at company creation.
+  // 'enterprise' (default): full maker-checker; 'sme': one operator may self-approve WITH a mandatory
+  // logged reason (evidence → self_approvals, reviewed by SME-01). Upgrade-only: sme→enterprise allowed,
+  // enterprise→sme forbidden (PROFILE_DOWNGRADE_FORBIDDEN — a full-SoD entity may not weaken later). ──
+  controlProfile: text('control_profile').notNull().default('enterprise'), // 'enterprise' | 'sme'
+  // Per-tenant stamped copy of platform_sme_defaults taken at provisioning {hidden_nav_groups?, accountant_email?}.
+  smePrefs: jsonb('sme_prefs').notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

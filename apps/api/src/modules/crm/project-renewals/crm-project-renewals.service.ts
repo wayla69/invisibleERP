@@ -6,7 +6,7 @@ import { n } from '../../../database/queries';
 import type { JwtUser } from '../../../common/decorators';
 import { CrmPipelineService } from '../pipeline/crm-pipeline.service';
 
-// CRM↔PPM back-flow (control CRM-18, migration 0414). When a project is DELIVERED (status Closed), its customer
+// CRM↔PPM back-flow (control CRM-18, migration 0415). When a project is DELIVERED (status Closed), its customer
 // represents a renewal / expansion motion — but nothing today ensures a renewal opportunity exists, so
 // recurring revenue silently lapses. This service surfaces delivered projects that lack a renewal motion (a
 // detective GAP list) and raises the renewal as a governed, idempotent action. It reads projects (a

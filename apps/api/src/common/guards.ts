@@ -118,6 +118,7 @@ export class JwtAuthGuard implements CanActivate {
     let dbRole: string | undefined; // live role from the users table (staff); overrides the token's role claim
     let dbOrgId: number | null = null; // live org_id (staff) for hybrid multi-company bypass scoping
     let dbTenantId: number | null | undefined; // live tenant_id (staff); overrides the token's tenantId claim (L-3)
+    let dbControlProfile: 'enterprise' | 'sme' | null = null; // live tenants.control_profile (docs/49) — never a token claim
     const revoked = new UnauthorizedException({ code: 'TOKEN_REVOKED', message: 'Session has been revoked — please sign in again', messageTh: 'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบใหม่' });
     if (payload.jti) {
       const [rev] = await this.authRead((tx) => tx.select({ j: revokedTokens.jti }).from(revokedTokens).where(and(eq(revokedTokens.jti, payload.jti), gt(revokedTokens.expiresAt, new Date()))).limit(1));
@@ -132,7 +133,7 @@ export class JwtAuthGuard implements CanActivate {
         if (m && m.active === false) throw new UnauthorizedException({ code: 'MEMBER_DEACTIVATED', message: 'This membership is no longer active', messageTh: 'สมาชิกนี้ถูกปิดใช้งาน' });
       }
     } else if (payload.sub) {
-      const [u] = await this.authRead((tx) => tx.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, tenantId: users.tenantId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt, tenantDeleted: tenants.deletedAt })
+      const [u] = await this.authRead((tx) => tx.select({ active: users.isActive, tvf: users.tokensValidFrom, role: users.role, orgId: users.orgId, tenantId: users.tenantId, mcp: users.mustChangePassword, mfaEnabled: users.mfaEnabled, tenantSuspended: tenants.suspendedAt, tenantDeleted: tenants.deletedAt, controlProfile: tenants.controlProfile })
         .from(users).leftJoin(tenants, eq(users.tenantId, tenants.id)).where(eq(users.username, payload.sub)).limit(1));
       if (u) { // staff principal — members aren't in `users`, so they skip this check
         if (u.active === false) throw new UnauthorizedException({ code: 'USER_DEACTIVATED', message: 'This account has been deactivated', messageTh: 'บัญชีนี้ถูกปิดใช้งาน' });
@@ -159,6 +160,10 @@ export class JwtAuthGuard implements CanActivate {
         // tenantId claim can no longer point a staff session at another tenant. Rides this same per-request
         // read (no extra round-trip). NULL = a global/HQ staff account (kept as null).
         dbTenantId = u.tenantId != null ? Number(u.tenantId) : null;
+        // SME single-user edition (docs/49) — the tenant's control profile, sourced LIVE from the same
+        // tenants join (no extra round-trip). assertMakerChecker treats anything but 'sme' as
+        // 'enterprise' (fail-closed), so members / API keys / HQ accounts never relax maker-checker.
+        dbControlProfile = u.controlProfile === 'sme' ? 'sme' : u.controlProfile === 'enterprise' ? 'enterprise' : null;
         // ITGC-AC-07 / docs/27 R0-3 — must_change_password is a HARD gate, not a UI hint: a seeded or
         // admin-reset credential can reach nothing but the change-password/logout/me endpoints until the
         // password is rotated. Rides the same per-request row read (no extra round-trip).
@@ -192,6 +197,7 @@ export class JwtAuthGuard implements CanActivate {
       orgId: dbOrgId,
       permissions: payload.permissions ?? [],
       memberId: payload.memberId ?? null, // loyalty member principal (role==='Member'); null for staff
+      controlProfile: dbControlProfile,
     } satisfies JwtUser;
     return true;
   }

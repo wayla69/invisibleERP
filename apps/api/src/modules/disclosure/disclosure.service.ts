@@ -1,9 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { disclosureChecklists, disclosureItems } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { currentTenantStore } from '../../common/tenant-context';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
 
 // CLS-02 (control GL-26) — Disclosure / close-package checklist (governed close binder).
 // A per-period disclosure binder that governs the reporting package (SEC disclosure-controls expectation).
@@ -126,14 +128,14 @@ export class DisclosureService {
   // ───────────────────── Review (maker-checker sign-off gate) ─────────────────────
   // GL-26: every item must be Complete/NA (else ITEMS_INCOMPLETE listing the open items) and the reviewer
   // MUST differ from the preparer (else SOD_SELF_APPROVAL). Moves Draft → Reviewed.
-  async review(dto: { checklistId: number; reviewedBy: string }) {
+  async review(dto: { checklistId: number; reviewedBy: string }, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const chk = await this.getChecklistRow(dto.checklistId);
     if (chk.status !== 'Draft') {
       throw new BadRequestException({ code: 'NOT_DRAFT', message: `Checklist is ${chk.status}, not Draft`, messageTh: 'รายการนี้ไม่อยู่ในสถานะร่าง' });
     }
     if (chk.preparedBy && chk.preparedBy === dto.reviewedBy) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: the preparer cannot review their own disclosure checklist', messageTh: 'ผู้จัดทำตรวจสอบรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.disclosure.review', ref: String(dto.checklistId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: the preparer cannot review their own disclosure checklist', messageTh: 'ผู้จัดทำตรวจสอบรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const items = await this.itemsFor(dto.checklistId);
     const open = items.filter((i: any) => i.status === 'Open');

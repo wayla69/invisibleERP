@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, HttpCode, ParseIntPipe } fro
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { InvestmentService } from './investment.service';
 
 const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -30,6 +31,7 @@ const PriceApproveBody = z.object({
   symbol: z.string().min(1),
   price_date: z.string().regex(ymdRe),
   tenant_id: z.number().int().positive().optional(),
+  self_approval_reason: z.string().max(500).optional(),
 });
 const RevalueBody = z.object({ as_of: z.string().regex(ymdRe).optional() });
 const ImpairBody = z.object({ ecl: z.number().positive(), as_of: z.string().regex(ymdRe).optional() });
@@ -92,7 +94,7 @@ export class InvestmentController {
   @Post('investments/:id/approve')
   @HttpCode(200)
   @Permissions('treasury_approve', 'exec')
-  approveInvestment(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) { return this.svc.approveInvestment(id, u); }
+  approveInvestment(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveInvestment(id, u, b?.self_approval_reason); }
 
   @Post('investments/:id/reject')
   @HttpCode(200)
@@ -103,7 +105,7 @@ export class InvestmentController {
   @HttpCode(200)
   @Permissions('treasury_approve', 'exec')
   approvePrice(@Body(new ZodValidationPipe(PriceApproveBody)) b: PriceApproveBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.approvePrice(b.symbol, b.price_date, b.tenant_id ?? null, u);
+    return this.svc.approvePrice(b.symbol, b.price_date, b.tenant_id ?? null, u, b.self_approval_reason);
   }
 
   @Post('prices/reject')

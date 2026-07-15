@@ -940,7 +940,7 @@ async function main() {
   const rtypesAttr = await inj('GET', '/api/bi/report-types', sales1);
   ok('CRM-15 BI: registry exposes the crm_attribution report type', (rtypesAttr.json.report_types ?? []).some((r: any) => r.key === 'crm_attribution'), 'crm_attribution');
 
-  // ── CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0414) — a DELIVERED project (phase gate at 'closed')
+  // ── CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0415) — a DELIVERED project (phase gate at 'closed')
   // raises a renewal opportunity for its account so recurring revenue doesn't silently lapse. Runs on HQ
   // (admin creates + submits the gate; mgr independently GOes it). ──
   await inj('POST', '/api/crm/accounts', admin, { name: 'Renewal Customer', customer_no: 'CUST-REN' });

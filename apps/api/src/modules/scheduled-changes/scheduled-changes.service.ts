@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { scheduledMasterChanges, items, tenants } from '../../database/schema';
 import { bizYmdDash } from '../../common/bizdate';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // Date-effective (future-dated) master-data changes (master-data audit Phase 12). A steward schedules a change
 // to a supported master field to take effect on a future business date; the idempotent daily job applyDue
@@ -37,10 +38,10 @@ export class ScheduledChangesService {
 
   // A sensitive scheduled change is released by a DIFFERENT user (maker ≠ checker) — only then does it become
   // eligible for the daily apply. Self-approval → 403 SOD_VIOLATION.
-  async approve(id: number, user: JwtUser) {
+  async approve(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const [row] = await this.db.select().from(scheduledMasterChanges).where(and(eq(scheduledMasterChanges.id, id), eq(scheduledMasterChanges.status, 'pending_approval'))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_PENDING', message: 'No scheduled change pending approval', messageTh: 'ไม่มีคำขอที่รออนุมัติ' });
-    if (row.requestedBy && row.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a change you scheduled', messageTh: 'ผู้ขอตั้งเวลาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: row.requestedBy, event: 'md.scheduled-change.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a change you scheduled', messageTh: 'ผู้ขอตั้งเวลาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const [up] = await this.db.update(scheduledMasterChanges).set({ status: 'scheduled', approvedBy: user.username }).where(eq(scheduledMasterChanges.id, id)).returning();
     return shape(up);
   }
