@@ -6,6 +6,7 @@ import { CpqPricebookService } from './cpq-pricebook.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 const EmailBody = z.object({ to_email: z.string().email() });
 
@@ -95,7 +96,7 @@ export class CpqController {
   @Post('quotes/:id/approve')
   @Permissions('exec', 'cpq_approve')
   @HttpCode(200)
-  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.approveDiscount(id, user); }
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveDiscount(id, user, b?.self_approval_reason); }
 
   // Printable ใบเสนอราคา (Quotation) — HTML→PDF via the shared renderer, HTML fallback when Chromium absent.
   @Get('quotes/:id/pdf')
@@ -119,14 +120,14 @@ export class CpqController {
   @Post('quotes/:id/accept')
   @Permissions('exec', 'cpq')
   @HttpCode(200)
-  accept(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.acceptQuote(id, user); }
+  accept(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.acceptQuote(id, user, b?.self_approval_reason); }
 
   // Reject: for a PendingApproval quote this is the checker declining the discount/margin breach (→ Draft,
   // SOD_SELF_APPROVAL); for a Sent/Draft quote it is the classic quote rejection (→ Rejected).
   @Post('quotes/:id/reject')
   @Permissions('exec', 'cpq', 'cpq_approve')
   @HttpCode(200)
-  reject(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.rejectQuote(id, user); }
+  reject(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.rejectQuote(id, user, b?.self_approval_reason); }
 
   // ── CRM-14 (CRM-12): bundles — master data (masterdata-gated, mirrors config/rule creation) ──
   @Get('bundles')

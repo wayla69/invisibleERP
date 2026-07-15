@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { qint, qintOpt } from '../../common/query';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { LedgerService } from './ledger.service';
 
 // Only HQ/Admin may target ANOTHER tenant's books via an explicit tenant_id. Everyone else is pinned to
@@ -188,11 +189,12 @@ export class LedgerController {
   @Permissions('gl_post', 'gl_close', 'approvals')
   pendingJournal(@Query('limit') limit?: string) { return this.svc.pendingJournal(qint('limit', limit, 50)); }
 
-  // Approve / reject a pending JE — approver must differ from preparer (enforced in the service).
+  // Approve / reject a pending JE — approver must differ from preparer (enforced in the service;
+  // an 'sme' tenant may self-approve WITH self_approval_reason — docs/49, SME-01).
   @Post('journal/:entryNo/approve')
   @HttpCode(200)
   @Permissions('gl_close', 'approvals')
-  approveJournal(@Param('entryNo') entryNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveEntry(entryNo, u); }
+  approveJournal(@Param('entryNo') entryNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveEntry(entryNo, u, b?.self_approval_reason); }
 
   @Post('journal/:entryNo/reject')
   @HttpCode(200)

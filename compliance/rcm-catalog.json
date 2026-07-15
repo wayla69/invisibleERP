@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 289,
+    "total": 290,
     "by_status": {
-      "Implemented": 285,
+      "Implemented": 286,
       "Partial": 4
     },
     "by_family": {
@@ -13,7 +13,7 @@
       "CRM — Loyalty": 24,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
-      "Entity-Level": 7,
+      "Entity-Level": 8,
       "Expenditure": 16,
       "Fixed Assets": 8,
       "General Ledger": 27,
@@ -168,6 +168,25 @@
       "tod": "Inspect the KPI scorecard: each KPI's value, comparatives (prior-period/prior-year/budget), RAG rating, and that a red KPI drills to the GL account rows behind it.",
       "toe": "Re-perform: on a known seeded ledger every KPI equals its hand-computed value, RAG turns red past its threshold (e.g. overdue-AR %), the drill rows tie to the sub-ledger, and a non-finance role is denied the scorecard (finance-kpi harness).",
       "evidence": "CFO KPI scorecard (finance/metrics/pack) + drill/trend",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SME-01",
+      "cycle": "Entity-Level",
+      "category": "Entity",
+      "fsli": "All",
+      "risk": "SME single-user edition (docs/49): a control_profile='sme' company legitimately lets ONE operator hold every duty, so preventive maker-checker segregation cannot operate — an unreviewed self-approval could conceal error or fraud.",
+      "assertion": "Authorization",
+      "description": "Compensating detective control for the relaxed SoD: (1) self-approval is fail-closed — only a tenant explicitly provisioned 'sme' (god-only, chosen at creation, upgrade-only to enterprise, never downgradable — 403 PROFILE_DOWNGRADE_FORBIDDEN) may self-approve, and ONLY through the single assertMakerChecker seam with a mandatory justification (400 SELF_APPROVAL_REASON_REQUIRED without one); every other principal (enterprise tenants, API keys, members, HQ) keeps the hard SOD block. (2) Every allowed self-approval writes an immutable evidence row (self_approvals: event/ref/user/amount/reason) plus a self_approved marker in the hash-chained audit_log. (3) The scheduled sme_self_approval_review BI report (SME-01) delivers every logged self-approval in the window to the INDEPENDENT reviewers — the company's external accountant and the platform owner — for after-the-fact review. (4) A persistent SME-mode banner tells every user the environment runs relaxed SoD.",
+      "prev_det": "Det",
+      "nature": "Hybrid",
+      "frequency": "Monthly",
+      "owner": "External accountant / Platform owner",
+      "coso": "P10/P16",
+      "code_reference": "common/control-profile.ts (assertMakerChecker + SelfApprovalBody); common/guards.ts (live control_profile); database/schema/self-approvals.ts + platform-sme-defaults.ts (0412); billing/platform-admin.service.ts (upgradeControlProfile, PROFILE_DOWNGRADE_FORBIDDEN); governance/governance-bi-reports.ts (sme_self_approval_review); apps/web app-shell.tsx (SmeModeBanner); docs/49-sme-single-user-edition-plan.md",
+      "tod": "Inspect: an enterprise tenant's self-approval → 403 SOD_*; an sme tenant's self-approval without reason → 400 SELF_APPROVAL_REASON_REQUIRED; with reason → allowed + self_approvals row; downgrade attempt → 403.",
+      "toe": "Re-perform on the sme cutover harness: enterprise block unchanged, sme reason-gated allowance writes evidence, the SME-01 report lists it, cross-tenant reads return nothing.",
+      "evidence": "self_approvals rows + audit_log self_approved markers + scheduled SME-01 report runs",
       "status": "Implemented"
     },
     {

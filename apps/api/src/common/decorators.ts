@@ -48,6 +48,10 @@ export interface JwtUser {
   // Loyalty MEMBER principal (set only for role==='Member' tokens from the phone-OTP member app). A member
   // token carries permissions:[] (no staff access) and is RLS-scoped to the member's tenant. See MemberGuard.
   memberId?: number | null;
+  // SME single-user edition (docs/49) — the tenant's control profile, sourced LIVE from tenants in
+  // JwtAuthGuard (never a token claim). Anything but 'sme' means full maker-checker ('enterprise' —
+  // fail-closed default for API keys, members and HQ/global accounts). See common/control-profile.ts.
+  controlProfile?: 'enterprise' | 'sme' | null;
 }
 
 // แนบ user จาก JWT (ตั้งโดย JwtAuthGuard) เข้า request

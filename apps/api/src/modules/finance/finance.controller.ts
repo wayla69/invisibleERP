@@ -10,6 +10,7 @@ import { ArCashApplicationService, type CashApplicationDto, type ApplyOnAccountD
 import { ApPaymentRunService, type ProposeRunDto, type EditRunLinesDto, type DiscountTermDto } from './ap-payment-run.service';
 import { ArApNettingService, type NettingAgreementDto, type ProposeNettingDto } from './arap-netting.service';
 import { qint, qintOpt } from '../../common/query';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 const ReceiptBody = z.object({ invoice_no: z.string().min(1), amount: z.number().positive(), method: z.string().optional(), ref_no: z.string().optional(), remarks: z.string().optional(), idempotency_key: z.string().optional() });
 const ApTxnBody = z.object({ vendor_id: z.number().optional(), vendor_name: z.string().optional(), txn_type: z.string().optional(), invoice_no: z.string().optional(), invoice_date: z.string().optional(), due_date: z.string().optional(), amount: z.number(), paid_amount: z.number().optional(), remarks: z.string().optional(), vat_treatment: z.enum(['standard', 'exempt', 'zero', 'reverse_charge']).optional(), tax_code: z.string().optional(), idempotency_key: z.string().optional() });
@@ -314,7 +315,7 @@ export class FinanceController {
 
   // Approve a pending payment (checker; approver ≠ requester enforced in the service, even for Admin).
   @Post('ap/payments/:paymentNo/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveApPayment(@Param('paymentNo') paymentNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveApPayment(paymentNo, u); }
+  approveApPayment(@Param('paymentNo') paymentNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveApPayment(paymentNo, u, b?.self_approval_reason); }
 
   // Reject a pending payment (checker).
   @Post('ap/payments/:paymentNo/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')

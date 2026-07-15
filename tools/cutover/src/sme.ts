@@ -1,0 +1,168 @@
+/**
+ * SME single-user edition ToE (docs/49, control SME-01) — mirrors UAT-ADM-157..160.
+ * Enterprise maker-checker stays byte-identical (403 SOD_VIOLATION, reason or not); an 'sme' tenant may
+ * self-approve WITH a logged justification (self_approvals evidence + the sme_self_approval_review report);
+ * god provisions SME companies + platform SME defaults; transition is UPGRADE-ONLY; public signup can never
+ * mint an SME tenant.
+ *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover sme
+ */
+import 'reflect-metadata';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'sme-secret';
+process.env.NODE_ENV = 'test';
+// The platform owner ("god") — set BEFORE app bootstrap so the guard sees it from the first request.
+process.env.PLATFORM_ADMIN_USERNAMES = 'god1';
+
+import { Test } from '@nestjs/testing';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { resolve, join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import * as s from '../../../apps/api/dist/database/schema/index';
+import { AppModule } from '../../../apps/api/dist/app.module';
+import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
+import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
+import { BillingService } from '../../../apps/api/dist/modules/billing/billing.service';
+import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+
+const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
+const checks: { name: string; ok: boolean; detail?: string }[] = [];
+const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
+
+async function main() {
+  const pg = await PGlite.create();
+  for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort())
+    await pg.exec(readFileSync(join(MIGRATIONS_DIR, f), 'utf8').replace(/-->\s*statement-breakpoint/g, ''));
+  const db: any = drizzle(pg, { schema: s });
+  const pw = new PasswordService();
+
+  await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
+  for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
+    await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
+  // god1 (platform owner) lives in HQ
+  await db.insert(s.users).values([{ username: 'god1', passwordHash: await pw.hash('god1pass1234'), role: 'Admin' }]).onConflictDoNothing();
+
+  const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
+  const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+  app.useGlobalFilters(new AllExceptionsFilter());
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+  await app.get(LedgerService).seedChartOfAccounts();
+  await app.get(BillingService).seedPlans();
+  const inj = async (m: string, url: string, token?: string, payload?: any) => {
+    const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
+    let json: any = {}; try { json = res.json(); } catch { /* */ }
+    return { status: res.statusCode, json };
+  };
+  const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
+  const year = new Date().getFullYear();
+  const god = await login('god1', 'god1pass1234');
+
+  const postJe = (token: string, amount: number) =>
+    inj('POST', '/api/ledger/journal', token, { date: `${year}-06-15`, source: 'TEST', lines: [{ account_code: '1000', debit: amount }, { account_code: '4000', credit: amount }] });
+  // Run a BI report type once and return { run, data } — data comes from the recorded report_runs row
+  // (the run response carries only the string summary; report.data is persisted in report_runs.summary).
+  const runReport = async (token: string, report_type: string) => {
+    const sub = await inj('POST', '/api/bi/subscriptions', token, { name: `ToE ${report_type}`, report_type, frequency: 'monthly' });
+    const run = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, token, {});
+    const rows = (await pg.query(`SELECT summary FROM report_runs WHERE id=${Number(run.json.run_id) || 0}`)).rows as any[];
+    return { run, data: rows[0]?.summary as any };
+  };
+
+  // ── 1. Enterprise regression (UAT-ADM-157): maker ≠ checker binds exactly as before ──
+  const entCreate = await inj('POST', '/api/admin/tenants', god, {
+    company_name: 'EntCo', tenant_code: 'entco1', admin_username: 'ent_admin', admin_password: 'entadmin12345', email: 'ent@x.co',
+  });
+  ok('God provisions a default company → 201 control_profile=enterprise', entCreate.status === 201 && entCreate.json.control_profile === 'enterprise', `${entCreate.status} ${entCreate.json.control_profile}`);
+  const entTid = Number(entCreate.json.tenant_id);
+  // a second (different) approver in the same enterprise company, seeded directly
+  await db.insert(s.users).values([{ username: 'ent_approver', passwordHash: await pw.hash('entappr12345'), role: 'Admin', tenantId: entTid, orgId: entTid }]);
+  const entAdmin = await login('ent_admin', 'entadmin12345');
+  const entApprover = await login('ent_approver', 'entappr12345');
+  const entJe = await postJe(entAdmin, 1000);
+  const entJeNo = entJe.json.entry_no;
+  const entSelf = await inj('POST', `/api/ledger/journal/${entJeNo}/approve`, entAdmin);
+  ok('Enterprise: maker approving own JE (no body) → 403 SOD_VIOLATION', entSelf.status === 403 && entSelf.json.error?.code === 'SOD_VIOLATION', `${entSelf.status} ${entSelf.json.error?.code}`);
+  const entSelfReason = await inj('POST', `/api/ledger/journal/${entJeNo}/approve`, entAdmin, { self_approval_reason: 'x' });
+  ok('Enterprise: a self_approval_reason does NOT unlock self-approval (still 403 SOD_VIOLATION)', entSelfReason.status === 403 && entSelfReason.json.error?.code === 'SOD_VIOLATION', `${entSelfReason.status} ${entSelfReason.json.error?.code}`);
+  const entOther = await inj('POST', `/api/ledger/journal/${entJeNo}/approve`, entApprover);
+  ok('Enterprise: a DIFFERENT user approves fine (200 Posted)', entOther.status === 200 && entOther.json.status === 'Posted', `${entOther.status} ${entOther.json.status}`);
+
+  // ── 2. God provisions an SME company (UAT-ADM-158) ──
+  const setDefaults = await inj('POST', '/api/admin/sme-defaults', god, { hidden_nav_groups: ['nav.group.projects'], accountant_email: 'acc@x.co' });
+  const getDefaults = await inj('GET', '/api/admin/sme-defaults', god);
+  ok('God sets platform SME defaults (hidden nav groups + accountant) → readable back',
+    setDefaults.status === 200 && getDefaults.status === 200 && (getDefaults.json.hidden_nav_groups ?? []).includes('nav.group.projects') && getDefaults.json.accountant_email === 'acc@x.co',
+    JSON.stringify(getDefaults.json).slice(0, 120));
+  const smeCreate = await inj('POST', '/api/admin/tenants', god, {
+    company_name: 'ร้านเจ้าของคนเดียว', tenant_code: 'smeco1', admin_username: 'sme_owner', admin_password: 'smeowner12345', email: 'sme@x.co', control_profile: 'sme',
+  });
+  ok('God provisions an SME company (control_profile=sme) → 201', smeCreate.status === 201 && smeCreate.json.control_profile === 'sme', `${smeCreate.status} ${smeCreate.json.control_profile}`);
+  const smeTid = Number(smeCreate.json.tenant_id);
+  const smeOwner = await login('sme_owner', 'smeowner12345');
+  const smeMe = await inj('GET', '/api/auth/me', smeOwner);
+  ok('SME admin /api/auth/me carries control_profile=sme + the stamped hidden nav groups',
+    smeMe.json.control_profile === 'sme' && (smeMe.json.sme_hidden_nav_groups ?? []).includes('nav.group.projects'),
+    JSON.stringify({ cp: smeMe.json.control_profile, nav: smeMe.json.sme_hidden_nav_groups }));
+
+  // ── 3. SME self-approval (UAT-ADM-158): allowed ONLY with a justification, always evidenced ──
+  const smeJe = await postJe(smeOwner, 750);
+  const smeJeNo = smeJe.json.entry_no;
+  ok('SME owner posts a manual JE as Draft (GL-05 unchanged at posting time)', /^JE-/.test(smeJeNo ?? '') && smeJe.json.pending === true, `${smeJe.status} ${smeJeNo}`);
+  const smeNoReason = await inj('POST', `/api/ledger/journal/${smeJeNo}/approve`, smeOwner);
+  ok('SME: self-approval with NO reason → 400 SELF_APPROVAL_REASON_REQUIRED', smeNoReason.status === 400 && smeNoReason.json.error?.code === 'SELF_APPROVAL_REASON_REQUIRED', `${smeNoReason.status} ${smeNoReason.json.error?.code}`);
+  const smeWithReason = await inj('POST', `/api/ledger/journal/${smeJeNo}/approve`, smeOwner, { self_approval_reason: 'เจ้าของอนุมัติเอง' });
+  ok('SME: self-approval WITH a reason → 200 Posted', smeWithReason.status === 200 && smeWithReason.json.status === 'Posted', `${smeWithReason.status} ${smeWithReason.json.status}`);
+  const evid = (await pg.query(`SELECT event, ref, username, reason, amount FROM self_approvals WHERE tenant_id=${smeTid}`)).rows as any[];
+  ok('SME-01 evidence row written (event gl.je.approve, ref=JE no, username, reason)',
+    evid.length === 1 && evid[0].event === 'gl.je.approve' && evid[0].ref === smeJeNo && evid[0].username === 'sme_owner' && evid[0].reason === 'เจ้าของอนุมัติเอง' && Number(evid[0].amount) === 750,
+    JSON.stringify(evid[0] ?? {}));
+
+  // ── 4. SME-01 report: sme_self_approval_review delivers every logged self-approval ──
+  const smeReport = await runReport(smeOwner, 'sme_self_approval_review');
+  ok('sme_self_approval_review runs success for the SME admin', smeReport.run.json.status === 'success', JSON.stringify({ s: smeReport.run.json.status, e: smeReport.run.json.error }).slice(0, 120));
+  ok('SME-01 report data: count>=1 and items[0] carries the reason',
+    Number(smeReport.data?.count) >= 1 && smeReport.data?.items?.[0]?.reason === 'เจ้าของอนุมัติเอง' && smeReport.data?.items?.[0]?.ref === smeJeNo,
+    JSON.stringify({ count: smeReport.data?.count, item0: smeReport.data?.items?.[0] }).slice(0, 160));
+
+  // ── 5. Cross-tenant boundary: the enterprise tenant's review sees ZERO SME rows ──
+  const entReport = await runReport(entAdmin, 'sme_self_approval_review');
+  ok('Cross-tenant: enterprise admin\'s sme_self_approval_review → count 0 (no leakage of the SME tenant\'s rows)',
+    entReport.run.json.status === 'success' && Number(entReport.data?.count) === 0 && (entReport.data?.items ?? []).length === 0,
+    JSON.stringify({ count: entReport.data?.count, items: (entReport.data?.items ?? []).length }));
+
+  // ── 6. Upgrade-only transition (UAT-ADM-159): sme → enterprise, never back ──
+  const downgrade = await inj('POST', `/api/admin/tenants/${entTid}/control-profile`, god, { control_profile: 'sme' });
+  ok('Downgrade attempt {control_profile:sme} → 400 (zod: only literal enterprise accepted)', downgrade.status === 400, `${downgrade.status} ${downgrade.json.error?.code}`);
+  const upgrade = await inj('POST', `/api/admin/tenants/${smeTid}/control-profile`, god, { control_profile: 'enterprise' });
+  ok('Upgrade sme → enterprise → 200 changed:true', upgrade.status === 200 && upgrade.json.changed === true && upgrade.json.control_profile === 'enterprise', `${upgrade.status} ${JSON.stringify(upgrade.json)}`);
+  const smeJe2 = await postJe(smeOwner, 300);
+  const upgradedSelf = await inj('POST', `/api/ledger/journal/${smeJe2.json.entry_no}/approve`, smeOwner, { self_approval_reason: 'พยายามอนุมัติเองหลังอัปเกรด' });
+  ok('After upgrade the owner\'s self-approval is BLOCKED like any enterprise (403 SOD_VIOLATION, reason or not)',
+    upgradedSelf.status === 403 && upgradedSelf.json.error?.code === 'SOD_VIOLATION', `${upgradedSelf.status} ${upgradedSelf.json.error?.code}`);
+  const upgradeAgain = await inj('POST', `/api/admin/tenants/${smeTid}/control-profile`, god, { control_profile: 'enterprise' });
+  ok('Re-upgrading an enterprise company → 200 changed:false (idempotent)', upgradeAgain.status === 200 && upgradeAgain.json.changed === false, `${upgradeAgain.status} ${JSON.stringify(upgradeAgain.json)}`);
+  const evidAfter = (await pg.query(`SELECT count(*)::int n FROM self_approvals WHERE tenant_id=${smeTid}`)).rows as any[];
+  ok('The blocked post-upgrade attempt wrote NO new evidence row (evidence only on ALLOWED self-approvals)', evidAfter[0].n === 1, `n=${evidAfter[0].n}`);
+
+  // ── 7. Public signup NEVER honours control_profile (UAT-ADM-160) ──
+  const su = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'SneakySME', tenant_code: 'sneaky1', admin_username: 'sneaky_admin', admin_password: 'sneaky12345', email: 'sn@x.co', control_profile: 'sme',
+  });
+  const suRow = (await pg.query(`SELECT control_profile FROM tenants WHERE id=${Number(su.json.tenant_id) || 0}`)).rows as any[];
+  ok('Public signup with control_profile=sme → provisioned tenant is ENTERPRISE', su.status === 201 && suRow[0]?.control_profile === 'enterprise', `${su.status} ${suRow[0]?.control_profile}`);
+  const sneaky = await login('sneaky_admin', 'sneaky12345');
+  const sneakyMe = await inj('GET', '/api/auth/me', sneaky);
+  ok('Signup admin /api/auth/me carries NO sme profile (no self-approval relaxation)', sneakyMe.status === 200 && sneakyMe.json.control_profile !== 'sme', `cp=${sneakyMe.json.control_profile}`);
+
+  console.log('\n── SME single-user edition (docs/49, SME-01) ──');
+  for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
+  const failed = checks.filter((c) => !c.ok).length;
+  console.log(failed ? `\n❌ ${failed}/${checks.length} sme checks failed` : `\n✅ All ${checks.length} sme checks passed`);
+  await app.close();
+  process.exit(failed ? 1 : 0);
+}
+main().catch((e) => { console.error(e); process.exit(1); });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { StockOpsService } from './stock-ops.service';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { qint, qintOpt } from '../../common/query';
 
 const Line = z.object({ item_id: z.string().min(1), item_description: z.string().optional(), uom: z.string().optional() });
@@ -41,7 +42,7 @@ export class StocktakeController {
   @Get(':stNo') detail(@Param('stNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.getStocktake(no, u); }
   @Post(':stNo/post')
   @Permissions('wh_adjust')
-  post(@Param('stNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.postStocktake(no, u); }
+  post(@Param('stNo') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.postStocktake(no, u, b?.self_approval_reason); }
 }
 
 // Manual goods issue / inter-location transfer + movement history (custody movement: wh_custody).

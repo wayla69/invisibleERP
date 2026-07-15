@@ -1,6 +1,6 @@
 # 49 — SME Single-User Edition: One Operator, Every Job — Design & Roadmap
 
-> **Date:** 2026-07-15 · **Status:** v0.1 — **PLAN / DRAFT** (not started) · **Owner:** ERP / Product / Compliance
+> **Date:** 2026-07-15 · **Status:** v0.2 — **APPROVED, IN BUILD** (owner decisions recorded §6) · **Owner:** ERP / Product / Compliance
 > **Scope:** Deliver an **SME edition** in which **one person can legitimately perform every job** — without
 > forking the codebase and without silently disabling the SOX/ICFR control fabric. The relaxation is a
 > **per-tenant, configurable policy** layered on the *existing* maker-checker seams, backed by a documented
@@ -60,16 +60,28 @@ found in the code (non-exhaustive — Phase S1 enumerates all):
 A single per-tenant enum, resolved **live** (like role/orgId/tenantId in the guard), with an env-provided
 default for newly-provisioned companies. Model it on `TENANCY_MODE`.
 
-### 1.1 Data + config
+### 1.1 Data + config (updated per owner decisions 2026-07-15)
 - **Migration (Phase S1):** add `tenants.control_profile text NOT NULL DEFAULT 'enterprise'`
-  (`'enterprise' | 'sme'`). No RLS change — it is a column on the existing `tenants` row. Journal it; bump
-  the migration number to the next free id.
-- **Env default:** `DEFAULT_CONTROL_PROFILE` (default `enterprise`) — the profile stamped on a company at
-  provisioning (`modules/billing/tenant-provisioning.service.ts`). Add a **warn** in `env.validation.ts`
-  mirroring the `TENANCY_MODE` block (invalid value ⇒ fall back to `enterprise`, the safe default).
-- **Who flips it:** the platform owner ("god") per company via a `@PlatformAdmin` route on the billing
-  admin controller (`admin/tenants/:id/control-profile`), so switching an existing customer to SME is a
-  conscious, audited fleet action — never a client-supplied header.
+  (`'enterprise' | 'sme'`), a tenant-scoped `self_approvals` evidence table (canonical 0232-form RLS loop +
+  `idx_self_approvals_tenant`), and a **platform-level** `platform_sme_defaults` single-row config table
+  (no `tenant_id`-named column — platform table pattern; GRANT block per 0234/0247). Journal all; next free
+  migration number.
+- **Edition is chosen at company CREATION** (provisioning param, default `enterprise`), from the platform
+  console's provision form. **Upgrade `sme` → `enterprise` is allowed; downgrade `enterprise` → `sme` is
+  FORBIDDEN** (`403 PROFILE_DOWNGRADE_FORBIDDEN`) — an entity that has operated under full SoD may not
+  weaken its control environment later (owner decision; also keeps the audit narrative monotonic).
+- **Platform SME-defaults config page (god):** a config surface where the platform owner sets the defaults
+  every NEW SME company starts with — identical for all SMEs at creation (owner decision): hidden nav
+  groups, SME-01 reviewer routing (external-accountant email; platform owner always included), and the
+  default `SME_OWNER` role assignment for the company's first admin. Stored in `platform_sme_defaults`;
+  applied by `tenant-provisioning.service.ts` at creation time; changing defaults later affects only
+  future companies (existing tenants keep their stamped copy).
+- **Who flips it:** the platform owner ("god") per company via a `@PlatformAdmin` route
+  (`admin/tenants/:id/control-profile`, upgrade-only), so the transition is a conscious, audited fleet
+  action — never a client-supplied header.
+- **Visible mode indicator:** every user of an SME tenant sees a persistent **"โหมด SME (SME Mode)"** badge
+  in the app shell (beside the scope banner), so nobody mistakes a relaxed-SoD environment for the
+  enterprise control environment (owner requirement).
 
 ### 1.2 The single policy seam — `common/control-profile.ts`
 One helper that **every** maker-checker site calls, instead of the scattered inline
@@ -94,18 +106,17 @@ export interface MakerCheckerCtx {
 export function assertMakerChecker(ctx: MakerCheckerCtx): void;
 ```
 
-Decision rule inside `assertMakerChecker`:
+Decision rule inside `assertMakerChecker` (per owner decision 2026-07-15 — **no amount threshold**):
 
 1. **`enterprise`** → today's behaviour verbatim: `maker === approver` ⇒ throw `SOD_SELF_APPROVAL`. Zero
    behaviour change (goldenmaster/writeflow parity holds).
-2. **`sme`** → allow `maker === approver` **only when both**:
-   - the event's `amount` is **at or below** that event's **self-approval threshold** (a per-event, per-tenant
-     table `control_profile_limits`, sensible SME defaults, editable by the owner), **and**
-   - a non-empty `reason` is supplied (persisted on the approval row + emitted to `audit_log` with a
-     `self_approved: true` marker).
-   Above the threshold, `sme` behaves like `enterprise` — the solo owner must still bring in a second
-   approver (or the transaction parks in the maker-checker queue). This keeps a genuine ceiling on
-   unreviewed self-authorization.
+2. **`sme`** → allow `maker === approver` at **any amount** (owner decision: ไม่มีจำกัด), **provided** a
+   non-empty `reason` is supplied. Every allowed self-approval is recorded in the shared, tenant-scoped
+   **`self_approvals`** table `{event, ref, username, amount?, reason, at}` + the append-only `audit_log`
+   with a `self_approved: true` marker — this feed is what SME-01 (§4) reviews. A missing reason ⇒
+   `400 SELF_APPROVAL_REASON_REQUIRED`. With no preventive ceiling, the **detective** SME-01 review is the
+   load-bearing compensating control, routed to **both** the customer's external accountant **and** the
+   platform owner (owner decision).
 
 > **Never** read `control_profile` from a client header or JWT claim — source it live from the DB in the
 > interceptor/guard alongside `tenantId` (L-3 pattern), so a client can't self-upgrade to SME.
@@ -131,7 +142,7 @@ Decision rule inside `assertMakerChecker`:
 Each phase is one shippable PR. Phases S2+ depend on S1's seam existing.
 
 ### Phase S1 — the seam + the flag (no behaviour change yet) ⭐ first
-- Migration: `tenants.control_profile` + `control_profile_limits` (per-event self-approval ceilings).
+- Migration: `tenants.control_profile` + `self_approvals` evidence table + `platform_sme_defaults`.
 - `common/control-profile.ts` with `assertMakerChecker`; resolve profile live in
   `common/tenant-tx.interceptor.ts` (beside tenantId).
 - `DEFAULT_CONTROL_PROFILE` env + `env.validation.ts` warn.
@@ -174,11 +185,12 @@ Each phase is one shippable PR. Phases S2+ depend on S1's seam existing.
 Relaxing maker-checker for a solo operator is **acceptable under ICFR only if a compensating control
 detects and reviews the self-authorizations**. SME-01 is that control:
 
-- **Preventive ceiling:** the per-event self-approval threshold (§1.2) — high-risk / high-value actions
-  still require a second person even in SME mode.
+- **Preventive gate:** a self-approval is never silent — it fails without an explicit justification
+  (`SELF_APPROVAL_REASON_REQUIRED`), and the `enterprise` profile (plus every non-SME tenant) keeps the full
+  hard block. (Owner decision: no amount ceiling in SME mode — the detective leg below carries the load.)
 - **Detective review:** the scheduled *self-approval review* report (every `self_approved` transaction in the
-  period, with maker=approver, amount, reason, ref) delivered to an **independent reviewer** — typically the
-  SME's external accountant/bookkeeper, or the platform owner. Sign-off is logged.
+  period, with maker=approver, amount, reason, ref) delivered to **both** independent reviewers — the SME's
+  external accountant/bookkeeper **and** the platform owner. Sign-off is logged.
 - **Immutable trail:** every self-approval already writes to the append-only `audit_log`; the `self_approved`
   marker + mandatory `reason` make the exception queryable, not buried.
 
@@ -206,13 +218,17 @@ posture the codebase already fights for (fail-closed defaults, no silent bypass)
 
 ---
 
-## 6. Open decisions for the owner (before S1 code)
+## 6. Owner decisions — RESOLVED 2026-07-15
 
-1. **Threshold defaults** — per-event self-approval ceilings for SME mode (e.g. JE ≤ ฿X, discount ≤ Y%,
-   gift-card face ≤ ฿Z). Suggest starting conservative and tunable per tenant.
-2. **Independent reviewer identity** — is the SME-01 detective review sent to the customer's external
-   accountant, the platform owner, or both? Drives who the report is scheduled to.
-3. **Which enterprise surfaces to hide** in SME nav (Phase S3) — needs a product pass on `nav.ts` groups.
+1. **Threshold defaults** → **ไม่มีจำกัด (no ceiling).** SME self-approval is allowed at any amount; the
+   mandatory logged reason + the SME-01 detective review are the compensating controls.
+2. **Independent reviewer identity** → **both**: the customer's external accountant **and** the platform
+   owner receive the SME-01 self-approval review.
+3. **SME nav surface** → **configurable**: a god-only platform config page sets the SME defaults (hidden
+   nav groups etc.); **every new SME starts identical** from those defaults.
+4. **(added)** Persistent **SME Mode badge** for all users of an SME tenant; edition **chosen at company
+   creation**; **upgrade-only** transition (`sme`→`enterprise` allowed, downgrade forbidden); complete,
+   working screens for provisioning / config / badge / upgrade.
 
 ---
 
@@ -220,3 +236,5 @@ posture the codebase already fights for (fail-closed defaults, no silent bypass)
 | Rev | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-15 | ERP/Product | Initial plan — edition-as-config decision, `control_profile` seam, SME-01 compensating control, 4-phase doc-synced roadmap. Not started. |
+| 0.2 | 2026-07-15 | ERP/Product | Owner decisions recorded (§6): no self-approval ceiling; SME-01 → accountant + platform owner; god config page for platform-wide SME defaults; SME Mode badge; edition at creation, upgrade-only. Status → IN BUILD. |
+| 1.0 | 2026-07-15 | ERP/Product | **DELIVERED (v1)** — migration `0412` (`tenants.control_profile`+`sme_prefs`, `self_approvals`, `platform_sme_defaults`); the `common/control-profile.ts` seam (`assertMakerChecker` + `SelfApprovalBody`); live profile on `JwtUser` via the guard's tenants join; **12 events wired v1**: `gl.je.approve` (GL-05), `ap.payment.approve`, `exp.pettycash.approve`, `md.change.approve` (MDM-01), `cpq.discount.approve`/`cpq.quote.accept`/`cpq.quote.reject` (CPQ-01/G12), `inv.stocktake.post` (INV-04), `giftcard.issue.approve` (G1), `hcm.timesheet.approve`/`hcm.leave.approve`, `price.rule.approve` (G6), `gl.recon.certify` — every other maker-checker site keeps the hard block (fail-closed; extend by one `assertMakerChecker` call each; sites in `service-size-baseline.json` files — INV-07 write-off, refunds, assets — deferred to a follow-up that offsets the ratchet). NO new role (per-company Admin already resolves all permissions). God screens: provision edition selector, edition column + one-way upgrade, ค่าเริ่มต้น SME tab; SME banner for all tenant users; web `api.ts` auto-prompts the reason on `SELF_APPROVAL_REASON_REQUIRED`. SME-01 = `sme_self_approval_review` in `governance-bi-reports.ts` (RCM 290). Docs: PN-23 rev 0.5 row 0b; manual 11 + FAQ; UAT-ADM-157..160 + matrix v7.24; ToE `cutover/sme.ts`. |

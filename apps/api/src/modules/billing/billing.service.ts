@@ -116,6 +116,10 @@ export class BillingService {
   extendTrial(id: number, days: number) { return this.platformAdmin.extendTrial(id, days); }
   suspendTenant(id: number, by: string, reason?: string) { return this.platformAdmin.suspendTenant(id, by, reason); }
   reactivateTenant(id: number, by: string) { return this.platformAdmin.reactivateTenant(id, by); }
+  // SME single-user edition (docs/49) — upgrade-only profile transition + platform SME defaults.
+  upgradeControlProfile(id: number, target: 'enterprise', actor: string) { return this.platformAdmin.upgradeControlProfile(id, target, actor); }
+  getSmeDefaults() { return this.platformAdmin.getSmeDefaults(); }
+  setSmeDefaults(b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) { return this.platformAdmin.setSmeDefaults(b, actor); }
 
   // ───────────────────── Tenant lifecycle — docs/46 Phase 4c cut 2 ─────────────────────
   // Signup gate + invites + approval queue + provisioning + factory reset live in

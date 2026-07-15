@@ -247,7 +247,7 @@ export class LedgerService implements OnModuleInit {
   // ── docs/38 ledger PR-3: journal listings, GL-05 approve/reject, GL-17 reversal/immutability/audit — LedgerPostingService delegators. ──
   async listJournal(limit: number) { return this.posting.listJournal(limit); }
   async pendingJournal(limit: number) { return this.posting.pendingJournal(limit); }
-  async approveEntry(entryNo: string, approver: JwtUser) { return this.posting.approveEntry(entryNo, approver); }
+  async approveEntry(entryNo: string, approver: JwtUser, selfApprovalReason?: string | null) { return this.posting.approveEntry(entryNo, approver, selfApprovalReason); }
   async rejectEntry(entryNo: string, approver: JwtUser, reason?: string) { return this.posting.rejectEntry(entryNo, approver, reason); }
   async reverseEntry(dto: { entryId: number; reversedBy: string; reason?: string; date?: string; requireDistinctApprover?: boolean }) { return this.posting.reverseEntry(dto); }
   async attemptVoidPosted(entryId: number, actor: string) { return this.posting.attemptVoidPosted(entryId, actor); }

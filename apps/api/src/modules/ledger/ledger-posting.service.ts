@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, journalLines, fiscalPeriods, glAuditLog } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -272,13 +273,17 @@ export class LedgerPostingService {
 
   // GL-05 maker-checker: approve a Draft JE → Posted. The approver MUST differ from the preparer
   // (segregation of duties) regardless of permissions held — even an Admin cannot approve their own.
-  async approveEntry(entryNo: string, approver: JwtUser) {
+  // Exception (docs/49): a control_profile='sme' tenant may self-approve WITH a logged justification —
+  // the allowance writes self_approvals evidence reviewed by SME-01; enterprise behaviour is unchanged.
+  async approveEntry(entryNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [e] = await db.select().from(journalEntries).where(eq(journalEntries.entryNo, entryNo)).limit(1);
     if (!e) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal entry not found', messageTh: 'ไม่พบรายการบัญชี' });
     if (e.status !== 'Draft') throw new BadRequestException({ code: 'NOT_PENDING', message: `Entry ${entryNo} is ${e.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
     if (e.createdBy && e.createdBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a journal entry you prepared', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      // Amount at stake (sum of debits) fetched only on the self-approval path — the normal path is untouched.
+      const [amt] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}), 0)` }).from(journalLines).where(eq(journalLines.entryId, Number(e.id)));
+      await assertMakerChecker(db, { user: approver, maker: e.createdBy, event: 'gl.je.approve', ref: entryNo, amount: amt?.v, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a journal entry you prepared', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     // Re-check the period is still open at approval time (it may have closed since the draft was prepared).
     const [pp] = e.tenantId == null ? [undefined]

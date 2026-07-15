@@ -1,7 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq, sql, desc } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { subscriptions, tenants, users, branches, auditLog, aiTokenUsage } from '../../database/schema';
+import { subscriptions, tenants, users, branches, auditLog, aiTokenUsage, platformSmeDefaults } from '../../database/schema';
 import { logger } from '../../observability/logger';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
@@ -32,7 +32,7 @@ export class PlatformAdminService {
         suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
         deletedAt: tenants.deletedAt, deletedBy: tenants.deletedBy, purgedAt: tenants.purgedAt,
         legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
-        tags: tenants.tags,
+        tags: tenants.tags, controlProfile: tenants.controlProfile,
         planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
       })
       .from(tenants)
@@ -67,6 +67,7 @@ export class PlatformAdminService {
         // Setup essentials for issuing tax invoices — mirrors TenantController.fmt's setup_complete.
         setup_complete: !!(t.legalName && t.taxId && t.addressLine1 && t.province),
         tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
+        control_profile: t.controlProfile === 'sme' ? 'sme' : 'enterprise',
       });
     }
     return out;
@@ -79,6 +80,46 @@ export class PlatformAdminService {
     const clean = Array.from(new Set((tags ?? []).map((s) => String(s).trim()).filter(Boolean))).slice(0, 20);
     await this.db.update(tenants).set({ tags: clean }).where(eq(tenants.id, id));
     return { tenant_id: id, tags: clean };
+  }
+
+  // ── SME single-user edition (docs/49) ────────────────────────────────────
+  // UPGRADE-ONLY control-profile transition: sme → enterprise. A downgrade is refused — an entity that has
+  // operated under the full maker-checker environment may not weaken it later (keeps the control narrative
+  // monotonic). The change is audit-logged (AuditInterceptor) and notified to the god inbox.
+  async upgradeControlProfile(id: number, target: 'enterprise', actor: string) {
+    const [t] = await this.db.select({ id: tenants.id, code: tenants.code, profile: tenants.controlProfile }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    if (target !== 'enterprise' || t.profile === 'enterprise') {
+      // Idempotent no-op when already enterprise; any other direction is a downgrade.
+      if (t.profile === 'enterprise' && target === 'enterprise') return { tenant_id: id, control_profile: 'enterprise', changed: false };
+      throw new ForbiddenException({ code: 'PROFILE_DOWNGRADE_FORBIDDEN', message: 'Control profile can only be upgraded (sme → enterprise), never downgraded', messageTh: 'โปรไฟล์การควบคุมอัปเกรดได้ทางเดียว (SME → Enterprise) ไม่สามารถดาวน์เกรดได้' });
+    }
+    await this.db.update(tenants).set({ controlProfile: 'enterprise' }).where(eq(tenants.id, id));
+    logger.warn({ tenantId: id, code: t.code, actor }, 'control profile upgraded sme -> enterprise');
+    await this.platformNotifs?.emit({ type: 'control_profile_upgraded', title: `อัปเกรดโปรไฟล์ควบคุม: ${t.code} → Enterprise`, body: `โดย ${actor}`, tenantId: id, refType: 'tenant', refId: String(id) });
+    return { tenant_id: id, control_profile: 'enterprise', changed: true };
+  }
+
+  // Platform-wide SME provisioning defaults — the single config row every NEW SME company is stamped from
+  // (tenants.sme_prefs copy at provisionTenant). Changing it affects only future companies.
+  async getSmeDefaults() {
+    const [row] = await this.db.select().from(platformSmeDefaults).where(eq(platformSmeDefaults.id, 1)).limit(1);
+    return {
+      hidden_nav_groups: Array.isArray(row?.hiddenNavGroups) ? (row!.hiddenNavGroups as string[]) : [],
+      accountant_email: row?.accountantEmail ?? null,
+      updated_by: row?.updatedBy ?? null,
+      updated_at: row?.updatedAt ?? null,
+    };
+  }
+
+  async setSmeDefaults(b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) {
+    const current = await this.getSmeDefaults();
+    const hidden = Array.from(new Set((b.hidden_nav_groups ?? current.hidden_nav_groups).map((s) => String(s).trim()).filter(Boolean))).slice(0, 50);
+    const email = b.accountant_email === undefined ? current.accountant_email : b.accountant_email;
+    await this.db.insert(platformSmeDefaults)
+      .values({ id: 1, hiddenNavGroups: hidden, accountantEmail: email, updatedBy: actor, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: platformSmeDefaults.id, set: { hiddenNavGroups: hidden, accountantEmail: email, updatedBy: actor, updatedAt: new Date() } });
+    return { hidden_nav_groups: hidden, accountant_email: email, updated_by: actor };
   }
 
   // Cross-company AI-token usage aggregate (Platform Console) — total in/out/overage per company, ordered by

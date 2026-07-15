@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PricingService } from './pricing.service';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 const RuleBody = z.object({
   id: z.number().optional(), name: z.string().min(1), scope: z.enum(['all', 'item', 'category']).optional(),
@@ -38,7 +39,7 @@ export class PricingController {
   // R10: only PricingManager (pricelist) or exec may create/update pricing rules. A change is STAGED
   // (inactive) and must be ACTIVATED by a DIFFERENT user (exec/approvals) — the author cannot self-approve.
   @Post('rules') @Permissions('pricelist', 'exec') upsert(@Body(new ZodValidationPipe(RuleBody)) b: z.infer<typeof RuleBody>, @CurrentUser() u: JwtUser) { return this.svc.upsertRule(b, u); }
-  @Post('rules/:id/approve') @Permissions('exec', 'approvals') approveRule(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.approveRule(+id, u); }
+  @Post('rules/:id/approve') @Permissions('exec', 'approvals') approveRule(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveRule(+id, u, b?.self_approval_reason); }
   @Post('rules/:id/reject') @Permissions('exec', 'approvals') rejectRule(@Param('id') id: string, @Body(new ZodValidationPipe(RuleRejectBody)) b: z.infer<typeof RuleRejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectRule(+id, u, b.reason); }
   @Delete('rules/:id') @Permissions('pricelist', 'exec') del(@Param('id') id: string) { return this.svc.deleteRule(+id); }
 

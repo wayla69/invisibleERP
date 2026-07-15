@@ -97,6 +97,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // Governance readiness (ELC-01/02/04): each run snapshots acknowledgement coverage, oversight cadence and
   // open-case ageing; the run summary surfaces any breach. Schedule it `weekly` to drive the cadence reminders.
   governance_readiness: { label: 'ความพร้อมธรรมาภิบาล (ELC)', labelEn: 'Governance readiness (ELC)' },
+  // SME-01 (docs/49) — the SME edition's detective compensating control: every logged self-approval in the
+  // window, for independent review. Schedule monthly with recipients = external accountant + platform owner.
+  sme_self_approval_review: { label: 'ทบทวนการอนุมัติด้วยตนเอง (SME-01)', labelEn: 'Self-approval review (SME-01)' },
   // Data-retention purge of DEAD ephemeral security rows only (never financial/audit/PII — statutory hold).
   data_retention_purge: { label: 'ล้างข้อมูลชั่วคราวที่หมดอายุ (นโยบายเก็บข้อมูล)', labelEn: 'Purge expired ephemeral security rows' },
   // Executive cross-module scorecard (RG-1): composes finance/CRM/projects/supply-chain health into one board.

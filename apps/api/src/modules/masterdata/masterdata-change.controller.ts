@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { MasterdataChangeService } from './masterdata-change.service';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 // GRC-3 — sensitive master-data single-record maker-checker (control MDM-01). Editing a sensitive field
 // (vendor bank account / credit limit / payment terms) stages a `pending` request here; a DISTINCT user
@@ -32,7 +33,7 @@ export class MasterdataChangeController {
 
   // Checker — a DISTINCT user applies the staged change to the master (self-approval → 403 SOD_SELF_APPROVAL).
   @Post(':reqNo/approve') @Permissions('masterdata', 'exec')
-  approve(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approve(reqNo, u); }
+  approve(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approve(reqNo, u, b?.self_approval_reason); }
 
   // Checker — discard the staged change (the master is never touched).
   @Post(':reqNo/reject') @Permissions('masterdata', 'exec')

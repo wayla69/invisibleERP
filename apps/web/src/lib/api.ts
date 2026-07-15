@@ -131,6 +131,18 @@ function buildHeaders(init: RequestInit): Record<string, string> {
   };
 }
 
+// SME self-approval (docs/49): an 'sme' tenant approving its own document gets a 400
+// SELF_APPROVAL_REASON_REQUIRED until it supplies a justification. Handling it HERE means every approve
+// button in the app gains the reason prompt without per-screen changes: prompt once, merge
+// `self_approval_reason` into the JSON body, and replay the request a single time. Approve endpoints are
+// state-guarded (an already-approved doc replays as NOT_PENDING), so the one-shot retry is safe.
+function promptSelfApprovalReason(serverMsg: string): string | null {
+  if (typeof window === 'undefined') return null;
+  const answer = window.prompt(`${serverMsg}\n\nกรุณาระบุเหตุผลการอนุมัติรายการของตนเอง (โหมด SME):`);
+  const reason = (answer ?? '').trim();
+  return reason || null;
+}
+
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   let res = await fetchWithTimeout(`${BASE}${path}`, { ...init, headers: buildHeaders(init) });
   // Access token likely just expired — try a one-shot silent refresh, then replay the request once.
@@ -139,7 +151,17 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
       res = await fetchWithTimeout(`${BASE}${path}`, { ...init, headers: buildHeaders(init) });
     }
   }
-  const body = await res.json().catch(() => ({}));
+  let body = await res.json().catch(() => ({}));
+  if (res.status === 400 && body?.error?.code === 'SELF_APPROVAL_REASON_REQUIRED') {
+    const reason = promptSelfApprovalReason(body.error.messageTh ?? body.error.message ?? '');
+    if (reason) {
+      let merged: Record<string, unknown> = {};
+      try { merged = init.body ? JSON.parse(String(init.body)) : {}; } catch { merged = {}; }
+      const retryInit = { ...init, body: JSON.stringify({ ...merged, self_approval_reason: reason }) };
+      res = await fetchWithTimeout(`${BASE}${path}`, { ...retryInit, headers: buildHeaders(retryInit) });
+      body = await res.json().catch(() => ({}));
+    }
+  }
   if (!res.ok) {
     if (handleUnauthorized(res.status)) {
       // Carry the HTTP status here too: callers that treat a status-less Error as a NETWORK failure
@@ -160,6 +182,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   }
   return body as T;
 }
+
 
 // Download a file (xlsx/csv/pdf export, QR labels) with auth → save via a blob anchor.
 export async function apiDownload(path: string, filename: string, init: RequestInit = {}): Promise<void> {
