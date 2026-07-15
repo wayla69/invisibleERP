@@ -50,4 +50,18 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
 
   'rep.callback_processing': { th: 'กำลังเชื่อมต่อ…', en: 'Connecting…' },
   'rep.callback_failed': { th: 'เชื่อมต่อไม่สำเร็จ', en: 'Connection failed' },
+
+  // MKT-16 — review-response SLA
+  'rep.tab_sla': { th: 'SLA การตอบรีวิว', en: 'Response SLA' },
+  'rep.sla_policy': { th: 'นโยบาย SLA การตอบรีวิว', en: 'Review-response SLA policy' },
+  'rep.sla_threshold': { th: 'ต้องตอบรีวิวคะแนน', en: 'Respond to reviews rated' },
+  'rep.sla_or_below': { th: 'หรือต่ำกว่า', en: 'or below' },
+  'rep.sla_hours': { th: 'ภายใน (ชั่วโมง)', en: 'Within (hours)' },
+  'rep.sla_saved': { th: 'บันทึกนโยบาย SLA แล้ว', en: 'SLA policy saved' },
+  'rep.sla_breached': { th: 'เกินกำหนด SLA', en: 'SLA breached' },
+  'rep.sla_open': { th: 'ค้างตอบ (ยังไม่เกิน)', en: 'Open (within SLA)' },
+  'rep.sla_policy_active': { th: 'นโยบายที่ใช้อยู่', en: 'Active policy' },
+  'rep.sla_none_breached': { th: 'ไม่มีรีวิวที่เกินกำหนด', en: 'No reviews past SLA' },
+  'rep.sla_none_open': { th: 'ไม่มีรีวิวค้างตอบ', en: 'No open reviews' },
+  'rep.sla_col_age': { th: 'อายุ', en: 'Age' },
 };

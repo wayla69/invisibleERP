@@ -1,6 +1,7 @@
 # 47 — Reputation & External Analytics Ingestion (Google Maps reviews · GA4)
 
-> **Date:** 2026-07-13 · **Status:** v0.1 — scoping · **Owner:** ERP / Product
+> **Date:** 2026-07-13 · **Status:** v0.3 — **DELIVERED** (built + harness-tested; §5 shipped, control **MKT-14**)
+> · next-level **MKT-16** delivered (§6) · **Owner:** ERP / Product
 > **Question answered:** *"Can we do webhook via Google Maps review, Wongnai review, and Google
 > Analytics?"* — Not via webhook (none of the three push events to a third party); this is a
 > **scheduled-poll ingestion** feature instead, for two of the three platforms.
@@ -88,3 +89,29 @@ One PR: schema/migration, OAuth service, connections CRUD + target-listing, revi
 services, BI report registration, controller, `/reputation` web workspace (Connections / Reviews /
 Analytics tabs) + callback page + nav entry, RCM control + narrative + user-manual + UAT + traceability +
 `.env.example`, cutover harness (`reputation.ts`) including the cross-tenant boundary test.
+
+**Status: DELIVERED** — all of §5 shipped (control **MKT-14**, migration `0402`, `modules/reputation`,
+`/reputation` workspace + callback, `cutover/reputation.ts`). This section is retained as the original
+scope; the header status is reconciled to reflect the built state (the doc previously read "scoping").
+
+## 6. Next-level — review-response SLA governance (MKT-16, DELIVERED)
+
+Ingestion alone is passive: a negative review can sit **unanswered** and quietly erode the public rating.
+This next-level wave adds a **detective control** on top of the ingested `external_reviews`, with no change
+to the ingestion path:
+
+- **Policy** — `reputation_response_settings` (migration `0416`, one row per tenant, canonical 0232 RLS +
+  leading tenant index): `sla_rating_threshold` (which reviews need a response — default ≤3★) and
+  `sla_hours` (how fast — default 48h). Read/upserted via `GET`/`PUT /api/reputation/response-settings`
+  (change gated `marketing`/`exec`).
+- **Detective worklist** — `GET /api/reputation/response-sla` computes, over the existing reviews, the
+  ones at/below the threshold that are still **unreplied**, splitting them into **breached** (older than
+  `sla_hours` from the review's create time) vs **open** (within the window). A review above the threshold
+  or already replied is excluded; a reply clears it.
+- **Schedulable digest** — a `reputation_response_sla` BI report type (module-owned `BiReportSource`, same
+  shape as `ar_collections_dunning`) so a store can be alerted to overdue negative reviews on a schedule.
+- **Web** — a **Response-SLA** tab on `/reputation` (policy form + breached/open worklists), inlined into
+  the existing client page (`use-client` ratchet flat).
+- **Control MKT-16** (detective) — RCM census reconciled; ToE re-performed by the `cutover/reputation.ts`
+  harness (breach/open classification, threshold-change exclusion, reply-clears-breach, permission gate,
+  cross-tenant isolation). Purely analytical — no GL posting, no review data written.

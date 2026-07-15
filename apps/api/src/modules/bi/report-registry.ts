@@ -148,6 +148,8 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   reputation_ga4_sync: { label: 'ซิงก์ Google Analytics (GA4)', labelEn: 'Sync Google Analytics (GA4)' },
   // Read-only dashboard aggregate — also exposed live via GET /api/bi/reputation-summary.
   reputation_summary: { label: 'สรุปชื่อเสียงร้าน + Analytics', labelEn: 'Reputation & analytics summary' },
+  // MKT-16 — review-response SLA breach digest (detective; schedulable). Also live at GET /api/reputation/response-sla.
+  reputation_response_sla: { label: 'SLA การตอบรีวิว (เกินกำหนด)', labelEn: 'Review-response SLA breaches' },
   // docs/48 — Marketing Mix Modeling. mmm_run is a scheduled "action" job (refresh the channel model from
   // the latest ingested signals); mmm_summary is a read-only dashboard aggregate also exposed live via
   // GET /api/bi/mmm-summary.

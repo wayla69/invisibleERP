@@ -82,6 +82,21 @@ export const analyticsDailySnapshots = pgTable('analytics_daily_snapshots', {
   uqSnapshot: uniqueIndex('analytics_snapshots_tenant_property_date').on(t.tenantId, t.propertyRef, t.metricDate),
 }));
 
+// docs/47 next-level (MKT-16) — per-tenant review-response SLA policy. Defines which reviews need a timely
+// response (rating <= threshold) and how fast (hours from the review's create time). The breach worklist is
+// computed over external_reviews; this table holds only the policy (one row per tenant).
+export const reputationResponseSettings = pgTable('reputation_response_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  slaRatingThreshold: integer('sla_rating_threshold').notNull().default(3),
+  slaHours: integer('sla_hours').notNull().default(48),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqTenant: uniqueIndex('uq_reputation_response_settings').on(t.tenantId),
+}));
+
 export type ReputationConnection = typeof reputationConnections.$inferSelect;
 export type ExternalReview = typeof externalReviews.$inferSelect;
+export type ReputationResponseSettings = typeof reputationResponseSettings.$inferSelect;
 export type AnalyticsDailySnapshot = typeof analyticsDailySnapshots.$inferSelect;
