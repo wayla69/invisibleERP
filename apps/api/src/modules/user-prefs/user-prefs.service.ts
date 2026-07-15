@@ -14,6 +14,7 @@ export interface UserPrefs {
   pos_fav: number[]; // POS menu-item id quick-access list (B2 favourites grid)
   shop_favs: string[]; // /shop favourite item_ids (★ on a catalog card)
   shop_templates: ShopTemplate[]; // /shop saved basket templates (รายการประจำ)
+  sme_wizard_done: boolean; // docs/49 v1.3 — the SME first-run setup wizard was completed/dismissed (don't nag again)
 }
 
 const MAX_FAVORITES = 100;
@@ -69,7 +70,8 @@ function normalize(raw: unknown): UserPrefs {
     for (const raw2 of v.shop_templates) { const t = normTemplate(raw2); if (t) byName.set(t.name, t); }
   }
   const shop_templates = [...byName.values()].slice(0, MAX_SHOP_TEMPLATES);
-  return { favorites, navFold, pos_fav, shop_favs, shop_templates };
+  const sme_wizard_done = v.sme_wizard_done === true;
+  return { favorites, navFold, pos_fav, shop_favs, shop_templates, sme_wizard_done };
 }
 
 // Per-user UI preferences (sidebar favourites + nav fold-state). Personal: every query is scoped to the
@@ -100,6 +102,7 @@ export class UserPrefsService {
       pos_fav: patch.pos_fav ?? current.pos_fav,
       shop_favs: patch.shop_favs ?? current.shop_favs,
       shop_templates: patch.shop_templates ?? current.shop_templates,
+      sme_wizard_done: patch.sme_wizard_done ?? current.sme_wizard_done,
     });
     if (row) {
       await db.update(userPrefs).set({ prefs: merged, updatedAt: new Date() }).where(eq(userPrefs.id, row.id));

@@ -57,6 +57,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
 import { SmeReasonDialog } from '@/components/sme-reason-dialog';
+import { SmeSetupWizard } from '@/components/sme-setup-wizard';
 import { AssistantWidget } from '@/components/assistant-widget';
 import { NotificationBell } from '@/components/notification-bell';
 
@@ -965,6 +966,10 @@ export function AppShell({
       {/* SME self-approval reason dialog (docs/49 H2) — invisible until api() dispatches a
           SELF_APPROVAL_REASON_REQUIRED request to it via lib/sme-reason.ts. Mounted unconditionally. */}
       <SmeReasonDialog />
+
+      {/* SME first-run setup wizard (docs/49 v1.3) — self-hides unless the tenant is 'sme', setup is
+          incomplete, and the wizard hasn't been completed/dismissed (sme_wizard_done user-pref). */}
+      <SmeSetupWizard />
 
       {/* Global floating AI helper — contextual assistance from any screen, for users who can use the
           assistant (self-hides otherwise). Shares chat logic with the full /assistant page. */}

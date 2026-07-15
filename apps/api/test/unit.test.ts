@@ -11,7 +11,7 @@ import { hmacSha256Hex, verifyWebhookSignature, verifyWebhookWithTimestamp } fro
 import { hitRateLimit } from '../src/common/rate-limit-store';
 import { verifyInboundWebhook } from '../src/common/webhook-auth';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
-import { assertMakerChecker, isControlProfile, SelfApprovalBody } from '../src/common/control-profile';
+import { assertMakerChecker, isControlProfile, SelfApprovalBody, assertSmeAllowsDistinctApprovers, isSmeProfile } from '../src/common/control-profile';
 import type { JwtUser } from '../src/common/decorators';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
@@ -366,5 +366,25 @@ describe('SME edition maker-checker seam — assertMakerChecker (docs/49, SME-01
     expect(isControlProfile('enterprise')).toBe(true);
     expect(isControlProfile('SME')).toBe(false);
     expect(isControlProfile('')).toBe(false);
+  });
+  it('isSmeProfile is fail-closed (only explicit sme)', () => {
+    expect(isSmeProfile({ controlProfile: 'sme' })).toBe(true);
+    expect(isSmeProfile({ controlProfile: 'enterprise' })).toBe(false);
+    expect(isSmeProfile({ controlProfile: null })).toBe(false);
+    expect(isSmeProfile({ controlProfile: undefined })).toBe(false);
+  });
+  it('assertSmeAllowsDistinctApprovers blocks all_of_n>1 only for an sme tenant (docs/49 v1.3)', () => {
+    const sme = { controlProfile: 'sme' as const };
+    const ent = { controlProfile: 'enterprise' as const };
+    // SME: >1 throws SME_MULTI_APPROVER_STEP; 1 / null / undefined pass.
+    expect(() => assertSmeAllowsDistinctApprovers(sme, 2)).toThrow();
+    let threw: any; try { assertSmeAllowsDistinctApprovers(sme, 3); } catch (e) { threw = e; }
+    expect(threw?.response?.code).toBe('SME_MULTI_APPROVER_STEP');
+    expect(() => assertSmeAllowsDistinctApprovers(sme, 1)).not.toThrow();
+    expect(() => assertSmeAllowsDistinctApprovers(sme, null)).not.toThrow();
+    expect(() => assertSmeAllowsDistinctApprovers(sme, undefined)).not.toThrow();
+    // Enterprise (and null/fail-closed) never blocked, at any N.
+    expect(() => assertSmeAllowsDistinctApprovers(ent, 5)).not.toThrow();
+    expect(() => assertSmeAllowsDistinctApprovers({ controlProfile: null }, 9)).not.toThrow();
   });
 });
