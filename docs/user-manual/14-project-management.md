@@ -340,6 +340,23 @@ This gives a segregated stage-gate control over project continuation — a proje
 running unchecked, on one person's say-so. Required role/permission: `exec`/`planner`/`ar`.
 Preventive/authorization — posts nothing to the GL.
 
+## Program benefits realization — is the program delivering the value it was funded for? (PROJ-27)
+The program page (`/projects/program/{code}`) has a **การวัดผลประโยชน์ของโปรแกรม (benefits realization)**
+panel that tracks whether a program actually delivers the benefits it was funded on:
+- **Declare a benefit** — a cost saving, revenue uplift or service improvement — with a **baseline**, a
+  **target** value + date, an owner, and a financial / non-financial category.
+- **Log actuals over time** — each measurement is kept (append-only); the latest is the current actual. The
+  panel shows each benefit's **realized %** (progress from baseline toward target) and a **health** badge
+  (met / on track / at risk, or an **overdue shortfall** once it's past the target date and still short).
+- A roll-up shows the program's financial target vs actual, how many benefits are realized, and how many are
+  at risk.
+- **Sign off** a benefit as **realized** or **not realized** — this is **two-person**: it must be done by a
+  **different user than the one who declared** the benefit, so realization can't be self-certified. A closed
+  benefit is read-only.
+
+This surfaces benefits leakage — a program can no longer be quietly closed as "done" while delivering little of
+what justified it. Required role/permission: `exec`/`planner`/`ar`. Detective — posts nothing to the GL.
+
 ## Timesheets → project labour (`/hcm`, tab ลงเวลา / OT)
 When logging a timesheet you can allocate it to a **โครงการ (project)** and a **งาน (WBS task)** and mark it
 **billable**. The entry lands **Pending**; a **different** approver presses **อนุมัติ** (maker-checker,
@@ -444,10 +461,15 @@ Cash spent at site can be booked **against the project** so it shows up in the p
   concept→planning→execution→closeout→closed only through a gate that is submitted then **decided by a
   different user** (GO/HOLD/KILL) — so a project can't change phase, or keep running unchecked, on one
   person's decision, and every transition is auditable.
+- **Program benefits realization** (**PROJ-27**) measures realized-vs-promised benefits and signs each off
+  maker-checker: a benefit is declared with a baseline/target, actuals are tracked, and closing it
+  realized/not-realized is done by a **different user than the declarer** — so benefits leakage is surfaced
+  and realization can't be self-certified.
 
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.34 | 2026-07-14 | **PROJ-27 — program benefits realization.** The program page gains a **การวัดผลประโยชน์ของโปรแกรม (benefits realization)** panel: declare a program's expected benefits (baseline/target/date/owner, financial or non-financial), log actuals over time (append-only), watch each benefit's realized % + health (met / on track / at risk / overdue shortfall) and a program roll-up. Signing a benefit off as realized/not-realized is two-person — a **different user than the declarer** must confirm — so realization can't be self-certified and benefits leakage is surfaced. |
 | 2.33 | 2026-07-14 | **PROJ-26 — project phase-gate governance.** The project workspace gains a **เกตตรวจเฟสโครงการ (phase gates)** panel: a phase-ladder strip (concept→planning→execution→closeout→closed), a gate history, submit-a-gate to the next phase with a readiness note, and GO/HOLD/KILL on a pending gate. A gate must be decided by a **different user than the submitter**, only advances the project forward, and a GO is what moves the project into the next phase — a segregated stage-gate control over project continuation, fully auditable. |
 | 2.32 | 2026-07-14 | **PROJ-25 — portfolio selection scenarios.** The portfolio command center gains a **สถานการณ์คัดเลือกพอร์ตโฟลิโอ (selection scenarios)** panel: model candidate projects into a named scenario with a budget envelope + priorities, watch the selected budget vs the envelope live (headroom / over-envelope banner), then **commit** the GO-set as a two-person decision — a different user than the author must commit, and an over-envelope selection needs an exec override reason. Committed scenarios are locked and stamped with the committer + reason. Read-only aggregation — no project budget is mutated. |
 | 2.31 | 2026-07-14 | **PROJ-24 — change-order impact simulation.** Each pending change order gains a **จำลองผลกระทบ (simulate impact)** button opening a current/projected/Δ table for the contract value, budget, estimated cost, gross margin, EAC and budget headroom, with each Δ coloured favourable (green) / unfavourable (red). Read-only what-if — nothing is written; the figures are exactly what approval would then apply, so a variation that turns the project margin-negative or pushes the EAC past the new budget is obvious before authorization. |

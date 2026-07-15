@@ -860,6 +860,53 @@ export const projectPhaseGates = pgTable(
 );
 export type ProjectPhaseGate = typeof projectPhaseGates.$inferSelect;
 
+// PROJ-27 — Program benefits realization (PPM Wave P4). Benefits justify a program's investment: a program
+// declares expected benefits (baseline/target/target_date/owner); actuals are logged over time (append-only);
+// the realization view compares actual vs target and flags shortfalls. Closing a benefit realized/not_realized
+// is a maker-checker sign-off (confirmer <> created_by → SOD_SELF_APPROVAL). Programs are identified by
+// projects.program_code (no master table). Two tenant tables (0232 canonical RLS, tenant-leading indexes).
+export const programBenefits = pgTable(
+  'program_benefits',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    programCode: text('program_code').notNull(),             // matches projects.program_code
+    benefitNo: text('benefit_no').notNull(),                 // PB-#### per tenant
+    name: text('name').notNull(),
+    category: text('category').notNull().default('financial'), // financial | non_financial
+    unit: text('unit'),
+    baselineValue: numeric('baseline_value', { precision: 18, scale: 2 }).notNull().default('0'),
+    targetValue: numeric('target_value', { precision: 18, scale: 2 }).notNull(),
+    targetDate: date('target_date'),
+    owner: text('owner'),
+    status: text('status').notNull().default('open'),        // open | realized | not_realized
+    createdBy: text('created_by').notNull(),
+    confirmedBy: text('confirmed_by'),                       // reviewer — must differ from created_by (SoD)
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    confirmNotes: text('confirm_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqNo: unique('uq_program_benefit_no').on(t.tenantId, t.benefitNo), byTenant: index('idx_program_benefits_tenant').on(t.tenantId, t.programCode) }),
+);
+
+export const programBenefitMeasurements = pgTable(
+  'program_benefit_measurements',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    benefitId: bigint('benefit_id', { mode: 'number' }).notNull().references(() => programBenefits.id),
+    measuredValue: numeric('measured_value', { precision: 18, scale: 2 }).notNull(),
+    measuredAt: date('measured_at').notNull(),
+    note: text('note'),
+    recordedBy: text('recorded_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_program_benefit_measurements_tenant').on(t.tenantId, t.benefitId) }),
+);
+export type ProgramBenefit = typeof programBenefits.$inferSelect;
+export type ProgramBenefitMeasurement = typeof programBenefitMeasurements.$inferSelect;
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;
