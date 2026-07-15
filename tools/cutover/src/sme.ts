@@ -102,6 +102,9 @@ async function main() {
   });
   ok('God provisions an SME company (control_profile=sme) → 201', smeCreate.status === 201 && smeCreate.json.control_profile === 'sme', `${smeCreate.status} ${smeCreate.json.control_profile}`);
   const smeTid = Number(smeCreate.json.tenant_id);
+  // docs/49/docs/36 item 5 — an SME company with no explicit plan_code defaults to the 'sme' single-operator plan.
+  const smeSub = (await pg.query(`SELECT plan_code FROM subscriptions WHERE tenant_id=${smeTid} LIMIT 1`)).rows as any[];
+  ok('SME company defaults onto the sme plan (edition-aware provisioning)', smeSub[0]?.plan_code === 'sme', `plan=${smeSub[0]?.plan_code}`);
   const smeOwner = await login('sme_owner', 'admin123');
   const smeMe = await inj('GET', '/api/auth/me', smeOwner);
   ok('SME admin /api/auth/me carries control_profile=sme + the stamped hidden nav groups',
@@ -164,6 +167,23 @@ async function main() {
   ok('G1 enterprise regression: self-confirm stays a hard 400 SOD_SELF_APPROVAL (reason or not)',
     entConf.status === 400 && entConf.json.error?.code === 'SOD_SELF_APPROVAL', `${entConf.status} ${entConf.json.error?.code}`);
 
+  // ── 4d. docs/49 v1.3 (item 4): the setup-wizard's load-bearing backend chain — setting tax_id (a G15
+  //    maker-checker field) STAGES a change; a solo SME owner then self-approves it WITH a reason so the
+  //    wizard completes without a second person (evidence via SME-01). Enterprise still needs a distinct approver. ──
+  const smePatch = await inj('PATCH', '/api/tenant/profile', smeOwner, { legal_name: 'ร้านเจ้าของคนเดียว จำกัด', tax_id: '1234567890123', address_line1: '1 ถนนหลัก', province: 'กรุงเทพฯ' });
+  const stagedReq = smePatch.json?.pending_change?.req_no;
+  ok('Item 4: SME owner sets tax_id via the wizard → staged (G15 maker-checker) pending_change returned',
+    smePatch.status === 200 && !!stagedReq && (smePatch.json.pending_change.fields ?? []).includes('tax_id'), `${smePatch.status} ${JSON.stringify(smePatch.json?.pending_change ?? {})}`);
+  const stagedNoReason = await inj('POST', `/api/tenant/profile-approvals/${stagedReq}/approve`, smeOwner);
+  ok('Item 4: SME owner self-approving the staged tax_id with NO reason → 400 SELF_APPROVAL_REASON_REQUIRED',
+    stagedNoReason.status === 400 && stagedNoReason.json.error?.code === 'SELF_APPROVAL_REASON_REQUIRED', `${stagedNoReason.status} ${stagedNoReason.json.error?.code}`);
+  const stagedApprove = await inj('POST', `/api/tenant/profile-approvals/${stagedReq}/approve`, smeOwner, { self_approval_reason: 'การตั้งค่าเริ่มต้นบริษัทผ่านตัวช่วย' });
+  const smeProfile = await inj('GET', '/api/tenant/profile', smeOwner);
+  ok('Item 4: SME owner self-approves the tax_id WITH a reason → applied, setup_complete=true (wizard done)',
+    stagedApprove.status === 200 && smeProfile.json.tax_id === '1234567890123' && smeProfile.json.setup_complete === true, `${stagedApprove.status} setup=${smeProfile.json.setup_complete}`);
+  const smeWizEvid = (await pg.query(`SELECT count(*)::int n FROM self_approvals WHERE tenant_id=${smeTid} AND event='tenant.profile-change.approve'`)).rows as any[];
+  ok('Item 4: the wizard tax_id self-approval left an SME-01 evidence row (audit trail preserved)', smeWizEvid[0].n === 1, `n=${smeWizEvid[0].n}`);
+
   // ── 5. Cross-tenant boundary: the enterprise tenant's review sees ZERO SME rows ──
   const entReport = await runReport(entAdmin, 'sme_self_approval_review');
   ok('Cross-tenant: enterprise admin\'s sme_self_approval_review → count 0 (no leakage of the SME tenant\'s rows)',
@@ -181,10 +201,10 @@ async function main() {
     upgradedSelf.status === 403 && upgradedSelf.json.error?.code === 'SOD_VIOLATION', `${upgradedSelf.status} ${upgradedSelf.json.error?.code}`);
   const upgradeAgain = await inj('POST', `/api/admin/tenants/${smeTid}/control-profile`, god, { control_profile: 'enterprise' });
   ok('Re-upgrading an enterprise company → 200 changed:false (idempotent)', upgradeAgain.status === 200 && upgradeAgain.json.changed === false, `${upgradeAgain.status} ${JSON.stringify(upgradeAgain.json)}`);
-  // Two ALLOWED self-approvals exist by now (gl.je.approve §3 + proj.benefit.confirm §4c) — the blocked
-  // post-upgrade attempt must not have added a third.
+  // Three ALLOWED self-approvals exist by now (gl.je.approve §3 + proj.benefit.confirm §4c +
+  // tenant.profile-change.approve §4d) — the blocked post-upgrade attempt must not have added a fourth.
   const evidAfter = (await pg.query(`SELECT count(*)::int n FROM self_approvals WHERE tenant_id=${smeTid}`)).rows as any[];
-  ok('The blocked post-upgrade attempt wrote NO new evidence row (evidence only on ALLOWED self-approvals)', evidAfter[0].n === 2, `n=${evidAfter[0].n}`);
+  ok('The blocked post-upgrade attempt wrote NO new evidence row (evidence only on ALLOWED self-approvals)', evidAfter[0].n === 3, `n=${evidAfter[0].n}`);
 
   // ── 7. Public signup NEVER honours control_profile (UAT-ADM-160) ──
   const su = await inj('POST', '/api/auth/signup', undefined, {

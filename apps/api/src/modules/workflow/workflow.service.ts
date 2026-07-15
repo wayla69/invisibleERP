@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { workflowDefinitions, workflowSteps, workflowInstances, approvalActions, approvalDelegations, users, notifications } from '../../database/schema';
 import { ymd, n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { assertMakerChecker } from '../../common/control-profile';
+import { assertMakerChecker, assertSmeAllowsDistinctApprovers } from '../../common/control-profile';
 import { SodService } from './sod.service';
 import { LineNotifyService, buildApproveCard } from '../messaging/line-notify.service';
 
@@ -70,6 +70,9 @@ export class WorkflowService {
     for (const s of steps) {
       if (!(s.approver_role) === !(s.approver_user)) throw new BadRequestException({ code: 'STEP_ROLE_XOR_USER', message: 'A step needs exactly one of approver_role / approver_user', messageTh: 'ขั้นต้องระบุ role หรือ user อย่างใดอย่างหนึ่ง' });
       if (!(s.match_key) !== !(s.match_value)) throw new BadRequestException({ code: 'MATCH_KEY_VALUE', message: 'A dimension condition needs both match_key and match_value', messageTh: 'เงื่อนไขมิติต้องมีทั้ง key และ value' });
+      // docs/49 v1.3: a solo-operator SME company can never supply N>1 distinct approvers — reject the
+      // deadlock-guaranteeing step at build time rather than letting the workflow park pending forever.
+      assertSmeAllowsDistinctApprovers(user, s.all_of_n);
       await db.insert(workflowSteps).values({ tenantId: user.tenantId ?? null, definitionId, stepNo: s.step_no, approverRole: s.approver_role ?? null, approverUser: s.approver_user ?? null, minAmount: String(s.min_amount ?? 0), allOfN: s.all_of_n ?? 1, name: s.name ?? null, slaHours: s.sla_hours ?? null, escalateToRole: s.escalate_to_role ?? null, escalateToUser: s.escalate_to_user ?? null, matchKey: s.match_key ?? null, matchValue: s.match_value ?? null });
     }
   }

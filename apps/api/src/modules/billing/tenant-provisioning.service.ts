@@ -254,7 +254,10 @@ export class TenantProvisioningService {
     const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
-    const planCode = dto.plan_code?.trim() || 'free';
+    // Default plan is edition-aware (docs/49/docs/36): an SME company with no explicit plan lands on the
+    // 'sme' single-operator plan, everything else on 'free'. Loosely coupled — an explicit plan_code always
+    // wins, and control_profile stays orthogonal (the plan is only the DEFAULT, not a hard binding).
+    const planCode = dto.plan_code?.trim() || (dto.control_profile === 'sme' ? 'sme' : 'free');
 
     // A provisioned Admin whose username is on PLATFORM_ADMIN_USERNAMES would silently gain the god
     // cross-tenant bypass (isPlatformAdmin is membership-by-username alone). Refuse it — a platform owner

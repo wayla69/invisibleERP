@@ -1221,6 +1221,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-ADM-160 | SME edition — SME-01 review report surfaces exceptions; cross-tenant isolated; public signup ignores the field | SME-01 | 23 §9 row 0b (`sme.ts`) |
 | UAT-ADM-161 | SME edition — SME-01 subscription auto-scheduled at provisioning; per-tenant accountant edit re-points it | SME-01 | 23 §9 row 0b (`sme.ts`) |
 | UAT-ADM-162 | SME edition — PROJ-27 benefit confirm rides the seam (post-audit G1); enterprise 400 contract kept | SME-01, PROJ-27 | 23 §9 row 0b (`sme.ts`) |
+| UAT-ADM-163 | SME edition — multi-approver workflow step (all_of_n>1) blocked at save time; enterprise unaffected | docs/49 item 3 (usability guard, no new control) | 08 §9 (`workflow.ts`) |
 | UAT-ADM-035 | Webhook — register + secret-once + isolation | ITGC-AC-04/03 | 08 §7.A.9 |
 | UAT-ADM-036 | Webhook — event emits a signed delivery (logged) | Feature (webhooks), ITGC-AC-04 | 08 §7.A.9 |
 | UAT-ADM-037 | Webhook — redeliver / dispatch / revoke | Feature (webhooks) | 08 §7.A.9 |

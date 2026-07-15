@@ -83,6 +83,27 @@ export async function assertMakerChecker(db: { insert: Function }, ctx: MakerChe
   appendAuditMeta({ self_approved: { event: ctx.event, ref: ctx.ref, amount, reason } });
 }
 
+/** True only for an explicit 'sme' tenant (null/'enterprise' ⇒ false — fail-closed, matches profileOf). */
+export const isSmeProfile = (user: Pick<JwtUser, 'controlProfile'>): boolean => user.controlProfile === 'sme';
+
+/**
+ * Guard a MULTI-approver ("all-of-N") requirement against a single-operator SME tenant (docs/49 v1.3).
+ * SME self-approval relaxes the maker-checker *identity* rule (maker may equal checker), but it can NOT
+ * conjure a SECOND distinct human — so a workflow step / rule that requires N>1 distinct approvers would
+ * deadlock forever in a one-person company. Reject it at configuration time with an actionable error
+ * instead of letting the operator build a workflow that can never complete. Enterprise tenants are
+ * unaffected (multi-approver steps are exactly their point).
+ */
+export function assertSmeAllowsDistinctApprovers(user: Pick<JwtUser, 'controlProfile'>, allOfN: number | null | undefined): void {
+  if (isSmeProfile(user) && (allOfN ?? 1) > 1) {
+    throw new BadRequestException({
+      code: 'SME_MULTI_APPROVER_STEP',
+      message: 'SME (single-operator) companies cannot require more than one distinct approver on a step — it would never complete. Set all_of_n to 1, or upgrade to the Enterprise edition to use multi-approver workflows.',
+      messageTh: 'บริษัทโหมด SME (ผู้ปฏิบัติงานคนเดียว) กำหนดให้ต้องมีผู้อนุมัติมากกว่าหนึ่งคนในขั้นเดียวไม่ได้ เพราะรายการจะค้างตลอดไป — ตั้ง all_of_n = 1 หรืออัปเกรดเป็น Enterprise เพื่อใช้เวิร์กโฟลว์หลายผู้อนุมัติ',
+    });
+  }
+}
+
 /** Zod-free validation for admin inputs: is this a known profile value? */
 export const isControlProfile = (v: unknown): v is ControlProfile =>
   v === 'enterprise' || v === 'sme';

@@ -21,6 +21,7 @@ const UpdateBody = z.object({
       qty: z.number().positive(),
     })).max(200),
   })).max(50).optional(),
+  sme_wizard_done: z.boolean().optional(), // docs/49 v1.3 — SME first-run wizard completed/dismissed
 });
 
 @Controller('api/user-prefs')
