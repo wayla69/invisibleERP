@@ -149,7 +149,11 @@ evidence attachment, SLA/overdue escalation.
 - Harness: template → instances; dependency gating; lock blocked until blocking tasks done; auto-complete
   fires; SoD on sign-off-vs-lock.
 
-### B2 — Auto-reversing accruals · Effort **S** · quick win
+### B2 — Auto-reversing accruals · Effort **S** · quick win · **✅ DELIVERED (2026-07-16)**
+> Delivered: migration `0419` `recurring_journals.auto_reverse` (monthly-only, `AUTO_REVERSE_MONTHLY_ONLY`);
+> the sweep's first run in the next business month posts the flipped Draft reversal (GL-05, idempotent
+> `REC-<id>-<lastRun>-REV`, response `reversals`); `/gl-schedules` checkbox + badge. ToE `basics` 414→422;
+> PN-04 §7(11) rev 2.23; manual 06 v0.19; UAT-GL-189..192.
 **Goal:** month-end accruals must reverse on day 1 of the next period; today reversal is manual (GL-17).
 - `ledger-recurring.service.ts`: `auto_reverse` flag on recurring templates; the period-open path (or the
   `gl_recurring_journals` job on its first run in the new period) posts the reversal **Draft** through

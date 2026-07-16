@@ -371,6 +371,39 @@ async function main() {
   const posted5710 = await tbDebit('5710');
   ok('Recurring: a second user approves → accrual hits the GL (+1000)', recAppr.status === 200 && near(posted5710, before5710 + 1000), `st=${recAppr.status} after=${posted5710}`);
 
+  // ── B2 auto-reversing accruals (docs/50 Wave 1; GL-08 + GL-17 semantics) ──
+  // auto_reverse is accrual-only (monthly): the sweep's first run in the NEXT business month posts a
+  // flipped Draft reversal of the prior month's entry (maker-checker GL-05, idempotent per source_ref).
+  const arBad = await inj('POST', '/api/ledger/recurring', admin, { name: 'bad-autorev', frequency: 'daily', auto_reverse: true, lines: [{ account_code: '5720', debit: 700 }, { account_code: '2100', credit: 700 }] });
+  ok('AutoRev: non-monthly template rejected (AUTO_REVERSE_MONTHLY_ONLY)', arBad.status === 400 && arBad.json?.error?.code === 'AUTO_REVERSE_MONTHLY_ONLY', `st=${arBad.status} code=${arBad.json?.error?.code}`);
+  const tbBalanceOf = async (code: string) => {
+    const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+    const row = (tb.rows ?? []).find((r: any) => r.account_code === code);
+    return row ? Number(row.balance) : 0;
+  };
+  const beforeAr5720 = await tbDebit('5720');
+  const beforeArBal5720 = await tbBalanceOf('5720');
+  const arTpl = await inj('POST', '/api/ledger/recurring', admin, { name: 'Accrued utilities', frequency: 'monthly', auto_reverse: true, lines: [{ account_code: '5720', debit: 700 }, { account_code: '2100', credit: 700 }] });
+  ok('AutoRev: monthly accrual template created (auto_reverse=true)', arTpl.status === 201 && arTpl.json?.auto_reverse === true, JSON.stringify(arTpl.json).slice(0, 90));
+  const runA = await inj('POST', '/api/ledger/recurring/run', admin);
+  const arEntryNo = (runA.json?.entries ?? []).find((e: any) => e.recurring_id === arTpl.json.id)?.entry_no;
+  ok('AutoRev: accrual posts on the sweep, no same-month reversal', /^JE-/.test(arEntryNo ?? '') && (runA.json?.reversals ?? []).length === 0, `no=${arEntryNo} rev=${(runA.json?.reversals ?? []).length}`);
+  await inj('POST', `/api/ledger/journal/${arEntryNo}/approve`, mgr);
+  ok('AutoRev: approved accrual hits the GL (+700)', near(await tbDebit('5720'), beforeAr5720 + 700), `after=${await tbDebit('5720')}`);
+  // simulate the month rollover: stamp the template's last run into the PRIOR business month
+  const asOf = String(runA.json?.as_of ?? '');
+  const priorMonthDate = (() => { const d = new Date(`${asOf}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); })();
+  await pg.query(`UPDATE recurring_journals SET last_run_date='${priorMonthDate}' WHERE id=${Number(arTpl.json.id)}`);
+  const runB = await inj('POST', '/api/ledger/recurring/run', admin);
+  const arRev = (runB.json?.reversals ?? [])[0];
+  ok('AutoRev: first sweep of the new month posts the reversal (Draft)', (runB.json?.reversals ?? []).length === 1 && /^JE-/.test(arRev?.entry_no ?? '') && arRev?.reversed_run === priorMonthDate, JSON.stringify(runB.json?.reversals));
+  const pendAr = (await inj('GET', '/api/ledger/journal/pending', admin)).json;
+  ok('AutoRev: reversal is Draft awaiting maker-checker (GL-05) — GL unchanged', (pendAr.entries ?? []).some((e: any) => e.entry_no === arRev?.entry_no) && near(await tbDebit('5720'), beforeAr5720 + 700), `pending has=${(pendAr.entries ?? []).some((e: any) => e.entry_no === arRev?.entry_no)}`);
+  const revAppr = await inj('POST', `/api/ledger/journal/${arRev?.entry_no}/approve`, mgr);
+  ok('AutoRev: approved reversal nets the accrual back out (flipped lines; gross debit kept)', revAppr.status === 200 && near(await tbDebit('5720'), beforeAr5720 + 700) && near(await tbBalanceOf('5720'), beforeArBal5720), `st=${revAppr.status} bal=${await tbBalanceOf('5720')}`);
+  const runC = await inj('POST', '/api/ledger/recurring/run', admin);
+  ok('AutoRev: re-run posts no second reversal (idempotent source_ref)', (runC.json?.reversals ?? []).length === 0 && runC.json?.posted === 0, `rev=${(runC.json?.reversals ?? []).length} posted=${runC.json?.posted}`);
+
   const tbCredit2 = async (code: string) => {
     const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
     const row = (tb.rows ?? []).find((r: any) => r.account_code === code);

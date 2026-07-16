@@ -149,6 +149,8 @@ export const recurringJournals = pgTable(
     currency: text('currency').default('THB'),
     lines: jsonb('lines').notNull(), // [{ account_code, debit?, credit?, memo?, cost_center? }]
     active: text('active').default('true'),
+    // 0419 (docs/50 Wave 1 B2) — auto-reverse the posted accrual in the next business month (monthly only).
+    autoReverse: text('auto_reverse').default('false'),
     nextRunDate: date('next_run_date'),
     lastRunDate: date('last_run_date'),
     lastEntryNo: text('last_entry_no'),
