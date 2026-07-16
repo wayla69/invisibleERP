@@ -433,6 +433,12 @@ When the material is **already in the warehouse**, staff reserve it for the proj
 - **Issue to the project** — `POST /api/reservations/{id}/issue` moves the reserved stock **out of inventory
   and into the project's cost (WIP)** at its stock cost (Dr project WIP 1260 / Cr Inventory 1200), and books
   it against the BoQ line. **Release** (`…/{id}/release`) frees a reservation you no longer need.
+- **Stale holds don't linger (A2).** A reservation left **held** too long blocks everyone else's
+  availability, so the **action center** lists holds older than the stale window (**การจองสต๊อกค้างเกิน…วัน**,
+  linking to the project's จองสต๊อก tab), and the schedulable job **ปล่อยการจองสต๊อกที่ค้างเกินกำหนด**
+  (`reservation_stale_release`; or manually `POST /api/reservations/expire-stale?max_age_days=30`)
+  releases them in bulk — the stock simply returns to the pool (nothing is issued or posted), and
+  running it again does nothing. Consume or release your holds deliberately before the sweep does.
 
 ## Site cash on the project — advances & reimbursements (docs/32, M4)
 Cash spent at site can be booked **against the project** so it shows up in the project's cost:
@@ -484,6 +490,7 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.36 | 2026-07-16 | **A2 — reservation aging + auto-release sweep (docs/50 Wave 1).** The จองสต๊อก guide gains the stale-hold hygiene note: aging holds surface on the action center (`reservation_stale`) and the schedulable `reservation_stale_release` job (or `POST /api/reservations/expire-stale`) bulk-releases holds past the TTL (default 30 days) — release-only, idempotent. UAT-O2C-498..501. |
 | 2.35 | 2026-07-15 | **CRM-18 — renewals from delivered projects (CRM↔PPM back-flow).** The portfolio page gains a **ต่ออายุจากโครงการที่ส่งมอบ (Renewals from delivered projects)** panel: projects that have passed their final phase gate to *closed* are listed with their CRM account and a **gap** badge when no renewal has been raised. **Raise renewal** creates a renewal opportunity for the account (one per project) that flows into the CRM renewal pipeline — so delivered-project business gets a renewal motion instead of silently lapsing. Detective — nothing posts to the GL and no project is changed. |
 | 2.34 | 2026-07-14 | **PROJ-27 — program benefits realization.** The program page gains a **การวัดผลประโยชน์ของโปรแกรม (benefits realization)** panel: declare a program's expected benefits (baseline/target/date/owner, financial or non-financial), log actuals over time (append-only), watch each benefit's realized % + health (met / on track / at risk / overdue shortfall) and a program roll-up. Signing a benefit off as realized/not-realized is two-person — a **different user than the declarer** must confirm — so realization can't be self-certified and benefits leakage is surfaced. |
 | 2.33 | 2026-07-14 | **PROJ-26 — project phase-gate governance.** The project workspace gains a **เกตตรวจเฟสโครงการ (phase gates)** panel: a phase-ladder strip (concept→planning→execution→closeout→closed), a gate history, submit-a-gate to the next phase with a readiness note, and GO/HOLD/KILL on a pending gate. A gate must be decided by a **different user than the submitter**, only advances the project forward, and a GO is what moves the project into the next phase — a segregated stage-gate control over project continuation, fully auditable. |

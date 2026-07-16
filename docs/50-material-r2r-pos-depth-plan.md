@@ -83,7 +83,11 @@ path* (`issueToProject` has no inverse), so returns are done as ad-hoc adjustmen
 - Harness: extend `tools/cutover/src/projects.ts` §9f — issue → partial return → WIP/stock/commitment all
   reconcile; over-return rejected; idempotent replay.
 
-### A2 — Reservation aging + auto-release sweep · Effort **S** · quick win
+### A2 — Reservation aging + auto-release sweep · Effort **S** · quick win · **✅ DELIVERED (2026-07-16)**
+> Delivered: `reservations.service.ts` `expireStale` (release-only, idempotent; TTL default 30d) +
+> `POST /api/reservations/expire-stale`; scheduler job `reservation_stale_release` via the new
+> `reservations/reservations-bi-reports.ts` provider; `reservation_stale` action-center exception.
+> ToE `projects` 330→336; PN-16 §7(27) rev 0.56; manual 14 rev 2.36; UAT-O2C-498..501.
 **Goal:** stale `held` reservations silently starve other projects' availability.
 - `reservations.service.ts` `expireStale(tenantId, maxAgeDays)` releasing holds past a per-tenant TTL
   (default 30d, `receiving_settings`-style config); ride the BI scheduler as an idempotent action job

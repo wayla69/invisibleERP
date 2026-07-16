@@ -116,6 +116,28 @@ export class ReservationsService {
     return { reservation_id: Number(reservationId), status: 'consumed', ...move };
   }
 
+  // A2 (docs/50 Wave 1) — stale-hold sweep. A reservation parked 'held' forever silently starves every
+  // other project's available-to-issue (available = on_hand − Σheld), so holds older than max_age_days
+  // are RELEASED in bulk (stock returns to the pool; nothing is issued or posted — releasing is the
+  // no-GL, no-stock-movement path, so the sweep is safe to automate). Idempotent: released rows leave
+  // the 'held' set, so a re-run scans nothing new. Runs manually (POST /api/reservations/expire-stale)
+  // or scheduled as the `reservation_stale_release` action job (reservations-bi-reports.ts); the
+  // projects action center surfaces aging holds BEFORE the sweep reaps them (kind `reservation_stale`).
+  async expireStale(user: JwtUser, maxAgeDays = 30) {
+    const days = Number.isFinite(Number(maxAgeDays)) && Number(maxAgeDays) > 0 ? Math.floor(Number(maxAgeDays)) : 30;
+    const cutoff = new Date(Date.now() - days * 86400_000);
+    const conds = [eq(stockReservations.status, 'held'), sql`${stockReservations.createdAt} < ${cutoff}`];
+    if (user.tenantId != null) conds.push(eq(stockReservations.tenantId, user.tenantId));
+    const stale = await this.db.select().from(stockReservations).where(and(...conds));
+    if (!stale.length) return { max_age_days: days, scanned: 0, released: 0, reservations: [] };
+    await this.db.update(stockReservations).set({ status: 'released', updatedAt: new Date() })
+      .where(inArray(stockReservations.id, stale.map((r: any) => Number(r.id))));
+    return {
+      max_age_days: days, scanned: stale.length, released: stale.length,
+      reservations: stale.map((r: any) => ({ id: Number(r.id), item_id: r.itemId, location_id: r.locationId, project_id: Number(r.projectId), qty: n(r.qtyReserved), created_at: r.createdAt })),
+    };
+  }
+
   async listForProject(code: string) {
     const p = await this.projectRow(code);
     const rows = await this.db.select().from(stockReservations).where(eq(stockReservations.projectId, Number(p.id))).orderBy(desc(stockReservations.id));

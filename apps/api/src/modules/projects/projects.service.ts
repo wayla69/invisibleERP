@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar, stockReservations } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -607,6 +607,16 @@ export class ProjectsService {
       const pid = Number(m.projectId); if (!ids.has(pid)) continue;
       const code = codeById.get(pid) ?? null;
       push('pmr_over_budget', 'high', pid, code, `ใบขอเบิกวัสดุเกินงบรออนุมัติ (${m.pmrNo})`, `Over-budget material requisition awaiting approval (${m.pmrNo})`, m.pmrNo, 'boq', { pmr_no: m.pmrNo, requested_by: m.requestedBy, over_amount: n(m.overAmount) });
+    }
+
+    // Aging stock reservations still 'held' past the stale window (docs/50 Wave 1 A2) — surfaced BEFORE
+    // the scheduled `reservation_stale_release` sweep reaps them, so a planner consumes or releases deliberately.
+    const resRows = await db.select().from(stockReservations)
+      .where(and(eq(stockReservations.status, 'held'), sql`${stockReservations.createdAt} < ${new Date(Date.now() - staleDays * 86400_000)}`));
+    for (const rr of resRows) {
+      const pid = Number(rr.projectId); if (!ids.has(pid)) continue;
+      const code = codeById.get(pid) ?? null;
+      push('reservation_stale', 'low', pid, code, `การจองสต๊อกค้างเกิน ${staleDays} วัน (${rr.itemId} × ${n(rr.qtyReserved)})`, `Stock reservation held longer than ${staleDays}d (${rr.itemId} × ${n(rr.qtyReserved)})`, String(rr.id), 'reservations', { reservation_id: Number(rr.id), item_id: rr.itemId, qty: n(rr.qtyReserved), created_at: rr.createdAt });
     }
 
     // Pending project timesheets awaiting independent approval (maker-checker labor, PROJ-04).

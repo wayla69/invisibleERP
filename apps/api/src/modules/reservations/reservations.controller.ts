@@ -25,6 +25,14 @@ export class ReservationsController {
     return this.svc.reserve(b, u);
   }
 
+  // A2 (docs/50 Wave 1): release every hold older than max_age_days (default 30) — manual trigger for the
+  // scheduled `reservation_stale_release` action job. Planner/warehouse duty (same set that can release).
+  @Post('expire-stale')
+  @Permissions('wh_custody', 'warehouse', 'procurement', 'planner')
+  expireStale(@Query('max_age_days') maxAgeDays: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.expireStale(u, maxAgeDays != null ? Number(maxAgeDays) : 30);
+  }
+
   // Available-to-issue for an item+location = on_hand − Σ(held). Static 'available' segment.
   @Get('available')
   @Permissions('wh_custody', 'warehouse', 'procurement', 'planner', 'exec')

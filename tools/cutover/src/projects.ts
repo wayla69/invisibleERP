@@ -307,6 +307,29 @@ async function main() {
   const availRel = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
   ok('Released reservation restores availability → available 70', near(availRel.json.available, 70), JSON.stringify(availRel.json));
 
+  // ── 9f-bis. A2 stale-hold sweep (docs/50 Wave 1): aging holds surface on the action center, then the
+  //    sweep releases them; fresh holds untouched; re-run idempotent ──
+  const resOld = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 15 });
+  const resNew = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 5 });
+  await pg.query(`UPDATE stock_reservations SET created_at = now() - interval '45 days' WHERE id = ${Number(resOld.json.reservation_id)}`);
+  const acRes = await inj('GET', '/api/projects/action-center', admin);
+  ok('A2: aging held reservation surfaces on the action center (reservation_stale)',
+    (acRes.json.items ?? []).some((i: any) => i.kind === 'reservation_stale' && Number(i.meta?.reservation_id) === Number(resOld.json.reservation_id)),
+    JSON.stringify((acRes.json.items ?? []).filter((i: any) => i.kind === 'reservation_stale').slice(0, 2)));
+  const availPreSweep = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A2: both holds reduce availability before the sweep (70−20=50)', near(availPreSweep.json.available, 50), JSON.stringify(availPreSweep.json));
+  const sweep1 = await inj('POST', '/api/reservations/expire-stale?max_age_days=30', admin);
+  ok('A2: sweep releases ONLY the stale hold (released=1, id matches)',
+    sweep1.status < 300 && sweep1.json.released === 1 && Number(sweep1.json.reservations?.[0]?.id) === Number(resOld.json.reservation_id),
+    JSON.stringify(sweep1.json).slice(0, 120));
+  const availPostSweep = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A2: released stale hold restores availability (fresh hold still held → 65)', near(availPostSweep.json.available, 65), JSON.stringify(availPostSweep.json));
+  const sweep2 = await inj('POST', '/api/reservations/expire-stale?max_age_days=30', admin);
+  ok('A2: re-run is a no-op (released=0)', sweep2.json.released === 0 && sweep2.json.scanned === 0, JSON.stringify(sweep2.json));
+  const acResAfter = await inj('GET', '/api/projects/action-center', admin);
+  ok('A2: released hold leaves the action center', !(acResAfter.json.items ?? []).some((i: any) => i.kind === 'reservation_stale' && Number(i.meta?.reservation_id) === Number(resOld.json.reservation_id)), '');
+  await inj('POST', `/api/reservations/${resNew.json.reservation_id}/release`, admin); // restore availability for later sections
+
   // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
   const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
   ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));
