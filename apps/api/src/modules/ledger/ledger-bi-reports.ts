@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { BiReportGenerator, BiReportSource } from '../bi/report-registry';
 import { LedgerService } from './ledger.service';
 import { FxRevalService } from './fx-reval.service';
+import { LedgerJeAnomalyService } from './ledger-je-anomaly.service';
 import { ymd } from '../../database/queries';
 
 // B3 (docs/50 Wave 2): the business month the period-end jobs target by default — the JUST-ENDED month
@@ -18,7 +19,7 @@ export const prevBizMonth = (): string => {
 // (GL-08 recurring, GL-09 prepaid, GL-23 allocations) ride the facade's delegators.
 @Injectable()
 export class LedgerBiReports implements BiReportSource {
-  constructor(private readonly ledger: LedgerService, private readonly fxReval: FxRevalService) {}
+  constructor(private readonly ledger: LedgerService, private readonly fxReval: FxRevalService, private readonly jeAnomaly: LedgerJeAnomalyService) {}
 
   biReports(): BiReportGenerator[] {
     return [
@@ -59,6 +60,20 @@ export class LedgerBiReports implements BiReportSource {
             if (code === 'ALREADY_POSTED') return { data: { period, outcome: 'already_posted' }, summary: `FX revaluation ${period}: already posted — no-op`, summaryTh: `งวด ${period} โพสต์แล้ว — ไม่มีการเปลี่ยนแปลง` };
             throw e;
           }
+        },
+      },
+      {
+        // B5 (docs/50 Wave 5, GL-28) — the scheduled JE-exception sweep. Idempotent: the register keys
+        // one row per tenant × rule × entry, so a re-run inserts nothing new; dismissed rows stay dismissed.
+        type: 'je_exceptions',
+        generate: async (f, user) => {
+          const days = typeof f?.days === 'number' && f.days > 0 ? f.days : undefined;
+          const r = await this.jeAnomaly.scan(user, { days });
+          return {
+            data: r,
+            summary: `JE exceptions: ${r.findings} finding(s) over ${r.scanned} entries (${r.new} new; ${r.open} open) — ${Object.entries(r.by_rule).map(([k, v]) => `${k}:${v}`).join(', ') || 'clean'}`,
+            summaryTh: `ตรวจจับรายการบัญชีผิดปกติ: พบ ${r.findings} รายการจาก ${r.scanned} JE (ใหม่ ${r.new} · คงค้าง ${r.open})`,
+          };
         },
       },
     ];

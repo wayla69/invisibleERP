@@ -49,6 +49,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // docs/50 Wave 2 B3 — period-end STAGING jobs (auto-Draft; posting stays maker-checker).
   // filters: { period? 'YYYY-MM' } (default = the just-ended business month); consolidation_run also { group_id? }.
   gl_fx_reval_run: { label: 'เตรียมปรับปรุงอัตราแลกเปลี่ยนสิ้นงวด (GL-18)', labelEn: 'Stage period-end FX revaluation' },
+  je_exceptions: { label: 'ตรวจจับรายการบัญชีผิดปกติ (GL-28)', labelEn: 'JE anomaly / exception sweep' },
   consolidation_run: { label: 'เตรียมงบการเงินรวมสิ้นงวด (CON-01)', labelEn: 'Stage period-end consolidation' },
   // Asset audit results (FA-11): recent audits + their found/missing/misplaced/unknown tallies + the
   // outstanding custody-change requests awaiting approval. Read-only aggregate.
