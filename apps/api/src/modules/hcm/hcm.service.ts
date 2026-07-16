@@ -8,6 +8,7 @@ import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { HcmLeaveService } from './hcm-leave.service';
+import { TimeClockService } from '../pos/labor/timeclock.service';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -25,7 +26,25 @@ export class HcmService {
     // HR-2 (docs/42) — leave accrual/balances; enforces the HR-02 entitlement gate on requestLeave.
     // @Optional so a partial harness (no HcmLeaveService) still constructs — the gate is then skipped.
     @Optional() private readonly leave?: HcmLeaveService,
+    // POS time-clock team roll-up (read-only contract). @Optional so a partial harness still constructs;
+    // the team-attendance route degrades to an empty read when the POS labor module isn't wired.
+    @Optional() private readonly timeClock?: TimeClockService,
   ) {}
+
+  // Team attendance for the HR/manager view — the whole team's clock-in/out rolled up from the POS
+  // time-clock (docs/42 HCM depth). POS labor owns the punches; HCM reads via its contract and enriches
+  // emp_code → name from the HR-owned employees table (single-table lookup; RLS scopes the tenant).
+  async teamAttendance(user: JwtUser, opts?: { date?: string }) {
+    if (!this.timeClock) return { employees: [], summary: { employees: 0, currently_clocked_in: 0, total_hours: 0 }, source: 'pos_timeclock', unavailable: true };
+    const a = await this.timeClock.teamAttendance({ date: opts?.date });
+    const codes = a.employees.map((e) => e.emp_code).filter((c): c is string => !!c && c !== '(unknown)');
+    const names = new Map<string, string>();
+    if (codes.length) {
+      const rows = await this.db.select({ code: employees.empCode, name: employees.name }).from(employees).where(inArray(employees.empCode, codes));
+      for (const r of rows) { if (r.code) names.set(r.code, r.name ?? ''); }
+    }
+    return { employees: a.employees.map((e) => ({ ...e, name: names.get(e.emp_code) ?? null })), summary: a.summary, source: 'pos_timeclock' };
+  }
 
   private async emp(code: string) {
     const [e] = await this.db.select().from(employees).where(eq(employees.empCode, code)).limit(1);

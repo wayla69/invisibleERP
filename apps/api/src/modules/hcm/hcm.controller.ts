@@ -21,6 +21,10 @@ export class HcmController {
   @Get('timesheets')
   listTimesheets(@Query('emp_code') empCode: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listTimesheets(empCode, u); }
 
+  // Team attendance rolled up from the POS time-clock (read-only; class perms exec/users/creditors + hcm suite).
+  @Get('attendance')
+  teamAttendance(@Query('date') date: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.teamAttendance(u, { date }); }
+
   // Approve a timesheet (maker-checker → posts project labor if it targets a project) — PROJ-04.
   @Post('timesheets/:id/approve')
   approveTimesheet(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveTimesheet(Number(id), u, b?.self_approval_reason); }

@@ -158,6 +158,26 @@ Leave balances are earned through an **accrual engine** rather than being fixed:
 
 ---
 
+## 4c. Team attendance (HCM · from the POS time-clock)
+
+**Route:** `/hcm` → tab **เวลาเข้า-ออกทีม** (Team attendance).
+**Required role:** `hr` / `hr_admin` / `exec` (the HCM screen's standard gate).
+
+For branches that clock staff in and out on the **POS time-clock**, HR now sees the whole team's
+attendance without opening the POS back-office:
+
+1. The summary tiles show **how many employees** have punches, **how many are clocked in right now**, and
+   the **team's total hours**.
+2. The table rolls the punches up **per employee** — name and code, number of sessions, total hours, the
+   **last clock-in**, and a live **clocked-in / clocked-out** badge.
+3. Use the **date** filter to narrow the roll-up to a single business day (Asia/Bangkok).
+
+This is a **read-only** view; clocking in and out still happens at the POS time-clock. The employee's own
+version of this is in ESS (`/ess` → **เวลาเข้า-ออก**, see §5.5). The data is sourced live from the POS
+time-clock; if a branch does not use it, the tab is simply empty.
+
+---
+
 ## 5. Employee self-service (ESS)
 
 This section is for **every employee** (not just HR). The self-service screen lets
@@ -169,7 +189,7 @@ another employee's data.
 workspaces).
 
 Tabs: **ข้อมูลของฉัน** (My info) · **ขอลางาน** (Request leave) · **เบิกค่าใช้จ่าย**
-(Claim expense) · **ลงเวลา** (Timesheets).
+(Claim expense) · **ลงเวลา** (Timesheets) · **เวลาเข้า-ออก** (Attendance).
 
 ### 5.1 View my info, leave balances and payslips
 1. Open **ESS** (`/ess`) → **ข้อมูลของฉัน**.
@@ -220,6 +240,24 @@ GL impact.
 > **Control:** You **cannot approve your own claim** — the system blocks it with
 > `SOD_SELF_APPROVAL` (segregation of duties, R07). The approver must differ from
 > the claimant.
+
+### 5.5 My attendance (from the POS time-clock)
+
+If your branch uses the **POS time-clock** to clock staff in and out, your own
+clock-in/out history now shows up inside self-service — no need to ask a supervisor.
+
+1. Open **ESS** (`/ess`) → **เวลาเข้า-ออก** (Attendance).
+2. The summary tiles show your **total hours**, **days worked**, and whether you are
+   **currently clocked in**. The table lists each session with its date, clock-in and
+   clock-out time, hours, and how the punch was made (PIN / QR / etc.).
+
+You only ever see **your own** punches — the screen resolves your employee record
+from your login, so a colleague's attendance is never shown. This is a **read-only**
+view; clocking in and out still happens at the POS time-clock as before.
+
+> **Note:** The data is sourced live from the POS time-clock (the same records the
+> store register captures). If your branch does not use the time-clock, the tab is
+> simply empty.
 
 ---
 

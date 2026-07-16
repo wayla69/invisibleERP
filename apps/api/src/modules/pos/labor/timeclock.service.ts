@@ -108,6 +108,67 @@ export class TimeClockService {
     return { entries: rows.map((r: any) => ({ id: r.id, emp_code: r.empCode, clock_in: r.clockIn, clock_out: r.clockOut, break_minutes: r.breakMinutes, hours: n(r.hours), clock_in_method: r.clockInMethod, geofence_pass: r.geofencePass, note: r.note })), total_hours: totalHours, open_count: open.length, count: rows.length };
   }
 
+  // Loosely-coupled read contract for the HR modules (ESS/HCM depth): ONE employee's own attendance from the
+  // POS time-clock, so an employee sees their real clock-in/out inside self-service. Read-only; RLS scopes to
+  // the caller's tenant. Ownership of the timeClock table stays with POS labor — HR calls this API, never the
+  // table directly (Bounded-Context + Loose-Coupling gatekeeper, CLAUDE.md §§1–3).
+  async employeeAttendance(employeeId: number, opts?: { from?: string; to?: string; limit?: number }) {
+    const db = this.db;
+    const limit = Math.min(Math.max(opts?.limit ?? 60, 1), 200);
+    const rows = await db.select().from(timeClock)
+      .where(eq(timeClock.employeeId, employeeId))
+      .orderBy(desc(timeClock.id)).limit(limit);
+    // Optional business-day window (Asia/Bangkok dates via ymd() — matches the rest of the codebase).
+    const inWindow = rows.filter((r: any) => {
+      const d = r.clockIn ? ymd(new Date(r.clockIn)) : null;
+      if (opts?.from && (!d || d < opts.from)) return false;
+      if (opts?.to && (!d || d > opts.to)) return false;
+      return true;
+    });
+    const closed = inWindow.filter((r: any) => r.status === 'Closed');
+    const totalHours = round2(closed.reduce((a: number, r: any) => a + n(r.hours), 0));
+    const daysWorked = new Set(closed.map((r: any) => (r.clockIn ? ymd(new Date(r.clockIn)) : null)).filter(Boolean)).size;
+    const openRow = inWindow.find((r: any) => r.status === 'Open') ?? null;
+    return {
+      entries: inWindow.map((r: any) => ({
+        id: Number(r.id), date: r.clockIn ? ymd(new Date(r.clockIn)) : null,
+        clock_in: r.clockIn, clock_out: r.clockOut, break_minutes: r.breakMinutes, hours: n(r.hours),
+        status: r.status, clock_in_method: r.clockInMethod, geofence_pass: r.geofencePass, note: r.note,
+      })),
+      summary: { total_hours: totalHours, days_worked: daysWorked, sessions: closed.length, currently_clocked_in: !!openRow },
+    };
+  }
+
+  // Team roll-up of the POS time-clock for the HR/manager view (docs/42 HCM depth): attendance grouped by
+  // employee across the tenant (RLS-scoped). Keyed by the DENORMALIZED emp_code on the punch — no join to the
+  // HR-owned employees table here (the HCM caller enriches names from its own table). Read-only.
+  async teamAttendance(opts?: { date?: string; limit?: number }) {
+    const db = this.db;
+    const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 2000);
+    const rows = await db.select().from(timeClock).orderBy(desc(timeClock.id)).limit(limit);
+    const day = opts?.date ?? null;
+    const byEmp = new Map<string, { emp_code: string; total_hours: number; sessions: number; currently_clocked_in: boolean; last_clock_in: any }>();
+    for (const r of rows) {
+      const code = r.empCode ?? '(unknown)';
+      const d = r.clockIn ? ymd(new Date(r.clockIn)) : null;
+      if (day && d !== day) continue;
+      let e = byEmp.get(code);
+      if (!e) { e = { emp_code: code, total_hours: 0, sessions: 0, currently_clocked_in: false, last_clock_in: null }; byEmp.set(code, e); }
+      if (r.status === 'Closed') { e.total_hours = round2(e.total_hours + n(r.hours)); e.sessions += 1; }
+      if (r.status === 'Open') e.currently_clocked_in = true;
+      if (!e.last_clock_in || (r.clockIn && new Date(r.clockIn) > new Date(e.last_clock_in))) e.last_clock_in = r.clockIn;
+    }
+    const list = [...byEmp.values()].sort((a, b) => b.total_hours - a.total_hours);
+    return {
+      employees: list,
+      summary: {
+        employees: list.length,
+        currently_clocked_in: list.filter((e) => e.currently_clocked_in).length,
+        total_hours: round2(list.reduce((a, e) => a + e.total_hours, 0)),
+      },
+    };
+  }
+
   // Sales-per-labor-hour for a day = Σ sales total / Σ closed labor hours that day.
   async productivity(date?: string) {
     const db = this.db;
