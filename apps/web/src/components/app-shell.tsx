@@ -591,6 +591,10 @@ export function AppShell({
   const isGod = me.data?.is_platform_owner ?? false;
   // SME edition (docs/49): hide the group title-keys the tenant was stamped with at provisioning.
   const smeHidden = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_hidden_nav_groups ?? [] : []), [me.data]);
+  // B1 (docs/50): industry-derived default-OPEN group/subgroup keys stamped at provisioning. When present,
+  // listed keys start open and every other subgroup starts folded; a user's own navFold toggle always wins,
+  // and the domain/subgroup holding the active route still opens. Empty set = enterprise behaviour.
+  const smeOpen = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_open_nav_groups ?? [] : []), [me.data]);
   const groups = React.useMemo(() => {
     const filtered = filterByPerm(wsNav).filter((g) => !smeHidden.has(g.title));
     const base = filtered.length ? filtered : wsNav; // fall back while loading
@@ -824,7 +828,8 @@ export function AppShell({
             // Only-active-open default: the domain holding the current route opens on load; an explicit user
             // toggle (navFold[group.title]) persists and overrides. Count feeds the collapsed badge.
             const groupActive = allGroupItems(group).some((it) => isActive(it.href));
-            const open = navFold[group.title] ?? groupActive;
+            const groupDefault = groupActive || smeOpen.has(group.title);
+            const open = navFold[group.title] ?? groupDefault;
             const count = allGroupItems(group).length;
             return (
               <NavGroupSection
@@ -833,19 +838,23 @@ export function AppShell({
                 count={count}
                 open={open}
                 active={groupActive}
-                onToggle={() => toggleFold(group.title, groupActive)}
+                onToggle={() => toggleFold(group.title, groupDefault)}
               >
                 {group.items && group.items.length > 0 && (
                   <SidebarMenu>{orderItems(group.items, itemOrder?.[group.title]).map(renderItem)}</SidebarMenu>
                 )}
                 {group.subgroups?.map((sub) => {
-                  const subOpen = navFold[sub.title] ?? sub.defaultOpen ?? true;
+                  // B1: under an SME industry profile subgroups default FOLDED unless listed (or active);
+                  // without a profile the pre-B1 default (defaultOpen ?? true) is unchanged.
+                  const subActive = sub.items.some((it) => isActive(it.href));
+                  const subDefault = smeOpen.size > 0 ? smeOpen.has(sub.title) || subActive : (sub.defaultOpen ?? true);
+                  const subOpen = navFold[sub.title] ?? subDefault;
                   return (
                     <NavSubSection
                       key={sub.title}
                       title={t(sub.title)}
                       open={subOpen}
-                      onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
+                      onToggle={() => toggleFold(sub.title, subDefault)}
                     >
                       <SidebarMenu>{orderItems(sub.items, itemOrder?.[sub.title]).map(renderItem)}</SidebarMenu>
                     </NavSubSection>

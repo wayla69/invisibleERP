@@ -174,6 +174,51 @@ async function main() {
   ok('GET /api/admin/tenants/:id returns company detail (subscription + counts + activity)',
     detail.status === 200 && detail.json.id === Number(created.json.tenant_id) && !!detail.json.subscription && typeof detail.json.counts?.users === 'number' && Array.isArray(detail.json.recent_activity),
     `st=${detail.status} plan=${detail.json.subscription?.plan_code} users=${detail.json.counts?.users}`);
+  // ── 3b4. B1 (docs/50 Track B): SME provisioning folds the sidebar from the company's INDUSTRY —
+  //         the industry nav profile (@ierp/shared nav-profiles) is stamped into tenants.sme_prefs at
+  //         creation and surfaced on /api/auth/me as sme_hidden_nav_groups + sme_open_nav_groups. ──
+  const b1Resto = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ครัวคนเดียว', tenant_code: 'b1resto', admin_username: 'b1_resto_owner', admin_password: 'resto12345',
+    email: 'b1r@x.co', control_profile: 'sme', industry: 'restaurant',
+  });
+  ok('B1: god provisions an SME restaurant company (201, control_profile=sme, industry=restaurant)',
+    b1Resto.status === 201 && b1Resto.json.control_profile === 'sme' && b1Resto.json.industry === 'restaurant',
+    `${b1Resto.status} cp=${b1Resto.json.control_profile} ind=${b1Resto.json.industry}`);
+  const b1RestoTok = (await login('b1_resto_owner', 'resto12345')).json.token;
+  const b1RestoMe = await inj('GET', '/api/auth/me', b1RestoTok);
+  ok('B1: restaurant SME /api/auth/me carries the industry fold profile (hidden ⊇ projects; open ⊇ POS frontline)',
+    b1RestoMe.status === 200
+      && (b1RestoMe.json.sme_hidden_nav_groups ?? []).includes('nav.group.projects')
+      && (b1RestoMe.json.sme_open_nav_groups ?? []).includes('nav.group.pos_sales')
+      && (b1RestoMe.json.sme_open_nav_groups ?? []).includes('nav.sub.pos_frontline'),
+    JSON.stringify({ hidden: b1RestoMe.json.sme_hidden_nav_groups, open: b1RestoMe.json.sme_open_nav_groups }));
+  // A later god sme-prefs edit owns hidden_nav_groups but must PRESERVE the stamped industry open profile.
+  const b1PrefsEdit = await inj('POST', `/api/admin/tenants/${b1Resto.json.tenant_id}/sme-prefs`, owner, { hidden_nav_groups: ['nav.group.hr'] });
+  const b1RestoMe2 = await inj('GET', '/api/auth/me', b1RestoTok);
+  ok('B1: a god sme-prefs edit replaces hidden_nav_groups but preserves the stamped open_nav_groups',
+    b1PrefsEdit.status === 200
+      && (b1RestoMe2.json.sme_hidden_nav_groups ?? []).includes('nav.group.hr')
+      && !(b1RestoMe2.json.sme_hidden_nav_groups ?? []).includes('nav.group.projects')
+      && (b1RestoMe2.json.sme_open_nav_groups ?? []).includes('nav.sub.pos_frontline'),
+    JSON.stringify({ hidden: b1RestoMe2.json.sme_hidden_nav_groups, open: b1RestoMe2.json.sme_open_nav_groups }));
+  // A different industry gets a different fold (distribution: POS domains hidden, procurement open).
+  const b1Dist = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ค้าส่งคนเดียว', tenant_code: 'b1dist', admin_username: 'b1_dist_owner', admin_password: 'dist12345',
+    email: 'b1d@x.co', control_profile: 'sme', industry: 'distribution',
+  });
+  const b1DistMe = await inj('GET', '/api/auth/me', (await login('b1_dist_owner', 'dist12345')).json.token);
+  ok('B1: distribution SME gets its own industry fold (hidden ⊇ pos_sales; open ⊇ procurement)',
+    b1Dist.status === 201
+      && (b1DistMe.json.sme_hidden_nav_groups ?? []).includes('nav.group.pos_sales')
+      && (b1DistMe.json.sme_open_nav_groups ?? []).includes('nav.group.procurement'),
+    JSON.stringify({ hidden: b1DistMe.json.sme_hidden_nav_groups, open: b1DistMe.json.sme_open_nav_groups }));
+  // Enterprise regression: a non-SME company's /me carries NO nav profile fields at all.
+  const b1EntMe = await inj('GET', '/api/auth/me', platLogin.json.token);
+  ok('B1: an ENTERPRISE company /api/auth/me carries no SME nav profile (behaviour unchanged)',
+    b1EntMe.status === 200 && b1EntMe.json.control_profile !== 'sme'
+      && b1EntMe.json.sme_open_nav_groups === undefined && b1EntMe.json.sme_hidden_nav_groups === undefined,
+    JSON.stringify({ cp: b1EntMe.json.control_profile, open: b1EntMe.json.sme_open_nav_groups }));
+
   // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
   const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });
   ok('POST /api/admin/tenants/:id/extend-trial extends the trial (status Trialing, future end)',
