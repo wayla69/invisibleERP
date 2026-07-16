@@ -433,6 +433,29 @@ When the material is **already in the warehouse**, staff reserve it for the proj
 - **Issue to the project** — `POST /api/reservations/{id}/issue` moves the reserved stock **out of inventory
   and into the project's cost (WIP)** at its stock cost (Dr project WIP 1260 / Cr Inventory 1200), and books
   it against the BoQ line. **Release** (`…/{id}/release`) frees a reservation you no longer need.
+- **Returning unused material (A1, control INV-19).** Material you issued but didn't use goes back
+  through the **คืนวัสดุ** action on the issued (consumed) row — never as a plain stock adjustment.
+  Enter the **quantity** (capped at what was issued, counting earlier returns — over-returning is
+  rejected) and a **mandatory reason**. The stock returns at the **original issue cost** and the
+  project's WIP and BoQ budget are relieved by the same value. A return worth **฿1,000 or more** waits
+  for a **different person** to approve it in the **ใบคืนวัสดุ** table below (you can't approve your own
+  — the system blocks it); smaller returns post immediately.
+- **Site scrap of issued material (A5).** Material that was issued and then **damaged or lost on site**
+  is logged through the **บันทึกของเสียหน้างาน** action on the issued (consumed) row — not a return (nothing
+  comes back to the shelf) and not a plain waste entry (the stock already left the warehouse at issue).
+  Enter the **quantity** and the **unit cost from the issue document** (the cost is required — a costless
+  entry cannot relieve the project's cost). The system posts the loss (Dr ค่าเศษซาก 5810 / Cr งานระหว่างทำ
+  1260 with the project stamped on the ledger lines), touches **no stock**, and refuses a scrap worth more
+  than what the project actually drew (net of returns and earlier scrap) — `WASTE_EXCEEDS_WIP` — so the
+  project's WIP can never go negative. The scrapped value then shows on the BoQ & งบวัสดุ tab: a **ของเสีย
+  หน้างาน** column per WBS node and in the **EVM แยกตามหมวด BoQ** table (with the headline **CPI วัสดุ**),
+  and in the project's governance status pack.
+- **Stale holds don't linger (A2).** A reservation left **held** too long blocks everyone else's
+  availability, so the **action center** lists holds older than the stale window (**การจองสต๊อกค้างเกิน…วัน**,
+  linking to the project's จองสต๊อก tab), and the schedulable job **ปล่อยการจองสต๊อกที่ค้างเกินกำหนด**
+  (`reservation_stale_release`; or manually `POST /api/reservations/expire-stale?max_age_days=30`)
+  releases them in bulk — the stock simply returns to the pool (nothing is issued or posted), and
+  running it again does nothing. Consume or release your holds deliberately before the sweep does.
 
 ## Site cash on the project — advances & reimbursements (docs/32, M4)
 Cash spent at site can be booked **against the project** so it shows up in the project's cost:
@@ -484,6 +507,11 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.40 | 2026-07-16 | **A5 — project-tagged site scrap + EVM by BoQ category (docs/50 Wave 5, extends INV-10/INV-15).** The จองสต๊อก guide gains **บันทึกของเสียหน้างาน** on issued rows (qty + the issue unit cost — required; scrap beyond what the project drew is rejected `WASTE_EXCEEDS_WIP`; posts Dr 5810 / Cr งานระหว่างทำ 1260, no stock movement). The BoQ & งบวัสดุ tab gains a **ของเสียหน้างาน** column per WBS node and the **EVM แยกตามหมวด BoQ** table (budget/committed/actual/wasted/EV + CPI per หมวด, headline **CPI วัสดุ**), also in the governance pack. UAT-O2C-517..521. |
+| 2.39 | 2026-07-16 | **A4 — BoQ takeoff import (docs/50 Wave 4).** The BoQ tab gains **นำเข้าจากไฟล์ (CSV)**: paste the estimator's takeoff (headers: item_no, description, category, uom, budget_qty, rate, wbs_code). Any invalid row rejects the whole file with a per-row report; unknown item codes import with a warning when a description identifies the line. Imports always land as a **draft** — the normal BoQ approval still applies. UAT-O2C-512..514. |
+| 2.38 | 2026-07-16 | **A3 — material control tower (docs/50 Wave 3).** The **BoQ & งบวัสดุ** tab gains two read-only tables: **งบวัสดุตามโหนด WBS** (budget / committed / issued / returned / remaining per WBS node — over-drawn nodes show red) and **กราฟเบิกวัสดุ แผน vs จริง** (monthly cumulative actual draw vs a linear plan; months ahead of plan flagged **เร็วกว่าแผน**). UAT-O2C-508..510. |
+| 2.37 | 2026-07-16 | **A1 — material return-to-stock (docs/50 Wave 2, new control INV-19).** The จองสต๊อก guide gains the คืนวัสดุ flow: return issued material against its reservation (qty ≤ issued, reason mandatory, original issue cost); returns ≥ ฿1,000 need a different approver (ใบคืนวัสดุ table with inline approve/reject). UAT-O2C-502..507. |
+| 2.36 | 2026-07-16 | **A2 — reservation aging + auto-release sweep (docs/50 Wave 1).** The จองสต๊อก guide gains the stale-hold hygiene note: aging holds surface on the action center (`reservation_stale`) and the schedulable `reservation_stale_release` job (or `POST /api/reservations/expire-stale`) bulk-releases holds past the TTL (default 30 days) — release-only, idempotent. UAT-O2C-498..501. |
 | 2.35 | 2026-07-15 | **CRM-18 — renewals from delivered projects (CRM↔PPM back-flow).** The portfolio page gains a **ต่ออายุจากโครงการที่ส่งมอบ (Renewals from delivered projects)** panel: projects that have passed their final phase gate to *closed* are listed with their CRM account and a **gap** badge when no renewal has been raised. **Raise renewal** creates a renewal opportunity for the account (one per project) that flows into the CRM renewal pipeline — so delivered-project business gets a renewal motion instead of silently lapsing. Detective — nothing posts to the GL and no project is changed. |
 | 2.34 | 2026-07-14 | **PROJ-27 — program benefits realization.** The program page gains a **การวัดผลประโยชน์ของโปรแกรม (benefits realization)** panel: declare a program's expected benefits (baseline/target/date/owner, financial or non-financial), log actuals over time (append-only), watch each benefit's realized % + health (met / on track / at risk / overdue shortfall) and a program roll-up. Signing a benefit off as realized/not-realized is two-person — a **different user than the declarer** must confirm — so realization can't be self-certified and benefits leakage is surfaced. |
 | 2.33 | 2026-07-14 | **PROJ-26 — project phase-gate governance.** The project workspace gains a **เกตตรวจเฟสโครงการ (phase gates)** panel: a phase-ladder strip (concept→planning→execution→closeout→closed), a gate history, submit-a-gate to the next phase with a readiness note, and GO/HOLD/KILL on a pending gate. A gate must be decided by a **different user than the submitter**, only advances the project forward, and a GO is what moves the project into the next phase — a segregated stage-gate control over project continuation, fully auditable. |

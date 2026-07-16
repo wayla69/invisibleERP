@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectChangeOrders, projectHealthSnapshots, projectBoq, projectMaterialRequisitions, crmOpportunities, customerMaster, timesheets, projectResources, resourceCalendar } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectChangeOrders, projectHealthSnapshots, projectBoq, projectMaterialRequisitions, crmOpportunities, customerMaster, timesheets, projectResources, resourceCalendar, stockReservations } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -12,6 +12,8 @@ import type { JwtUser } from '../../common/decorators';
 import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
+import { ProjectsMaterialService } from './projects-material.service';
+import { BoqImportService, type BoqImportInput } from './boq-import.service';
 import { ProjectsPortfolioService } from './projects-portfolio.service';
 import { ProjectsGateService } from './projects-gate.service';
 import { ProgramBenefitsService } from './program-benefits.service';
@@ -72,6 +74,8 @@ export class ProjectsService {
   private readonly resourcing: ProjectsResourcingService;
   private readonly wbs: ProjectsWbsService;
   private readonly evmSvc: ProjectsEvmService;
+  private readonly materialSvc: ProjectsMaterialService;
+  private readonly boqImportSvc: BoqImportService;
   private readonly portfolio: ProjectsPortfolioService;
   private readonly gates: ProjectsGateService;
   private readonly benefits: ProgramBenefitsService;
@@ -98,6 +102,11 @@ export class ProjectsService {
     this.resourcing = new ProjectsResourcingService(db, (code) => this.row(code));
     this.wbs = new ProjectsWbsService(db, (code) => this.row(code), (code, dto, user) => this.bill(code, dto, user));
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
+    // A3 (docs/50 Wave 3) — material control tower read models (ctor-body plain class, ratchet pattern).
+    // A5 (docs/50 Wave 5) — + the facade evm() port for the EVM-by-category lens.
+    this.materialSvc = new ProjectsMaterialService(db, (code) => this.row(code), this.commitments, (code) => this.evm(code));
+    // A4 (docs/50 Wave 4) — BoQ takeoff import (ctor-body plain class, ratchet pattern).
+    this.boqImportSvc = new BoqImportService(db, (code) => this.row(code), (code) => this.getBoq(code));
     this.portfolio = new ProjectsPortfolioService(db);
     this.gates = new ProjectsGateService(db, (code) => this.row(code));
     this.benefits = new ProgramBenefitsService(db);
@@ -357,6 +366,13 @@ export class ProjectsService {
   // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
   // ── docs/38 projects PR-4: EVM/schedule/programs/baselines/health live in ProjectsEvmService. ──
   async evm(code: string, asOf?: string) { return this.evmSvc.evm(code, asOf); }
+  // A3 (docs/50 Wave 3) — thin delegators; logic in projects-material.service.ts (ratchet).
+  async boqByWbs(code: string) { return this.materialSvc.boqByWbs(code); }
+  async materialDrawCurve(code: string) { return this.materialSvc.drawCurve(code); }
+  async evmByCategory(code: string) { return this.materialSvc.evmByCategory(code); } // A5 (docs/50 Wave 5)
+  // A4 (docs/50 Wave 4) — thin delegators; logic in boq-import.service.ts (ratchet).
+  async importBoq(code: string, input: BoqImportInput, user: JwtUser) { return this.boqImportSvc.importBoq(code, input, user); }
+  boqImportTemplate() { return this.boqImportSvc.template(); }
   // PPM-B2 (PROJ-22): manual bottom-up ETC entry + the EAC-scenario comparison (formulaic vs bottom-up).
   async submitEtc(code: string, dto: EtcDto, user: JwtUser) { return this.evmSvc.submitEtc(code, dto, user); }
   async eacScenarios(code: string) { return this.evmSvc.eacScenarios(code); }
@@ -624,6 +640,16 @@ export class ProjectsService {
       push('pmr_over_budget', 'high', pid, code, `ใบขอเบิกวัสดุเกินงบรออนุมัติ (${m.pmrNo})`, `Over-budget material requisition awaiting approval (${m.pmrNo})`, m.pmrNo, 'boq', { pmr_no: m.pmrNo, requested_by: m.requestedBy, over_amount: n(m.overAmount) });
     }
 
+    // Aging stock reservations still 'held' past the stale window (docs/50 Wave 1 A2) — surfaced BEFORE
+    // the scheduled `reservation_stale_release` sweep reaps them, so a planner consumes or releases deliberately.
+    const resRows = await db.select().from(stockReservations)
+      .where(and(eq(stockReservations.status, 'held'), sql`${stockReservations.createdAt} < ${new Date(Date.now() - staleDays * 86400_000)}`));
+    for (const rr of resRows) {
+      const pid = Number(rr.projectId); if (!ids.has(pid)) continue;
+      const code = codeById.get(pid) ?? null;
+      push('reservation_stale', 'low', pid, code, `การจองสต๊อกค้างเกิน ${staleDays} วัน (${rr.itemId} × ${n(rr.qtyReserved)})`, `Stock reservation held longer than ${staleDays}d (${rr.itemId} × ${n(rr.qtyReserved)})`, String(rr.id), 'reservations', { reservation_id: Number(rr.id), item_id: rr.itemId, qty: n(rr.qtyReserved), created_at: rr.createdAt });
+    }
+
     // Pending project timesheets awaiting independent approval (maker-checker labor, PROJ-04).
     const tsRows = await db.select().from(timesheets).where(eq(timesheets.status, 'Pending'));
     const tsByProject = new Map<number, number>();
@@ -802,11 +828,14 @@ export class ProjectsService {
     const risks = await this.listRisks(code);
     const ms = await this.listMilestones(code);
     const co = await this.listChangeOrders(code);
+    // A5 (docs/50 Wave 5) — the material lens: per-BoQ-category EVM incl. material CPI + wasted value.
+    const mat = await this.evmByCategory(code);
     return {
       project_code: code, name: detail.name, status: detail.status, customer_name: detail.customer_name, period,
       rag: this.evmSvc.ragOf(e.cpi, e.spi), pct_complete: detail.pct_complete,
       contract_amount: detail.contract_amount, billed_to_date: detail.billed_to_date, wip: detail.wip, margin: detail.margin,
       evm: { cpi: e.cpi, spi: e.spi, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, cost_variance: e.cost_variance, schedule_variance: e.schedule_variance },
+      material: mat.boq ? { material_cpi: mat.material_cpi, totals: mat.totals, categories: mat.categories } : null,
       health_trend: health,
       baseline: { active: baseline.baseline, variance: baseline.variance },
       risks: { summary: risks.summary, open_high: risks.risks.filter((r: any) => r.rag === 'red' && r.status !== 'closed') },

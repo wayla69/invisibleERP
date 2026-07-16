@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -10,6 +10,7 @@ import {
   type RefundDto,
   type OpenTillDto,
   type CloseTillDto,
+  type TillSettingsDto,
   type CashMovementDto,
   type AdjustTipDto,
 } from './payments.service';
@@ -35,6 +36,7 @@ const AdjustTipBody = z.object({ tip: z.number().nonnegative(), reason: z.string
 const RefundBody = z.object({ payment_no: z.string().min(1), amount: z.number().positive(), reason: z.string().optional() });
 const OpenTillBody = z.object({ opening_float: z.number().nonnegative().optional() });
 const CloseTillBody = z.object({ session_no: z.string().min(1), closing_count: z.number().nonnegative(), denominations: z.record(z.string(), z.number()).optional() });
+const TillSettingsBody = z.object({ blind_close: z.boolean().optional() });
 const CashMovementBody = z.object({ type: z.enum(['paid_in', 'paid_out', 'drop']), amount: z.number().positive(), reason: z.string().optional() });
 const RejectVarianceBody = z.object({ reason: z.string().max(500).optional() });
 // Refund reject: the rejection reason + the (optional) SME self-approval justification (docs/49).
@@ -128,6 +130,18 @@ export class PaymentsController {
   @Post('till/close') @Permissions('pos_till', 'ar')
   closeTill(@Body(new ZodValidationPipe(CloseTillBody)) b: CloseTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.closeTill(b, u);
+  }
+
+  // Blind drawer close policy (P1c, docs/50 Wave 1). Readable by any till principal (the register needs
+  // to know whether to hide expected); changing the policy is manager-only (mirrors receiving-settings).
+  @Get('till/settings') @Permissions('pos_till', 'pos_close', 'ar', 'exec')
+  tillSettings_(@CurrentUser() u: JwtUser) {
+    return this.svc.getTillSettings(u);
+  }
+
+  @Put('till/settings') @Permissions('ar', 'exec')
+  putTillSettings(@Body(new ZodValidationPipe(TillSettingsBody)) b: TillSettingsDto, @CurrentUser() u: JwtUser) {
+    return this.svc.putTillSettings(b, u);
   }
 
   // POS-01: a material cash over/short parked on close is cleared by a manager (maker-checker).

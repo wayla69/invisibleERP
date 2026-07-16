@@ -18,6 +18,10 @@ const IngestSale = z.object({
   tip: z.number().nonnegative().optional(), service_charge_pct: z.number().min(0).max(100).optional(),
   // Phase 2b: buffet-tier sale — cloud re-prices the per-pax charge from ITS package master
   buffet: z.object({ package_code: z.string().min(1), pax: z.number().int().positive(), overtime_pax: z.number().int().nonnegative().optional() }).optional(),
+  // C4 (docs/50 Wave 4 — closes docs/41 Phase 2c's LOYALTY_REDEEM skip): the member + the points the HUB
+  // redeemed; the cloud clamps to ITS balance ("adjusted at sync"). Zod must pass these through or the
+  // HMAC (signed over the full sales array) stops verifying.
+  member_id: z.number().int().positive().optional(), redeem_points: z.number().int().positive().optional(),
 }).refine((s) => s.lines.length > 0 || !!s.buffet, { message: 'a sale needs lines or a buffet charge' });
 const IngestBody = z.object({ tenant_id: z.number().int().positive(), sent_at: z.string().min(1), sales: z.array(IngestSale), signature: z.string().min(1) });
 type IngestDto = z.infer<typeof IngestBody>;

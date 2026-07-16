@@ -310,6 +310,33 @@ async function main() {
   ok('Hub: kitchen logs waste (Dr 5810 / Cr 1200 on the hub ledger)', /^WASTE-/.test(wLog.json?.waste_no ?? '') && Math.abs(Number(wLog.json?.total_cost) - 50) < 0.01, JSON.stringify(wLog.json ?? wLog.status).slice(0, 120));
   const wPush = await pushHubWaste(hub.db, t1, { secret: SECRET, sendWaste });
   ok('Push: the waste document replays (1 pushed, 0 failed)', wPush.pushed === 1 && wPush.failed === 0, JSON.stringify(wPush));
+
+  // ═══ C4 (docs/50 Wave 4) — loyalty-REDEMPTION sale replays with a cloud-side clamp ═══
+  // Hub member 901 has 200 points and redeems 100 on a hub sale; the SAME member on the cloud has only
+  // 50 — the replay must NOT fail the revenue sale: it clamps to the cloud balance ("adjusted at sync"),
+  // redeems 50 under the native lock, and a re-push never double-deducts.
+  for (const dbp of [hub.pg, cloud.pg]) {
+    await dbp.query(`INSERT INTO loyalty_config (id, enabled) VALUES (1, true) ON CONFLICT (id) DO UPDATE SET enabled=true`);
+  }
+  await hub.pg.query(`INSERT INTO pos_members (id, tenant_id, member_code, name, balance, lifetime) VALUES (901, ${t1}, 'M-901', 'สมชาย ฮับ', 200, 200)`);
+  await cloud.pg.query(`INSERT INTO pos_members (id, tenant_id, member_code, name, balance, lifetime) VALUES (901, ${t1}, 'M-901', 'สมชาย คลาวด์', 50, 50)`);
+  const hsRedeem = await ring([{ sku: 'GP01', qty: 1 }], { member_id: 901, redeem_points: 100 });
+  ok('C4: hub rings a redemption sale (points_used = 100 on the hub)', !!hsRedeem.sale_no && Number(hsRedeem.points_used ?? 0) === 100, JSON.stringify({ no: hsRedeem.sale_no, pu: hsRedeem.points_used }));
+  const pushC4 = await pushHubSales(hub.db, t1, { secret: SECRET, send });
+  ok('C4: the redemption sale PUSHES (no LOYALTY_REDEEM skip; docs/41 Phase 2c closed)', pushC4.pushed === 1 && pushC4.failed === 0, JSON.stringify(pushC4));
+  const c4Log = (await hub.pg.query(`SELECT status, cloud_sale_no, skip_reason FROM hub_push_log WHERE hub_sale_no='${hsRedeem.sale_no}'`)).rows[0] as any;
+  ok('C4: push log row is pushed with a cloud sale_no', c4Log?.status === 'pushed' && /^SALE-/.test(c4Log?.cloud_sale_no ?? ''), JSON.stringify(c4Log));
+  // the replay both REDEEMS (clamped 50) and EARNS natively on the cloud — balance = 50 − 50 + earned ≥ 0
+  const c4Earn = (await cloud.pg.query(`SELECT coalesce(sum(points),0) e FROM pos_member_ledger WHERE member_id=901 AND txn_type='Earn'`)).rows[0] as any;
+  const c4Member = (await cloud.pg.query(`SELECT balance FROM pos_members WHERE id=901`)).rows[0] as any;
+  ok('C4: cloud redeem CLAMPED to the cloud balance (50 − 50 + earn; never negative)', Number(c4Member?.balance) === Number(c4Earn?.e) && Number(c4Member?.balance) >= 0, JSON.stringify({ bal: c4Member?.balance, earn: c4Earn?.e }));
+  const c4Ledger = (await cloud.pg.query(`SELECT txn_type, points FROM pos_member_ledger WHERE member_id=901 AND txn_type='Redeem'`)).rows as any[];
+  ok('C4: exactly ONE cloud Redeem ledger row for the replayed sale (50 points)', c4Ledger.length === 1 && Math.abs(Number(c4Ledger[0]?.points)) === 50, JSON.stringify(c4Ledger));
+  await hub.pg.query(`DELETE FROM hub_push_log WHERE hub_sale_no='${hsRedeem.sale_no}'`); // crash-replay simulation
+  const pushC4b = await pushHubSales(hub.db, t1, { secret: SECRET, send });
+  const c4Member2 = (await cloud.pg.query(`SELECT balance FROM pos_members WHERE id=901`)).rows[0] as any;
+  ok('C4: re-push is a duplicate — no double deduction/earn (balance unchanged)', pushC4b.duplicate >= 1 && pushC4b.pushed === 0 && Number(c4Member2?.balance) === Number(c4Member?.balance), JSON.stringify({ pushC4b, bal: c4Member2?.balance }));
+
   const cloudWaste = (await cloud.pg.query(`SELECT waste_no, qty, total_cost, journal_no FROM waste_log`)).rows as any[];
   ok('Cloud: same waste_no, qty and cost; GL posted', cloudWaste.length === 1 && cloudWaste[0].waste_no === wLog.json.waste_no && Math.abs(Number(cloudWaste[0].total_cost) - 50) < 0.01 && /^JE-/.test(cloudWaste[0].journal_no ?? ''), JSON.stringify(cloudWaste));
   const w5810 = (await cloud.pg.query(`SELECT coalesce(sum(debit),0) d FROM journal_lines jl JOIN journal_entries je ON je.id=jl.entry_id WHERE jl.account_code='5810'`)).rows[0] as any;

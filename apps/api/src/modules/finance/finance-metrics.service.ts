@@ -6,6 +6,7 @@ import { arInvoices, apTransactions, bankAccounts, journalLines, journalEntries,
 import { ymd } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerJeAnomalyService } from '../ledger/ledger-je-anomaly.service';
 import { FinanceService } from './finance.service';
 import { BudgetService } from '../budget/budget.service';
 import { CloseService } from '../ledger/close.service';
@@ -63,6 +64,7 @@ export class FinanceMetricsService {
     @Optional() private readonly finance?: FinanceService,
     @Optional() private readonly budget?: BudgetService,
     @Optional() private readonly close?: CloseService,
+    @Optional() private readonly jeAnomaly?: LedgerJeAnomalyService, // B5 (GL-28) cockpit pillar
   ) {}
 
   private readonly cache = new TtlCache();
@@ -339,15 +341,16 @@ export class FinanceMetricsService {
   async closeStatus(q: { period?: string }, user: JwtUser) {
     const period = q.period && /^\d{4}-\d{2}$/.test(q.period) ? q.period : ymd().slice(0, 7);
     const key = `fin-kpi:${user.tenantId}:close:${period}`;
-    return this.cache.wrap(key, this.ttl, () => this.closeStatusUncached(period));
+    return this.cache.wrap(key, this.ttl, () => this.closeStatusUncached(period, user.tenantId ?? null));
   }
 
-  private async closeStatusUncached(period: string) {
-    const [validate, recon, approvals, closeRun] = await Promise.all([
+  private async closeStatusUncached(period: string, tenantId: number | null = null) {
+    const [validate, recon, approvals, closeRun, jeExceptions] = await Promise.all([
       this.close ? this.close.validate(period).catch(() => null) : Promise.resolve(null),
       this.finance ? this.finance.reconcileControls().catch(() => null) : Promise.resolve(null),
       this.finance ? this.finance.pendingApprovals({ overdue_days: 3 }).catch(() => null) : Promise.resolve(null),
       this.close ? this.close.status(period).catch(() => null) : Promise.resolve(null), // null ⇒ no close run started yet
+      this.jeAnomaly ? this.jeAnomaly.cockpitSummary(tenantId).catch(() => null) : Promise.resolve(null), // B5 (GL-28)
     ]);
 
     // days-to-close: locked ⇒ lock date − period-end; else elapsed since period-end (0 while still in-period)
@@ -368,8 +371,9 @@ export class FinanceMetricsService {
       tie_out: recon == null ? null : recon.all_reconciled ? 'green' : 'red',
       readiness: validate == null ? null : validate.ready ? 'green' : (validate.blockers?.length ? 'red' : 'amber'),
       approvals: approvals == null ? null : overdue === 0 ? 'green' : overdue >= 5 ? 'red' : 'amber',
+      je_exceptions: jeExceptions == null ? null : (jeExceptions.rag as 'green' | 'amber' | 'red'), // B5 (GL-28)
     } as Record<string, 'green' | 'amber' | 'red' | null>;
-    const worst = (['tie_out', 'readiness', 'approvals'] as const).map((k) => rag[k]);
+    const worst = (['tie_out', 'readiness', 'approvals', 'je_exceptions'] as const).map((k) => rag[k]);
     const overall: 'green' | 'amber' | 'red' = worst.includes('red') ? 'red' : worst.includes('amber') ? 'amber' : 'green';
 
     return {
@@ -378,6 +382,7 @@ export class FinanceMetricsService {
       tie_out: recon ? { all_reconciled: recon.all_reconciled, exceptions: recon.exceptions, lines: recon.lines } : null,
       readiness: validate ? { ready: validate.ready, blockers: validate.blockers, warnings: validate.warnings, checks: validate.checks } : null,
       approvals: approvals ? { count: approvals.count, overdue: approvals.overdue, oldest_age_days: approvals.oldest_age_days, by_type: approvals.by_type, total_amount: approvals.total_amount, items: (approvals.items ?? []).slice(0, 15) } : null,
+      je_exceptions: jeExceptions ? { open: jeExceptions.open, high_open: jeExceptions.high_open } : null, // B5 (GL-28)
       rag: { ...rag, overall },
     };
   }

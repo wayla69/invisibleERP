@@ -159,14 +159,22 @@ export default function RegisterPage() {
     if (mode === 'dinein' || orderType !== 'dine_in') {
       await api(`/api/restaurant/orders/${orderNo}/fire`, { method: 'POST', body: '{}' }).catch(() => { /* kitchen fire best-effort */ });
     }
-    // manual service charge: force-apply at the entered % regardless of party size (service_min_party=1).
-    const sc = serviceChargePct > 0 ? { apply_pricing_rules: true, service_charge_pct: serviceChargePct, party_size: pax, service_min_party: 1, channel: orderType } : {};
-    const sale = await api<{ sale_no: string; total: number; total_with_tip?: number }>(`/api/restaurant/orders/${orderNo}/checkout`, {
+    // C3 (docs/50 Wave 3): ALWAYS apply the tenant's automatic price rules at the register — before this,
+    // apply_pricing_rules was only sent alongside a manual service charge, so happy-hour/BOGO/qty-break
+    // rules silently never fired at the till (a tenant with no rules is byte-identical: no rules = no
+    // discounts). The manual service charge keeps its force-apply semantics (service_min_party=1).
+    const sc = serviceChargePct > 0
+      ? { apply_pricing_rules: true, service_charge_pct: serviceChargePct, party_size: pax, service_min_party: 1, channel: orderType }
+      : { apply_pricing_rules: true, party_size: pax, channel: orderType };
+    const sale = await api<{ sale_no: string; total: number; total_with_tip?: number; applied_rules?: string[]; line_discount_total?: number }>(`/api/restaurant/orders/${orderNo}/checkout`, {
       method: 'POST',
       body: JSON.stringify({ method, discount_pct: discountPct || undefined, voucher_code: voucherCode || undefined, ...sc }),
     });
     const total = Number(sale.total ?? sale.total_with_tip ?? tot.total);
     const change = cashReceived != null ? Math.round((cashReceived - total) * 100) / 100 : undefined;
+    // Surface what the pricing engine did — the cashier (and the customer asking "why this price?")
+    // sees which automatic rules fired instead of a silently different total.
+    if ((sale.applied_rules ?? []).length > 0) notifySuccess(t('px.reg_rules_applied', { rules: (sale.applied_rules ?? []).join(', ') }));
 
     tm.pushDisplay({ message: t('px.reg_disp_thanks'), total, amount_due: cashReceived ?? undefined, change });
     // Auto-print only when a printer is paired — otherwise the cashier prints on demand from the success

@@ -2,8 +2,11 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ReservationsService, type ReserveDto } from './reservations.service';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
+import { ReservationsService, type ReserveDto, type ReturnDto } from './reservations.service';
 
+const ReturnBody = z.object({ qty: z.number().positive().optional(), reason: z.string().min(1).max(500) });
+const ReturnRejectBody = z.object({ reason: z.string().max(500).optional() });
 const ReserveBody = z.object({
   project_code: z.string().min(1),
   item_id: z.string().min(1),
@@ -23,6 +26,42 @@ export class ReservationsController {
   @Permissions('wh_custody', 'warehouse', 'procurement', 'planner')
   reserve(@Body(new ZodValidationPipe(ReserveBody)) b: ReserveDto, @CurrentUser() u: JwtUser) {
     return this.svc.reserve(b, u);
+  }
+
+  // ── A1 material return-to-stock (docs/50 Wave 2; INV-19) ──
+  // Request a return of issued material (qty ≤ issued, reason mandatory; ≥ threshold parks PendingApproval).
+  @Post(':id/return')
+  @Permissions('wh_custody', 'warehouse', 'procurement', 'planner')
+  requestReturn(@Param('id') id: string, @Body(new ZodValidationPipe(ReturnBody)) b: ReturnDto, @CurrentUser() u: JwtUser) {
+    return this.svc.requestReturn(Number(id), b, u);
+  }
+
+  // Returns register: pending + history (static segment BEFORE the :id routes).
+  @Get('returns')
+  @Permissions('wh_custody', 'warehouse', 'procurement', 'planner', 'exec')
+  listReturns(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.listReturns(u, status);
+  }
+
+  // A DIFFERENT user approves a material return (maker-checker; self-approve → SOD_VIOLATION).
+  @Post('returns/:returnNo/approve')
+  @Permissions('warehouse', 'planner', 'exec')
+  approveReturn(@Param('returnNo') returnNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveReturn(returnNo, u, b?.self_approval_reason);
+  }
+
+  @Post('returns/:returnNo/reject')
+  @Permissions('warehouse', 'planner', 'exec')
+  rejectReturn(@Param('returnNo') returnNo: string, @Body(new ZodValidationPipe(ReturnRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.svc.rejectReturn(returnNo, u, b?.reason);
+  }
+
+  // A2 (docs/50 Wave 1): release every hold older than max_age_days (default 30) — manual trigger for the
+  // scheduled `reservation_stale_release` action job. Planner/warehouse duty (same set that can release).
+  @Post('expire-stale')
+  @Permissions('wh_custody', 'warehouse', 'procurement', 'planner')
+  expireStale(@Query('max_age_days') maxAgeDays: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.expireStale(u, maxAgeDays != null ? Number(maxAgeDays) : 30);
   }
 
   // Available-to-issue for an item+location = on_hand − Σ(held). Static 'available' segment.

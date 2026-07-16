@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, integer, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, timestamp, pgEnum, jsonb, integer, boolean, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Payments + tender layer (move #3) — 1 sale → N tenders; proof money moved
@@ -90,7 +90,24 @@ export const tillSessions = pgTable('till_sessions', {
   varianceStatus: text('variance_status').notNull().default('NotRequired'),        // NotRequired | PendingApproval | Approved | Rejected
   varianceApprovedBy: text('variance_approved_by'),
   varianceApprovedAt: timestamp('variance_approved_at', { withTimezone: true }),
+  // 0426 (docs/50 Wave 1) — evidence that this session was closed BLIND (counted without seeing expected).
+  blindClose: boolean('blind_close').notNull().default(false),
 });
+
+// Per-tenant till policy (0426, docs/50 Wave 1 — POS roadmap P1c blind close; strengthens REV-13):
+// blind_close ON ⇒ till-duty callers cannot see the system-expected drawer cash on an OPEN session
+// (X/Z redaction in payments.service); expected/variance are revealed only after the count is submitted.
+// One row per tenant (NULL tenant = single-company default), mirroring receiving_settings.
+export const tillSettings = pgTable('till_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  blindClose: boolean('blind_close').notNull().default(false),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqTenant: uniqueIndex('uq_till_settings').on(t.tenantId),
+  byTenant: index('idx_till_settings_tenant').on(t.tenantId),
+}));
 
 // POS-07 — signed, persisted, tamper-evident Z-report archive. The live X/Z endpoints compute totals on
 // demand; signing snapshots those totals into an immutable record (content_hash over the canonical totals)

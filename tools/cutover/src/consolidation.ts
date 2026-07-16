@@ -210,6 +210,26 @@ async function main() {
   const rerun = await inj('POST', `/api/consolidation/groups/${groupId}/run`, admin, { period: '2026-01' });
   ok('CON-03 re-run posted period → ALREADY_POSTED', rerun.status === 400 && rerun.json.error?.code === 'ALREADY_POSTED', JSON.stringify(rerun.json));
 
+  // ── B3 (docs/50 Wave 2): schedulable consolidation staging — per-group fault isolation, auto-Draft
+  //    only (posting stays CON-03 maker-checker). The posted 2026-01 group reports already_posted; an
+  //    un-gated period (2026-02, no IC recon sign-off yet) reports IC_RECON_NOT_APPROVED — neither errors ──
+  const conSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'รวมงบสิ้นงวด', report_type: 'consolidation_run', frequency: 'monthly', filters: { period: '2026-01', group_id: groupId } });
+  ok('B3: consolidation_run subscription accepted', conSub.status < 300 && !!conSub.json.id, JSON.stringify(conSub.json).slice(0, 80));
+  const conJob1 = await inj('POST', `/api/bi/subscriptions/${conSub.json.id}/run`, admin);
+  ok('B3: job on the POSTED period is a graceful per-group no-op (already_posted, HTTP 200)', conJob1.status === 200, `${conJob1.status}`);
+  const conSub2 = await inj('POST', '/api/bi/subscriptions', admin, { name: 'รวมงบ 2026-02', report_type: 'consolidation_run', frequency: 'monthly', filters: { period: '2026-02', group_id: groupId } });
+  const conJob2 = await inj('POST', `/api/bi/subscriptions/${conSub2.json.id}/run`, admin);
+  ok('B3: job on an un-signed-off period no-ops per group (IC gate intact, HTTP 200)', conJob2.status === 200, `${conJob2.status}`);
+  const runsAfterJobs = await inj('GET', `/api/consolidation/groups/${groupId}/runs`, admin);
+  ok('B3: neither job created a run past the gates (still only the posted 2026-01 run)', (runsAfterJobs.json.runs ?? []).length === 1 && (runsAfterJobs.json.runs ?? [])[0]?.status === 'Posted', JSON.stringify((runsAfterJobs.json.runs ?? []).map((r: any) => ({ p: r.period, st: r.status }))));
+  // Approve 2026-02's IC recon (prepare → a DIFFERENT user approves) → the same job now STAGES a Draft run.
+  await inj('POST', `/api/ic-reconciliation/groups/${groupId}/prepare`, admin, { period: '2026-02' });
+  await inj('POST', `/api/ic-reconciliation/groups/${groupId}/approve`, admin2, { period: '2026-02' });
+  const conJob3 = await inj('POST', `/api/bi/subscriptions/${conSub2.json.id}/run`, admin);
+  const runsAfterStage = await inj('GET', `/api/consolidation/groups/${groupId}/runs`, admin);
+  const stagedFeb = (runsAfterStage.json.runs ?? []).find((r: any) => r.period === '2026-02');
+  ok('B3: once the IC gate clears, the job stages the period run as DRAFT (posting stays maker-checker)', conJob3.status === 200 && !!stagedFeb && stagedFeb.status !== 'Posted', JSON.stringify(stagedFeb ?? {}));
+
   // ── WS3.3 CON-04: segment reporting (IFRS 8) ──
 
   // Seed a branch-tagged P&L JE for HQ tenant so the segment report has dimensioned data.
