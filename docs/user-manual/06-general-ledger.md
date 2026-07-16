@@ -797,7 +797,10 @@ the period, post, and close it again.)
 A *soft* close (above) can be reopened. When the books are final, run a **hard close**:
 a checklist-driven, segregated, irreversible **lock**. Once a period is **Locked**, *all*
 postings into it are rejected with `PERIOD_LOCKED` — there is no `allowClosedPeriod`
-escape (only the system year-end closing entry is exempt).
+escape (only the system year-end closing entry is exempt). This includes **approving a
+draft journal entry** that was prepared while the period was still open: the approval is
+rejected with `PERIOD_LOCKED` (the entry stays a draft), so nothing can slip into a
+hard-closed period through the maker-checker queue.
 
 **Required permission:** `gl_close` (start / complete steps / lock). Reading status also
 allows `gl_post` and `exec`.
