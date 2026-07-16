@@ -135,7 +135,7 @@ export class AdminUsersService {
 
   async create(dto: CreateUserDto, actor: JwtUser) {
     const db = this.db;
-    if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
+    if (!dto.password || dto.password.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
     this.assertCanGrantRole(dto.role, actor);
@@ -219,7 +219,7 @@ export class AdminUsersService {
   }
 
   async resetPassword(username: string, newPassword: string, actor: JwtUser) {
-    if (!newPassword || newPassword.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
+    if (!newPassword || newPassword.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     username = normalizeUsername(username);
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);

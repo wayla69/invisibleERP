@@ -1,5 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
-import { verifyWebhookSignature } from './crypto';
+import { verifyWebhookSignature, safeEqualStr } from './crypto';
 
 // Inbound-webhook authentication (security review L-2). The delivery-aggregator / inbound-email webhooks were
 // authenticated by a STATIC shared secret echoed in a header — a leaked secret alone lets anyone forge any
@@ -12,11 +11,9 @@ import { verifyWebhookSignature } from './crypto';
 //     HMAC keep working unchanged.
 //   • With neither configured, returns 'unconfigured' so the caller can fail-closed in production.
 
-function safeEqualStr(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ab.length === bb.length && timingSafeEqual(ab, bb);
-}
+// Bare shared-secret compares use the SHA-256-first, length-independent safeEqualStr from crypto.ts
+// (pentest info-item): the old local helper short-circuited on `a.length === b.length`, leaking the
+// secret's length via timing. The digest-based compare is always over equal-length 32-byte hashes.
 
 export type WebhookAuthResult = 'ok' | 'bad' | 'stale' | 'unconfigured';
 
