@@ -493,6 +493,24 @@ async function main() {
   const cvPdf = await inj('GET', `/api/tax-invoices/${cv.json.doc_no}/pdf`, cust1);
   ok('TAX-10: converted invoice prints as a FULL ม.86/4 document with the buyer block', cvPdf.status === 200 && cvPdf.text.includes('ใบกำกับภาษี') && cvPdf.text.includes(cvBuyer.name), `${cvPdf.status}`);
 
+  // ── C2 (docs/50 Wave 2 — POS roadmap P1b): sale-keyed full tax invoice at the counter ──
+  // The cashier knows the SALE number off the receipt, not the ATV doc number. The POS endpoint resolves
+  // (or LAZILY issues, idempotently) the sale's ABB, then delegates to the SAME TAX-10 conversion above —
+  // one full per ABB, amounts verbatim, ABB → Replaced, ภ.พ.30 single-count all inherited.
+  await seedSale('S-T1-POSFTI', t1, 200, 14, 214, 'F');
+  const posFti = await inj('POST', '/api/pos/orders/S-T1-POSFTI/full-tax-invoice', cust1, { buyer: cvBuyer });
+  ok('C2: sale-keyed endpoint lazily issues the ABB then converts (TIV-, verbatim 200/14/214)',
+    posFti.status < 300 && /^TIV-/.test(posFti.json.doc_no ?? '') && posFti.json.type === 'full' && near(posFti.json.subtotal, 200) && near(posFti.json.vat_amount, 14) && posFti.json.already_converted === false,
+    `${posFti.status} ${JSON.stringify(posFti.json).slice(0, 110)}`);
+  ok('C2: the lazily-issued ABB is linked + superseded (replaces_doc_no ATV-, source S-T1-POSFTI)',
+    /^ATV-/.test(posFti.json.replaces_doc_no ?? '') && posFti.json.source_ref === 'S-T1-POSFTI', JSON.stringify({ rep: posFti.json.replaces_doc_no }));
+  const posFtiDup = await inj('POST', '/api/pos/orders/S-T1-POSFTI/full-tax-invoice', cust1, { buyer: { ...cvBuyer, name: 'คนละชื่อ (ต้องถูกเมิน)' } });
+  ok('C2: second request returns the SAME full invoice (idempotent, already_converted)', posFtiDup.json.doc_no === posFti.json.doc_no && posFtiDup.json.already_converted === true, `${posFtiDup.status} ${posFtiDup.json.doc_no}`);
+  const posFti404 = await inj('POST', '/api/pos/orders/S-NO-SUCH-SALE/full-tax-invoice', cust1, { buyer: cvBuyer });
+  ok('C2: unknown sale → 404', posFti404.status === 404, `${posFti404.status}`);
+  const posFtiNoTax = await inj('POST', '/api/pos/orders/S-T1-POSFTI/full-tax-invoice', cust1, { buyer: { name: 'ผู้ซื้อ', address: 'ที่อยู่' } });
+  ok('C2: buyer Tax ID required by the schema → 400', posFtiNoTax.status === 400, `${posFtiNoTax.status}`);
+
   await app.close();
   await pg.close();
 

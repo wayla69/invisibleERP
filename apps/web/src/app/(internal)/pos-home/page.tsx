@@ -1,10 +1,12 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Banknote, ClipboardList, CreditCard, Receipt, ReceiptText, ShoppingCart, Store, Users, Wallet } from 'lucide-react';
+import { Banknote, ClipboardList, CreditCard, FileText, Receipt, ReceiptText, ShoppingCart, Store, Users, Wallet } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDate } from '@/lib/format';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
@@ -13,6 +15,9 @@ import { DataTable } from '@/components/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { SimpleBarChart } from '@/components/charts';
 import { statusVariant } from '@/components/ui';
 
@@ -50,6 +55,22 @@ export default function PosHomePage() {
 
   const d = q.data;
   const payments = (d?.by_payment ?? []).map((p) => ({ name: p.Payment_Method || '—', amount: p.amount }));
+
+  // C2 (docs/50 Wave 2): full tax invoice (ใบกำกับเต็มรูป) on demand for a B2B walk-in — keyed by the
+  // sale number on the receipt; the API converts the abbreviated slip via the TAX-10 path (idempotent).
+  const [ftiSale, setFtiSale] = useState<string | null>(null);
+  const [fti, setFti] = useState({ name: '', tax_id: '', branch_code: '', address: '' });
+  const fullTax = useMutation({
+    mutationFn: () => api(`/api/pos/orders/${encodeURIComponent(ftiSale!)}/full-tax-invoice`, {
+      method: 'POST',
+      body: JSON.stringify({ buyer: { name: fti.name, tax_id: fti.tax_id, branch_code: fti.branch_code || undefined, address: fti.address } }),
+    }),
+    onSuccess: (r: any) => {
+      notifySuccess(r?.already_converted ? t('pos.fti_already', { doc_no: r?.doc_no }) : t('pos.fti_issued', { doc_no: r?.doc_no }));
+      setFtiSale(null); setFti({ name: '', tax_id: '', branch_code: '', address: '' });
+    },
+    onError: (e: any) => notifyError(e?.message ?? t('pos.fti_failed')),
+  });
 
   return (
     <div>
@@ -143,6 +164,11 @@ export default function PosHomePage() {
                     { key: 'Total', label: t('dash.col_total'), align: 'right', render: (r) => baht(r.Total) },
                     { key: 'Payment_Method', label: t('dash.col_payment') },
                     { key: 'Status', label: t('dash.col_status'), render: (r) => <Badge variant={statusVariant(r.Status)}>{r.Status}</Badge> },
+                    { key: 'fti', label: '', render: (r) => r.Status !== 'Voided' ? (
+                      <Button variant="ghost" size="sm" title={t('pos.fti_btn_tip')} onClick={() => setFtiSale(r.Sale_No)}>
+                        <FileText className="size-4" />
+                      </Button>
+                    ) : null },
                   ]}
                 />
               </div>
@@ -150,6 +176,28 @@ export default function PosHomePage() {
           </div>
         )}
       </StateView>
+
+      {/* C2: full tax invoice (ใบกำกับเต็มรูป) buyer-capture dialog */}
+      <Dialog open={ftiSale != null} onOpenChange={(o) => { if (!o) setFtiSale(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('pos.fti_title', { sale_no: ftiSale ?? '' })}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('pos.fti_desc')}</p>
+          <div className="space-y-3">
+            <div className="grid gap-1.5"><Label htmlFor="fti-name">{t('pos.fti_name')}</Label><Input id="fti-name" value={fti.name} onChange={(e) => setFti((s) => ({ ...s, name: e.target.value }))} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5"><Label htmlFor="fti-taxid">{t('pos.fti_taxid')}</Label><Input id="fti-taxid" inputMode="numeric" maxLength={13} value={fti.tax_id} onChange={(e) => setFti((s) => ({ ...s, tax_id: e.target.value.replace(/\D/g, '') }))} /></div>
+              <div className="grid gap-1.5"><Label htmlFor="fti-branch">{t('pos.fti_branch')}</Label><Input id="fti-branch" placeholder="00000" maxLength={5} value={fti.branch_code} onChange={(e) => setFti((s) => ({ ...s, branch_code: e.target.value.replace(/\D/g, '') }))} /></div>
+            </div>
+            <div className="grid gap-1.5"><Label htmlFor="fti-addr">{t('pos.fti_address')}</Label><Input id="fti-addr" value={fti.address} onChange={(e) => setFti((s) => ({ ...s, address: e.target.value }))} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFtiSale(null)}>{t('fin.cancel')}</Button>
+            <Button disabled={fullTax.isPending || !fti.name || fti.tax_id.length !== 13 || !fti.address} onClick={() => fullTax.mutate()}>
+              <FileText className="mr-1.5 size-4" />{t('pos.fti_submit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

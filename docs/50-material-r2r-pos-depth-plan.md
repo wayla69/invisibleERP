@@ -230,7 +230,14 @@ a documented architecture decision. Replacement quick win, pulled forward from C
 - Delivered: ToE `cashreport` 33→45; PN-07 §7(5) rev 2.0; manual 01 §6 v0.57; UAT-O2C-492..497;
   roadmap P1c updated. C4's remaining scope shrinks to the offline-replay items.
 
-### C2 — Full B2B tax invoice (ใบกำกับเต็มรูป) at POS + e-Tax on demand · Effort **M** · roadmap P1b residual
+### C2 — Full B2B tax invoice (ใบกำกับเต็มรูป) at POS + e-Tax on demand · Effort **M** · roadmap P1b residual · **✅ DELIVERED (2026-07-16)**
+> **Depth note:** the TAX-10 ABB→full conversion (verbatim amounts, Replaced status, ภ.พ.30 single-count,
+> one-full-per-ABB, migration 0291) already existed in `tax-docs` — the genuine residual was the
+> **sale-keyed counter surface**. Delivered: `POST /api/pos/orders/:saleNo/full-tax-invoice`
+> (`PosService.fullTaxInvoiceForSale` — lazily issues the ABB idempotently, then delegates to the SAME
+> conversion; zero tax logic in the POS module) + the POS-home recent-bills **ขอใบกำกับเต็มรูป**
+> buyer-capture dialog. ToE `taxdocs` 131→136; PN-06 §7(3a) rev 0.29; manual 01 v0.58;
+> UAT-TAX-063..064; roadmap P1b updated.
 **Goal:** B2B walk-ins get a full tax invoice at the counter; today only the abbreviated ATV- auto-issues.
 - `POST /api/pos/orders/:saleNo/full-tax-invoice` in `pos/fiscal` — buyer tax-id/branch capture
   (validated), converts/links the abbreviated doc (no double VAT reporting), optional e-Tax submission via

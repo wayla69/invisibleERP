@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { qint } from '../../common/query';
 import { PosService, type CreateOrderDto } from './pos.service';
+import { ConvertAbbBody, type ConvertAbbDto } from '../tax/documents/dto';
 
 const CreateOrderBody = z.object({
   customer_name: z.string().optional(),
@@ -44,6 +45,15 @@ export class PosController {
   @Post('orders') @Permissions('pos', 'order_cust')
   createOrder(@Body(new ZodValidationPipe(CreateOrderBody)) body: CreateOrderDto, @CurrentUser() user: JwtUser) {
     return this.svc.createOrder(body, user);
+  }
+
+  // C2 (docs/50 Wave 2 — POS roadmap P1b): full tax invoice (ใบกำกับเต็มรูป, ม.86/4) on demand at the
+  // counter, keyed by the SALE number the buyer's receipt carries. Delegates to the SAME TAX-10 ABB→full
+  // conversion (buyer tax-id validated, amounts verbatim, ABB → Replaced, idempotent one-full-per-ABB).
+  // Counter duties may issue it — the same set that records the tender.
+  @Post('orders/:saleNo/full-tax-invoice') @Permissions('pos', 'pos_sell', 'cust_pos', 'ar')
+  fullTaxInvoice(@Param('saleNo') saleNo: string, @Body(new ZodValidationPipe(ConvertAbbBody)) b: ConvertAbbDto, @CurrentUser() u: JwtUser) {
+    return this.svc.fullTaxInvoiceForSale(saleNo, b, u);
   }
 }
 

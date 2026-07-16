@@ -4,6 +4,8 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, custPosItems, tenants, orders, orderLines, loyaltyConfig, loyaltyPoints, loyaltyTxn, arInvoices } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
+import { TaxInvoiceService } from '../tax/documents/tax-invoice.service';
+import type { ConvertAbbDto } from '../tax/documents/dto';
 import { isSeriousOverdue } from '../finance/collections.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -22,7 +24,22 @@ export class PosService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
+    private readonly taxInvoice: TaxInvoiceService,
   ) {}
+
+  // ── Full tax invoice (ใบกำกับเต็มรูป, ม.86/4) at POS by SALE number (C2, docs/50 Wave 2 — POS roadmap
+  // P1b residual). The counter staff know the SALE number off the receipt, not the ATV doc number, so this
+  // resolves the sale's abbreviated invoice (issuing it idempotently if the checkout's best-effort issue
+  // was skipped) and delegates to the SAME TAX-10 conversion — buyer tax-id validated there, amounts/VAT
+  // copied verbatim, ABB flipped to Replaced (the ภ.พ.30 counts the supply exactly once), one full per ABB
+  // DB-enforced, idempotent (a second request returns the same full invoice, already_converted). No new
+  // tax logic lives here — this is a POS convenience surface over the tax-docs contract.
+  async fullTaxInvoiceForSale(saleNo: string, dto: ConvertAbbDto, user: JwtUser) {
+    const [sale] = await this.db.select({ id: custPosSales.id }).from(custPosSales).where(eq(custPosSales.saleNo, saleNo)).limit(1);
+    if (!sale) throw new NotFoundException({ code: 'NOT_FOUND', message: `Sale ${saleNo} not found`, messageTh: 'ไม่พบรายการขาย' });
+    const abb: any = await this.taxInvoice.issueAbbreviatedFromSale(saleNo, user); // idempotent: returns the existing ABB
+    return this.taxInvoice.convertAbbreviatedToFull(abb.doc_no, dto, user);
+  }
 
   // ───────────────────────── READ (Phase 2) ─────────────────────────
   async summary(startDate: string, endDate: string) {

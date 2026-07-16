@@ -54,7 +54,11 @@ Effort key: **S** ≈ 1–2 days · **M** ≈ 3–5 days · **L** ≈ 1–2 week
 - **Verify:** harness `pricing` — happy-hour window applies only in-window; combo explodes; BOGO; service charge on 6-top; rounding to satang.
 
 ### Phase P1b — Thai fiscal compliance · Effort **M–L** · Risk: med (RD/ETDA integration)
-- **Full tax invoice (ใบกำกับเต็มรูป) at POS on demand** for B2B walk-ins (buyer tax-id/branch capture) — extend `tax-docs` to be POS-callable: `POST /api/pos/orders/:saleNo/full-tax-invoice`.
+- **Full tax invoice (ใบกำกับเต็มรูป) at POS on demand** for B2B walk-ins (buyer tax-id/branch capture) — extend `tax-docs` to be POS-callable: `POST /api/pos/orders/:saleNo/full-tax-invoice`. **✅ Delivered
+  (2026-07-16, docs/50 Wave 2 C2):** the sale-keyed endpoint lazily issues the sale's ABB (idempotent) and
+  delegates to the TAX-10 ABB→full conversion (verbatim amounts, Replaced, ภ.พ.30 single-count,
+  one-full-per-ABB); POS-home recent-bills **ขอใบกำกับเต็มรูป** buyer-capture dialog. ToE `taxdocs`
+  131→136; PN-06 §7(3a) rev 0.29; UAT-TAX-063..064.
 - **RD e-Tax Invoice & e-Receipt** (ETDA): sign + submit via a provider (e.g. INET/Frank/leading e-Tax SP); store submission status + RD response; **electronic journal** (immutable, append-only, exportable). New tables: `etax_submissions`, `pos_journal` (hash-chained).
 - **Web:** "request full tax invoice" on receipt; e-Tax status dashboard.
 - **Verify:** provider **sandbox** submission + status callback; journal hash-chain integrity test.
