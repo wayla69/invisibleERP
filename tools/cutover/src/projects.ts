@@ -386,6 +386,56 @@ async function main() {
   ok('A3: final cumulative actual = Σ RES − Σ MRET (physical net draw)', near(lastPt?.actual_cum, byWbs.json.totals.issued - byWbs.json.totals.returned), JSON.stringify({ last: lastPt, iss: byWbs.json.totals.issued, ret: byWbs.json.totals.returned }));
   ok('A3: final planned_cum = the full material budget (linear spread ends at 100%)', near(lastPt?.planned_cum, draw.json.budget_total), JSON.stringify({ p: lastPt?.planned_cum, b: draw.json.budget_total }));
 
+  // ── 9f-quinquies. A5 project-tagged wastage + EVM by category (docs/50 Wave 5, migration 0423): site
+  //    scrap relieves project WIP (Dr 5810 / Cr 1260 project_id) — never inventory — capped at the net
+  //    drawn value; feeds the per-node "wasted" figure and the material lens of EVM-by-category ──
+  const prjAId = Number(prjRow?.id);
+  // Fresh WIP to scrap against: A1 returned everything, so reserve + issue 10 more STEEL (10 × 50 = 500).
+  const resW = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 10, boq_line_id: matLineId });
+  const issW = await inj('POST', `/api/reservations/${resW.json.reservation_id}/issue`, admin);
+  ok('A5: fixture issue 10 STEEL → WIP +500', issW.status < 300 && near(issW.json.value, 500), JSON.stringify({ s: issW.status, v: issW.json.value }));
+  const tbW0 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const wipW0 = Number(bal(tbW0, '1260')?.balance ?? 0), invW0 = Number(bal(tbW0, '1200')?.balance ?? 0), lossW0 = Number(bal(tbW0, '5810')?.balance ?? 0);
+  const wNoProj = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, boq_line_id: matLineId });
+  ok('A5: boq_line_id without project_id → 400 PROJECT_REQUIRED', wNoProj.status === 400 && wNoProj.json.error?.code === 'PROJECT_REQUIRED', `${wNoProj.status} ${wNoProj.json.error?.code}`);
+  const wUntagged = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50 });
+  ok('A5: UNTAGGED waste of a perpetual item still rejected (USE_WRITEOFF — INV-07 boundary unchanged)', wUntagged.status === 400 && wUntagged.json.error?.code === 'USE_WRITEOFF', `${wUntagged.status} ${wUntagged.json.error?.code}`);
+  const wNoCost = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', project_id: prjAId });
+  ok('A5: project waste without unit_cost rejected (COST_REQUIRED — WIP relief needs the issue cost)', wNoCost.status === 400 && wNoCost.json.error?.code === 'COST_REQUIRED', `${wNoCost.status} ${wNoCost.json.error?.code}`);
+  const wBadPrj = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, project_id: 999999 });
+  ok('A5: unknown project → 404 PROJECT_NOT_FOUND (BOLA combined id+tenant check)', wBadPrj.status === 404 && wBadPrj.json.error?.code === 'PROJECT_NOT_FOUND', `${wBadPrj.status} ${wBadPrj.json.error?.code}`);
+  const wBadLine = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: 999999 });
+  ok('A5: BoQ line of another/no project → 400 BOQ_LINE_MISMATCH', wBadLine.status === 400 && wBadLine.json.error?.code === 'BOQ_LINE_MISMATCH', `${wBadLine.status} ${wBadLine.json.error?.code}`);
+  const wOver = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 100, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: matLineId });
+  ok('A5: scrap beyond the net drawn value rejected (WASTE_EXCEEDS_WIP, 5000 > 500)', wOver.status === 400 && wOver.json.error?.code === 'WASTE_EXCEEDS_WIP', `${wOver.status} ${wOver.json.error?.code}`);
+  const w1 = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 4, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: matLineId, notes: 'เหล็กงอหน้างาน' });
+  ok('A5: project-tagged scrap posts (200) — journal_no set, wip_remaining 300, no stock touched (stock_after null)',
+    w1.status < 300 && !!w1.json.journal_no && near(w1.json.total_cost, 200) && near(w1.json.wip_remaining, 300) && w1.json.stock_after === null && Number(w1.json.project_id) === prjAId,
+    JSON.stringify(w1.json).slice(0, 160));
+  const tbW1 = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('A5: GL — Dr 5810 +200 / Cr 1260 −200, 1200 UNTOUCHED, balanced',
+    tbW1.json.totals?.balanced === true && near(Number(bal(tbW1, '5810')?.balance ?? 0) - lossW0, 200) && near(wipW0 - Number(bal(tbW1, '1260')?.balance ?? 0), 200) && near(Number(bal(tbW1, '1200')?.balance ?? 0), invW0),
+    JSON.stringify({ dLoss: Number(bal(tbW1, '5810')?.balance ?? 0) - lossW0, dWip: wipW0 - Number(bal(tbW1, '1260')?.balance ?? 0) }));
+  const availW = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A5: physical stock untouched by project scrap (on hand still 90)', near(availW.json.on_hand, 90), JSON.stringify(availW.json));
+  const wipLine = await db.select().from(s.journalLines).where(eq(s.journalLines.projectId, prjAId));
+  ok('A5: the 1260 credit line carries the project dimension', wipLine.some((l: any) => l.accountCode === '1260' && near(l.credit, 200)), JSON.stringify(wipLine.filter((l: any) => l.accountCode === '1260').slice(-1)));
+  const byWbsW = await inj('GET', '/api/projects/PRJ-A/boq/by-wbs', admin);
+  ok('A5: by-WBS rollup shows the wasted value (totals.wasted 200)', near(byWbsW.json.totals?.wasted, 200), JSON.stringify(byWbsW.json.totals));
+  const evmCat = await inj('GET', '/api/projects/PRJ-A/evm/by-category', admin);
+  const matCat = (evmCat.json.categories ?? []).find((c: any) => c.category === 'material');
+  ok('A5: EVM by category — material bucket carries budget/committed/actual/wasted (wasted 200) + cpi field',
+    evmCat.status === 200 && !!matCat && near(matCat.wasted, 200) && matCat.budget > 0 && ('cpi' in matCat) && near(evmCat.json.totals?.budget, byWbsW.json.totals?.budget),
+    JSON.stringify(matCat));
+  const gpMat = await inj('GET', '/api/projects/PRJ-A/governance-pack', admin);
+  ok('A5: single-project governance pack carries the material lens (material_cpi + wasted)', gpMat.status === 200 && !!gpMat.json.project?.material && near(gpMat.json.project.material.totals?.wasted, 200), JSON.stringify(gpMat.json.project?.material?.totals));
+  const w2 = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 6, reason_code: 'damage', unit_cost: 50, project_code: 'PRJ-A', boq_line_id: matLineId });
+  ok('A5: second scrap via project_code resolves + exhausts the drawn value (wip_remaining 0)', w2.status < 300 && near(w2.json.wip_remaining, 0) && Number(w2.json.project_id) === prjAId, JSON.stringify({ s: w2.status, r: w2.json.wip_remaining, p: w2.json.project_id }));
+  const w3 = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: matLineId });
+  ok('A5: one more baht of scrap rejected — WIP can never go negative (WASTE_EXCEEDS_WIP)', w3.status === 400 && w3.json.error?.code === 'WASTE_EXCEEDS_WIP', `${w3.status} ${w3.json.error?.code}`);
+  const wList = await inj('GET', '/api/inventory/waste', admin);
+  ok('A5: waste register rows carry the project dimension', (wList.json.waste ?? []).some((r: any) => Number(r.project_id) === prjAId && Number(r.boq_line_id) === Number(matLineId)), JSON.stringify((wList.json.waste ?? []).filter((r: any) => r.project_id).slice(0, 1)));
+
   // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
   const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
   ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));

@@ -96,7 +96,8 @@ export class ProjectsService {
     this.wbs = new ProjectsWbsService(db, (code) => this.row(code), (code, dto, user) => this.bill(code, dto, user));
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
     // A3 (docs/50 Wave 3) — material control tower read models (ctor-body plain class, ratchet pattern).
-    this.materialSvc = new ProjectsMaterialService(db, (code) => this.row(code), this.commitments);
+    // A5 (docs/50 Wave 5) — + the facade evm() port for the EVM-by-category lens.
+    this.materialSvc = new ProjectsMaterialService(db, (code) => this.row(code), this.commitments, (code) => this.evm(code));
     // A4 (docs/50 Wave 4) — BoQ takeoff import (ctor-body plain class, ratchet pattern).
     this.boqImportSvc = new BoqImportService(db, (code) => this.row(code), (code) => this.getBoq(code));
     this.portfolio = new ProjectsPortfolioService(db);
@@ -353,6 +354,7 @@ export class ProjectsService {
   // A3 (docs/50 Wave 3) — thin delegators; logic in projects-material.service.ts (ratchet).
   async boqByWbs(code: string) { return this.materialSvc.boqByWbs(code); }
   async materialDrawCurve(code: string) { return this.materialSvc.drawCurve(code); }
+  async evmByCategory(code: string) { return this.materialSvc.evmByCategory(code); } // A5 (docs/50 Wave 5)
   // A4 (docs/50 Wave 4) — thin delegators; logic in boq-import.service.ts (ratchet).
   async importBoq(code: string, input: BoqImportInput, user: JwtUser) { return this.boqImportSvc.importBoq(code, input, user); }
   boqImportTemplate() { return this.boqImportSvc.template(); }
@@ -811,11 +813,14 @@ export class ProjectsService {
     const risks = await this.listRisks(code);
     const ms = await this.listMilestones(code);
     const co = await this.listChangeOrders(code);
+    // A5 (docs/50 Wave 5) — the material lens: per-BoQ-category EVM incl. material CPI + wasted value.
+    const mat = await this.evmByCategory(code);
     return {
       project_code: code, name: detail.name, status: detail.status, customer_name: detail.customer_name, period,
       rag: this.evmSvc.ragOf(e.cpi, e.spi), pct_complete: detail.pct_complete,
       contract_amount: detail.contract_amount, billed_to_date: detail.billed_to_date, wip: detail.wip, margin: detail.margin,
       evm: { cpi: e.cpi, spi: e.spi, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, cost_variance: e.cost_variance, schedule_variance: e.schedule_variance },
+      material: mat.boq ? { material_cpi: mat.material_cpi, totals: mat.totals, categories: mat.categories } : null,
       health_trend: health,
       baseline: { active: baseline.baseline, variance: baseline.variance },
       risks: { summary: risks.summary, open_high: risks.risks.filter((r: any) => r.rag === 'red' && r.status !== 'closed') },

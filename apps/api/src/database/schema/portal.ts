@@ -63,11 +63,17 @@ export const wasteLog = pgTable('waste_log', {
   totalCost: numeric('total_cost', { precision: 18, scale: 4 }).notNull().default('0'),
   notes: text('notes'),
   journalNo: text('journal_no'),                        // JE-... when the waste was costed to GL
+  // A5 (docs/50 Wave 5) — optional project dimension: a project-tagged, costed waste relieves PROJECT WIP
+  // (Cr 1260, project_id line dimension) instead of inventory (Cr 1200) and feeds the per-BoQ-line "wasted"
+  // figure in the material control tower. NULL = ordinary kitchen/warehouse waste, byte-identical to before.
+  projectId: bigint('project_id', { mode: 'number' }),
+  boqLineId: bigint('boq_line_id', { mode: 'number' }),
   loggedBy: text('logged_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byPeriod: index('idx_waste_log_period').on(t.tenantId, t.reasonCode),
   byDisposition: index('idx_waste_log_disposition').on(t.tenantId, t.disposition),
+  byProject: index('idx_waste_log_project').on(t.tenantId, t.projectId),
 }));
 
 // Per-branch on-hand ledger (Phase — branch-aware replenishment). Runs ALONGSIDE customer_inventory:

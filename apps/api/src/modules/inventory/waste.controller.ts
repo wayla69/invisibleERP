@@ -17,6 +17,10 @@ const WasteBody = z.object({
   branch_id: z.number().int().optional(),
   ref_doc: z.string().max(60).optional(),
   notes: z.string().max(500).optional(),
+  // A5 (docs/50 Wave 5) — project-tagged site scrap: relieves project WIP (1260) instead of inventory.
+  project_id: z.number().int().positive().optional(),
+  project_code: z.string().max(40).optional(),
+  boq_line_id: z.number().int().positive().optional(),
 });
 
 const VoidFireBody = z.object({

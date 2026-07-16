@@ -420,6 +420,12 @@ export class ProjectsController {
     return this.svc.evm(code, asOf);
   }
 
+  // A5 (docs/50 Wave 5) — EVM split by BoQ category (material/labor/subcon/other) incl. material CPI + wasted.
+  @Get(':code/evm/by-category')
+  evmByCategory(@Param('code') code: string) {
+    return this.svc.evmByCategory(code);
+  }
+
   // EVM S-curve series (planned cumulative cost by month + current EV/AC/PV overlay).
   @Get(':code/evm/series')
   evmSeries(@Param('code') code: string, @Query('months') months: string | undefined) {

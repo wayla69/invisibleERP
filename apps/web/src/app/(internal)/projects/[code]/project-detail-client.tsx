@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -221,6 +221,8 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   // A3 material control tower reads (WBS rollup + draw curve)
   const byWbsQ = useQuery<any>({ queryKey: ['proj', code, 'by-wbs'], queryFn: () => api(`/api/projects/${code}/boq/by-wbs`) });
   const drawQ = useQuery<any>({ queryKey: ['proj', code, 'material-draw'], queryFn: () => api(`/api/projects/${code}/material-draw`) });
+  // A5 — EVM split by BoQ category (material CPI + wasted value per category)
+  const evmCatQ = useQuery<any>({ queryKey: ['proj', code, 'evm-by-category'], queryFn: () => api(`/api/projects/${code}/evm/by-category`) });
   const siteCash = useQuery<any>({ queryKey: ['proj', code, 'sitecash'], queryFn: () => api(`/api/projects/${code}/site-cash`) });
   const bq = boq.data;
   const boqId: number | undefined = bq?.boq?.id;
@@ -305,6 +307,23 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     const reason = window.prompt(t('pj.resv_return_reason_prompt'));
     if (!reason || !reason.trim()) { notifyError(t('pj.resv_return_reason_required')); return; }
     requestReturn.mutate({ id: r.id, qty: Number(qtyStr) || undefined, reason: reason.trim() });
+  };
+
+  // A5: site scrap of ISSUED material — relieves project WIP (Dr 5810 / Cr 1260), capped server-side at
+  // the net drawn value (WASTE_EXCEEDS_WIP). Cost is the issue unit cost, asserted by the logger.
+  const logScrap = useMutation({
+    mutationFn: (v: { item_id: string; qty: number; unit_cost: number; boq_line_id?: number }) =>
+      api('/api/inventory/waste', { method: 'POST', body: JSON.stringify({ ...v, reason_code: 'damage', project_code: code }) }),
+    onSuccess: () => { notifySuccess(t('pj.resv_scrap_posted')); refresh(); byWbsQ.refetch(); evmCatQ.refetch(); },
+    onError: (e: any) => notifyError(e?.message ?? String(e)),
+  });
+  const promptScrap = (r: any) => {
+    const qtyStr = window.prompt(t('pj.resv_scrap_qty_prompt', { qty: num(r.qty) }), '1');
+    if (qtyStr == null || !(Number(qtyStr) > 0)) return;
+    const costStr = window.prompt(t('pj.resv_scrap_cost_prompt'));
+    if (costStr == null) return;
+    if (!(Number(costStr) > 0)) { notifyError(t('pj.resv_scrap_cost_required')); return; }
+    logScrap.mutate({ item_id: r.item_id, qty: Number(qtyStr), unit_cost: Number(costStr), boq_line_id: r.boq_line_id ?? undefined });
   };
 
   // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
@@ -399,7 +418,32 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
                   { key: 'committed', label: t('pj.pmr_stat_committed'), align: 'right', render: (r: any) => baht(r.committed) },
                   { key: 'issued', label: t('pj.mct_col_issued'), align: 'right', render: (r: any) => baht(r.issued) },
                   { key: 'returned', label: t('pj.mct_col_returned'), align: 'right', render: (r: any) => baht(r.returned) },
+                  { key: 'wasted', label: t('pj.mct_col_wasted'), align: 'right', render: (r: any) => r.wasted > 0 ? <span className="font-medium text-destructive">{baht(r.wasted)}</span> : baht(r.wasted) },
                   { key: 'remaining', label: t('pj.boq_col_remaining'), align: 'right', render: (r: any) => <span className={r.remaining < 0 ? 'font-medium text-destructive' : 'tabular'}>{baht(r.remaining)}</span> },
+                ]}
+              />
+            </div>
+          )}
+          {/* A5 — EVM by BoQ category: the material cost-performance lens (CPI per category + wasted) */}
+          {(evmCatQ.data?.categories ?? []).length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.evmcat_title')}</h3>
+                {evmCatQ.data.material_cpi != null && (
+                  <Badge variant={evmCatQ.data.material_cpi >= 1 ? 'success' : 'destructive'}>{t('pj.evmcat_material_cpi')} {evmCatQ.data.material_cpi}</Badge>
+                )}
+              </div>
+              <DataTable
+                rows={evmCatQ.data.categories}
+                rowKey={(r: any) => r.category}
+                columns={[
+                  { key: 'category', label: t('pj.evmcat_col_category'), render: (r: any) => t(`pj.boq_cat_${r.category}`) },
+                  { key: 'budget', label: t('pj.boq_col_budget'), align: 'right', render: (r: any) => baht(r.budget) },
+                  { key: 'committed', label: t('pj.pmr_stat_committed'), align: 'right', render: (r: any) => baht(r.committed) },
+                  { key: 'actual', label: t('pj.evmcat_col_actual'), align: 'right', render: (r: any) => baht(r.actual) },
+                  { key: 'wasted', label: t('pj.mct_col_wasted'), align: 'right', render: (r: any) => r.wasted > 0 ? <span className="font-medium text-destructive">{baht(r.wasted)}</span> : baht(r.wasted) },
+                  { key: 'ev', label: t('pj.evmcat_col_ev'), align: 'right', render: (r: any) => baht(r.ev) },
+                  { key: 'cpi', label: 'CPI', align: 'right', render: (r: any) => r.cpi == null ? '—' : <span className={r.cpi < 1 ? 'font-medium text-destructive' : 'font-medium text-emerald-600'}>{r.cpi}</span> },
                 ]}
               />
             </div>
@@ -491,7 +535,10 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
                 <Button variant="ghost" size="sm" title={t('pj.resv_release_tip')} onClick={() => releaseResv.mutate(r.id)}><ArrowLeft className="size-4" /></Button>
               </span>
             ) : r.status === 'consumed' ? (
-              <Button variant="ghost" size="sm" title={t('pj.resv_return_tip')} onClick={() => promptReturn(r)}><ArrowLeft className="size-4" /></Button>
+              <span className="flex gap-1">
+                <Button variant="ghost" size="sm" title={t('pj.resv_return_tip')} onClick={() => promptReturn(r)}><ArrowLeft className="size-4" /></Button>
+                <Button variant="ghost" size="sm" title={t('pj.resv_scrap_tip')} onClick={() => promptScrap(r)}><Trash2 className="size-4" /></Button>
+              </span>
             ) : null },
           ]}
           emptyState={{ icon: Boxes, title: t('pj.resv_empty_title'), description: t('pj.resv_empty_desc') }}
