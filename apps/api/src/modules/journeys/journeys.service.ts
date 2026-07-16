@@ -145,7 +145,7 @@ export class JourneysService {
     const db = this.db;
     const act = await db.select().from(journeys).where(and(eq(journeys.tenantId, tenantId), eq(journeys.status, 'active')));
     let enrolled = 0, sent = 0, skipped = 0, completed = 0;
-    const sysUser = { tenantId, username: actor, role: 'System' } as any as JwtUser;
+    const sysUser = { tenantId, username: actor, role: 'System' } as unknown as JwtUser;
 
     for (const j of act) {
       if (j.trigger === 'segment' && j.segmentId) {
@@ -222,7 +222,7 @@ export class JourneysService {
     const [step] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(enr.journeyId)), eq(journeySteps.stepNo, Number(enr.currentStep)))).limit(1);
     if (!step) return 'completed';
     const memberId = Number(enr.memberId);
-    const sysUser = { tenantId, username: actor, role: 'System' } as any as JwtUser;
+    const sysUser = { tenantId, username: actor, role: 'System' } as unknown as JwtUser;
     if (step.skipRule) {
       try { if (await this.segments.memberMatchesRule(db, tenantId, memberId, step.skipRule)) return 'skipped'; } catch { /* bad rule ⇒ don't skip */ }
     }

@@ -567,7 +567,7 @@ export class LineWebhookController {
     @Req() req: FastifyRequest & { rawBody?: Buffer },
     @Headers('x-line-signature') signature: string | undefined,
   ) {
-    return this.svc.handle(tenantCode, req.rawBody, signature, (req as any).body);
+    return this.svc.handle(tenantCode, req.rawBody, signature, req.body);
   }
 
   // LINE-account linking for the chat-PR flow — mirrors the /requisitions permission set (pr_raise;

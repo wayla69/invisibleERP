@@ -247,6 +247,29 @@ async function main() {
       && ((b3Ent.json.created ?? []).includes('hq_branch') || (b3Ent.json.skipped ?? []).includes('hq_branch'))
       && ['menu_starter', 'dining_tables', 'wh_branch', 'demo_project'].every((k) => !(b3Ent.json.created ?? []).includes(k) && !(b3Ent.json.skipped ?? []).includes(k)),
     JSON.stringify(b3Ent.json));
+  // The remaining two industries: retail gets a POS sample catalog (type 'retail', no dining tables);
+  // services gets a demo project (no menu kit at all).
+  const b3Retail = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ร้านค้าคนเดียว', tenant_code: 'b1retail', admin_username: 'b1_retail_owner', admin_password: 'retail12345',
+    email: 'b1rt@x.co', control_profile: 'sme', industry: 'retail',
+  });
+  const b3RetailSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_retail_owner', 'retail12345')).json.token, {});
+  const b3RetailRows = (await pg.query(`SELECT count(*)::int AS n FROM menu_items WHERE tenant_id=${Number(b3Retail.json.tenant_id) || 0} AND type='retail'`)).rows as any[];
+  ok('B3: retail SME kit seeds 2 sample POS items (type retail) and NO dining tables',
+    b3RetailSp.status === 201 && (b3RetailSp.json.created ?? []).includes('menu_starter')
+      && !(b3RetailSp.json.created ?? []).includes('dining_tables') && !(b3RetailSp.json.skipped ?? []).includes('dining_tables')
+      && b3RetailRows[0].n === 2,
+    JSON.stringify({ resp: b3RetailSp.json, retailItems: b3RetailRows[0].n }));
+  const b3Svc = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ที่ปรึกษาคนเดียว', tenant_code: 'b1svc', admin_username: 'b1_svc_owner', admin_password: 'svc12345678',
+    email: 'b1sv@x.co', control_profile: 'sme', industry: 'services',
+  });
+  const b3SvcSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_svc_owner', 'svc12345678')).json.token, {});
+  const b3SvcRows = (await pg.query(`SELECT count(*)::int AS n FROM projects WHERE tenant_id=${Number(b3Svc.json.tenant_id) || 0} AND project_code='PRJ-DEMO'`)).rows as any[];
+  ok('B3: services SME kit seeds the demo project and NO menu kit',
+    b3SvcSp.status === 201 && (b3SvcSp.json.created ?? []).includes('demo_project')
+      && !(b3SvcSp.json.created ?? []).includes('menu_starter') && b3SvcRows[0].n === 1,
+    JSON.stringify({ resp: b3SvcSp.json, demoProjects: b3SvcRows[0].n }));
 
   // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
   const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });

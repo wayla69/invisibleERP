@@ -21,7 +21,6 @@
     "apps/api/src/modules/profitability/profitability.service.ts",
     "apps/api/src/modules/projects/projects.service.ts",
     "apps/api/src/modules/reconciliation/reconciliation.service.ts",
-    "apps/api/src/modules/restaurant/tip.service.ts",
     "apps/api/src/modules/revrec-disclosure/rev-disclosure.service.ts",
     "apps/api/src/modules/tax/reports/tax-reports.service.ts"
   ]

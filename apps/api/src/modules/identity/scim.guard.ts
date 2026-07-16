@@ -43,7 +43,7 @@ export class ScimAuthGuard implements CanActivate {
       role: 'AccessAdmin',
       customerName: null,
       tenantId: Number(row.tenantId),
-      permissions: resolvePermissions('AccessAdmin' as any),
+      permissions: resolvePermissions('AccessAdmin'),
     } satisfies JwtUser;
     return true;
   }

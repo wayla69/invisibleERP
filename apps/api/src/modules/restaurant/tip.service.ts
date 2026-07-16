@@ -1,9 +1,10 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, tipDistributions, tipDistributionLines, journalLines, journalEntries } from '../../database/schema';
+import { payments, tipDistributions, tipDistributionLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
@@ -27,6 +28,7 @@ export class TipService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
+    private readonly ledgerRead: LedgerReadService,
   ) {}
 
   // tips collected in a window (Σ payments.tip on captured/settled tenders) + already distributed.
@@ -93,12 +95,8 @@ export class TipService {
   }
 
   // 2300 Tips Payable outstanding = Σ credit − Σ debit over Posted entries (the tips still owed to staff).
+  // Read via LedgerReadService (docs/46 Phase 3 boundary) — accountNet returns debit − credit, so negate.
   private async outstanding2300(tenantId: number | null): Promise<number> {
-    const db = this.db;
-    const conds = [eq(journalLines.accountCode, '2300'), eq(journalEntries.status, 'Posted')];
-    if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
-    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
-    return roundCurrency(n(g?.v), 'THB');
+    return roundCurrency(-(await this.ledgerRead.accountNet(['2300'], { tenantId })), 'THB');
   }
 }
