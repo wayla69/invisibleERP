@@ -248,6 +248,10 @@ async function main() {
   ok('Edge rate limiter: /api/crm/web-to-lead is on the dedicated strict bucket',
     rateLimitBucketOf('/api/crm/web-to-lead') === 'lead' && rateLimitBucketOf('/api/crm/pipeline/leads') === 'api' && rateLimitBucketOf('/api/login') === 'auth',
     `bucket=${rateLimitBucketOf('/api/crm/web-to-lead')}`);
+  // Security (pentest P12): public tenant-minting endpoints ride their OWN strict bucket, not the loose global one.
+  ok('Edge rate limiter: /api/auth/signup + signup-requests are on the strict signup bucket (P12)',
+    rateLimitBucketOf('/api/auth/signup') === 'signup' && rateLimitBucketOf('/api/auth/signup-requests') === 'signup',
+    `signup=${rateLimitBucketOf('/api/auth/signup')} req=${rateLimitBucketOf('/api/auth/signup-requests')}`);
 
   // 30. CSV lead import: dry-run validation report, then commit (invalid row skipped, LEAD- numbered)
   const csv = 'Name,Company,Email,Phone,Source\nสมชาย นำเข้า,Import Co,somchai@imp.example,0812345678,expo\n,NoName Co,,,\nสมหญิง นำเข้า,,somying@imp.example,,expo';

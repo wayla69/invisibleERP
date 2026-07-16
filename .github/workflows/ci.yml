@@ -105,7 +105,7 @@ jobs:
           - shard: platform-a
             run: >-
               cutover:e2e cutover:ext cutover:tenant-isolation cutover:tenant-idx
-              cutover:module-qr cutover:gaps
+              cutover:rls-coverage cutover:module-qr cutover:gaps
           - shard: platform-b
             run: >-
               cutover:worldclass cutover:migration-parity cutover:ai-eval

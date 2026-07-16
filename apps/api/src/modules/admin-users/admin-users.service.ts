@@ -392,6 +392,13 @@ export class AdminUsersService {
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    // Security (pentest P9): deletion is a privileged action OVER the target — a denial-of-administration if a
+    // lesser admin can remove a peer Admin. Authorize on the target's CURRENT role, same as reset-password
+    // (P1): only the platform owner may delete an Admin (or another platform owner).
+    if (isPlatformAdmin(u.username) && !isPlatformAdmin(actor?.username)) {
+      throw new ForbiddenException({ code: 'ADMIN_GRANT_DENIED', message: 'Only the platform owner may delete a platform-owner account', messageTh: 'เฉพาะเจ้าของแพลตฟอร์มเท่านั้นที่ลบบัญชีเจ้าของแพลตฟอร์มได้' });
+    }
+    this.assertCanGrantRole(u.role as string, actor);
     await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
     await db.delete(users).where(eq(users.id, u.id));
     return { username, deleted: true };
