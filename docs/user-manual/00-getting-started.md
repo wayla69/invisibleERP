@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.2 · 2026-07-16** · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/50 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/50 B2).*
+**Status: DRAFT v0.3 · 2026-07-16** · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/50 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/50 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/50 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -205,6 +205,13 @@ appear in **both** workspaces.
   แสดงเมนูขั้นสูง) to reveal every hidden domain yourself — no administrator needed. Search (⌘K) and
   Favourites always reach hidden items, and any group you open/close yourself stays the way you left it,
   synced across your devices.
+- **Industry starter kit (SME companies only):** the setup wizard's **สร้างสำนักงานใหญ่** step (or
+  `POST /api/tenant/starter-pack`) also drops in a little sample content matching your business type so
+  the first screens aren't empty — a restaurant gets a sample menu category with two items and four
+  tables; a retail shop gets two sample products in the POS catalog; a wholesaler gets a **คลังสินค้า 1**
+  warehouse branch; a services firm gets a demo project. Everything is plainly marked (DEMO/ตัวอย่าง),
+  belongs only to your company, is safe to edit or delete, and is never re-created once the area has real
+  data.
 - **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
   home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
   bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first

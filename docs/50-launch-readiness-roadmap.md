@@ -1,6 +1,6 @@
 # 50 — SME Launch-Readiness Roadmap (Tracks A–C)
 
-> **Date:** 2026-07-16 · **Status:** v1.1 — Track A DELIVERED · Track B: B1+B2 DELIVERED, B3 planned ·
+> **Date:** 2026-07-16 · **Status:** v1.2 — Tracks A + B (B1/B2/B3) DELIVERED · Track C = standing checklist ·
 > **Owner:** ERP / Product
 > **Scope:** The last mile between "the SME single-user edition exists" (`docs/49`, fully delivered
 > v1.0–1.6) and "a solo Thai business owner can be handed a login and succeed on day one." Three tracks:
@@ -83,14 +83,19 @@ The industry fold is a *default, not a cage* — and it is now provably right in
   enterprise admin sees no toggle and keeps pre-B1 subgroup defaults. Verified locally (17/17 with the
   `workspace-split` regression suite) + web build/typecheck/ratchets green.
 
-### B3 — Industry-aware first-run content (after B2)
+### B3 — Industry-aware first-run content ✅ DELIVERED (this PR)
 
-The ~15 visible items must land on non-empty screens. Extend the SME setup wizard + `starter-pack` with
-an industry starter kit applied at first run (owner-confirmed, idempotent, skippable): restaurant — sample
-menu categories + a few tables; retail — item categories + a barcode-ready sample item; distribution — a
-second warehouse + a sample supplier; services — a sample project with a one-line BoQ. Rides the existing
-`POST /api/tenant/starter-pack` create/skip contract; no new control (master-data seeding under the
-operator's own duties; MDM maker-checker seams untouched).
+The ~15 visible items land on non-empty screens: `POST /api/tenant/starter-pack` (the wizard's *Create HQ*
+button; same create/skip idempotent contract, permission `users` unchanged) now applies an **SME industry
+kit** after the HQ branch — restaurant: a sample menu category + 2 items and 4 dining tables; retail: a
+sample POS catalog (2 retail items); distribution: a `WH1` warehouse branch; services: a demo project.
+Logic lives in the new `modules/billing/starter-pack.service.ts` (the controller is a thin delegate);
+each piece seeds only when its table is empty for the tenant. **Design constraint honoured:** everything
+seeded is tenant-scoped (`menu_*`, `dining_tables`, `branches`, `projects`) — the SHARED `items` master
+(no `tenant_id`) is deliberately never touched, so demo rows can't leak across companies; the harness
+asserts this. Enterprise companies keep the exact pre-B3 behaviour (HQ only). `general` SMEs get no kit.
+No new control (tenant-scoped sample data under the operator's own duties; MDM maker-checker untouched).
+ToE: `onboarding` harness +5 (150 total); UAT-ADM-170.
 
 ---
 
@@ -107,5 +112,6 @@ B1 live + this checklist walked for the target environment.
 ## Revision history
 | Rev | Date | Author | Change |
 |---|---|---|---|
+| 1.2 | 2026-07-16 | ERP/Product | **B3 delivered** — SME industry starter kit in `POST /api/tenant/starter-pack` (new `starter-pack.service.ts`; controller delegates): restaurant menu+tables / retail catalog / distribution WH1 branch / services demo project; idempotent create/skip, tenant-scoped only (shared `items` master untouched — harness-asserted), enterprise + `general` unchanged. Onboarding harness 145→150; UAT-ADM-170 + matrix v7.36; manual 00-getting-started v0.3. Track B complete. |
 | 1.1 | 2026-07-16 | ERP/Product | **B2 delivered** — "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (SME-only sidebar footer, reserved synced navFold key `__show_sme_hidden__`, i18n ×5, no API change) + Playwright proof `e2e/sme-nav-folding.spec.ts` (4 specs: hidden domain gone, industry groups open/others folded incl. subgroup defaults, reveal round-trip, enterprise regression; 17/17 with workspace-split). Manual 00-getting-started v0.2. |
 | 1.0 | 2026-07-16 | ERP/Product | Re-created after the working-tree reset (see note). Track A recorded delivered (P1–P4, PRs #797/#798/#799). **B1 delivered** — industry-aware SME nav folding at provisioning (shared `nav-profiles.ts`, `sme_prefs` stamp, `/me` `sme_open_nav_groups`, AppShell fold defaults; onboarding +5, `nav-profiles.test.ts` 6; UAT-ADM-169). B2 (reveal toggle + e2e) and B3 (industry starter kit) planned. |

@@ -219,6 +219,35 @@ async function main() {
       && b1EntMe.json.sme_open_nav_groups === undefined && b1EntMe.json.sme_hidden_nav_groups === undefined,
     JSON.stringify({ cp: b1EntMe.json.control_profile, open: b1EntMe.json.sme_open_nav_groups }));
 
+  // ── 3b5. B3 (docs/50 Track B): the starter pack seeds an SME industry kit — tenant-scoped sample
+  //         content matching the B1 nav (restaurant: menu + dining tables; distribution: WH branch),
+  //         idempotent, and NEVER touches the shared `items` master. Enterprise: HQ-only (pre-B3). ──
+  const b3Resto1 = await inj('POST', '/api/tenant/starter-pack', b1RestoTok, {});
+  ok('B3: restaurant SME starter-pack seeds HQ + sample menu + dining tables',
+    b3Resto1.status === 201
+      && ['hq_branch', 'menu_starter', 'dining_tables'].every((k) => (b3Resto1.json.created ?? []).includes(k)),
+    JSON.stringify(b3Resto1.json));
+  const b3RestoRows = (await pg.query(`SELECT (SELECT count(*)::int FROM menu_items WHERE tenant_id=${b1Resto.json.tenant_id}) AS menu, (SELECT count(*)::int FROM dining_tables WHERE tenant_id=${b1Resto.json.tenant_id}) AS tables, (SELECT count(*)::int FROM items WHERE item_id LIKE 'DEMO-%') AS shared_items`)).rows as any[];
+  ok('B3: kit rows are tenant-scoped (menu 2, tables 4) and the SHARED items master got NOTHING',
+    b3RestoRows[0].menu === 2 && b3RestoRows[0].tables === 4 && b3RestoRows[0].shared_items === 0,
+    JSON.stringify(b3RestoRows[0]));
+  const b3Resto2 = await inj('POST', '/api/tenant/starter-pack', b1RestoTok, {});
+  ok('B3: second starter-pack call skips every kit piece (idempotent)',
+    b3Resto2.status === 201
+      && ['hq_branch', 'menu_starter', 'dining_tables'].every((k) => (b3Resto2.json.skipped ?? []).includes(k))
+      && (b3Resto2.json.created ?? []).length === 0,
+    JSON.stringify(b3Resto2.json));
+  const b3Dist = await inj('POST', '/api/tenant/starter-pack', (await login('b1_dist_owner', 'dist12345')).json.token, {});
+  ok('B3: distribution SME kit seeds the WH1 warehouse branch instead',
+    b3Dist.status === 201 && (b3Dist.json.created ?? []).includes('wh_branch') && !(b3Dist.json.created ?? []).includes('menu_starter'),
+    JSON.stringify(b3Dist.json));
+  const b3Ent = await inj('POST', '/api/tenant/starter-pack', platLogin.json.token, {});
+  ok('B3: an ENTERPRISE company starter-pack stays HQ-only (no industry kit)',
+    b3Ent.status === 201
+      && ((b3Ent.json.created ?? []).includes('hq_branch') || (b3Ent.json.skipped ?? []).includes('hq_branch'))
+      && ['menu_starter', 'dining_tables', 'wh_branch', 'demo_project'].every((k) => !(b3Ent.json.created ?? []).includes(k) && !(b3Ent.json.skipped ?? []).includes(k)),
+    JSON.stringify(b3Ent.json));
+
   // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
   const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });
   ok('POST /api/admin/tenants/:id/extend-trial extends the trial (status Trialing, future end)',
