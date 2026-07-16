@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
+import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalPeriods, journalEntries, journalLines, reconPeriods } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
@@ -303,7 +303,24 @@ export class CloseService {
     }
     const snapshotRecon = { key: 'gl_snapshot_drift', title: 'Period-balance snapshot reconciles to the raw ledger (GL-20)', ok: driftAccts.length === 0, count: driftAccts.length, accounts: driftAccts.slice(0, 20) };
 
-    const checks = [drafts, periodBalanced, entriesBalanced, suspense, snapshotRecon];
+    // B4 (docs/50 Wave 4) — recon_completeness (advisory): every account reconciliation OPENED for this
+    // period should be certified (manually via REC-01 or auto-certified for the safe class) before lock.
+    // Advisory like suspense — the workspace is opt-in per account, so an uncertified recon warns, never
+    // hard-blocks (the hard gates stay drafts/balance/snapshot).
+    const reconTenantId = this.tenantId();
+    const reconRows = reconTenantId != null
+      ? await db.select().from(reconPeriods).where(and(eq(reconPeriods.tenantId, reconTenantId), eq(reconPeriods.period, period)))
+      : [];
+    const uncertified = reconRows.filter((r: any) => r.status !== 'Certified');
+    const reconCompleteness = {
+      key: 'recon_completeness',
+      title: 'Account reconciliations certified (REC-01)',
+      ok: uncertified.length === 0,
+      advisory: true as const,
+      opened: reconRows.length,
+      uncertified: uncertified.map((r: any) => ({ account_code: r.accountCode, status: r.status, risk_rating: r.riskRating })),
+    };
+    const checks = [drafts, periodBalanced, entriesBalanced, suspense, snapshotRecon, reconCompleteness];
     const blockers = checks.filter((c: any) => !c.ok && !c.advisory).map((c) => c.key);
     const warnings = checks.filter((c: any) => !c.ok && c.advisory).map((c) => c.key);
     return { period, ready: blockers.length === 0, blockers, warnings, checks };

@@ -12,6 +12,12 @@ export const reconPeriods = pgTable('recon_periods', {
   status: text('status').notNull().default('Open'), // Open | Reconciled | Certified
   glBalance: numeric('gl_balance', { precision: 18, scale: 4 }).notNull().default('0'),
   subledgerBalance: numeric('subledger_balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  // 0422 (docs/50 Wave 4 B4) — roll-forward (ties to the posted GL by construction) + risk-driven review.
+  openingBalance: numeric('opening_balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  activity: numeric('activity', { precision: 18, scale: 4 }).notNull().default('0'),
+  closingBalance: numeric('closing_balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  riskRating: text('risk_rating').notNull().default('medium'), // low | medium | high
+  autoCertified: boolean('auto_certified').notNull().default(false),
   preparedBy: text('prepared_by'),
   preparedAt: timestamp('prepared_at', { withTimezone: true }),
   certifiedBy: text('certified_by'),

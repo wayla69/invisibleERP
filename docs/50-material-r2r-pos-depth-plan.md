@@ -201,7 +201,13 @@ evidence attachment, SLA/overdue escalation.
 - Harness: scheduled run drafts once per period; duplicate schedule tick = no-op; post still requires a
   second user.
 
-### B4 — Reconciliation workspace depth (roll-forward + risk-rating + auto-certify) · Effort **M–L**
+### B4 — Reconciliation workspace depth (roll-forward + risk-rating + auto-certify) · Effort **M–L** · **✅ DELIVERED (2026-07-16)**
+> Delivered (genuinely greenfield — the audit confirmed none of it pre-existed): migration `0422` adds
+> roll-forward (GL-tied by construction) + risk rating + auto_certified to `recon_periods`; aging on the
+> summary; `PUT …/:id/risk`; `POST /api/recon/periods/auto-certify` (safe class only — LOW risk + zero
+> roll-forward; '(auto)'-attributed; REC-01 untouched); GL-19 advisory `recon_completeness` (cockpit
+> consumes it via the validate leg). ToE `recon-profitability` 13→24; PN-04 rev 2.37; manual 06 v0.22;
+> UAT-GL-198..200. Deferred: reviewer-routing assignments; per-risk frequency policies.
 **Goal:** lift `modules/reconciliation` from item-matching to full balance-sheet certification
 (BlackLine-style) — the audit-readiness feature auditors ask for first.
 - Per-account roll-forward (opening → activity → closing vs GL), aging of reconciling items, per-account
