@@ -1,6 +1,6 @@
 # 50 — SME Launch-Readiness Roadmap (Tracks A–C)
 
-> **Date:** 2026-07-16 · **Status:** v1.2 — Tracks A + B (B1/B2/B3) DELIVERED · Track C = standing checklist ·
+> **Date:** 2026-07-16 · **Status:** v1.3 — Tracks A + B DELIVERED · Track C audited (code side ✅; console side = runbook) ·
 > **Owner:** ERP / Product
 > **Scope:** The last mile between "the SME single-user edition exists" (`docs/49`, fully delivered
 > v1.0–1.6) and "a solo Thai business owner can be handed a login and succeed on day one." Three tracks:
@@ -99,19 +99,39 @@ ToE: `onboarding` harness +5 (145 total); UAT-ADM-170.
 
 ---
 
-## Track C — Go-live operations (standing checklist, not a PR series)
+## Track C — Go-live operations ✅ AUDITED 2026-07-16 (code side) · console side = runbook item 13
 
-Pointers, all existing: deploy smoke (`claude/add-deploy-smoke-test`), tenancy boot checks fail-closed
-(H-3/H-4, `docs/ops/tenancy-model.md`), `TENANCY_MODE=multi-company` on every outside-facing deploy
-(AC-18), service worker network-first HTML (deploy-safe chunks), LINE OA go-live runbook
-(`docs/ops/line-oa-golive.md`), migration journal monotonicity gate. Launch sign-off = Track A merged +
-B1 live + this checklist walked for the target environment.
+The single open-items list is **`docs/ops/go-live-console-runbook.md`** (by design — don't fork it).
+Track C's audit split its pointers into what is *verified in the repo/CI* vs what *needs a human/console*:
+
+**Verified in-repo (2026-07-16, main @ `2587741`):**
+- **Deploy smoke** — `.github/workflows/deploy.yml`: `/healthz` liveness poll + an authenticated smoke over
+  core routes (fails the deploy on non-200, "likely a missing migration/column"); the authed leg is gated on
+  the `SMOKE_USER`/`SMOKE_PASS` secrets and *warn-skips* when unset — setting them is part of runbook scope.
+- **Tenancy boot checks fail-closed** — `common/tenancy-boot-check.ts`: prod **refuses to boot** on >1
+  tenant under `single-company` (H-4) or an RLS-bypassing base DB role (H-3); opt-out envs default OFF.
+- **`TENANCY_MODE`** — validated + warned at boot (`env.validation.ts`); present in
+  `docs/ops/railway-env-manifest.json` for every API service. Must be `multi-company` on any deploy where
+  outsiders get companies (AC-18).
+- **Service worker deploy-safety** — `apps/web/public/sw.js` v4: HTML navigations network-first (cache only
+  as offline fallback), `/_next/static` cache-first, stale-cache purge on activate.
+- **Migration journal monotonicity** — the `migrations-journaled` CI gate fails any new non-monotonic
+  `when` (the 2026-07-03 silent-skip outage class).
+- **LINE OA go-live runbook** exists (`docs/ops/line-oa-golive.md`), wired from the Settings messaging card.
+
+**Console side:** work `docs/ops/go-live-console-runbook.md` top-down (legal, DPA→`AI_DPA_ACKNOWLEDGED`,
+SOC 2, ELC operation, PgBouncer/Redis, PII backfill, loadtest baseline, `SEED_ADMIN_PASSWORD`, pilot
+reset/delete/purge) — **plus the new item 13 (SME edition launch gate)**: platform SME defaults with the
+accountant email (drives SME-01 recipients), edition+industry chosen at provisioning (birth attributes for
+the B1 nav profile + B3 starter kit), and the accountant's separate `sme_review`-only login for SME-02.
+Launch sign-off = Tracks A+B merged + runbook walked for the target environment.
 
 ---
 
 ## Revision history
 | Rev | Date | Author | Change |
 |---|---|---|---|
+| 1.3 | 2026-07-16 | ERP/Product/Platform | **Track C audited.** Every code-side pointer verified on main @ `2587741` (deploy smoke in `deploy.yml` incl. the `SMOKE_USER`/`SMOKE_PASS` warn-skip caveat; fail-closed tenancy boot checks; `TENANCY_MODE` validation + env manifest; sw.js v4 network-first HTML; `migrations-journaled` monotonic-`when` gate; LINE OA runbook). Console side consolidated into `docs/ops/go-live-console-runbook.md` — **new item 13 (SME edition launch gate, rev 1.4)**: platform SME defaults/accountant email (SME-01 recipients), edition+industry as birth attributes at provisioning, accountant `sme_review`-only login for SME-02, with a per-industry provisioning verification loop. No code change. |
 | 1.2 | 2026-07-16 | ERP/Product | **B3 delivered** — SME industry starter kit in `POST /api/tenant/starter-pack` (new `starter-pack.service.ts`; controller delegates): restaurant menu+tables / retail catalog / distribution WH1 branch / services demo project; idempotent create/skip, tenant-scoped only (shared `items` master untouched — harness-asserted), enterprise + `general` unchanged. Onboarding harness 140→145; UAT-ADM-170 + matrix v7.36; manual 00-getting-started v0.3. Track B complete. |
 | 1.1 | 2026-07-16 | ERP/Product | **B2 delivered** — "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (SME-only sidebar footer, reserved synced navFold key `__show_sme_hidden__`, i18n ×5, no API change) + Playwright proof `e2e/sme-nav-folding.spec.ts` (4 specs: hidden domain gone, industry groups open/others folded incl. subgroup defaults, reveal round-trip, enterprise regression; 17/17 with workspace-split). Manual 00-getting-started v0.2. |
 | 1.0 | 2026-07-16 | ERP/Product | Re-created after the working-tree reset (see note). Track A recorded delivered (P1–P4, PRs #797/#798/#799). **B1 delivered** — industry-aware SME nav folding at provisioning (shared `nav-profiles.ts`, `sme_prefs` stamp, `/me` `sme_open_nav_groups`, AppShell fold defaults; onboarding +5, `nav-profiles.test.ts` 6; UAT-ADM-169). B2 (reveal toggle + e2e) and B3 (industry starter kit) planned. |
