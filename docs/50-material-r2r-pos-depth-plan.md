@@ -1,6 +1,6 @@
 # 50 — Project Material Control · Record-to-Report · POS Sale — Further Development Phase
 
-> **Date:** 2026-07-16 · **Status:** v0.5 — **Waves 1–3 DELIVERED** (A2 · B2 · C1r · A1 · B3 · C2 · A3 · B1-v1 · C3r); Waves 4–5 planned · **Owner:** ERP / Product
+> **Date:** 2026-07-16 · **Status:** v0.6 — **Waves 1–4 DELIVERED** (12 phases); Wave 5 planned (B5 · A5 · C5-external) · **Owner:** ERP / Product
 > **Scope:** the next development phase across three cycles the business runs on daily:
 > **(A) Project material control** (docs/32 + docs/35 spine), **(B) Record-to-report** (PN-04 GL close
 > spine, docs/17/18/35), **(C) POS sale** (`docs/pos-worldclass-roadmap.md` + docs/41 hub spine).
@@ -334,7 +334,7 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 | **1 — quick wins ✅ DELIVERED 2026-07-16** | **A2** reservation sweep · **B2** auto-reversing accruals · **C1 (re-scoped)** blind drawer close | S-effort, each closes a real control/consistency gap, zero external deps |
 | **2 — control gaps ✅ DELIVERED 2026-07-16** | **A1** material returns · **C2** full tax invoice · **B3** period-end automation | the physical-loop and fiscal gaps auditors/users hit monthly |
 | **3 — anchor features ✅ DELIVERED 2026-07-16** | **B1** Close Manager (v1) · **C3 (re-scoped)** register rule application · **A3** material control tower | the big UX/orchestration lifts |
-| **4 — depth** | **B4** recon workspace · **A4** BoQ import · **C4** offline completeness | audit-readiness + estimator/store-ops depth |
+| **4 — depth ✅ DELIVERED 2026-07-16** | **B4** recon workspace · **A4** BoQ import · **C4 (re-scoped)** loyalty-redeem replay | audit-readiness + estimator/store-ops depth |
 | **5 — detective + external** | **B5** JE analytics · **A5** material EVM/wastage · **C5** PSP terminal | C5 lands whenever the merchant sandbox arrives — start procurement in Wave 1 |
 
 - **Parallelizable:** tracks A/B/C touch disjoint modules — one PR per phase, any track can run ahead.
@@ -354,5 +354,6 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 | v0.1 | 2026-07-16 | Initial plan: codebase audit of the three cycles + 15 phases in 5 waves |
 | v0.2 | 2026-07-16 | Wave 1 build: C1 re-scoped (original was a docs/43-decided non-gap — TIP/GIFTCARD events are visibility-only by design) to **blind drawer close**, DELIVERED |
 | v0.3 | 2026-07-16 | **Wave 1 DELIVERED** — A2 (reservation sweep, ToE projects 336), B2 (auto-reversing accruals, ToE basics 422, golden re-pinned 531→534 for the 3 additive response fields), C1-rescoped (blind close, ToE cashreport 45). Verified: typecheck, api+web build, 4 ratchets, compliance 179, writeflow 36, analytics 17, worldclass 59, pos-p1 19, giftcards 33, taxdocs 131, input-vat 6 |
+| v0.6 | 2026-07-16 | **Wave 4 DELIVERED** — A4 (BoQ takeoff import, fail-closed, ToE projects 362), B4 (recon depth: GL-tied roll-forward + risk + aging + safe-class auto-certify + GL-19 recon_completeness, migration 0422, ToE recon-profitability 24 — the audit confirmed genuinely greenfield), C4 re-scoped (loyalty-redeem hub replay with cloud-side clamp, ToE hub-snapshot 79; the fiscal-chain half was a THIRD false gap — the cloud re-append chain is already the book of record). Golden 534 unchanged; basics 431, compliance 179, projects 362, worldclass 59, e2e 23, writeflow 36; typecheck/builds/ratchets green |
 | v0.5 | 2026-07-16 | **Wave 3 DELIVERED** — A3 (material control tower: by-WBS rollup + draw curve, ToE projects 357), B1 v1 (Close Manager: per-tenant close-task templates w/ owner/due/dependency, migration 0421, ToE basics 431; GL-19 auto-complete + overdue GOV-01 provider deferred), C3 re-scoped (a SECOND false gap — the pricing engine pre-existed in modules/pricing; delivered the genuine residual: the register now applies automatic rules on every checkout + applied-rules toast). Golden 534 unchanged; compliance 179, e2e 23, worldclass 59, writeflow 36, analytics 17, typecheck/builds/ratchets green |
 | v0.4 | 2026-07-16 | **Wave 2 DELIVERED** — A1 (material return-to-stock, NEW control **INV-19**, migration 0420, RCM 296, ToE projects 351), B3 (schedulable `gl_fx_reval_run` + `consolidation_run` staging jobs, ToE fxreval 22 + consolidation 47), C2 (sale-keyed full tax invoice at the counter over the existing TAX-10 conversion, ToE taxdocs 136). C2 depth note: the ABB→full conversion pre-existed — the residual was the counter surface only. Golden 534 unchanged; typecheck/builds/ratchets/census green |
