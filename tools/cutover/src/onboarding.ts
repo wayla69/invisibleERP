@@ -174,7 +174,7 @@ async function main() {
   ok('GET /api/admin/tenants/:id returns company detail (subscription + counts + activity)',
     detail.status === 200 && detail.json.id === Number(created.json.tenant_id) && !!detail.json.subscription && typeof detail.json.counts?.users === 'number' && Array.isArray(detail.json.recent_activity),
     `st=${detail.status} plan=${detail.json.subscription?.plan_code} users=${detail.json.counts?.users}`);
-  // ── 3b4. B1 (docs/50 Track B): SME provisioning folds the sidebar from the company's INDUSTRY —
+  // ── 3b4. B1 (docs/51 Track B): SME provisioning folds the sidebar from the company's INDUSTRY —
   //         the industry nav profile (@ierp/shared nav-profiles) is stamped into tenants.sme_prefs at
   //         creation and surfaced on /api/auth/me as sme_hidden_nav_groups + sme_open_nav_groups. ──
   const b1Resto = await inj('POST', '/api/admin/tenants', owner, {
@@ -219,7 +219,7 @@ async function main() {
       && b1EntMe.json.sme_open_nav_groups === undefined && b1EntMe.json.sme_hidden_nav_groups === undefined,
     JSON.stringify({ cp: b1EntMe.json.control_profile, open: b1EntMe.json.sme_open_nav_groups }));
 
-  // ── 3b5. B3 (docs/50 Track B): the starter pack seeds an SME industry kit — tenant-scoped sample
+  // ── 3b5. B3 (docs/51 Track B): the starter pack seeds an SME industry kit — tenant-scoped sample
   //         content matching the B1 nav (restaurant: menu + dining tables; distribution: WH branch),
   //         idempotent, and NEVER touches the shared `items` master. Enterprise: HQ-only (pre-B3). ──
   const b3Resto1 = await inj('POST', '/api/tenant/starter-pack', b1RestoTok, {});

@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.3 · 2026-07-16** · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/50 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/50 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/50 B2).*
+**Status: DRAFT v0.3 · 2026-07-16** · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),

@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { branches, tenants, menuCategories, menuItems, diningTables, projects } from '../../database/schema';
 
-// B3 (docs/50 Track B) — the idempotent first-run starter pack behind POST /api/tenant/starter-pack.
+// B3 (docs/51 Track B) — the idempotent first-run starter pack behind POST /api/tenant/starter-pack.
 // Always: the HQ branch (the original ITGC-AC-18 #4 minimal starter, unchanged for every tenant).
 // SME companies additionally get a small INDUSTRY starter kit so the ~15 nav items B1 leaves visible land
 // on non-empty screens: restaurant → a sample menu category/items + a few dining tables; retail → a sample

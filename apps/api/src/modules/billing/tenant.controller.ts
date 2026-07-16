@@ -173,7 +173,7 @@ export class TenantController {
     return { tenant_id: id, steps, done, total: steps.length, percent: Math.round((done / steps.length) * 100), complete: done === steps.length, next: steps.find((s) => !s.done)?.key ?? null };
   }
 
-  // Industry starter (ITGC-AC-18 #4 + docs/50 B3) — idempotent: gives a brand-new company its HQ branch,
+  // Industry starter (ITGC-AC-18 #4 + docs/51 B3) — idempotent: gives a brand-new company its HQ branch,
   // and an SME company additionally a small industry kit (sample menu/tables/warehouse/project) so the B1
   // industry nav lands on non-empty screens. Logic in StarterPackService; safe to call repeatedly.
   @Post('starter-pack')

@@ -1,4 +1,4 @@
-// B1 (docs/50 Track B) — SME industry-aware nav folding profiles.
+// B1 (docs/51 Track B) — SME industry-aware nav folding profiles.
 // Guards the internal consistency of the shared industry → nav-profile mapping that provisioning stamps
 // into tenants.sme_prefs: every referenced key must exist in the census, hidden/open must not conflict,
 // and each industry's first-load visible-item budget must stay in the "~15" band (8–25) so the launch UX

@@ -1,4 +1,4 @@
-# 50 — SME Launch-Readiness Roadmap (Tracks A–C)
+# 51 — SME Launch-Readiness Roadmap (Tracks A–C)
 
 > **Date:** 2026-07-16 · **Status:** v1.3 — Tracks A + B DELIVERED · Track C audited (code side ✅; console side = runbook) ·
 > **Owner:** ERP / Product
@@ -9,7 +9,7 @@
 > Same delivery discipline as docs/19/23/49: each item an independently-shippable, doc-synced PR, merged
 > only on a fully green CI matrix.
 >
-> **Note:** this document is a re-creation. The original docs/50 draft (authored alongside B1) was lost to
+> **Note:** this document is a re-creation. The original draft (numbered docs/50 at the time; renumbered to docs/51 on 2026-07-16 after colliding with the concurrently-authored 50-material-r2r-pos-depth-plan.md) (authored alongside B1) was lost to
 > a working-tree reset before it was committed; B1 itself was re-implemented and re-verified from the
 > handoff brief. Track B item scopes below are the re-confirmed plan of record.
 

@@ -1,4 +1,4 @@
-// SME industry-aware nav folding (docs/50 Track B — B1).
+// SME industry-aware nav folding (docs/51 Track B — B1).
 //
 // A control_profile='sme' company is stamped at PROVISIONING with a per-industry navigation profile so a
 // solo owner's first login shows only the ~15 sidebar items their business actually uses instead of the
@@ -78,7 +78,7 @@ export const SME_NAV_CENSUS: Record<string, { items: number; parent?: string }> 
 };
 
 /**
- * Per-industry SME nav profiles. Design intent (docs/50 B1): the first login of a solo owner surfaces
+ * Per-industry SME nav profiles. Design intent (docs/51 B1): the first login of a solo owner surfaces
  * the industry's daily-work items (target ~15 visible; guarded 8–25 by the unit test) with everything
  * else folded, and removes whole domains the industry clearly never uses (still reachable via ⌘K and
  * re-enableable per tenant by the platform owner). 'general' is the safe fallback: hides nothing and
