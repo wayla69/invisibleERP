@@ -330,6 +330,50 @@ async function main() {
   ok('A2: released hold leaves the action center', !(acResAfter.json.items ?? []).some((i: any) => i.kind === 'reservation_stale' && Number(i.meta?.reservation_id) === Number(resOld.json.reservation_id)), '');
   await inj('POST', `/api/reservations/${resNew.json.reservation_id}/release`, admin); // restore availability for later sections
 
+  // ── 9f-ter. A1 material return-to-stock (docs/50 Wave 2, INV-19): the governed inverse of issue —
+  //    qty ≤ issued, reason mandatory, original issue cost, maker-checker at/above the threshold ──
+  const boqBeforeRet = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const committedBefore = Number((boqBeforeRet.json.lines ?? []).find((l: any) => l.id === matLineId)?.committed ?? 0);
+  const tbRet0 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const wipRet0 = Number(bal(tbRet0, '1260')?.balance ?? 0), invRet0 = Number(bal(tbRet0, '1200')?.balance ?? 0);
+  const noReason = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 5 });
+  ok('A1: return without a reason rejected (REASON_REQUIRED / 400)', noReason.status === 400, `${noReason.status} ${noReason.json.error?.code}`);
+  const resHeld = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 5 });
+  const retHeld = await inj('POST', `/api/reservations/${resHeld.json.reservation_id}/return`, admin, { qty: 5, reason: 'ผิดสถานะ' });
+  ok('A1: return on a HELD (not issued) reservation rejected (RESERVATION_NOT_CONSUMED)', retHeld.status === 400 && retHeld.json.error?.code === 'RESERVATION_NOT_CONSUMED', `${retHeld.status} ${retHeld.json.error?.code}`);
+  await inj('POST', `/api/reservations/${resHeld.json.reservation_id}/release`, admin);
+  // Sub-threshold return (10 × 50 = 500 < 1000) posts IMMEDIATELY at the original issue cost.
+  const ret1 = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 10, reason: 'เหลือใช้จากหน้างาน' });
+  ok('A1: sub-threshold return posts immediately (MRET-, unit 50, value 500)', ret1.status < 300 && ret1.json.status === 'Posted' && /^MRET-/.test(ret1.json.return_no ?? '') && near(ret1.json.unit_cost, 50) && near(ret1.json.value, 500) && /^INV-PRJR/.test(ret1.json.move_no ?? ''), JSON.stringify(ret1.json).slice(0, 140));
+  const availRet1 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A1: returned stock is back on hand and available (70 → 80)', near(availRet1.json.on_hand, 80) && near(availRet1.json.available, 80), JSON.stringify(availRet1.json));
+  const tbRet1 = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('A1: GL reversal — Dr 1200 +500 / Cr 1260 −500, balanced',
+    tbRet1.json.totals?.balanced === true && near(Number(bal(tbRet1, '1200')?.balance ?? 0) - invRet0, 500) && near(wipRet0 - Number(bal(tbRet1, '1260')?.balance ?? 0), 500),
+    JSON.stringify({ dInv: Number(bal(tbRet1, '1200')?.balance ?? 0) - invRet0, dWip: wipRet0 - Number(bal(tbRet1, '1260')?.balance ?? 0) }));
+  const boqAfterRet1 = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const committedAfter1 = Number((boqAfterRet1.json.lines ?? []).find((l: any) => l.id === matLineId)?.committed ?? 0);
+  ok('A1: BoQ-line committed un-drawn by the returned value (−500)', near(committedBefore - committedAfter1, 500), `before=${committedBefore} after=${committedAfter1}`);
+  // Material return (20 × 50 = 1000 ≥ threshold): parks PendingApproval — no stock/GL until a DIFFERENT user approves.
+  const ret2 = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 20, reason: 'ปิดงาน คืนทั้งหมด' });
+  ok('A1: material return parks PendingApproval (≥ threshold 1000)', ret2.status < 300 && ret2.json.status === 'PendingApproval' && near(ret2.json.value, 1000), JSON.stringify(ret2.json).slice(0, 120));
+  const availRet2 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A1: pending return moves NO stock (still 80)', near(availRet2.json.on_hand, 80), JSON.stringify(availRet2.json));
+  const selfAppr = await inj('POST', `/api/reservations/returns/${ret2.json.return_no}/approve`, admin);
+  ok('A1: requester cannot approve own return (403 SOD_VIOLATION)', selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+  const mgrAppr = await inj('POST', `/api/reservations/returns/${ret2.json.return_no}/approve`, mgr);
+  ok('A1: a different user approves → posted (stock 100, WIP relieved 1000 more)', mgrAppr.status < 300 && mgrAppr.json.status === 'Posted' && mgrAppr.json.approved_by === 'mgr', JSON.stringify(mgrAppr.json).slice(0, 120));
+  const availRet3 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A1: approved return restores the stock (on hand 100)', near(availRet3.json.on_hand, 100), JSON.stringify(availRet3.json));
+  const reAppr = await inj('POST', `/api/reservations/returns/${ret2.json.return_no}/approve`, mgr);
+  ok('A1: re-approval rejected (NO_PENDING_RETURN)', reAppr.status === 400 && reAppr.json.error?.code === 'NO_PENDING_RETURN', `${reAppr.status} ${reAppr.json.error?.code}`);
+  const over = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 1, reason: 'เกิน' });
+  ok('A1: over-return rejected — 30 of 30 already returned (OVER_RETURN)', over.status === 400 && over.json.error?.code === 'OVER_RETURN', `${over.status} ${over.json.error?.code}`);
+  const retList = await inj('GET', '/api/reservations/returns', admin);
+  ok('A1: returns register lists both returns, none pending', retList.status === 200 && (retList.json.returns ?? []).filter((r: any) => [ret1.json.return_no, ret2.json.return_no].includes(r.return_no)).length === 2 && retList.json.pending === 0, `n=${retList.json.count} pending=${retList.json.pending}`);
+  const tbRet2 = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('A1: trial balance balanced after both returns (WIP net −1500 vs pre-return)', tbRet2.json.totals?.balanced === true && near(wipRet0 - Number(bal(tbRet2, '1260')?.balance ?? 0), 1500), JSON.stringify({ dWip: wipRet0 - Number(bal(tbRet2, '1260')?.balance ?? 0) }));
+
   // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
   const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
   ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));

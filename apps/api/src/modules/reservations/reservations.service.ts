@@ -1,16 +1,28 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, invBalances, stockReservations, projectCommitments } from '../../database/schema';
+import { projects, invBalances, stockReservations, invMoves, projectCommitments, projectMaterialReturns } from '../../database/schema';
 import { InventoryLedgerService } from '../inventory/inventory-ledger.service';
 import { CommitmentsService } from '../commitments/commitments.service';
+import { DocNumberService } from '../../common/doc-number.service';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 const r4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
+const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x: unknown) => Number(x ?? 0);
 const EPS = 0.0001;
 
+// INV-19 (docs/50 Wave 2 A1): a material return valued AT/ABOVE this THB amount posts nothing until a
+// DIFFERENT user approves (maker-checker); below it the return posts immediately. Flat, env-overridable —
+// mirrors REFUND_APPROVAL_THRESHOLD / CASH_VARIANCE_THRESHOLD.
+export const MATERIAL_RETURN_APPROVAL_THRESHOLD = ((): number => {
+  const v = Number(process.env.MATERIAL_RETURN_APPROVAL_THRESHOLD);
+  return Number.isFinite(v) && v > 0 ? v : 1000;
+})();
+
 export interface ReserveDto { project_code: string; item_id: string; location_id?: string; qty: number; boq_line_id?: number; unit_cost?: number }
+export interface ReturnDto { qty?: number; reason?: string }
 
 // Stock reservation (M3, docs/32, INV-13). Soft-allocates on-hand stock to a project so it can't be double-
 // allocated: available-to-issue = on_hand(inv_balances) − Σ(held reservations for the same item+location). A
@@ -20,6 +32,7 @@ export class ReservationsService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly inventory: InventoryLedgerService,
+    private readonly docNo: DocNumberService,
     @Optional() private readonly commitments?: CommitmentsService,
   ) {}
 
@@ -136,6 +149,89 @@ export class ReservationsService {
       max_age_days: days, scanned: stale.length, released: stale.length,
       reservations: stale.map((r: any) => ({ id: Number(r.id), item_id: r.itemId, location_id: r.locationId, project_id: Number(r.projectId), qty: n(r.qtyReserved), created_at: r.createdAt })),
     };
+  }
+
+  // ── A1 material return-to-stock (docs/50 Wave 2; INV-19) — the governed inverse of issueToProject ──
+  // A return reverses (part of) ONE consumed reservation: qty ≤ issued (aggregate across this reservation's
+  // prior non-rejected returns → OVER_RETURN), reason mandatory (REASON_REQUIRED), and the value is the
+  // ORIGINAL issue unit cost read off the issue movement (never re-valued at today's average). At/above
+  // MATERIAL_RETURN_APPROVAL_THRESHOLD the request posts NOTHING until a different user approves.
+
+  async requestReturn(reservationId: number, dto: ReturnDto, user: JwtUser) {
+    const r = await this.row(reservationId);
+    if (r.status !== 'consumed') throw new BadRequestException({ code: 'RESERVATION_NOT_CONSUMED', message: `Reservation is ${r.status} — only issued (consumed) material can be returned`, messageTh: 'คืนได้เฉพาะวัสดุที่เบิกไปแล้ว' });
+    if (!dto.reason || !dto.reason.trim()) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A reason is required for a material return', messageTh: 'ต้องระบุเหตุผลในการคืนวัสดุ' });
+    // Original issue cost off the issue movement — the reservation stamped its move number at issue time.
+    const [move] = await this.db.select().from(invMoves).where(eq(invMoves.moveNo, String(r.issueNo ?? ''))).limit(1);
+    if (!move) throw new BadRequestException({ code: 'ISSUE_MOVE_NOT_FOUND', message: `Issue movement ${r.issueNo} not found for reservation ${reservationId}`, messageTh: 'ไม่พบรายการเบิกต้นทางของการจองนี้' });
+    const unitCost = r4(move.unitCost);
+    const issued = r4(r.qtyReserved);
+    const priorRows = await this.db.select({ v: sql<string>`coalesce(sum(${projectMaterialReturns.qty}),0)` })
+      .from(projectMaterialReturns)
+      .where(and(eq(projectMaterialReturns.reservationId, Number(reservationId)), inArray(projectMaterialReturns.status, ['PendingApproval', 'Posted'])));
+    const prior = r4(n(priorRows[0]?.v));
+    const qty = r4(dto.qty != null ? dto.qty : issued - prior);
+    if (!(qty > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: 'qty must be > 0', messageTh: 'จำนวนต้องมากกว่าศูนย์' });
+    if (qty + prior > issued + EPS) throw new BadRequestException({ code: 'OVER_RETURN', message: `Cannot return ${qty}: only ${r4(issued - prior)} of the issued ${issued} is still returnable (already returned/pending ${prior})`, messageTh: `คืนเกินจำนวนที่เบิก: คืนได้อีก ${r4(issued - prior)}`, issued, prior, returnable: r4(issued - prior) });
+    const value = r2(qty * unitCost);
+    const returnNo = await this.docNo.nextDaily('MRET');
+    const material = value >= MATERIAL_RETURN_APPROVAL_THRESHOLD;
+    const [ins] = await this.db.insert(projectMaterialReturns).values({
+      tenantId: r.tenantId ?? user.tenantId ?? null, returnNo, reservationId: Number(reservationId),
+      projectId: Number(r.projectId), itemId: r.itemId, locationId: r.locationId,
+      qty: String(qty), unitCost: String(unitCost), value: String(value), reason: dto.reason.trim(),
+      status: material ? 'PendingApproval' : 'Posted', requestedBy: user.username,
+    }).returning({ id: projectMaterialReturns.id });
+    if (material) return { return_no: returnNo, id: Number(ins!.id), status: 'PendingApproval', qty, unit_cost: unitCost, value, threshold: MATERIAL_RETURN_APPROVAL_THRESHOLD };
+    const posted = await this.postReturn({ id: Number(ins!.id), returnNo, reservationId: Number(reservationId), projectId: Number(r.projectId), itemId: r.itemId, locationId: r.locationId, qty, unitCost, value, boqLineId: r.boqLineId != null ? Number(r.boqLineId) : null, tenantId: r.tenantId ?? null }, user);
+    return { return_no: returnNo, id: Number(ins!.id), status: 'Posted', qty, unit_cost: unitCost, value, ...posted };
+  }
+
+  // A DIFFERENT user approves a material (≥ threshold) return → the stock/GL/commitment reversal runs now.
+  async approveReturn(returnNo: string, user: JwtUser, selfApprovalReason?: string | null) {
+    const [row] = await this.db.select().from(projectMaterialReturns).where(eq(projectMaterialReturns.returnNo, returnNo)).limit(1);
+    if (!row || row.status !== 'PendingApproval') throw new BadRequestException({ code: 'NO_PENDING_RETURN', message: `No material return pending approval (${returnNo})`, messageTh: 'ไม่พบรายการคืนวัสดุที่รออนุมัติ' });
+    await assertMakerChecker(this.db, { user, maker: row.requestedBy, event: 'material.return.approve', ref: returnNo, amount: n(row.value), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a material return you requested', messageTh: 'ผู้ขอคืนอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    // Fetch the reservation for the BoQ-line link (the un-consume leg).
+    const res = await this.row(Number(row.reservationId));
+    const posted = await this.postReturn({ id: Number(row.id), returnNo, reservationId: Number(row.reservationId), projectId: Number(row.projectId), itemId: row.itemId, locationId: row.locationId, qty: n(row.qty), unitCost: n(row.unitCost), value: n(row.value), boqLineId: res.boqLineId != null ? Number(res.boqLineId) : null, tenantId: row.tenantId ?? null }, user);
+    return { return_no: returnNo, status: 'Posted', approved_by: user.username, requested_by: row.requestedBy, ...posted };
+  }
+
+  async rejectReturn(returnNo: string, user: JwtUser, reason?: string) {
+    const [row] = await this.db.select().from(projectMaterialReturns).where(eq(projectMaterialReturns.returnNo, returnNo)).limit(1);
+    if (!row || row.status !== 'PendingApproval') throw new BadRequestException({ code: 'NO_PENDING_RETURN', message: `No material return pending approval (${returnNo})`, messageTh: 'ไม่พบรายการคืนวัสดุที่รออนุมัติ' });
+    await this.db.update(projectMaterialReturns).set({ status: 'Rejected', approvedBy: user.username, approvedAt: new Date(), reason: reason ? `${row.reason} [REJECTED: ${reason}]` : row.reason }).where(eq(projectMaterialReturns.id, row.id));
+    return { return_no: returnNo, status: 'Rejected', rejected_by: user.username };
+  }
+
+  async listReturns(user: JwtUser, status?: string) {
+    const conds: any[] = [];
+    if (user.tenantId != null) conds.push(eq(projectMaterialReturns.tenantId, user.tenantId));
+    if (status) conds.push(eq(projectMaterialReturns.status, status));
+    const rows = await this.db.select().from(projectMaterialReturns).where(conds.length ? and(...conds) : undefined).orderBy(desc(projectMaterialReturns.id)).limit(200);
+    const returns = rows.map((r: any) => ({ return_no: r.returnNo, reservation_id: Number(r.reservationId), project_id: Number(r.projectId), item_id: r.itemId, location_id: r.locationId, qty: n(r.qty), unit_cost: n(r.unitCost), value: n(r.value), reason: r.reason, status: r.status, requested_by: r.requestedBy, approved_by: r.approvedBy, move_no: r.moveNo, gl_entry_no: r.glEntryNo, created_at: r.createdAt }));
+    return { returns, count: returns.length, pending: returns.filter((r) => r.status === 'PendingApproval').length };
+  }
+
+  // Post the physical + financial reversal: stock back on hand at the ORIGINAL issue cost (Dr inventory /
+  // Cr 1260 project WIP via the valued sub-ledger, idempotent per MRET ref) and a NEGATIVE consumed
+  // commitment that un-draws the BoQ line (allowOver — a negative draw can never breach the budget).
+  private async postReturn(p: { id: number; returnNo: string; reservationId: number; projectId: number; itemId: string; locationId: string; qty: number; unitCost: number; value: number; boqLineId: number | null; tenantId: number | null }, user: JwtUser) {
+    const move = await this.inventory.returnFromProject({
+      item_id: p.itemId, location_id: p.locationId, qty: p.qty, unit_cost: p.unitCost, project_id: p.projectId,
+      ref_type: 'MRET', ref_id: p.returnNo,
+    }, user);
+    if (this.commitments && p.boqLineId != null) {
+      try {
+        await this.db.transaction(async (tx: any) => {
+          const c = await this.commitments!.reserve(tx, { projectId: p.projectId, boqLineId: p.boqLineId!, amount: -p.value, qty: -p.qty, sourceDocType: 'MRET', sourceDocNo: p.returnNo, createdBy: user.username, tenantId: p.tenantId, allowOver: true });
+          await tx.update(projectCommitments).set({ status: 'consumed' }).where(eq(projectCommitments.id, c.id));
+        });
+      } catch { /* commitment un-draw is best-effort — the stock/GL reversal already posted (mirror of issueToProject) */ }
+    }
+    await this.db.update(projectMaterialReturns).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date(), moveNo: 'move_no' in move ? String(move.move_no) : null, glEntryNo: 'gl_entry_no' in move && move.gl_entry_no ? String(move.gl_entry_no) : null }).where(eq(projectMaterialReturns.id, p.id));
+    return { move_no: 'move_no' in move ? move.move_no : null, gl_entry_no: 'gl_entry_no' in move ? (move.gl_entry_no ?? null) : null };
   }
 
   async listForProject(code: string) {

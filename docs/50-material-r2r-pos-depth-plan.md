@@ -68,7 +68,13 @@ The delivered spine controls *acquisition* (budget → commit → requisition �
 **return half of the loop** and the **analytics that make a PM trust the numbers**. docs/32 §10 explicitly
 parked A4 as a fast-follow.
 
-### A1 — Material return-to-stock (reverse issue of unused material) · Effort **M** · the control gap
+### A1 — Material return-to-stock (reverse issue of unused material) · Effort **M** · the control gap · **✅ DELIVERED (2026-07-16)**
+> Delivered: **NEW control INV-19** (RCM 296), migration `0420` `project_material_returns`;
+> `returnFromProject` in the valued sub-ledger (Dr inventory / Cr 1260 `project_id`, original issue cost,
+> idempotent per `MRET`); governed request/approve flow on reservations (qty ≤ issued aggregate, reason
+> mandatory, ≥ ฿1,000 maker-checker); negative consumed commitment un-draws the BoQ line; คืนวัสดุ web
+> action + returns table. ToE `projects` 336→351; PN-16 §7(27b) rev 0.57; manual 14 rev 2.37;
+> UAT-O2C-502..507.
 **Goal:** site returns unused material; stock, WIP, and the BoQ budget all move back — today there is *no
 path* (`issueToProject` has no inverse), so returns are done as ad-hoc adjustments outside the control.
 - `inventory/inventory-ledger.service.ts`: add `returnFromProject` (Dr 1200 / Cr 1260 project-WIP at the

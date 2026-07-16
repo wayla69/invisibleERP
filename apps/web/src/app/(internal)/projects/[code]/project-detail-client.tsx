@@ -269,6 +269,28 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     mutationFn: (id: number) => api(`/api/reservations/${id}/release`, { method: 'POST', body: '{}' }),
     onSuccess: () => { notifySuccess(t('pj.resv_toast_released')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
+  // A1 (INV-19): return unused issued material — qty ≤ issued, reason mandatory; a material-value return
+  // parks PendingApproval for a different approver. Register + approve/reject inline on this tab.
+  const returnsQ = useQuery<any>({ queryKey: ['proj', code, 'returns'], queryFn: () => api('/api/reservations/returns') });
+  const requestReturn = useMutation({
+    mutationFn: (v: { id: number; qty?: number; reason: string }) =>
+      api(`/api/reservations/${v.id}/return`, { method: 'POST', body: JSON.stringify({ qty: v.qty, reason: v.reason }) }),
+    onSuccess: (r: any) => { notifySuccess(r?.status === 'PendingApproval' ? t('pj.resv_return_pending') : t('pj.resv_return_posted')); refresh(); returnsQ.refetch(); },
+    onError: (err: any) => notifyError(err.message),
+  });
+  const decideReturn = useMutation({
+    mutationFn: (v: { return_no: string; action: 'approve' | 'reject' }) =>
+      api(`/api/reservations/returns/${encodeURIComponent(v.return_no)}/${v.action}`, { method: 'POST', body: '{}' }),
+    onSuccess: () => { notifySuccess(t('pj.resv_return_decided')); refresh(); returnsQ.refetch(); },
+    onError: (err: any) => notifyError(err.message),
+  });
+  const promptReturn = (r: any) => {
+    const qtyStr = window.prompt(t('pj.resv_return_qty_prompt', { qty: num(r.qty) }), String(r.qty));
+    if (qtyStr == null) return;
+    const reason = window.prompt(t('pj.resv_return_reason_prompt'));
+    if (!reason || !reason.trim()) { notifyError(t('pj.resv_return_reason_required')); return; }
+    requestReturn.mutate({ id: r.id, qty: Number(qtyStr) || undefined, reason: reason.trim() });
+  };
 
   // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
   const [advDlg, setAdvDlg] = useState(false);
@@ -405,10 +427,35 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
                 <Button variant="ghost" size="sm" title={t('pj.resv_issue_tip')} onClick={() => issueResv.mutate(r.id)}><CheckCircle2 className="size-4" /></Button>
                 <Button variant="ghost" size="sm" title={t('pj.resv_release_tip')} onClick={() => releaseResv.mutate(r.id)}><ArrowLeft className="size-4" /></Button>
               </span>
+            ) : r.status === 'consumed' ? (
+              <Button variant="ghost" size="sm" title={t('pj.resv_return_tip')} onClick={() => promptReturn(r)}><ArrowLeft className="size-4" /></Button>
             ) : null },
           ]}
           emptyState={{ icon: Boxes, title: t('pj.resv_empty_title'), description: t('pj.resv_empty_desc') }}
         />
+      )}
+      {(returnsQ.data?.returns ?? []).filter((r: any) => (reservations.data?.reservations ?? []).some((x: any) => x.id === r.reservation_id)).length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.resv_returns_title')}</h3>
+          <DataTable
+            rows={(returnsQ.data?.returns ?? []).filter((r: any) => (reservations.data?.reservations ?? []).some((x: any) => x.id === r.reservation_id))}
+            rowKey={(r: any) => r.return_no}
+            columns={[
+              { key: 'return_no', label: t('pj.resv_return_col_no') },
+              { key: 'item_id', label: t('pj.resv_col_item') },
+              { key: 'qty', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
+              { key: 'value', label: t('pj.resv_return_col_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.value)}</span> },
+              { key: 'reason', label: t('pj.resv_return_col_reason') },
+              { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={r.status === 'Posted' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>{r.status}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'PendingApproval' ? (
+                <span className="flex gap-1">
+                  <Button variant="ghost" size="sm" title={t('fin.approve')} onClick={() => decideReturn.mutate({ return_no: r.return_no, action: 'approve' })}><CheckCircle2 className="size-4" /></Button>
+                  <Button variant="ghost" size="sm" title={t('pj.resv_return_reject')} onClick={() => decideReturn.mutate({ return_no: r.return_no, action: 'reject' })}><ArrowLeft className="size-4" /></Button>
+                </span>
+              ) : null },
+            ]}
+          />
+        </div>
       )}
     </div>
   );

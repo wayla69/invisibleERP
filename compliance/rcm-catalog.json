@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 295,
+    "total": 296,
     "by_status": {
-      "Implemented": 292,
+      "Implemented": 293,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 20,
+      "Inventory & COGS": 21,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -2942,6 +2942,25 @@
       "tod": "Inspect the two-way trace (backward GR→supplier, forward pick/sale→customer), the hold/release lifecycle, and that a Held lot is excluded from BOTH the FEFO suggestion and the WMS wave allocation.",
       "toe": "Re-perform (lot-trace harness): seed GR→lot→issue→sale; the backward trace returns the supplier + GR; the forward trace returns the customer + sale; holding the lot excludes it from FEFO (excluded_held>0) and from the WMS wave bin-allocation; releasing it re-includes the lot; releasing a non-held lot → LOT_NOT_HELD.",
       "evidence": "Two-way lot genealogy trace; lot hold/quarantine excluded from FEFO + WMS pick",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "INV-19",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Inventory; Project WIP",
+      "risk": "Unused project material has no governed path back to stock: site returns re-enter inventory as ad-hoc positive adjustments (wrong cost, no link to what was issued), project WIP stays overstated after the material physically left the site, or a fictitious 'return' inflates on-hand stock and deflates project cost with no second pair of eyes.",
+      "assertion": "Accuracy/Completeness/Existence",
+      "description": "Material return-to-stock (A1, docs/50 Wave 2, migration 0420): a return request (POST /api/reservations/:id/return) must reference the CONSUMED stock reservation it reverses — quantity is capped at the issued quantity AGGREGATE across the reservation's prior non-rejected returns (OVER_RETURN), a reason is mandatory (REASON_REQUIRED), and the value is the ORIGINAL issue unit cost read off the issue movement (never re-valued at today's average). A return valued at/above the materiality threshold (MATERIAL_RETURN_APPROVAL_THRESHOLD, default THB 1,000) posts NOTHING until a DIFFERENT user approves (maker-checker, SOD_VIOLATION on self-approve — the docs/49 SME seam applies); sub-threshold returns post immediately. Posting is the exact inverse of issue-to-project via the valued sub-ledger: stock back on hand + Dr inventory / Cr 1260 project WIP (project_id dimension), idempotent per MRET ref, and a NEGATIVE consumed commitment un-draws the BoQ line so the material budget frees up. Register at GET /api/reservations/returns.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per return",
+      "owner": "Warehouse / ProjectController",
+      "coso": "P13",
+      "code_reference": "reservations.service.ts requestReturn (OVER_RETURN/REASON_REQUIRED/RESERVATION_NOT_CONSUMED, original-issue-cost valuation, threshold gate) / approveReturn (assertMakerChecker) / rejectReturn / listReturns / postReturn (negative consumed commitment); inventory-ledger.service.ts returnFromProject (Dr inventory / Cr 1260 project_id, layer reopen, MRET idempotency); reservations.controller.ts (/api/reservations/:id/return, /returns[...]); schema/projects.ts project_material_returns (migration 0420, 0232 RLS); cutover/projects.ts §9f-ter (ToE)",
+      "tod": "Inspect the qty-aggregate cap, the reason requirement, the original-issue-cost valuation, the ≥-threshold maker-checker gate, and the Dr inventory / Cr 1260 reversal + negative consumed commitment.",
+      "toe": "Re-perform: issue 30 to a project; return 10 with a reason → posts immediately at the issue cost (stock +10, WIP −value, BoQ committed un-drawn, TB balanced); a return ≥ the threshold parks PendingApproval and moves NO stock; the requester's self-approve → 403 SOD_VIOLATION; a different user approves → stock/WIP move; re-approve → NO_PENDING_RETURN; returning more than issued → OVER_RETURN (re-performed by the projects harness).",
+      "evidence": "Returns register (pending + history); the Dr inventory / Cr 1260 reversal postings; negative consumed commitments",
       "status": "Implemented"
     },
     {

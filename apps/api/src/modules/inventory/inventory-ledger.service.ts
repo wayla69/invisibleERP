@@ -36,6 +36,7 @@ export interface LayerSlice { qty: number; unitCost: number; lotNo: string | nul
 export interface ReceiveDto { item_id: string; item_description?: string; uom?: string; location_id?: string; qty: number; unit_cost: number; ref_type?: string; ref_id?: string; costing_method?: CostingMethod; lot_no?: string; expiry_date?: string }
 export interface IssueDto { item_id: string; location_id?: string; qty: number; ref_type?: string; ref_id?: string }
 export interface IssueToProjectDto { item_id: string; location_id?: string; qty: number; project_id: number; ref_type?: string; ref_id?: string }
+export interface ReturnFromProjectDto { item_id: string; location_id?: string; qty: number; unit_cost: number; project_id: number; ref_type?: string; ref_id?: string }
 export interface AdjustDto { item_id: string; location_id?: string; qty_delta: number; reason?: string }
 
 /**
@@ -305,6 +306,46 @@ export class InventoryLedgerService {
     });
     await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
     return { move_no: moveNo, move_type: 'issue_to_project', item_id: dto.item_id, qty, unit_cost: issueUnit, value, balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
+  }
+
+  // ── Return unused material FROM A PROJECT (A1, docs/50 Wave 2 — the inverse of issueToProject; INV-19).
+  // Receives the qty back on hand at the ORIGINAL issue unit cost (passed by the return flow, which reads it
+  // off the issue movement — never re-valued at today's average) and relieves project WIP: Dr inventory /
+  // Cr 1260 (project_id dimension). Layered items reopen a cost layer at that unit cost. Lives beside
+  // issueToProject because both are the valued sub-ledger's core (module-private balance/layer helpers).
+  async returnFromProject(dto: ReturnFromProjectDto, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const qty = round4(dto.qty);
+    const unitCost = round4(dto.unit_cost);
+    if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
+    if (unitCost < 0) throw bad('BAD_COST', 'unit_cost must be ≥ 0', 'ต้นทุนต้องไม่ติดลบ');
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
+    if (dto.ref_type && dto.ref_id) {
+      const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
+      if (dup) return { move_no: dup.moveNo, move_type: 'return_from_project', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
+    }
+    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
+    const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
+    const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue);
+    const value = round4(qty * unitCost);
+    const newQty = round4(oldQty + qty);
+    const newVal = round4(oldVal + value);
+    const newAvg = newQty > EPS ? round4(newVal / newQty) : 0;
+    const moveNo = this.mkNo('INV-PRJR');
+    const acc = await this.invAccounts(tenantId, dto.item_id, loc);
+    const je = value > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-RCV', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
+      tenantId, memo: `Return from project ${moveNo} — ${dto.item_id}`, createdBy: user.username,
+      lines: [{ account_code: acc.inventory, debit: value }, { account_code: '1260', credit: value, project_id: dto.project_id, memo: `WIP return ${dto.item_id}` }],
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'receipt', itemId: dto.item_id, locationId: loc,
+      qtySigned: qty, unitCost, valueSigned: value, balanceQty: newQty, avgCost: newAvg,
+      refType: dto.ref_type, refId: dto.ref_id, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
+    if (isLayered(method)) await this.createLayer(tenantId, dto.item_id, loc, qty, unitCost, null, null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
+    return { move_no: moveNo, move_type: 'return_from_project', item_id: dto.item_id, qty, unit_cost: unitCost, value, balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
   }
 
   // ── Stock adjustment (count variance / shrinkage) + GL (loss Dr 5810 / Cr 1200; gain reversed) ──
