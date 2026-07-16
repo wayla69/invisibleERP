@@ -115,6 +115,39 @@ export class CommitmentsService {
     return rows.length;
   }
 
+  // A5 (docs/50 Wave 5) — resolve a project code to its id with the combined id+tenant (BOLA) check; the
+  // waste API accepts project_code so UI callers never handle raw numeric ids.
+  async projectIdByCode(code: string, tenantId: number | null): Promise<number> {
+    const [p] = await this.db.select({ id: projects.id, tenantId: projects.tenantId }).from(projects).where(eq(projects.projectCode, code)).limit(1);
+    if (!p || (tenantId != null && p.tenantId != null && Number(p.tenantId) !== Number(tenantId))) {
+      throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
+    }
+    return Number(p.id);
+  }
+
+  // A5 (docs/50 Wave 5) — the net PHYSICAL draw value sitting in project WIP for a project (optionally one
+  // BoQ line): Σ consumed RES issues + consumed MRET returns (returns are negative rows, so they net down).
+  // Project-tagged waste relieves WIP against this picture — the waste service guards that a scrap can never
+  // exceed what was actually drawn. Validates the project (id + tenant, BOLA) and, when given, that the BoQ
+  // line belongs to that project. Deliberately does NOT write a commitment row: the RES issue already
+  // consumed the budget, so a WASTE row would double-count against the line.
+  async wipDrawn(projectId: number, boqLineId: number | null | undefined, tenantId: number | null): Promise<{ net_issued: number }> {
+    const [p] = await this.db.select({ id: projects.id, tenantId: projects.tenantId }).from(projects).where(eq(projects.id, Number(projectId))).limit(1);
+    if (!p || (tenantId != null && p.tenantId != null && Number(p.tenantId) !== Number(tenantId))) {
+      throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${projectId} not found`, messageTh: 'ไม่พบโครงการ' });
+    }
+    if (boqLineId != null) {
+      const [line] = await this.db.select({ pid: projectBoqLines.projectId }).from(projectBoqLines).where(eq(projectBoqLines.id, Number(boqLineId))).limit(1);
+      if (!line || Number(line.pid) !== Number(projectId)) {
+        throw new BadRequestException({ code: 'BOQ_LINE_MISMATCH', message: `BoQ line ${boqLineId} does not belong to project ${projectId}`, messageTh: 'รายการ BoQ ไม่อยู่ในโครงการนี้' });
+      }
+    }
+    const conds = [eq(projectCommitments.projectId, Number(projectId)), eq(projectCommitments.status, 'consumed'), inArray(projectCommitments.sourceDocType, ['RES', 'MRET'])];
+    if (boqLineId != null) conds.push(eq(projectCommitments.boqLineId, Number(boqLineId)));
+    const [row] = await this.db.select({ v: sql<string>`coalesce(sum(${projectCommitments.amount}),0)` }).from(projectCommitments).where(and(...conds));
+    return { net_issued: r2(n(row?.v)) };
+  }
+
   // Per-BoQ-line committed total (open+consumed) for a set of lines — feeds the budget/committed/remaining read
   // model on getBoq. Returns a map lineId → committed amount.
   async committedByLine(boqLineIds: number[]): Promise<Map<number, number>> {

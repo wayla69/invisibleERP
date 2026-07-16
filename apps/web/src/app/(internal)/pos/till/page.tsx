@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Banknote, CheckCircle2, CircleDollarSign, XCircle } from 'lucide-react';
+import { AlertTriangle, Banknote, CheckCircle2, CircleDollarSign, EyeOff, Lock, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num, thaiDateTime } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -36,12 +36,53 @@ export default function PosTillPage() {
   const [openDialogOpen, setOpenDialogOpen] = useState(false);
   const [varianceId, setVarianceId] = useState<{ sessionNo: string; variance: number } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [countedCash, setCountedCash] = useState('');
+  const [closeResult, setCloseResult] = useState<{ variance: number; expected_cash: number; variance_status: string } | null>(null);
 
   const q = useQuery<XzListResp>({
     queryKey: ['xz-reports'],
     queryFn: () => api('/api/payments/xz-reports?limit=50'),
   });
   const d = q.data;
+
+  // Blind-close policy + the tenant's current open till (drives the "close till" flow).
+  const settingsQ = useQuery<{ blind_close: boolean }>({
+    queryKey: ['till-settings'],
+    queryFn: () => api('/api/payments/till/settings'),
+  });
+  const blind = settingsQ.data?.blind_close === true;
+  const currentQ = useQuery<{ open: { id: number; session_no: string } | null }>({
+    queryKey: ['till-current'],
+    queryFn: () => api('/api/payments/till/current'),
+  });
+  const openTillNow = currentQ.data?.open ?? null;
+  // Expected cash for the close dialog — only fetched when NOT blind (server redacts it anyway when
+  // the policy is on; not asking at all keeps the number out of the client entirely).
+  const xQ = useQuery<any>({
+    queryKey: ['till-x', openTillNow?.id],
+    queryFn: () => api(`/api/payments/till/${openTillNow!.id}/x-report`),
+    enabled: closeDialogOpen && !blind && openTillNow != null,
+  });
+
+  const putBlind = useMutation({
+    mutationFn: (on: boolean) => api('/api/payments/till/settings', { method: 'PUT', body: JSON.stringify({ blind_close: on }) }),
+    onSuccess: () => { notifySuccess(t('px.till_blind_saved')); qc.invalidateQueries({ queryKey: ['till-settings'] }); },
+    onError: (e: any) => notifyError(e?.message ?? t('px.till_blind_save_failed')),
+  });
+
+  const closeTill = useMutation({
+    mutationFn: () => api('/api/payments/till/close', {
+      method: 'POST',
+      body: JSON.stringify({ session_no: openTillNow!.session_no, closing_count: parseFloat(countedCash || '0') }),
+    }),
+    onSuccess: (r: any) => {
+      setCloseResult({ variance: r?.variance ?? 0, expected_cash: r?.expected_cash ?? 0, variance_status: r?.variance_status ?? 'NotRequired' });
+      qc.invalidateQueries({ queryKey: ['xz-reports'] });
+      qc.invalidateQueries({ queryKey: ['till-current'] });
+    },
+    onError: (e: any) => notifyError(e?.message ?? t('px.till_close_failed')),
+  });
 
   const openTill = useMutation({
     mutationFn: (openingFloat: number) =>
@@ -118,9 +159,22 @@ export default function PosTillPage() {
       description={t('px.till_desc')}
       query={q}
       actions={
-        <Button size="sm" onClick={() => setOpenDialogOpen(true)}>
-          <CircleDollarSign className="mr-1.5 size-4" />{t('px.till_new_till')}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Blind-close policy toggle — the server gates changes to manager duties ('ar'/'exec'). */}
+          <Button size="sm" variant={blind ? 'default' : 'outline'} disabled={putBlind.isPending || settingsQ.isLoading}
+            title={t('px.till_blind_setting_hint')}
+            onClick={() => putBlind.mutate(!blind)}>
+            <EyeOff className="mr-1.5 size-4" />{blind ? t('px.till_blind_on') : t('px.till_blind_off')}
+          </Button>
+          {openTillNow && (
+            <Button size="sm" variant="secondary" onClick={() => { setCountedCash(''); setCloseResult(null); setCloseDialogOpen(true); }}>
+              <Lock className="mr-1.5 size-4" />{t('px.till_close_btn')}
+            </Button>
+          )}
+          <Button size="sm" onClick={() => setOpenDialogOpen(true)}>
+            <CircleDollarSign className="mr-1.5 size-4" />{t('px.till_new_till')}
+          </Button>
+        </div>
       }
       stats={
         <>
@@ -158,6 +212,56 @@ export default function PosTillPage() {
               onClick={() => openTill.mutate(parseFloat(openFloat || '0'))}>
               {t('px.till_open_till_btn')}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Close till dialog — blind-aware: expected cash is shown only when the policy is off; with blind
+          close on, the cashier submits the count first and the variance is revealed after. */}
+      <Dialog open={closeDialogOpen} onOpenChange={(o) => { if (!o) { setCloseDialogOpen(false); setCloseResult(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('px.till_close_title', { session_no: openTillNow?.session_no ?? '' })}</DialogTitle>
+          </DialogHeader>
+          {closeResult ? (
+            <div className="space-y-2">
+              <p className="text-sm">{t('px.till_close_result_expected', { amount: baht(closeResult.expected_cash) })}</p>
+              <p className={`text-sm font-medium ${closeResult.variance !== 0 ? 'text-destructive' : 'text-green-700'}`}>
+                {t('px.till_close_result_variance', { amount: baht(closeResult.variance) })}
+              </p>
+              {closeResult.variance_status === 'PendingApproval' && (
+                <p className="text-sm text-muted-foreground">{t('px.till_close_result_pending')}</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {blind ? (
+                <p className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                  <EyeOff className="size-4 shrink-0" />{t('px.till_blind_notice')}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t('px.till_expected_label')}: <span className="font-medium text-foreground">{xQ.data?.expected_cash != null ? baht(xQ.data.expected_cash) : '…'}</span>
+                </p>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="counted">{t('px.till_counted_label')}</Label>
+                <Input id="counted" type="number" min="0" step="0.01" placeholder="0.00"
+                  value={countedCash} onChange={(e) => setCountedCash(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            {closeResult ? (
+              <Button onClick={() => { setCloseDialogOpen(false); setCloseResult(null); }}>{t('px.till_close_done')}</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setCloseDialogOpen(false)}>{t('fin.cancel')}</Button>
+                <Button disabled={closeTill.isPending || countedCash === ''} onClick={() => closeTill.mutate()}>
+                  <Lock className="mr-1.5 size-4" />{t('px.till_close_submit')}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

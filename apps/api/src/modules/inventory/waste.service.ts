@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { and, desc, eq, gte, lte } from 'drizzle-orm';
+import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
+import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { wasteLog, customerInventory, custStockLog, invBalances, menuRecipes, menuRecipeLines } from '../../database/schema';
+import { wasteLog, customerInventory, custStockLog, invBalances, items, menuRecipes, menuRecipeLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
+import { CommitmentsService } from '../commitments/commitments.service';
 import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
@@ -34,6 +35,12 @@ export interface LogWasteDto {
   branch_id?: number;
   ref_doc?: string;
   notes?: string;
+  // A5 (docs/50 Wave 5) — project-tagged scrap: material ALREADY issued to a project (sitting in WIP 1260)
+  // that is damaged/lost on site. Relieves project WIP (Dr 5810 / Cr 1260 project_id) instead of inventory,
+  // touches NO stock (the issue already relieved it), and is capped at the project's net drawn value.
+  project_id?: number;
+  project_code?: string;     // alternative to project_id (resolved with the same BOLA check)
+  boq_line_id?: number;      // requires project_id; must belong to that project
 }
 export interface VoidFireDto {
   sku: string;               // the voided fired menu item
@@ -61,6 +68,9 @@ export class WasteService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
+    // A5 — the WIP-drawn picture guard for project-tagged waste. @Optional so harnesses that construct a
+    // partial app (no CommitmentsModule) still boot; the project-tagged path then fails closed.
+    @Optional() private readonly commitments?: CommitmentsService,
   ) {}
 
   /**
@@ -80,17 +90,62 @@ export class WasteService {
     if (!WASTE_REASONS.includes(dto.reason_code)) throw new BadRequestException({ code: 'BAD_REASON', message: 'invalid reason_code', messageTh: 'เหตุผลไม่ถูกต้อง' });
     const disposition = dto.disposition ?? 'discard';
     if (!DISPOSITIONS.includes(disposition)) throw new BadRequestException({ code: 'BAD_DISPOSITION', message: 'invalid disposition', messageTh: 'ปลายทางของเสียไม่ถูกต้อง' });
+    let projectId = dto.project_id != null ? Number(dto.project_id) : null;
+    if (projectId == null && dto.project_code) {
+      if (!this.commitments) throw new BadRequestException({ code: 'PROJECT_WASTE_UNAVAILABLE', message: 'Project-tagged waste is not available in this deployment', messageTh: 'ระบบยังไม่รองรับการตัดของเสียเข้าโครงการ' });
+      projectId = await this.commitments.projectIdByCode(dto.project_code, tenantId);
+    }
+    const boqLineId = dto.boq_line_id != null ? Number(dto.boq_line_id) : null;
+    if (boqLineId != null && projectId == null) throw new BadRequestException({ code: 'PROJECT_REQUIRED', message: 'boq_line_id requires project_id', messageTh: 'ต้องระบุโครงการเมื่ออ้างรายการ BoQ' });
     // Guard: a perpetual-tracked item (valued sub-ledger) must use the INV-07 write-off, never the waste log,
-    // so inventory value isn't decremented twice / off-control.
-    const [perp] = await db.select({ id: invBalances.id }).from(invBalances).where(and(eq(invBalances.tenantId, tenantId!), eq(invBalances.itemId, dto.item_id))).limit(1);
-    if (perp) throw new BadRequestException({ code: 'USE_WRITEOFF', message: 'This item is perpetual-tracked — record shrinkage via the inventory write-off (INV-07), not the waste log', messageTh: 'สินค้านี้ใช้บัญชีสต๊อกถาวร — ให้ตัดผ่านการตัดสต๊อก (อนุมัติ) แทน' });
+    // so inventory value isn't decremented twice / off-control. Project-tagged scrap is EXEMPT by design:
+    // the material already LEFT stock via issue-to-project — the waste relieves WIP (1260), not inventory.
+    if (projectId == null) {
+      const [perp] = await db.select({ id: invBalances.id }).from(invBalances).where(and(eq(invBalances.tenantId, tenantId!), eq(invBalances.itemId, dto.item_id))).limit(1);
+      if (perp) throw new BadRequestException({ code: 'USE_WRITEOFF', message: 'This item is perpetual-tracked — record shrinkage via the inventory write-off (INV-07), not the waste log', messageTh: 'สินค้านี้ใช้บัญชีสต๊อกถาวร — ให้ตัดผ่านการตัดสต๊อก (อนุมัติ) แทน' });
+    }
 
     const qty = round2(n(dto.qty));
     const unitCost = roundCurrency(Math.max(0, n(dto.unit_cost)), 'THB');
     const totalCost = roundCurrency(qty * unitCost, 'THB');
+
+    // A5 — project-tagged scrap is capped at the project's NET drawn value less what was already scrapped
+    // (both at project scope AND, when a line is given, at the line scope) so WIP 1260 can never go negative
+    // from wastage. Fail-closed: a costless project waste is rejected (relieving WIP needs the issue cost).
+    let wipRemaining: number | null = null;
+    if (projectId != null) {
+      if (!this.commitments) throw new BadRequestException({ code: 'PROJECT_WASTE_UNAVAILABLE', message: 'Project-tagged waste is not available in this deployment', messageTh: 'ระบบยังไม่รองรับการตัดของเสียเข้าโครงการ' });
+      if (!(totalCost > 0)) throw new BadRequestException({ code: 'COST_REQUIRED', message: 'Project-tagged waste must carry the issue unit cost (unit_cost > 0) to relieve project WIP', messageTh: 'ของเสียโครงการต้องระบุต้นทุนต่อหน่วย (จากใบเบิก) เพื่อตัดต้นทุนงานระหว่างทำ' });
+      // Line scope first (also validates the line belongs to the project), then the project-wide cap.
+      const linePicture = boqLineId != null ? await this.commitments.wipDrawn(projectId, boqLineId, tenantId) : null;
+      const projPicture = await this.commitments.wipDrawn(projectId, null, tenantId);
+      const projPrior = await this.projectWasteToDate(db, tenantId, projectId, null);
+      let remaining = round2(projPicture.net_issued - projPrior);
+      if (linePicture) {
+        const linePrior = await this.projectWasteToDate(db, tenantId, projectId, boqLineId);
+        remaining = Math.min(remaining, round2(linePicture.net_issued - linePrior));
+      }
+      if (totalCost > remaining + 0.005) {
+        throw new BadRequestException({ code: 'WASTE_EXCEEDS_WIP', message: `Waste value ${totalCost} exceeds the project's remaining drawn material value ${remaining}`, messageTh: `มูลค่าของเสีย ${totalCost} เกินมูลค่าวัสดุที่เบิกเข้าโครงการคงเหลือ ${remaining}`, details: { remaining, net_issued: projPicture.net_issued, already_wasted: projPrior } });
+      }
+      wipRemaining = round2(remaining - totalCost);
+    }
     const wasteNo = opts?.wasteNo ?? await this.docNo.nextDaily('WASTE');
 
     return await db.transaction(async (tx: any) => {
+      // A5 — project scrap: NO stock movement (the issue already relieved inventory); GL relieves WIP 1260
+      // with the project dimension; the row carries project_id/boq_line_id for the per-line reconciliation.
+      if (projectId != null) {
+        const [master] = await tx.select({ d: items.itemDescription, uom: items.uom }).from(items).where(eq(items.itemId, dto.item_id)).limit(1);
+        const journalNo = await this.costToGl(tx, tenantId, wasteNo, dto.item_id, dto.reason_code, totalCost, user, projectId);
+        await tx.insert(wasteLog).values({
+          tenantId, branchId: dto.branch_id ?? null, wasteNo, itemId: dto.item_id, itemDescription: master?.d ?? dto.item_id,
+          qty: fx(qty, 4), uom: dto.uom ?? master?.uom ?? null, reasonCode: dto.reason_code, disposition, source: 'manual', refDoc: dto.ref_doc ?? null,
+          unitCost: fx(unitCost, 4), totalCost: fx(totalCost, 4), notes: dto.notes ?? null, journalNo, loggedBy: user.username,
+          projectId, boqLineId,
+        });
+        return { waste_no: wasteNo, item_id: dto.item_id, qty, reason_code: dto.reason_code, disposition, total_cost: totalCost, journal_no: journalNo, stock_after: null, project_id: projectId, boq_line_id: boqLineId, wip_remaining: wipRemaining };
+      }
       const after = await this.deductIngredient(tx, tenantId, dto.item_id, qty, dto.uom ?? null, dto.branch_id ?? null, dto.reason_code, wasteNo, user);
       const journalNo = totalCost > 0 ? await this.costToGl(tx, tenantId, wasteNo, dto.item_id, dto.reason_code, totalCost, user) : null;
       await tx.insert(wasteLog).values({
@@ -100,6 +155,15 @@ export class WasteService {
       });
       return { waste_no: wasteNo, item_id: dto.item_id, qty, reason_code: dto.reason_code, disposition, total_cost: totalCost, journal_no: journalNo, stock_after: after.balance };
     });
+  }
+
+  // A5 — Σ project-tagged waste already logged (project scope, or one BoQ line when boqLineId is given).
+  private async projectWasteToDate(runner: any, tenantId: number | null, projectId: number, boqLineId: number | null): Promise<number> {
+    const conds = [eq(wasteLog.projectId, projectId)];
+    if (tenantId != null) conds.push(eq(wasteLog.tenantId, tenantId));
+    if (boqLineId != null) conds.push(eq(wasteLog.boqLineId, boqLineId));
+    const [row] = await runner.select({ v: sql<string>`coalesce(sum(${wasteLog.totalCost}),0)` }).from(wasteLog).where(and(...conds));
+    return round2(n(row?.v));
   }
 
   // POS-5a — void-fired-item capture. A cancelled/voided fired ticket line was already prepped/cooked, so its
@@ -158,11 +222,16 @@ export class WasteService {
   }
 
   // cost the waste to GL — Dr 5810 Scrap/Waste Loss / Cr 1200 Inventory (idempotent per WASTE- doc).
-  private async costToGl(tx: any, tenantId: number | null, wasteNo: string, itemRef: string, reason: string, totalCost: number, user: JwtUser): Promise<string | null> {
+  // A5: a PROJECT-tagged waste instead credits 1260 project WIP (the material already left inventory at
+  // issue-to-project), both lines carrying the project_id dimension — mirrors returnFromProject's Cr leg.
+  private async costToGl(tx: any, tenantId: number | null, wasteNo: string, itemRef: string, reason: string, totalCost: number, user: JwtUser, projectId?: number | null): Promise<string | null> {
     if (await this.ledger.alreadyPosted('WASTE', wasteNo, tenantId, tx)) return null;
     // docs/43 PR-5: the loss leg follows the tenant posting-rule (WASTE.WRITEOFF) ?? registry default.
     const wasteAcct = (await this.ledger.postingOverrides('WASTE.WRITEOFF', tenantId)).waste_loss ?? postingDefault('WASTE.WRITEOFF', 'waste_loss');
-    const je: any = await this.ledger.postEntry({ source: 'WASTE', sourceRef: wasteNo, tenantId, memo: `Waste ${wasteNo} ${itemRef} (${reason})`, createdBy: user.username, lines: [{ account_code: wasteAcct, debit: totalCost }, { account_code: '1200', credit: totalCost }] }, tx);
+    const lines = projectId != null
+      ? [{ account_code: wasteAcct, debit: totalCost, project_id: projectId }, { account_code: '1260', credit: totalCost, project_id: projectId, memo: `WIP scrap ${itemRef}` }]
+      : [{ account_code: wasteAcct, debit: totalCost }, { account_code: '1200', credit: totalCost }];
+    const je: any = await this.ledger.postEntry({ source: 'WASTE', sourceRef: wasteNo, tenantId, memo: `Waste ${wasteNo} ${itemRef} (${reason})`, createdBy: user.username, lines }, tx);
     return je?.entry_no ?? null;
   }
 
@@ -192,7 +261,7 @@ export class WasteService {
       totalQty = round2(totalQty + n(r.qty));
     }
     return {
-      waste: rows.map((r: any) => ({ waste_no: r.wasteNo, item_id: r.itemId, item_description: r.itemDescription, qty: n(r.qty), uom: r.uom, reason_code: r.reasonCode, disposition: r.disposition ?? 'discard', source: r.source, ref_doc: r.refDoc, unit_cost: n(r.unitCost), total_cost: n(r.totalCost), notes: r.notes, journal_no: r.journalNo, logged_by: r.loggedBy, created_at: r.createdAt })),
+      waste: rows.map((r: any) => ({ waste_no: r.wasteNo, item_id: r.itemId, item_description: r.itemDescription, qty: n(r.qty), uom: r.uom, reason_code: r.reasonCode, disposition: r.disposition ?? 'discard', source: r.source, ref_doc: r.refDoc, unit_cost: n(r.unitCost), total_cost: n(r.totalCost), notes: r.notes, journal_no: r.journalNo, project_id: r.projectId != null ? Number(r.projectId) : null, boq_line_id: r.boqLineId != null ? Number(r.boqLineId) : null, logged_by: r.loggedBy, created_at: r.createdAt })),
       count: rows.length, total_qty: totalQty, total_cost: totalCost,
       by_reason: Object.entries(byReason).map(([reason, v]) => ({ reason, ...v })).sort((a, b) => b.cost - a.cost),
       by_disposition: Object.entries(byDisposition).map(([disposition, v]) => ({ disposition, ...v })).sort((a, b) => b.cost - a.cost),

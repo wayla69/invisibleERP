@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.9** _(2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.10** _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -172,12 +172,22 @@ each with its own RAG:
   snapshot reconciles to the raw ledger (GL-19 / GL-20).
 - **Pending approvals** — everything still awaiting a maker-checker sign-off, with
   ageing and an overdue count (GOV-01).
+- **JE exceptions (รายการบัญชีผิดปกติ, GL-28)** — the detective sweep over the posted
+  journal: duplicate entries, suspiciously round manual amounts, backdated dates,
+  after-hours posting (06:00–22:00 Asia/Bangkok is normal), and manual cash↔revenue
+  pairs. **สแกนใหม่** re-runs the sweep (idempotent — reviewed items never re-appear);
+  each open exception is cleared with **ยกเลิก**, which *requires a reason* and writes
+  it to the GL audit log. The pillar turns **red while any HIGH exception is open**
+  (duplicates, cash↔revenue pairs), amber for any other open item. The same sweep can
+  be scheduled under Reports → Scheduled reports (**ตรวจจับรายการบัญชีผิดปกติ**).
 - **Close checklist** — the required close steps and what's done (appears once a
   close run is started).
 
-The **overall status turns red** if any control account is out of balance or a hard
-readiness check fails — the controller's cue not to lock yet. Read-only; it posts
-nothing and drives no lock (the lock stays on the period-close screen).
+The **overall status turns red** if any control account is out of balance, a hard
+readiness check fails, or a HIGH JE exception is open — the controller's cue not to
+lock yet. Read-only; it posts nothing and drives no lock (the lock stays on the
+period-close screen). Dismissing a JE exception changes only the exception register
+(with the audit-logged reason) — never the journal itself.
 
 ---
 

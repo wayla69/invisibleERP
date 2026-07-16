@@ -236,3 +236,66 @@ describe('LedgerRecurringService — runDuePrepaid sweep (GL-09 straight line)',
     expect(cap.updates[0]).toMatchObject({ amortizedAmount: '0', periodsPosted: 1 });
   });
 });
+
+// ── B2 (docs/50 Wave 1): the auto-reversal pass inside runDueRecurring — a monthly accrual template
+//    flagged auto_reverse gets its PRIOR month's posting reversed (lines flipped, dated the 1st, Draft
+//    through GL-05) before the due pass runs. Routed env: select #1 = reversal candidates, #2 = due rows.
+function sweepEnvRouted(routes: any[][], postReturns?: (string | null)[]): { db: any; post: any; cap: SweepCap } {
+  const cap: SweepCap = { inserts: [], updates: [], posts: [] };
+  let sel = 0;
+  const chain = (rows: any[]) => {
+    const p: any = { from: () => p, where: () => p, limit: () => p, orderBy: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
+    return p;
+  };
+  const db = {
+    select: () => chain(routes[sel++] ?? []),
+    insert: () => ({ values: (v: any) => { cap.inserts.push(v); return { returning: () => Promise.resolve([{ id: 11 }]) }; } }),
+    update: () => ({ set: (v: any) => ({ where: () => { cap.updates.push(v); return Promise.resolve(); } }) }),
+  };
+  let call = 0;
+  const post = async (dto: any) => { cap.posts.push(dto); return { entry_no: postReturns ? postReturns[call++] ?? null : `JE-R-${cap.posts.length}` }; };
+  return { db, post, cap };
+}
+
+describe('LedgerRecurringService — B2 auto-reversal pass (runDueRecurring, GL-08 + GL-17 semantics)', () => {
+  const today = ymd();
+  const priorMonthDate = (() => { const d = new Date(`${today}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); })();
+  const arTpl = (extra: any = {}) => ({
+    id: 4, name: 'ค้างจ่ายรายเดือน', frequency: 'monthly', tenantId: 1, currency: 'THB', memo: null, ledgerCode: null,
+    lines: TEMPLATE_LINES, autoReverse: 'true', lastRunDate: priorMonthDate, lastEntryNo: 'JE-PRIOR', ...extra,
+  });
+
+  it('a prior-month posting is reversed: lines FLIPPED, dated the 1st, Draft (GL-05), stable -REV idem ref', async () => {
+    const { db, post, cap } = sweepEnvRouted([[arTpl()], []]);
+    const svc = new LedgerRecurringService(db as any, docNo, post);
+    const r = await svc.runDueRecurring(user);
+    expect(r.reversals).toEqual([{ entry_no: 'JE-R-1', recurring_id: 4, name: 'ค้างจ่ายรายเดือน', reversed_run: priorMonthDate }]);
+    expect(cap.posts[0]).toMatchObject({
+      source: 'Recurring', sourceRef: `REC-4-${priorMonthDate}-REV`, pendingApproval: true,
+      date: `${today.slice(0, 7)}-01`, createdBy: 'maker1 (recurring auto-reverse)',
+    });
+    // the reversal is the accrual with debit↔credit swapped, line for line
+    expect(cap.posts[0].lines).toEqual(TEMPLATE_LINES.map((l: any) => ({ ...l, debit: l.credit, credit: l.debit })));
+  });
+
+  it('a SAME-month posting is not yet reversible (skipped — the occurrence must age past month end)', async () => {
+    const { db, post, cap } = sweepEnvRouted([[arTpl({ lastRunDate: today })], []]);
+    const svc = new LedgerRecurringService(db as any, docNo, post);
+    const r = await svc.runDueRecurring(user);
+    expect(r.reversals).toEqual([]);
+    expect(cap.posts).toHaveLength(0);
+  });
+
+  it('a deduped reversal (idem ref already posted → entry_no null) is not reported and the sweep continues', async () => {
+    const { db, post, cap } = sweepEnvRouted([[arTpl()], []], [null]);
+    const svc = new LedgerRecurringService(db as any, docNo, post);
+    const r = await svc.runDueRecurring(user);
+    expect(r.reversals).toEqual([]);
+    expect(cap.posts).toHaveLength(1); // the attempt was made; ux_je_idem swallowed it
+  });
+
+  it('createRecurring rejects auto_reverse on a sub-monthly cadence (AUTO_REVERSE_MONTHLY_ONLY)', async () => {
+    const svc = new LedgerRecurringService(noDb, docNo, postEntry as any);
+    expect(await code(() => svc.createRecurring({ name: 'x', frequency: 'daily', autoReverse: true, lines: TEMPLATE_LINES } as any, user))).toBe('AUTO_REVERSE_MONTHLY_ONLY');
+  });
+});

@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 295,
+    "total": 297,
     "by_status": {
-      "Implemented": 292,
+      "Implemented": 294,
       "Partial": 3
     },
     "by_family": {
@@ -16,12 +16,12 @@
       "Entity-Level": 9,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 27,
+      "General Ledger": 28,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 20,
+      "Inventory & COGS": 21,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -2945,6 +2945,25 @@
       "status": "Implemented"
     },
     {
+      "control_id": "INV-19",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Inventory; Project WIP",
+      "risk": "Unused project material has no governed path back to stock: site returns re-enter inventory as ad-hoc positive adjustments (wrong cost, no link to what was issued), project WIP stays overstated after the material physically left the site, or a fictitious 'return' inflates on-hand stock and deflates project cost with no second pair of eyes.",
+      "assertion": "Accuracy/Completeness/Existence",
+      "description": "Material return-to-stock (A1, docs/50 Wave 2, migration 0420): a return request (POST /api/reservations/:id/return) must reference the CONSUMED stock reservation it reverses — quantity is capped at the issued quantity AGGREGATE across the reservation's prior non-rejected returns (OVER_RETURN), a reason is mandatory (REASON_REQUIRED), and the value is the ORIGINAL issue unit cost read off the issue movement (never re-valued at today's average). A return valued at/above the materiality threshold (MATERIAL_RETURN_APPROVAL_THRESHOLD, default THB 1,000) posts NOTHING until a DIFFERENT user approves (maker-checker, SOD_VIOLATION on self-approve — the docs/49 SME seam applies); sub-threshold returns post immediately. Posting is the exact inverse of issue-to-project via the valued sub-ledger: stock back on hand + Dr inventory / Cr 1260 project WIP (project_id dimension), idempotent per MRET ref, and a NEGATIVE consumed commitment un-draws the BoQ line so the material budget frees up. Register at GET /api/reservations/returns.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per return",
+      "owner": "Warehouse / ProjectController",
+      "coso": "P13",
+      "code_reference": "reservations.service.ts requestReturn (OVER_RETURN/REASON_REQUIRED/RESERVATION_NOT_CONSUMED, original-issue-cost valuation, threshold gate) / approveReturn (assertMakerChecker) / rejectReturn / listReturns / postReturn (negative consumed commitment); inventory-ledger.service.ts returnFromProject (Dr inventory / Cr 1260 project_id, layer reopen, MRET idempotency); reservations.controller.ts (/api/reservations/:id/return, /returns[...]); schema/projects.ts project_material_returns (migration 0420, 0232 RLS); cutover/projects.ts §9f-ter (ToE)",
+      "tod": "Inspect the qty-aggregate cap, the reason requirement, the original-issue-cost valuation, the ≥-threshold maker-checker gate, and the Dr inventory / Cr 1260 reversal + negative consumed commitment.",
+      "toe": "Re-perform: issue 30 to a project; return 10 with a reason → posts immediately at the issue cost (stock +10, WIP −value, BoQ committed un-drawn, TB balanced); a return ≥ the threshold parks PendingApproval and moves NO stock; the requester's self-approve → 403 SOD_VIOLATION; a different user approves → stock/WIP move; re-approve → NO_PENDING_RETURN; returning more than issued → OVER_RETURN (re-performed by the projects harness).",
+      "evidence": "Returns register (pending + history); the Dr inventory / Cr 1260 reversal postings; negative consumed commitments",
+      "status": "Implemented"
+    },
+    {
       "control_id": "INV-17",
       "cycle": "Inventory & COGS",
       "category": "Application",
@@ -4329,6 +4348,25 @@
       "tod": "Inspect the fail-closed request-time validation, the PendingApproval→distinct-Admin flow, the AutoApplied single-admin exception rows, and the append-only request trail (payload + before snapshot).",
       "toe": "Re-perform (compliance GL-27 ToE): Admin stages a create → PendingApproval, account does NOT exist yet; creator self-approve → 403 SOD_VIOLATION; a DIFFERENT Admin approves → account exists; duplicate create for the same code → DUPLICATE_ACCOUNT (or CHANGE_ALREADY_PENDING while staged); reject leaves the chart untouched; unit ToE: with exactly ONE active Admin the write applies immediately and the row reads AutoApplied.",
       "evidence": "coa_change_requests rows (payload/before/created_by/approved_by/reason); compliance harness + unit ToE",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GL-28",
+      "cycle": "General Ledger",
+      "category": "Detective",
+      "fsli": "All",
+      "risk": "The GL's preventive gates (GL-05 maker-checker, GL-17 immutability, GL-11/GL-27 CoA governance) stop unauthorised single-person postings, but a colluding or fat-fingered pattern that PASSES the gates — the same journal posted twice, suspiciously round manual amounts, an accounting date backdated far behind its capture time, posting/approval activity at 3 a.m., or a manual entry pairing cash directly with revenue (bypassing AR) — is never systematically looked for: management-override and error patterns accumulate unreviewed in the journal.",
+      "assertion": "Occurrence/Accuracy/Fraud (management override)",
+      "description": "Rule-based JE anomaly & control-exception analytics (docs/50 Wave 5 B5): LedgerJeAnomalyService scans Posted journal_entries/journal_lines/gl_audit_log over a rolling window (default 90 days) with five deterministic rules — duplicate_je (same date + total + account set, HIGH), round_amount (Manual ≥ ฿10,000 whole-฿1,000), backdated (accounting date > 7 days before capture), after_hours (POST/APPROVE outside 06:00–22:00 Asia/Bangkok), unusual_pair (Manual cash 10xx ↔ revenue 4xxx, HIGH) — writing an IDEMPOTENT exception register (je_exceptions, one row per tenant × rule × entry; migration 0424, canonical RLS) so a re-scan never re-raises reviewed items. The periodic review is the control: each exception is DISMISSED only with a mandatory reason (DISMISS_REASON_REQUIRED), stamped who/when, and every dismissal appends a gl_audit_log EXCEPTION_DISMISSED row — the review evidence. Surfaced as a Close-Cockpit pillar (RAG: red = any HIGH open) and a schedulable BI sweep (je_exceptions report type). Near-threshold-approval detection is consciously N/A: GL-05 maker-checker applies to every manual JE with no amount threshold to skirt.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Rolling scan (scheduled sweep + close review)",
+      "owner": "Financial Controller",
+      "coso": "P10",
+      "code_reference": "ledger/ledger-je-anomaly.service.ts (scan/list/dismiss/cockpitSummary); ledger/ledger-je-anomaly.controller.ts (/api/ledger/je-exceptions, scan gl_close/approvals/exec, dismiss gl_close/exec); schema/gl-audit.ts jeExceptions + migration 0424 (coalesce unique per tenant×rule×entry, canonical RLS); ledger-bi-reports.ts je_exceptions generator + report-registry entry; finance-metrics.service.ts closeStatus je_exceptions pillar; close-cockpit-client.tsx tile (scan + dismiss-with-reason); cutover/basics.ts (ToE)",
+      "tod": "Inspect the five rules, the idempotent register keying, the mandatory-reason dismissal, and the EXCEPTION_DISMISSED audit rows.",
+      "toe": "Re-perform (basics ToE): seed one anomaly per rule → scan flags all five (duplicates name their peer, after-hours carries the Bangkok hour); re-scan new=0; dismiss without a reason → 400; dismiss with a reason → dismissed + gl_audit_log EXCEPTION_DISMISSED; re-dismiss → ALREADY_DISMISSED; cockpit pillar red on HIGH open; the je_exceptions BI sweep runs idempotently.",
+      "evidence": "je_exceptions register (open/dismissed + reasons); gl_audit_log EXCEPTION_DISMISSED trail; cockpit pillar; sweep run log",
       "status": "Implemented"
     },
     {

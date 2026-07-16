@@ -2745,6 +2745,62 @@
       "when": 2023820000357,
       "tag": "0418_baseline_resync_2",
       "breakpoints": true
+    },
+    {
+      "idx": 393,
+      "version": "7",
+      "when": 2023820000358,
+      "tag": "0419_recurring_auto_reverse",
+      "breakpoints": true
+    },
+    {
+      "idx": 394,
+      "version": "7",
+      "when": 2023820000359,
+      "tag": "0420_project_material_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 395,
+      "version": "7",
+      "when": 2023820000360,
+      "tag": "0421_close_task_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 396,
+      "version": "7",
+      "when": 2023820000361,
+      "tag": "0422_recon_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 397,
+      "version": "7",
+      "when": 2023820000362,
+      "tag": "0423_project_tagged_waste",
+      "breakpoints": true
+    },
+    {
+      "idx": 398,
+      "version": "7",
+      "when": 2023820000363,
+      "tag": "0424_je_exceptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 399,
+      "version": "7",
+      "when": 2023820000364,
+      "tag": "0425_psp_terminal_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 400,
+      "version": "7",
+      "when": 2023820000365,
+      "tag": "0426_till_blind_close",
+      "breakpoints": true
     }
   ]
 }

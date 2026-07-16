@@ -58,6 +58,7 @@ const RecurringBody = z.object({
   currency: z.string().optional(),
   tenant_id: z.number().optional(),
   start_date: z.string().optional(),
+  auto_reverse: z.boolean().optional(), // B2: reverse the posted accrual next month (monthly templates only)
   lines: z.array(z.object({
     account_code: z.string().min(1),
     debit: z.number().nonnegative().optional(),
@@ -265,7 +266,7 @@ export class LedgerController {
   @Post('recurring')
   @Permissions('gl_post', 'exec')
   createRecurring(@Body(new ZodValidationPipe(RecurringBody)) b: RecurringBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.createRecurring({ name: b.name, frequency: b.frequency, memo: b.memo, ledgerCode: b.ledger_code ?? null, currency: b.currency, tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date, lines: b.lines }, u);
+    return this.svc.createRecurring({ name: b.name, frequency: b.frequency, memo: b.memo, ledgerCode: b.ledger_code ?? null, currency: b.currency, tenantId: hqTenant(u, b.tenant_id) ?? null, startDate: b.start_date, autoReverse: b.auto_reverse, lines: b.lines }, u);
   }
 
   @Get('recurring')

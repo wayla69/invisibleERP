@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -206,6 +206,23 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const commitments = useQuery<any>({ queryKey: ['proj', code, 'commitments'], queryFn: () => api(`/api/projects/${code}/commitments`) });
   const pmrList = useQuery<any>({ queryKey: ['proj', code, 'pmr'], queryFn: () => api(`/api/pmr/project/${code}`) });
   const reservations = useQuery<any>({ queryKey: ['proj', code, 'reservations'], queryFn: () => api(`/api/reservations/project/${code}`) });
+  // A4 BoQ takeoff import (paste-CSV; fail-closed all-or-nothing server-side)
+  const [impDlg, setImpDlg] = useState(false);
+  const [impCsv, setImpCsv] = useState('');
+  const importBoq = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/boq/import`, { method: 'POST', body: JSON.stringify({ format: 'csv', csv: impCsv }) }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('pj.boq_import_ok', { n: r?.imported ?? 0 }));
+      if ((r?.warnings ?? []).length) notifyError(t('pj.boq_import_warn', { n: r.warnings.length }));
+      setImpDlg(false); setImpCsv(''); refresh();
+    },
+    onError: (err: any) => notifyError(err?.message ?? t('pj.boq_import_failed')),
+  });
+  // A3 material control tower reads (WBS rollup + draw curve)
+  const byWbsQ = useQuery<any>({ queryKey: ['proj', code, 'by-wbs'], queryFn: () => api(`/api/projects/${code}/boq/by-wbs`) });
+  const drawQ = useQuery<any>({ queryKey: ['proj', code, 'material-draw'], queryFn: () => api(`/api/projects/${code}/material-draw`) });
+  // A5 — EVM split by BoQ category (material CPI + wasted value per category)
+  const evmCatQ = useQuery<any>({ queryKey: ['proj', code, 'evm-by-category'], queryFn: () => api(`/api/projects/${code}/evm/by-category`) });
   const siteCash = useQuery<any>({ queryKey: ['proj', code, 'sitecash'], queryFn: () => api(`/api/projects/${code}/site-cash`) });
   const bq = boq.data;
   const boqId: number | undefined = bq?.boq?.id;
@@ -269,6 +286,45 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     mutationFn: (id: number) => api(`/api/reservations/${id}/release`, { method: 'POST', body: '{}' }),
     onSuccess: () => { notifySuccess(t('pj.resv_toast_released')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
+  // A1 (INV-19): return unused issued material — qty ≤ issued, reason mandatory; a material-value return
+  // parks PendingApproval for a different approver. Register + approve/reject inline on this tab.
+  const returnsQ = useQuery<any>({ queryKey: ['proj', code, 'returns'], queryFn: () => api('/api/reservations/returns') });
+  const requestReturn = useMutation({
+    mutationFn: (v: { id: number; qty?: number; reason: string }) =>
+      api(`/api/reservations/${v.id}/return`, { method: 'POST', body: JSON.stringify({ qty: v.qty, reason: v.reason }) }),
+    onSuccess: (r: any) => { notifySuccess(r?.status === 'PendingApproval' ? t('pj.resv_return_pending') : t('pj.resv_return_posted')); refresh(); returnsQ.refetch(); },
+    onError: (err: any) => notifyError(err.message),
+  });
+  const decideReturn = useMutation({
+    mutationFn: (v: { return_no: string; action: 'approve' | 'reject' }) =>
+      api(`/api/reservations/returns/${encodeURIComponent(v.return_no)}/${v.action}`, { method: 'POST', body: '{}' }),
+    onSuccess: () => { notifySuccess(t('pj.resv_return_decided')); refresh(); returnsQ.refetch(); },
+    onError: (err: any) => notifyError(err.message),
+  });
+  const promptReturn = (r: any) => {
+    const qtyStr = window.prompt(t('pj.resv_return_qty_prompt', { qty: num(r.qty) }), String(r.qty));
+    if (qtyStr == null) return;
+    const reason = window.prompt(t('pj.resv_return_reason_prompt'));
+    if (!reason || !reason.trim()) { notifyError(t('pj.resv_return_reason_required')); return; }
+    requestReturn.mutate({ id: r.id, qty: Number(qtyStr) || undefined, reason: reason.trim() });
+  };
+
+  // A5: site scrap of ISSUED material — relieves project WIP (Dr 5810 / Cr 1260), capped server-side at
+  // the net drawn value (WASTE_EXCEEDS_WIP). Cost is the issue unit cost, asserted by the logger.
+  const logScrap = useMutation({
+    mutationFn: (v: { item_id: string; qty: number; unit_cost: number; boq_line_id?: number }) =>
+      api('/api/inventory/waste', { method: 'POST', body: JSON.stringify({ ...v, reason_code: 'damage', project_code: code }) }),
+    onSuccess: () => { notifySuccess(t('pj.resv_scrap_posted')); refresh(); byWbsQ.refetch(); evmCatQ.refetch(); },
+    onError: (e: any) => notifyError(e?.message ?? String(e)),
+  });
+  const promptScrap = (r: any) => {
+    const qtyStr = window.prompt(t('pj.resv_scrap_qty_prompt', { qty: num(r.qty) }), '1');
+    if (qtyStr == null || !(Number(qtyStr) > 0)) return;
+    const costStr = window.prompt(t('pj.resv_scrap_cost_prompt'));
+    if (costStr == null) return;
+    if (!(Number(costStr) > 0)) { notifyError(t('pj.resv_scrap_cost_required')); return; }
+    logScrap.mutate({ item_id: r.item_id, qty: Number(qtyStr), unit_cost: Number(costStr), boq_line_id: r.boq_line_id ?? undefined });
+  };
 
   // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
   const [advDlg, setAdvDlg] = useState(false);
@@ -295,7 +351,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <ListTree className="mx-auto size-8 text-muted-foreground" />
           <h3 className="text-base font-semibold">{t('pj.boq_empty_title')}</h3>
           <p className="text-sm text-muted-foreground">{t('pj.boq_empty_desc')}</p>
-          <div><Button onClick={() => setBoqDlg(true)}><Plus className="size-4" /> {t('pj.boq_btn_create')}</Button></div>
+          <div className="flex justify-center gap-2"><Button onClick={() => setBoqDlg(true)}><Plus className="size-4" /> {t('pj.boq_btn_create')}</Button><Button variant="outline" onClick={() => setImpDlg(true)}>{t('pj.boq_btn_import')}</Button></div>
         </Card>
       ) : (
         <>
@@ -335,6 +391,79 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             ]}
             emptyState={{ icon: ListTree, title: t('pj.boq_empty_lines_title'), description: t('pj.boq_empty_lines_desc') }}
           />
+          <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => setImpDlg(true)}>{t('pj.boq_btn_import')}</Button></div>
+          {impDlg && (
+            <div className="space-y-2 rounded-lg border p-3">
+              <p className="text-sm font-medium">{t('pj.boq_import_title')}</p>
+              <p className="text-xs text-muted-foreground">{t('pj.boq_import_hint')}</p>
+              <textarea className="min-h-28 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+                placeholder={'item_no,description,category,uom,budget_qty,rate,wbs_code'}
+                value={impCsv} onChange={(e) => setImpCsv(e.target.value)} />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={() => { setImpDlg(false); setImpCsv(''); }}>{t('fin.cancel')}</Button>
+                <Button size="sm" disabled={importBoq.isPending || !impCsv.trim()} onClick={() => importBoq.mutate()}>{t('pj.boq_btn_import')}</Button>
+              </div>
+            </div>
+          )}
+          {/* A3 material control tower — WBS rollup + planned-vs-actual draw curve (read models) */}
+          {(byWbsQ.data?.nodes ?? []).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.mct_wbs_title')}</h3>
+              <DataTable
+                rows={byWbsQ.data.nodes}
+                rowKey={(r: any) => r.wbs_code}
+                columns={[
+                  { key: 'wbs_code', label: t('pj.mct_col_wbs') },
+                  { key: 'budget', label: t('pj.boq_col_budget'), align: 'right', render: (r: any) => baht(r.budget) },
+                  { key: 'committed', label: t('pj.pmr_stat_committed'), align: 'right', render: (r: any) => baht(r.committed) },
+                  { key: 'issued', label: t('pj.mct_col_issued'), align: 'right', render: (r: any) => baht(r.issued) },
+                  { key: 'returned', label: t('pj.mct_col_returned'), align: 'right', render: (r: any) => baht(r.returned) },
+                  { key: 'wasted', label: t('pj.mct_col_wasted'), align: 'right', render: (r: any) => r.wasted > 0 ? <span className="font-medium text-destructive">{baht(r.wasted)}</span> : baht(r.wasted) },
+                  { key: 'remaining', label: t('pj.boq_col_remaining'), align: 'right', render: (r: any) => <span className={r.remaining < 0 ? 'font-medium text-destructive' : 'tabular'}>{baht(r.remaining)}</span> },
+                ]}
+              />
+            </div>
+          )}
+          {/* A5 — EVM by BoQ category: the material cost-performance lens (CPI per category + wasted) */}
+          {(evmCatQ.data?.categories ?? []).length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.evmcat_title')}</h3>
+                {evmCatQ.data.material_cpi != null && (
+                  <Badge variant={evmCatQ.data.material_cpi >= 1 ? 'success' : 'destructive'}>{t('pj.evmcat_material_cpi')} {evmCatQ.data.material_cpi}</Badge>
+                )}
+              </div>
+              <DataTable
+                rows={evmCatQ.data.categories}
+                rowKey={(r: any) => r.category}
+                columns={[
+                  { key: 'category', label: t('pj.evmcat_col_category'), render: (r: any) => t(`pj.boq_cat_${r.category}`) },
+                  { key: 'budget', label: t('pj.boq_col_budget'), align: 'right', render: (r: any) => baht(r.budget) },
+                  { key: 'committed', label: t('pj.pmr_stat_committed'), align: 'right', render: (r: any) => baht(r.committed) },
+                  { key: 'actual', label: t('pj.evmcat_col_actual'), align: 'right', render: (r: any) => baht(r.actual) },
+                  { key: 'wasted', label: t('pj.mct_col_wasted'), align: 'right', render: (r: any) => r.wasted > 0 ? <span className="font-medium text-destructive">{baht(r.wasted)}</span> : baht(r.wasted) },
+                  { key: 'ev', label: t('pj.evmcat_col_ev'), align: 'right', render: (r: any) => baht(r.ev) },
+                  { key: 'cpi', label: 'CPI', align: 'right', render: (r: any) => r.cpi == null ? '—' : <span className={r.cpi < 1 ? 'font-medium text-destructive' : 'font-medium text-emerald-600'}>{r.cpi}</span> },
+                ]}
+              />
+            </div>
+          )}
+          {(drawQ.data?.points ?? []).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.mct_draw_title')}</h3>
+              <DataTable
+                rows={drawQ.data.points}
+                rowKey={(r: any) => r.month}
+                columns={[
+                  { key: 'month', label: t('pj.mct_col_month') },
+                  { key: 'actual', label: t('pj.mct_col_actual'), align: 'right', render: (r: any) => baht(r.actual) },
+                  { key: 'actual_cum', label: t('pj.mct_col_actual_cum'), align: 'right', render: (r: any) => baht(r.actual_cum) },
+                  { key: 'planned_cum', label: t('pj.mct_col_planned_cum'), align: 'right', render: (r: any) => baht(r.planned_cum) },
+                  { key: 'over_plan', label: '', render: (r: any) => r.over_plan ? <Badge variant="destructive">{t('pj.mct_over_plan')}</Badge> : null },
+                ]}
+              />
+            </div>
+          )}
         </>
       )}
     </div>
@@ -405,10 +534,38 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
                 <Button variant="ghost" size="sm" title={t('pj.resv_issue_tip')} onClick={() => issueResv.mutate(r.id)}><CheckCircle2 className="size-4" /></Button>
                 <Button variant="ghost" size="sm" title={t('pj.resv_release_tip')} onClick={() => releaseResv.mutate(r.id)}><ArrowLeft className="size-4" /></Button>
               </span>
+            ) : r.status === 'consumed' ? (
+              <span className="flex gap-1">
+                <Button variant="ghost" size="sm" title={t('pj.resv_return_tip')} onClick={() => promptReturn(r)}><ArrowLeft className="size-4" /></Button>
+                <Button variant="ghost" size="sm" title={t('pj.resv_scrap_tip')} onClick={() => promptScrap(r)}><Trash2 className="size-4" /></Button>
+              </span>
             ) : null },
           ]}
           emptyState={{ icon: Boxes, title: t('pj.resv_empty_title'), description: t('pj.resv_empty_desc') }}
         />
+      )}
+      {(returnsQ.data?.returns ?? []).filter((r: any) => (reservations.data?.reservations ?? []).some((x: any) => x.id === r.reservation_id)).length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.resv_returns_title')}</h3>
+          <DataTable
+            rows={(returnsQ.data?.returns ?? []).filter((r: any) => (reservations.data?.reservations ?? []).some((x: any) => x.id === r.reservation_id))}
+            rowKey={(r: any) => r.return_no}
+            columns={[
+              { key: 'return_no', label: t('pj.resv_return_col_no') },
+              { key: 'item_id', label: t('pj.resv_col_item') },
+              { key: 'qty', label: t('pj.col_amount'), align: 'right', render: (r: any) => <span className="tabular">{num(r.qty)}</span> },
+              { key: 'value', label: t('pj.resv_return_col_value'), align: 'right', render: (r: any) => <span className="tabular">{baht(r.value)}</span> },
+              { key: 'reason', label: t('pj.resv_return_col_reason') },
+              { key: 'status', label: t('pj.col_status'), render: (r: any) => <Badge variant={r.status === 'Posted' ? 'success' : r.status === 'Rejected' ? 'destructive' : 'warning'}>{r.status}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => r.status === 'PendingApproval' ? (
+                <span className="flex gap-1">
+                  <Button variant="ghost" size="sm" title={t('fin.approve')} onClick={() => decideReturn.mutate({ return_no: r.return_no, action: 'approve' })}><CheckCircle2 className="size-4" /></Button>
+                  <Button variant="ghost" size="sm" title={t('pj.resv_return_reject')} onClick={() => decideReturn.mutate({ return_no: r.return_no, action: 'reject' })}><ArrowLeft className="size-4" /></Button>
+                </span>
+              ) : null },
+            ]}
+          />
+        </div>
       )}
     </div>
   );

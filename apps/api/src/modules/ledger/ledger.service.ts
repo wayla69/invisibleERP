@@ -46,6 +46,9 @@ export interface RecurringJournalDto {
   currency?: string;
   tenantId?: number | null;
   startDate?: string; // first run date (YYYY-MM-DD); defaults to today
+  // GL-08/GL-17 (docs/50 Wave 1 B2): auto-reverse the posted accrual in the next business month.
+  // Monthly-frequency templates only (AUTO_REVERSE_MONTHLY_ONLY at create).
+  autoReverse?: boolean;
   lines: JournalLineDto[];
 }
 

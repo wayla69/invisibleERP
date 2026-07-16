@@ -924,3 +924,33 @@ export type ProjectTaskDependency = typeof projectTaskDependencies.$inferSelect;
 export type ProjectCalendar = typeof projectCalendars.$inferSelect;
 export type ProjectCalendarException = typeof projectCalendarExceptions.$inferSelect;
 export type ProjectEtc = typeof projectEtc.$inferSelect;
+
+// A1 (docs/50 Wave 2, migration 0420, control INV-19) — material return-to-stock. A governed inverse of
+// issue-to-project: each row reverses (part of) ONE consumed stock reservation at the ORIGINAL issue unit
+// cost — qty ≤ issued (aggregate per reservation), reason mandatory, and at/above the materiality threshold
+// the return posts NOTHING until a different user approves (maker-checker; docs/49 seam applies).
+export const projectMaterialReturns = pgTable('project_material_returns', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  returnNo: text('return_no').notNull().unique(),
+  reservationId: bigint('reservation_id', { mode: 'number' }).notNull(),
+  projectId: bigint('project_id', { mode: 'number' }).notNull(),
+  itemId: text('item_id').notNull(),
+  locationId: text('location_id').notNull(),
+  qty: numeric('qty', { precision: 18, scale: 4 }).notNull(),
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull(),
+  value: numeric('value', { precision: 18, scale: 2 }).notNull(),
+  reason: text('reason').notNull(),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Posted | Rejected
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  moveNo: text('move_no'),
+  glEntryNo: text('gl_entry_no'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_project_material_returns_tenant').on(t.tenantId),
+  byReservation: index('idx_project_material_returns_res').on(t.reservationId),
+}));
+
+export type ProjectMaterialReturn = typeof projectMaterialReturns.$inferSelect;

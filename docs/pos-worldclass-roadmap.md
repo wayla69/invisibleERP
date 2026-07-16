@@ -24,7 +24,7 @@ Effort key: **S** ≈ 1–2 days · **M** ≈ 3–5 days · **L** ≈ 1–2 week
 **Goal:** real card acceptance + integrated hardware.
 - **Terminal/PSP:** implement a real `PaymentGateway` (extend `gateways.ts`) for a Thai acquirer — **Opn (Omise) / 2C2P / GB Prime** — supporting: create-charge, **EMV chip + contactless/tap**, **pre-auth + capture** (bar tabs), tip-on-terminal, void, refund-via-PSP, and a **settlement/batch** endpoint reconciled against `payments`. New tables: `payment_terminals` (pairing), `payment_intents` (PSP ref ↔ sale), `settlement_batches`.
 - **Endpoints:** `POST /api/payments/terminal/charge`, `/capture`, `/void`, `POST /api/payments/settlements/reconcile`, webhook `POST /api/payments/psp/webhook` (HMAC-verified, idempotent on PSP event id).
-- **Peripheral bridge:** a small local agent (or WebUSB/WebSerial) for **ESC/POS printer** (reuse `receipt.service` ESC/POS output), **cash-drawer kick**, **barcode scanner** (keyboard-wedge handled in web), and a **customer-facing display** screen wired to the existing CFD endpoint. **✅ Delivered (2026-06-25):** the WebUSB/WebSerial bridge (`apps/web/src/lib/peripherals.ts`) is now wired into the register via `apps/web/src/lib/terminal.ts` + the register's **⚙ ตั้งค่าเครื่อง** — receipt printing (print-through-driver **or** direct USB ESC/POS), automatic cash-drawer kick on cash sales, barcode quick-add, and live customer-display push (`POST /api/peripherals/display/:terminal`). PromptPay now also returns a scannable `qr_image`. *Still open:* the real PSP card-terminal (pre-auth/capture/settlement).
+- **Peripheral bridge:** a small local agent (or WebUSB/WebSerial) for **ESC/POS printer** (reuse `receipt.service` ESC/POS output), **cash-drawer kick**, **barcode scanner** (keyboard-wedge handled in web), and a **customer-facing display** screen wired to the existing CFD endpoint. **✅ Delivered (2026-06-25):** the WebUSB/WebSerial bridge (`apps/web/src/lib/peripherals.ts`) is now wired into the register via `apps/web/src/lib/terminal.ts` + the register's **⚙ ตั้งค่าเครื่อง** — receipt printing (print-through-driver **or** direct USB ESC/POS), automatic cash-drawer kick on cash sales, barcode quick-add, and live customer-display push (`POST /api/peripherals/display/:terminal`). PromptPay now also returns a scannable `qr_image`. **✅ Terminal depth delivered (2026-07-16, docs/50 Wave 5 C5 re-scoped, migration 0425):** an audit found the terminal core already built (provider framework + a real **Omise** acquirer with pre-auth/capture/void/refund, the HMAC+replay-window webhook, settlement batching — `pos/terminal/*`); the genuine residual shipped: **PSP event-id idempotency** (`psp_webhook_events` dedup — a redelivered event never re-processes), **real settlement reconciliation** (acquirer-report import matched per intent: matched/amount_mismatch/missing_intent/unreported_intent → `settlement_lines`; auto-Reconciled only at zero discrepancies), **tip-on-terminal** (charge-time tip + bar-tab capture-above-auth gratuity), `OMISE_SECRET_KEY` documented, and the signed-webhook path (valid/tampered/stale) exercised end-to-end in `pos-p0` (23→39). *Still externally gated:* a **second Thai acquirer** (2C2P / GB Prime — a ~1-class addition on the `TerminalProvider` shape once merchant sandbox credentials exist).
 - **Verify:** harness against the PSP **sandbox** (charge→capture→refund→settle, over-refund guard already exists); printer/drawer manual-tested.
 - **Depends on:** PSP merchant account (external).
 
@@ -54,14 +54,22 @@ Effort key: **S** ≈ 1–2 days · **M** ≈ 3–5 days · **L** ≈ 1–2 week
 - **Verify:** harness `pricing` — happy-hour window applies only in-window; combo explodes; BOGO; service charge on 6-top; rounding to satang.
 
 ### Phase P1b — Thai fiscal compliance · Effort **M–L** · Risk: med (RD/ETDA integration)
-- **Full tax invoice (ใบกำกับเต็มรูป) at POS on demand** for B2B walk-ins (buyer tax-id/branch capture) — extend `tax-docs` to be POS-callable: `POST /api/pos/orders/:saleNo/full-tax-invoice`.
+- **Full tax invoice (ใบกำกับเต็มรูป) at POS on demand** for B2B walk-ins (buyer tax-id/branch capture) — extend `tax-docs` to be POS-callable: `POST /api/pos/orders/:saleNo/full-tax-invoice`. **✅ Delivered
+  (2026-07-16, docs/50 Wave 2 C2):** the sale-keyed endpoint lazily issues the sale's ABB (idempotent) and
+  delegates to the TAX-10 ABB→full conversion (verbatim amounts, Replaced, ภ.พ.30 single-count,
+  one-full-per-ABB); POS-home recent-bills **ขอใบกำกับเต็มรูป** buyer-capture dialog. ToE `taxdocs`
+  131→136; PN-06 §7(3a) rev 0.29; UAT-TAX-063..064.
 - **RD e-Tax Invoice & e-Receipt** (ETDA): sign + submit via a provider (e.g. INET/Frank/leading e-Tax SP); store submission status + RD response; **electronic journal** (immutable, append-only, exportable). New tables: `etax_submissions`, `pos_journal` (hash-chained).
 - **Web:** "request full tax invoice" on receipt; e-Tax status dashboard.
 - **Verify:** provider **sandbox** submission + status callback; journal hash-chain integrity test.
 
 ### Phase P1c — POS audit & control · Effort **S–M**
 - **Central POS audit log** unifying voids/discounts/price-overrides/no-sale/refunds (actor, reason_code, approver, before/after) — reuse `audit_log` + `status-log.service`, add reason-code masters.
-- **Blind drawer close** (count without seeing expected; variance revealed after).
+- **Blind drawer close** (count without seeing expected; variance revealed after). **✅ Delivered
+  (2026-07-16, docs/50 Wave 1):** per-tenant `till_settings.blind_close` policy (manager-only change);
+  open-session X/Z redact expected cash + derivable figures server-side for till-duty callers; the
+  `/pos/till` close dialog submits the count first and reveals the variance after; the session is
+  stamped `blind_close` as evidence. ToE `cashreport` 33→45; PN-07 §7(5) rev 2.0; UAT-O2C-492..497.
 - **Verify:** harness asserts every controlled action writes an audit row with actor+reason; blind-close hides expected until submit.
 
 ---

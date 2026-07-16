@@ -127,6 +127,42 @@ async function main() {
   const cert2 = await inj('POST', `/api/recon/periods/${rpId}/certify`, rev);
   ok('Double-certify → 400', cert2.status === 400, `status=${cert2.status}`);
 
+  // ── B4 (docs/50 Wave 4): roll-forward + risk rating + safe-class auto-certification + GL-19 signal ──
+  // Roll-forward ties to the posted GL: account 1000 in 2026-01 → opening 0, activity 2000, closing 2000.
+  ok('B4: roll-forward on the certified period (opening 0 → activity 2000 → closing 2000, ties to GL)',
+    near(summ2.json.opening_balance, 0) && near(summ2.json.activity, 2000) && near(summ2.json.closing_balance, 2000) && near(summ2.json.gl_balance, 2000),
+    JSON.stringify({ o: summ2.json.opening_balance, a: summ2.json.activity, c: summ2.json.closing_balance }));
+  ok('B4: aging block present on the summary (all matched → no aged exceptions)',
+    summ2.json.aging && summ2.json.aging.d0_30 === 0 && summ2.json.aging.d61_plus === 0, JSON.stringify(summ2.json.aging));
+  // A LOW-risk zero-activity account auto-certifies; a NON-zero account never does (manual REC-01 only).
+  const rpZero = await inj('POST', '/api/recon/periods', prep, { account_code: '1999', period: '2026-01', risk_rating: 'low' });
+  ok('B4: zero-activity low-risk period opens with roll-forward 0/0/0', rpZero.status === 201 && near(rpZero.json.closing_balance, 0) && rpZero.json.risk_rating === 'low', JSON.stringify(rpZero.json));
+  const rpBusy = await inj('POST', '/api/recon/periods', prep, { account_code: '4000', period: '2026-01', risk_rating: 'low' });
+  ok('B4: a low-risk but NON-zero account is opened too (activity ≠ 0)', rpBusy.status === 201 && Math.abs(Number(rpBusy.json.activity)) > 0, JSON.stringify({ a: rpBusy.json.activity }));
+  const preClose = await inj('GET', '/api/ledger/close/validate?period=2026-01', rev);
+  ok('B4: GL-19 recon_completeness warns while recons are uncertified (advisory, not a blocker)',
+    preClose.status === 200 && (preClose.json.warnings ?? []).includes('recon_completeness') && !(preClose.json.blockers ?? []).includes('recon_completeness'),
+    JSON.stringify({ w: preClose.json.warnings, b: preClose.json.blockers }));
+  const autoCert = await inj('POST', '/api/recon/periods/auto-certify', rev, { period: '2026-01' });
+  ok('B4: auto-certify fires ONLY on the safe class (1999 certified; 4000 skipped NOT_ZERO)',
+    autoCert.status < 300 && autoCert.json.auto_certified === 1 && (autoCert.json.accounts ?? []).includes('1999')
+    && (autoCert.json.skipped ?? []).some((x: any) => x.account_code === '4000' && x.reason === 'NOT_ZERO'),
+    JSON.stringify(autoCert.json));
+  const zeroAfter = await inj('GET', `/api/recon/periods/${rpZero.json.id}/summary`, rev);
+  ok('B4: auto-certified period is flagged + attributed "(auto)"', zeroAfter.json.status === 'Certified' && zeroAfter.json.auto_certified === true && /\(auto\)$/.test(zeroAfter.json.certified_by ?? ''), JSON.stringify({ st: zeroAfter.json.status, by: zeroAfter.json.certified_by }));
+  // The busy account still needs the two-person path: risk re-rated HIGH, preparer blocked, reviewer certifies.
+  const reRisk = await inj('PUT', `/api/recon/periods/${rpBusy.json.id}/risk`, prep, { risk_rating: 'high' });
+  ok('B4: risk re-rating persists', reRisk.status === 200 && reRisk.json.risk_rating === 'high', JSON.stringify({ r: reRisk.json.risk_rating }));
+  await inj('POST', `/api/recon/periods/${rpBusy.json.id}/import-gl`, prep);
+  await inj('POST', `/api/recon/periods/${rpBusy.json.id}/items`, prep, { source: 'Subledger', amount: -1200, ref_doc: 'SL-4000A' });
+  await inj('POST', `/api/recon/periods/${rpBusy.json.id}/items`, prep, { source: 'Subledger', amount: -800, ref_doc: 'SL-4000B' });
+  await inj('POST', `/api/recon/periods/${rpBusy.json.id}/auto-match`, prep);
+  const busySelf = await inj('POST', `/api/recon/periods/${rpBusy.json.id}/certify`, prep);
+  ok('B4: high-risk account keeps REC-01 (preparer self-certify → 403)', busySelf.status === 403, `${busySelf.status}`);
+  await inj('POST', `/api/recon/periods/${rpBusy.json.id}/certify`, rev);
+  const postClose = await inj('GET', '/api/ledger/close/validate?period=2026-01', rev);
+  ok('B4: recon_completeness clears once every opened recon is certified', postClose.status === 200 && !(postClose.json.warnings ?? []).includes('recon_completeness'), JSON.stringify(postClose.json.warnings));
+
   // ── PROFITABILITY CHECKS ──
 
   // 11. Create two Brand segments

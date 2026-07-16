@@ -5,7 +5,7 @@
 // readiness (GL-19/GL-20), and the pending maker-checker queue (GOV-01) — plus the close checklist when a
 // close run is under way. Read-only; each pillar carries its own RAG (icon+label, never colour-alone).
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, AlertTriangle, AlertCircle, CircleDashed, Scale, ClipboardList, Clock } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, AlertCircle, CircleDashed, Scale, ClipboardList, Clock, Search } from 'lucide-react';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { api } from '@/lib/api';
@@ -19,7 +19,8 @@ interface CloseStatus {
   tie_out: { all_reconciled: boolean; exceptions: number; lines: any[] } | null;
   readiness: { ready: boolean; blockers: string[]; warnings: string[]; checks: any[] } | null;
   approvals: { count: number; overdue: number; oldest_age_days: number; by_type: Record<string, number>; total_amount: number; items: any[] } | null;
-  rag: { tie_out: Rag; readiness: Rag; approvals: Rag; overall: 'green' | 'amber' | 'red' };
+  je_exceptions: { open: number; high_open: number } | null;
+  rag: { tie_out: Rag; readiness: Rag; approvals: Rag; je_exceptions?: Rag; overall: 'green' | 'amber' | 'red' };
 }
 
 const TONE: Record<'green' | 'amber' | 'red', { text: string; bg: string; ring: string; Icon: typeof CheckCircle2 }> = {
@@ -31,11 +32,25 @@ const TONE: Record<'green' | 'amber' | 'red', { text: string; bg: string; ring: 
 export function CloseCockpitClient({ initialData }: { initialData: CloseStatus | null }) {
   const { t } = useLang();
   const [data, setData] = useState<CloseStatus | null>(initialData);
+  // B5 (GL-28): the open JE-exception worklist behind the pillar — scan / dismiss-with-reason.
+  const [jeList, setJeList] = useState<any[]>([]);
+  const [jeBusy, setJeBusy] = useState(false);
 
   const refetch = useCallback(async () => {
     try { setData(await api<CloseStatus>('/api/finance/metrics/close/status')); } catch { /* keep last good */ }
+    try { setJeList(((await api<any>('/api/ledger/je-exceptions?status=open')) as any).exceptions ?? []); } catch { /* keep last good */ }
   }, []);
   useEffect(() => { void refetch(); }, [refetch]);
+
+  const jeScan = useCallback(async () => {
+    setJeBusy(true);
+    try { await api('/api/ledger/je-exceptions/scan', { method: 'POST', body: '{}' }); await refetch(); } catch { /* surfaced by rag */ } finally { setJeBusy(false); }
+  }, [refetch]);
+  const jeDismiss = useCallback(async (id: number) => {
+    const reason = window.prompt(t('fnx.cockpit.je_reason_prompt'));
+    if (!reason || !reason.trim()) return;
+    try { await api(`/api/ledger/je-exceptions/${id}/dismiss`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) }); await refetch(); } catch { /* keep last good */ }
+  }, [refetch, t]);
 
   if (!data) {
     return (
@@ -135,6 +150,37 @@ export function CloseCockpitClient({ initialData }: { initialData: CloseStatus |
                 ))}
               </ul>
             </>
+          )}
+        </PillarCard>
+
+        {/* B5 (GL-28) — JE anomaly exceptions: detective review worklist with dismiss-with-reason */}
+        <PillarCard title={t('fnx.cockpit.je_exceptions')} icon={Search} rag={data.rag.je_exceptions ?? null}>
+          <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {data.je_exceptions == null ? t('fnx.cockpit.leg_unavailable')
+                : data.je_exceptions.open === 0 ? t('fnx.cockpit.je_none')
+                : t('fnx.cockpit.je_summary', { open: data.je_exceptions.open, high: data.je_exceptions.high_open })}
+            </span>
+            <button type="button" disabled={jeBusy} onClick={() => void jeScan()}
+              className="shrink-0 rounded border border-input px-1.5 py-0.5 text-[11px] hover:bg-accent disabled:opacity-50">
+              {t('fnx.cockpit.je_scan')}
+            </button>
+          </div>
+          {jeList.length > 0 && (
+            <ul className="space-y-1 text-xs">
+              {jeList.slice(0, 8).map((x: any) => (
+                <li key={x.id} className="flex items-center justify-between gap-2 border-t border-border/50 py-1">
+                  <span className="truncate">
+                    <span className={`mr-1.5 rounded px-1 text-[10px] font-medium ${x.severity === 'high' ? 'bg-destructive/10 text-destructive' : 'bg-warning/20 text-warning-foreground dark:text-warning'}`}>{x.rule}</span>
+                    {x.entry_no}
+                  </span>
+                  <button type="button" onClick={() => void jeDismiss(x.id)}
+                    className="shrink-0 rounded border border-input px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent">
+                    {t('fnx.cockpit.je_dismiss')}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </PillarCard>
 
