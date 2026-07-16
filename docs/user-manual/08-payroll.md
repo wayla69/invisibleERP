@@ -169,7 +169,7 @@ another employee's data.
 workspaces).
 
 Tabs: **ข้อมูลของฉัน** (My info) · **ขอลางาน** (Request leave) · **เบิกค่าใช้จ่าย**
-(Claim expense) · **ลงเวลา** (Timesheets).
+(Claim expense) · **ลงเวลา** (Timesheets) · **เวลาเข้า-ออก** (Attendance).
 
 ### 5.1 View my info, leave balances and payslips
 1. Open **ESS** (`/ess`) → **ข้อมูลของฉัน**.
@@ -220,6 +220,24 @@ GL impact.
 > **Control:** You **cannot approve your own claim** — the system blocks it with
 > `SOD_SELF_APPROVAL` (segregation of duties, R07). The approver must differ from
 > the claimant.
+
+### 5.5 My attendance (from the POS time-clock)
+
+If your branch uses the **POS time-clock** to clock staff in and out, your own
+clock-in/out history now shows up inside self-service — no need to ask a supervisor.
+
+1. Open **ESS** (`/ess`) → **เวลาเข้า-ออก** (Attendance).
+2. The summary tiles show your **total hours**, **days worked**, and whether you are
+   **currently clocked in**. The table lists each session with its date, clock-in and
+   clock-out time, hours, and how the punch was made (PIN / QR / etc.).
+
+You only ever see **your own** punches — the screen resolves your employee record
+from your login, so a colleague's attendance is never shown. This is a **read-only**
+view; clocking in and out still happens at the POS time-clock as before.
+
+> **Note:** The data is sourced live from the POS time-clock (the same records the
+> store register captures). If your branch does not use the time-clock, the tab is
+> simply empty.
 
 ---
 

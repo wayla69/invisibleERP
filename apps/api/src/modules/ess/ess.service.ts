@@ -11,6 +11,7 @@ import { n, ymd } from '../../database/queries';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { TimeClockService } from '../pos/labor/timeclock.service';
 
 export interface LeaveSelfDto { leave_type?: string; from_date: string; to_date: string; days: number; paid?: boolean; reason?: string }
 export interface ExpenseDto { claim_date?: string; category?: string; amount: number; description?: string; project_code?: string }
@@ -29,6 +30,9 @@ export class EssService {
     // Payslip download (PDPA-scoped to the caller's own slip). @Optional so a hand-constructed EssService
     // still builds; the own-payslip PDF route 404s when absent.
     @Optional() private readonly payroll?: PayrollService,
+    // POS time-clock attendance (read-only contract). @Optional so a hand-constructed EssService still builds;
+    // the attendance route degrades to an empty read when the POS labor module isn't wired.
+    @Optional() private readonly timeClock?: TimeClockService,
   ) {}
 
   // Resolve the logged-in user → their employee row (by user_name link, emp_code fallback). RLS scopes
@@ -71,6 +75,19 @@ export class EssService {
       `🔔 ใบลารออนุมัติ: ${emp.name ?? emp.empCode} ลา ${n(dto.days)} วัน (${dto.from_date} → ${dto.to_date})${dto.reason ? ` — ${dto.reason}` : ''}\nอนุมัติที่หน้า /hcm`,
       user.username);
     return { id: Number(r!.id), status: 'Pending', emp_code: emp.empCode, days: n(dto.days) };
+  }
+
+  // My attendance — the caller's OWN clock-in/out from the POS time-clock, surfaced inside HR self-service so
+  // an hourly employee sees the same attendance the POS register recorded (docs/42 HCM depth). Resolves the
+  // employee from the JWT (never a body param); the POS labor service owns the data, ESS only reads via its
+  // contract. Degrades to an empty read if the POS labor module isn't wired (@Optional).
+  async myAttendance(user: JwtUser) {
+    const emp = await this.me(user);
+    if (!this.timeClock) {
+      return { emp_code: emp.empCode, entries: [], summary: { total_hours: 0, days_worked: 0, sessions: 0, currently_clocked_in: false }, source: 'pos_timeclock', unavailable: true };
+    }
+    const a = await this.timeClock.employeeAttendance(Number(emp.id), { limit: 90 });
+    return { emp_code: emp.empCode, ...a, source: 'pos_timeclock' };
   }
 
   async myPayslips(user: JwtUser) {

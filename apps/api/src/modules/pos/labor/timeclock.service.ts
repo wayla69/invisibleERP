@@ -108,6 +108,37 @@ export class TimeClockService {
     return { entries: rows.map((r: any) => ({ id: r.id, emp_code: r.empCode, clock_in: r.clockIn, clock_out: r.clockOut, break_minutes: r.breakMinutes, hours: n(r.hours), clock_in_method: r.clockInMethod, geofence_pass: r.geofencePass, note: r.note })), total_hours: totalHours, open_count: open.length, count: rows.length };
   }
 
+  // Loosely-coupled read contract for the HR modules (ESS/HCM depth): ONE employee's own attendance from the
+  // POS time-clock, so an employee sees their real clock-in/out inside self-service. Read-only; RLS scopes to
+  // the caller's tenant. Ownership of the timeClock table stays with POS labor — HR calls this API, never the
+  // table directly (Bounded-Context + Loose-Coupling gatekeeper, CLAUDE.md §§1–3).
+  async employeeAttendance(employeeId: number, opts?: { from?: string; to?: string; limit?: number }) {
+    const db = this.db;
+    const limit = Math.min(Math.max(opts?.limit ?? 60, 1), 200);
+    const rows = await db.select().from(timeClock)
+      .where(eq(timeClock.employeeId, employeeId))
+      .orderBy(desc(timeClock.id)).limit(limit);
+    // Optional business-day window (Asia/Bangkok dates via ymd() — matches the rest of the codebase).
+    const inWindow = rows.filter((r: any) => {
+      const d = r.clockIn ? ymd(new Date(r.clockIn)) : null;
+      if (opts?.from && (!d || d < opts.from)) return false;
+      if (opts?.to && (!d || d > opts.to)) return false;
+      return true;
+    });
+    const closed = inWindow.filter((r: any) => r.status === 'Closed');
+    const totalHours = round2(closed.reduce((a: number, r: any) => a + n(r.hours), 0));
+    const daysWorked = new Set(closed.map((r: any) => (r.clockIn ? ymd(new Date(r.clockIn)) : null)).filter(Boolean)).size;
+    const openRow = inWindow.find((r: any) => r.status === 'Open') ?? null;
+    return {
+      entries: inWindow.map((r: any) => ({
+        id: Number(r.id), date: r.clockIn ? ymd(new Date(r.clockIn)) : null,
+        clock_in: r.clockIn, clock_out: r.clockOut, break_minutes: r.breakMinutes, hours: n(r.hours),
+        status: r.status, clock_in_method: r.clockInMethod, geofence_pass: r.geofencePass, note: r.note,
+      })),
+      summary: { total_hours: totalHours, days_worked: daysWorked, sessions: closed.length, currently_clocked_in: !!openRow },
+    };
+  }
+
   // Sales-per-labor-hour for a day = Σ sales total / Σ closed labor hours that day.
   async productivity(date?: string) {
     const db = this.db;

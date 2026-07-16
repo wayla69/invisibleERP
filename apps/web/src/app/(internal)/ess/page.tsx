@@ -30,6 +30,8 @@ interface MeResp {
 interface LeaveReq { id: number; leave_type: string; from_date: string; to_date: string; days: number; paid: boolean; status: string; reason: string | null }
 interface Payslip { id: number; emp_code: string; gross: number; ot_pay: number; sso_employee: number; pf_employee: number; wht: number; net: number }
 interface Timesheet { work_date: string; regular_hours: number; ot_hours: number; note: string | null }
+interface AttendanceEntry { id: number; date: string | null; clock_in: string | null; clock_out: string | null; hours: number; status: string; clock_in_method: string | null }
+interface AttendanceResp { emp_code: string; entries: AttendanceEntry[]; summary: { total_hours: number; days_worked: number; sessions: number; currently_clocked_in: boolean } }
 interface ExpenseClaim { id: number; claim_date: string | null; category: string | null; amount: number; description: string | null; status: string; ap_txn_no?: string | null }
 
 
@@ -44,6 +46,7 @@ export default function EssPage() {
           { key: 'leave', label: t('hr.tab_leave_req'), content: <LeaveTab /> },
           { key: 'expense', label: t('hr.tab_expense'), content: <ExpenseTab /> },
           { key: 'time', label: t('hr.tab_time'), content: <TimesheetTab /> },
+          { key: 'attendance', label: t('hr.tab_attendance'), content: <AttendanceTab /> },
         ]}
       />
     </div>
@@ -348,6 +351,49 @@ function TimesheetTab() {
               { key: 'note', label: t('hr.note'), render: (r) => r.note ?? '—' },
             ]}
           />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// Attendance — the employee's own clock-in/out pulled from the POS time-clock (GET /api/ess/attendance),
+// so an hourly worker sees inside HR self-service exactly what the POS register recorded. Read-only.
+function AttendanceTab() {
+  const { t } = useLang();
+  const q = useQuery<AttendanceResp>({ queryKey: ['ess-attendance'], queryFn: () => api('/api/ess/attendance') });
+  const s = q.data?.summary;
+  const rows = q.data?.entries ?? [];
+  const fmtTime = (x: string | null) => (x ? new Date(x).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
+
+  return (
+    <div className="space-y-5">
+      <StateView q={q}>
+        {q.data && (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label={t('hr.att_total_hours')} value={num(s?.total_hours ?? 0)} icon={Clock} tone="primary" />
+            <StatCard label={t('hr.att_days_worked')} value={num(s?.days_worked ?? 0)} tone="info" />
+            <StatCard label={t('hr.att_status')} value={s?.currently_clocked_in ? t('hr.att_clocked_in') : t('hr.att_clocked_out')} tone={s?.currently_clocked_in ? 'success' : 'info'} />
+          </div>
+        )}
+      </StateView>
+      <StateView q={q}>
+        {q.data && (
+          <>
+            <DataTable
+              rows={rows}
+              rowKey={(r) => r.id}
+              emptyState={{ icon: Clock, title: t('hr.att_empty_title'), description: t('hr.att_empty_desc') }}
+              columns={[
+                { key: 'date', label: t('dash.col_date'), render: (r) => thaiDate(r.date) },
+                { key: 'clock_in', label: t('hr.att_clock_in'), render: (r) => fmtTime(r.clock_in) },
+                { key: 'clock_out', label: t('hr.att_clock_out'), render: (r) => fmtTime(r.clock_out) },
+                { key: 'hours', label: t('hr.att_hours'), align: 'right', render: (r) => <span className="tabular">{num(r.hours)}</span> },
+                { key: 'status', label: t('hr.att_method'), render: (r) => (r.status === 'Open' ? <Badge variant="success">{t('hr.att_clocked_in')}</Badge> : (r.clock_in_method ?? '—')) },
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">{t('hr.att_source_note')}</p>
+          </>
         )}
       </StateView>
     </div>
