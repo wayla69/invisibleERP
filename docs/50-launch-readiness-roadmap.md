@@ -95,7 +95,7 @@ seeded is tenant-scoped (`menu_*`, `dining_tables`, `branches`, `projects`) — 
 (no `tenant_id`) is deliberately never touched, so demo rows can't leak across companies; the harness
 asserts this. Enterprise companies keep the exact pre-B3 behaviour (HQ only). `general` SMEs get no kit.
 No new control (tenant-scoped sample data under the operator's own duties; MDM maker-checker untouched).
-ToE: `onboarding` harness +5 (150 total); UAT-ADM-170.
+ToE: `onboarding` harness +5 (145 total); UAT-ADM-170.
 
 ---
 
@@ -112,6 +112,6 @@ B1 live + this checklist walked for the target environment.
 ## Revision history
 | Rev | Date | Author | Change |
 |---|---|---|---|
-| 1.2 | 2026-07-16 | ERP/Product | **B3 delivered** — SME industry starter kit in `POST /api/tenant/starter-pack` (new `starter-pack.service.ts`; controller delegates): restaurant menu+tables / retail catalog / distribution WH1 branch / services demo project; idempotent create/skip, tenant-scoped only (shared `items` master untouched — harness-asserted), enterprise + `general` unchanged. Onboarding harness 145→150; UAT-ADM-170 + matrix v7.36; manual 00-getting-started v0.3. Track B complete. |
+| 1.2 | 2026-07-16 | ERP/Product | **B3 delivered** — SME industry starter kit in `POST /api/tenant/starter-pack` (new `starter-pack.service.ts`; controller delegates): restaurant menu+tables / retail catalog / distribution WH1 branch / services demo project; idempotent create/skip, tenant-scoped only (shared `items` master untouched — harness-asserted), enterprise + `general` unchanged. Onboarding harness 140→145; UAT-ADM-170 + matrix v7.36; manual 00-getting-started v0.3. Track B complete. |
 | 1.1 | 2026-07-16 | ERP/Product | **B2 delivered** — "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (SME-only sidebar footer, reserved synced navFold key `__show_sme_hidden__`, i18n ×5, no API change) + Playwright proof `e2e/sme-nav-folding.spec.ts` (4 specs: hidden domain gone, industry groups open/others folded incl. subgroup defaults, reveal round-trip, enterprise regression; 17/17 with workspace-split). Manual 00-getting-started v0.2. |
 | 1.0 | 2026-07-16 | ERP/Product | Re-created after the working-tree reset (see note). Track A recorded delivered (P1–P4, PRs #797/#798/#799). **B1 delivered** — industry-aware SME nav folding at provisioning (shared `nav-profiles.ts`, `sme_prefs` stamp, `/me` `sme_open_nav_groups`, AppShell fold defaults; onboarding +5, `nav-profiles.test.ts` 6; UAT-ADM-169). B2 (reveal toggle + e2e) and B3 (industry starter kit) planned. |
