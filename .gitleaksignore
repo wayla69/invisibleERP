@@ -8,3 +8,10 @@
 # provisions and discards an in-memory PGlite DB per run. The live file now uses the same low-entropy
 # 'admin123' fixture password as every other harness (tools/cutover/src/*.ts).
 e734b05bd6b51567f74ecb769883e481e4f779e8:tools/cutover/src/sme.ts:generic-api-key:101
+
+# PR #797 (pentest P1): two throwaway cutover-harness reset-password FIXTURES ('newsales12345',
+# 'godreset12345' for in-memory PGlite users platco_sales / god_made_admin) tripped generic-api-key in
+# the original commit bd90c4e1. Not real credentials — the harness provisions and discards an in-memory
+# DB per run. The live file now uses the same low-entropy 'admin123' fixture as every other harness.
+bd90c4e14ab1c22956d774eba3414349b97cd672:tools/cutover/src/onboarding.ts:generic-api-key:142
+bd90c4e14ab1c22956d774eba3414349b97cd672:tools/cutover/src/onboarding.ts:generic-api-key:144

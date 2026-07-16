@@ -139,9 +139,9 @@ async function main() {
   //      platform owner can. Resetting a non-privileged user is unchanged.
   const resetAdminDenied = await inj('POST', '/api/admin/users/god_made_admin/reset-password', platLogin.json.token, { password: 'hijacked12345' });
   ok('P1: a non-platform Admin cannot reset an Admin account password (403 ADMIN_GRANT_DENIED)', resetAdminDenied.status === 403 && resetAdminDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${resetAdminDenied.status} ${resetAdminDenied.json.error?.code}`);
-  const resetSalesOk = await inj('POST', '/api/admin/users/platco_sales/reset-password', platLogin.json.token, { password: 'newsales12345' });
+  const resetSalesOk = await inj('POST', '/api/admin/users/platco_sales/reset-password', platLogin.json.token, { password: 'admin123' });
   ok('P1: a company Admin CAN still reset a non-Admin user password (granularity preserved)', (resetSalesOk.status === 200 || resetSalesOk.status === 201) && resetSalesOk.json.reset === true, `${resetSalesOk.status} ${JSON.stringify(resetSalesOk.json)}`);
-  const resetAdminByGod = await inj('POST', '/api/admin/users/god_made_admin/reset-password', owner, { password: 'godreset12345' });
+  const resetAdminByGod = await inj('POST', '/api/admin/users/god_made_admin/reset-password', owner, { password: 'admin123' });
   ok('P1: the platform owner CAN reset an Admin account (2xx)', (resetAdminByGod.status === 200 || resetAdminByGod.status === 201) && resetAdminByGod.json.reset === true, `${resetAdminByGod.status}`);
 
   // P2 — the SSO JIT default_role allow-list excludes privileged roles, so an AccessAdmin/Admin cannot
