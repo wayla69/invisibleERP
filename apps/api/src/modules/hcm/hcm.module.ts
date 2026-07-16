@@ -19,6 +19,7 @@ import { HcmTrainingController } from './hcm-training.controller';
 import { HcmTrainingService } from './hcm-training.service';
 import { ProjectsModule } from '../projects/projects.module';
 import { MessagingModule } from '../messaging/messaging.module';
+import { PosLoyaltyLaborModule } from '../pos/labor/pos-loyalty-labor.module';
 import { HcmBiReports } from './hcm-bi-reports';
 
 // Phase 19 — HCM: attendance/timesheets (OT → payroll) + leave (unpaid → payroll deduction).
@@ -40,7 +41,7 @@ import { HcmBiReports } from './hcm-bi-reports';
 // mints/renews a certification (expiry = completed_date + validity_months) with the HR-07 mandatory-training /
 // certification-compliance control (SCORE_REQUIRED gate + expired/expiring detective read).
 @Module({
-  imports: [ProjectsModule, MessagingModule],
+  imports: [ProjectsModule, MessagingModule, PosLoyaltyLaborModule],
   controllers: [HcmController, HcmLeaveController, HcmPerfController, HcmOrgController, HcmCompController, HcmLifecycleController, HcmRecruitingController, HcmEssController, HcmTrainingController],
   providers: [HcmBiReports, HcmService, HcmLeaveService, HcmPerfService, HcmOrgService, HcmCompService, HcmLifecycleService, HcmRecruitingService, HcmEssService, HcmTrainingService],
   exports: [HcmLeaveService],

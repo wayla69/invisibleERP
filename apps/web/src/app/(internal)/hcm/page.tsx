@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Clock, Plane, Check, CalendarClock, Play } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { baht } from '@/lib/format';
+import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
@@ -30,6 +30,7 @@ export default function HcmPage() {
         { key: 'time', label: t('hr.tab_time_ot'), content: <Timesheets /> },
         { key: 'leave', label: t('hr.tab_leave'), content: <Leave /> },
         { key: 'accrual', label: t('hr.tab_accrual'), content: <LeaveAccrual /> },
+        { key: 'team-attendance', label: t('hr.tab_team_attendance'), content: <TeamAttendance /> },
       ]} />
     </div>
   );
@@ -226,6 +227,49 @@ function LeaveAccrual() {
           { key: 'used', label: t('hr.day_unit'), align: 'right', render: (r: any) => r.used },
           { key: 'available', label: t('hr.col_available'), align: 'right', render: (r: any) => <Badge variant={r.available > 0 ? 'success' : 'muted'}>{r.available}</Badge> },
         ]} emptyState={{ icon: CalendarClock, title: t('hr.accrual_balances_title'), description: '' }} />}</StateView>
+      </Card>
+    </div>
+  );
+}
+
+// Team attendance — the whole team's clock-in/out rolled up from the POS time-clock (GET /api/hcm/attendance),
+// so an HR manager sees who worked and who is on the clock now. Read-only; optional single-day filter.
+function TeamAttendance() {
+  const { t } = useLang();
+  const [date, setDate] = useState('');
+  const q = useQuery<any>({ queryKey: ['hcm-team-attendance', date], queryFn: () => api(`/api/hcm/attendance${date ? `?date=${encodeURIComponent(date)}` : ''}`) });
+  const s = q.data?.summary;
+  const rows = q.data?.employees ?? [];
+  const fmt = (x: string | null) => (x ? new Date(x).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—');
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.ta_employees')}</div><div className="text-2xl font-semibold tabular">{num(s?.employees ?? 0)}</div></Card>
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.ta_clocked_in_now')}</div><div className="text-2xl font-semibold tabular">{num(s?.currently_clocked_in ?? 0)}</div></Card>
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.ta_total_hours')}</div><div className="text-2xl font-semibold tabular">{num(s?.total_hours ?? 0)}</div></Card>
+      </div>
+      <Card className="gap-3 p-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>{t('dash.col_date')}</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" /></div>
+        </div>
+        <StateView q={q}>
+          {q.data && (
+            <DataTable
+              rows={rows}
+              rowKey={(r: any) => r.emp_code}
+              emptyState={{ icon: Clock, title: t('hr.ta_empty_title'), description: t('hr.ta_empty_desc') }}
+              columns={[
+                { key: 'emp_code', label: t('hr.ta_col_employee'), render: (r: any) => <span>{r.name ?? r.emp_code}{r.name && <span className="ml-1 text-xs text-muted-foreground">{r.emp_code}</span>}</span> },
+                { key: 'sessions', label: t('hr.ta_col_sessions'), align: 'right', render: (r: any) => <span className="tabular">{num(r.sessions)}</span> },
+                { key: 'total_hours', label: t('hr.ta_col_hours'), align: 'right', render: (r: any) => <span className="tabular">{num(r.total_hours)}</span> },
+                { key: 'last_clock_in', label: t('hr.ta_col_last'), render: (r: any) => fmt(r.last_clock_in) },
+                { key: 'status', label: t('hr.ta_col_status'), render: (r: any) => (r.currently_clocked_in ? <Badge variant="success">{t('hr.att_clocked_in')}</Badge> : <Badge variant="muted">{t('hr.att_clocked_out')}</Badge>) },
+              ]}
+            />
+          )}
+        </StateView>
+        <p className="text-xs text-muted-foreground">{t('hr.att_source_note')}</p>
       </Card>
     </div>
   );

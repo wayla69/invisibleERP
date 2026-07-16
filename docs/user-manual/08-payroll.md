@@ -158,6 +158,26 @@ Leave balances are earned through an **accrual engine** rather than being fixed:
 
 ---
 
+## 4c. Team attendance (HCM · from the POS time-clock)
+
+**Route:** `/hcm` → tab **เวลาเข้า-ออกทีม** (Team attendance).
+**Required role:** `hr` / `hr_admin` / `exec` (the HCM screen's standard gate).
+
+For branches that clock staff in and out on the **POS time-clock**, HR now sees the whole team's
+attendance without opening the POS back-office:
+
+1. The summary tiles show **how many employees** have punches, **how many are clocked in right now**, and
+   the **team's total hours**.
+2. The table rolls the punches up **per employee** — name and code, number of sessions, total hours, the
+   **last clock-in**, and a live **clocked-in / clocked-out** badge.
+3. Use the **date** filter to narrow the roll-up to a single business day (Asia/Bangkok).
+
+This is a **read-only** view; clocking in and out still happens at the POS time-clock. The employee's own
+version of this is in ESS (`/ess` → **เวลาเข้า-ออก**, see §5.5). The data is sourced live from the POS
+time-clock; if a branch does not use it, the tab is simply empty.
+
+---
+
 ## 5. Employee self-service (ESS)
 
 This section is for **every employee** (not just HR). The self-service screen lets

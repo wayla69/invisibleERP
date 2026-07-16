@@ -139,6 +139,36 @@ export class TimeClockService {
     };
   }
 
+  // Team roll-up of the POS time-clock for the HR/manager view (docs/42 HCM depth): attendance grouped by
+  // employee across the tenant (RLS-scoped). Keyed by the DENORMALIZED emp_code on the punch — no join to the
+  // HR-owned employees table here (the HCM caller enriches names from its own table). Read-only.
+  async teamAttendance(opts?: { date?: string; limit?: number }) {
+    const db = this.db;
+    const limit = Math.min(Math.max(opts?.limit ?? 500, 1), 2000);
+    const rows = await db.select().from(timeClock).orderBy(desc(timeClock.id)).limit(limit);
+    const day = opts?.date ?? null;
+    const byEmp = new Map<string, { emp_code: string; total_hours: number; sessions: number; currently_clocked_in: boolean; last_clock_in: any }>();
+    for (const r of rows) {
+      const code = r.empCode ?? '(unknown)';
+      const d = r.clockIn ? ymd(new Date(r.clockIn)) : null;
+      if (day && d !== day) continue;
+      let e = byEmp.get(code);
+      if (!e) { e = { emp_code: code, total_hours: 0, sessions: 0, currently_clocked_in: false, last_clock_in: null }; byEmp.set(code, e); }
+      if (r.status === 'Closed') { e.total_hours = round2(e.total_hours + n(r.hours)); e.sessions += 1; }
+      if (r.status === 'Open') e.currently_clocked_in = true;
+      if (!e.last_clock_in || (r.clockIn && new Date(r.clockIn) > new Date(e.last_clock_in))) e.last_clock_in = r.clockIn;
+    }
+    const list = [...byEmp.values()].sort((a, b) => b.total_hours - a.total_hours);
+    return {
+      employees: list,
+      summary: {
+        employees: list.length,
+        currently_clocked_in: list.filter((e) => e.currently_clocked_in).length,
+        total_hours: round2(list.reduce((a, e) => a + e.total_hours, 0)),
+      },
+    };
+  }
+
   // Sales-per-labor-hour for a day = Σ sales total / Σ closed labor hours that day.
   async productivity(date?: string) {
     const db = this.db;

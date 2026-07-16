@@ -63,6 +63,16 @@ async function main() {
   const code = e.json.emp_code;
   ok('Create employee w/ PF 5% + hourly 200', e.status < 300 && /^EMP/.test(code ?? ''), JSON.stringify({ s: e.status }));
 
+  // ── 1b. team attendance rolls up the POS time-clock for the HR/manager view (docs/42 HCM depth) ──
+  // Seed a closed 8h punch, then read the HCM roll-up: it must group by employee and enrich emp_code → name
+  // from the HR-owned employees table (POS labor owns the punch; HCM reads via its contract).
+  const empRow = (await db.select().from(s.employees).where(eq(s.employees.empCode, code)))[0];
+  await db.insert(s.timeClock).values({ tenantId: hq, employeeId: Number(empRow.id), empCode: code, clockIn: new Date('2026-06-15T02:00:00Z'), clockOut: new Date('2026-06-15T10:00:00Z'), hours: '8', status: 'Closed', clockInMethod: 'PIN' }).onConflictDoNothing();
+  const ta = await inj('GET', '/api/hcm/attendance', admin);
+  ok('HCM team attendance rolls up the POS time-clock (1 emp, 8h, name enriched)',
+    ta.json.summary?.employees === 1 && near(ta.json.summary?.total_hours, 8) && ta.json.employees?.[0]?.emp_code === code && ta.json.employees?.[0]?.name === 'Somchai',
+    JSON.stringify(ta.json.summary));
+
   // ── 2. attendance: 10 OT hours; 3. unpaid leave 2 days (approved by a DIFFERENT user) ──
   // Leave approval is maker-checker (SOD_SELF_APPROVAL): the requester (admin) cannot approve their own
   // leave, so a distinct approver releases it — mirrors the payroll-run and timesheet controls.
