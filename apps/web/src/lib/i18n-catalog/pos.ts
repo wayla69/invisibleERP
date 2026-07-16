@@ -849,6 +849,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'px.term_testprint_sent': { th: 'ส่งงานทดสอบพิมพ์แล้ว', en: 'Test print sent' },
   'px.till_approve_failed': { th: 'อนุมัติไม่สำเร็จ', en: 'Approval failed' },
   'px.till_approve_variance_btn': { th: 'อนุมัติผลต่าง', en: 'Approve variance' },
+  'px.reg_rules_applied': { th: 'ใช้โปรโมชันอัตโนมัติ: {rules}', en: 'Automatic price rules applied: {rules}' },
   'px.till_blind_notice': { th: 'โหมดปิดกะแบบไม่เห็นยอด — นับเงินสดจริงในลิ้นชักก่อน ระบบจะเปิดเผยยอดคาดหวังและผลต่างหลังส่งยอดนับ', en: 'Blind close is on — count the physical drawer first; expected cash and the variance are revealed after you submit the count' },
   'px.till_blind_off': { th: 'ปิดกะแบบไม่เห็นยอด: ปิด', en: 'Blind close: off' },
   'px.till_blind_on': { th: 'ปิดกะแบบไม่เห็นยอด: เปิด', en: 'Blind close: on' },

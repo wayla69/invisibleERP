@@ -250,7 +250,19 @@ a documented architecture decision. Replacement quick win, pulled forward from C
 - **Control:** one full invoice per sale (idempotent), conversion audit-logged; extend the `taxdocs`
   harness + PN-06/PN-20.
 
-### C3 — POS-native pricing & promotions engine · Effort **M–L** · roadmap P1a
+### C3 — ~~POS-native pricing & promotions engine~~ → **re-scoped: register rule application** · **✅ DELIVERED (2026-07-16)**
+**Correction (v0.5):** C3 was a **false gap** — `modules/pricing` already ships everything this phase
+proposed: the `price_rules` schema field-for-field (scope/channel/location/dow/time windows;
+percent/amount/fixed/**BOGO**/**qty-break**; priority/stacking; validity), combo explosion,
+auto service charge, satang rounding, `POST /api/pricing/quote`, R10 maker-checker on rule changes,
+`buildSale` + portal-POS integration, the `/pricing` admin with quote preview, and the `pricing`
+harness (40 checks). The genuine residual was one wire: **the register only sent
+`apply_pricing_rules` alongside a manual service charge**, so automatic rules silently never fired at
+the till. Delivered: register checkout always applies the tenant's rules (`channel`/`party_size`
+passed; no-rules tenants byte-identical) + a toast listing the rules that fired.
+ToE `pricing` 40 + `restaurant` 186 green; PN-19 rev 1.57; UAT-O2C-511. Remaining polish (coupon/rule
+engine convergence, per-channel base-price tiers, threshold-gated rule approval) parked as explicit
+options, not gaps.
 **Goal:** one rules engine so dine-in / QR / channel / hub all price identically (happy-hour, BOGO,
 qty-break, combo explosion, service-charge auto-rules, satang rounding).
 - New `modules/pricing` (own bounded context): `price_rules` (scope item/category/all · channel · location
