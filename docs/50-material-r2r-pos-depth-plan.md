@@ -163,7 +163,7 @@ evidence attachment, SLA/overdue escalation.
 > Delivered: migration `0419` `recurring_journals.auto_reverse` (monthly-only, `AUTO_REVERSE_MONTHLY_ONLY`);
 > the sweep's first run in the next business month posts the flipped Draft reversal (GL-05, idempotent
 > `REC-<id>-<lastRun>-REV`, response `reversals`); `/gl-schedules` checkbox + badge. ToE `basics` 414→422;
-> PN-04 §7(11) rev 2.23; manual 06 v0.19; UAT-GL-189..192.
+> PN-04 §7(11) rev 2.34; manual 06 v0.19; UAT-GL-189..192.
 **Goal:** month-end accruals must reverse on day 1 of the next period; today reversal is manual (GL-17).
 - `ledger-recurring.service.ts`: `auto_reverse` flag on recurring templates; the period-open path (or the
   `gl_recurring_journals` job on its first run in the new period) posts the reversal **Draft** through
@@ -171,7 +171,12 @@ evidence attachment, SLA/overdue escalation.
 - Harness: extend `basics` — accrual posts + approves; next period auto-reversal drafts once; re-run
   idempotent; reverser ≠ original approver honoured.
 
-### B3 — Period-end automation: schedulable FX reval + consolidation · Effort **M**
+### B3 — Period-end automation: schedulable FX reval + consolidation · Effort **M** · **✅ DELIVERED (2026-07-16)**
+> Delivered: action jobs `gl_fx_reval_run` (ledger-bi-reports.ts) + `consolidation_run` (NEW
+> consolidation-bi-reports.ts provider); filters `{period?}` default just-ended month; idempotent,
+> fault-isolated per group, graceful on ALREADY_POSTED/IC_RECON_NOT_APPROVED; auto-Draft only —
+> GL-18/CON-03 posting maker-checker unchanged. ToE `fxreval` 15→22, `consolidation` 42→47;
+> PN-04 §7(10) rev 2.35; PN-11 rev 0.9; manual 06 v0.20; UAT-GL-193..194.
 **Goal:** reval and consolidation are the only close steps still hand-cranked
 (`fx-reval.service.ts` / `consolidation.service.ts` expose run+post but no scheduler).
 - Register `gl_fx_reval_run` and `consolidation_run` as idempotent action jobs on the BI scheduler

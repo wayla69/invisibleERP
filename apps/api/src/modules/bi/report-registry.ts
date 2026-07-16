@@ -46,6 +46,10 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
   // docs/50 Wave 1 A2 — release stock reservations held past their TTL (filters: { max_age_days }, default 30).
   reservation_stale_release: { label: 'ปล่อยการจองสต๊อกที่ค้างเกินกำหนด', labelEn: 'Release stale stock reservations' },
+  // docs/50 Wave 2 B3 — period-end STAGING jobs (auto-Draft; posting stays maker-checker).
+  // filters: { period? 'YYYY-MM' } (default = the just-ended business month); consolidation_run also { group_id? }.
+  gl_fx_reval_run: { label: 'เตรียมปรับปรุงอัตราแลกเปลี่ยนสิ้นงวด (GL-18)', labelEn: 'Stage period-end FX revaluation' },
+  consolidation_run: { label: 'เตรียมงบการเงินรวมสิ้นงวด (CON-01)', labelEn: 'Stage period-end consolidation' },
   // Asset audit results (FA-11): recent audits + their found/missing/misplaced/unknown tallies + the
   // outstanding custody-change requests awaiting approval. Read-only aggregate.
   asset_audit: { label: 'ผลการตรวจนับทรัพย์สิน', labelEn: 'Asset audit results' },
