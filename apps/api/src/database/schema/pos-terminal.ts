@@ -29,6 +29,9 @@ export const paymentIntents = pgTable('payment_intents', {
   currency: text('currency').default('THB'),
   status: text('status').default('RequiresPayment'), // RequiresPayment|Authorized|Captured|Voided|Refunded|Failed
   settlementBatchNo: text('settlement_batch_no'),
+  // C5 (docs/50 Wave 5) — tip-on-terminal: tip added at charge time, or the classic capture-time tip
+  // adjustment on a bar-tab pre-auth (captured_amount then includes the tip).
+  tipAmount: numeric('tip_amount', { precision: 14, scale: 2 }).default('0'),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   capturedAt: timestamp('captured_at', { withTimezone: true }),
@@ -47,5 +50,37 @@ export const settlementBatches = pgTable('settlement_batches', {
   txnCount: integer('txn_count').default(0),
   status: text('status').default('Open'), // Open | Settled | Reconciled
   reconciledBy: text('reconciled_by'),
+  // C5 — acquirer-report reconciliation (real match, not a status flip): Σ matched report amounts + the
+  // count of discrepancy lines from the last import.
+  reconciledAmount: numeric('reconciled_amount', { precision: 14, scale: 2 }),
+  discrepancyCount: integer('discrepancy_count').default(0),
+  reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// C5 (docs/50 Wave 5) — PSP webhook event-id dedup: one row per (provider, event_id), so a redelivered
+// event (same id, possibly a stale/different status) acks as duplicate_event and can never re-process.
+export const pspWebhookEvents = pgTable('psp_webhook_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  provider: text('provider').notNull(),
+  eventId: text('event_id').notNull(),
+  providerRef: text('provider_ref'),
+  status: text('status'),
+  outcome: text('outcome'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow(),
+});
+
+// C5 — imported acquirer settlement-report lines matched per intent.
+export const settlementLines = pgTable('settlement_lines', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  batchNo: text('batch_no').notNull(),
+  providerRef: text('provider_ref'),
+  intentNo: text('intent_no'),
+  amount: numeric('amount', { precision: 14, scale: 2 }).default('0'),
+  fee: numeric('fee', { precision: 14, scale: 2 }).default('0'),
+  matchStatus: text('match_status').notNull().default('matched'), // matched | amount_mismatch | missing_intent | unreported_intent
+  note: text('note'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
