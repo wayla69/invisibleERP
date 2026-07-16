@@ -37,7 +37,13 @@ export class AuthService {
       void this.attempts.recordFailure(norm); // fire-and-forget autocommit; do not delay the 401
       return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or password', messageTh: 'Username หรือ Password ไม่ถูกต้อง' });
     };
-    if (!row) throw fail();
+    if (!row) {
+      // Anti-enumeration (pentest P10): the known-user branch always runs a full scrypt verify, so the
+      // unknown-user branch must spend comparable work or login latency reveals whether a username exists.
+      // Mirrors the member-OTP hardening (member-auth.service.ts). Cost matches verify() — one scrypt at N.
+      await this.passwords.hash(password).catch(() => undefined);
+      throw fail();
+    }
 
     const { ok, needsRehash } = await this.passwords.verify(password, row.passwordHash);
     if (!ok) throw fail();
@@ -80,7 +86,12 @@ export class AuthService {
       // Generic message (don't reveal whether the username exists or merely lacks a PIN) — anti-enumeration.
       return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or PIN', messageTh: 'Username หรือ PIN ไม่ถูกต้อง' });
     };
-    if (!row || !row.pinHash) throw fail();
+    if (!row || !row.pinHash) {
+      // Anti-enumeration (pentest P10): spend ~one scrypt on the unknown-user / no-PIN branch so latency does
+      // not distinguish it from a real PIN verify below.
+      await this.passwords.hash(pin).catch(() => undefined);
+      throw fail();
+    }
     // verifyScrypt (no legacy SHA-256 branch) — a PIN is always scrypt, so it never flows into a weak hash.
     const { ok, needsRehash } = await this.passwords.verifyScrypt(pin, row.pinHash);
     if (!ok) throw fail();

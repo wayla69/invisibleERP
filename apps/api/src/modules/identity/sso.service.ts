@@ -1,6 +1,6 @@
 import { Inject, Injectable, BadRequestException, UnauthorizedException, ServiceUnavailableException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { and, eq, sql, gt, isNull } from 'drizzle-orm';
 import { resolvePermissions, type Role } from '@ierp/shared';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -151,7 +151,10 @@ export class SsoService {
     });
 
     const perms = resolvePermissions(role as Role);
-    const token = await this.jwt.signAsync({ sub: username, role, customerName: tenantCode, tenantId, permissions: perms });
+    // jti (pentest P11): give the SSO session token an identity so logout / the revocation denylist can kill
+    // it before expiry — mirrors the password (auth.service) and member (member-auth) login paths. Without it
+    // an SSO session was un-revocable (the guard only denylist-checks when a jti is present).
+    const token = await this.jwt.signAsync({ sub: username, role, customerName: tenantCode, tenantId, permissions: perms, jti: randomUUID() });
     return { token, username, role };
   }
 
