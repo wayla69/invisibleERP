@@ -96,6 +96,45 @@ export class ScheduleService {
     };
   }
 
+  // Schedule adherence for the HR/manager view (docs/42 HCM depth): per-employee ROSTERED shifts vs ACTUAL
+  // clocked hours over a window, with a variance flag (no_show / under / over / on_track / unscheduled). This
+  // is the workforce-management read HR needs — distinct from laborSummary's cost/labor-% (restaurant ops).
+  // Read-only; RLS scopes the tenant; keyed by the denormalized emp_code shared by both tables.
+  async scheduleAdherence(opts: { from: string; to: string }, user: JwtUser) {
+    const db = this.db;
+    const tenantId = user.tenantId as number;
+    const shifts = await db.select().from(shiftSchedules).where(and(
+      eq(shiftSchedules.tenantId, tenantId), gte(shiftSchedules.shiftDate, opts.from), lte(shiftSchedules.shiftDate, opts.to),
+      sql`${shiftSchedules.status}::text <> 'cancelled'`));
+    const punches = await db.select().from(timeClock).where(and(
+      eq(timeClock.tenantId, tenantId), sql`${timeClock.status}::text = 'Closed'`,
+      gte(timeClock.clockIn, new Date(opts.from + 'T00:00:00.000Z')), lte(timeClock.clockIn, new Date(opts.to + 'T23:59:59.999Z'))));
+    const byEmp = new Map<string, { emp_code: string; scheduled_hours: number; scheduled_shifts: number; actual_hours: number }>();
+    const get = (code: string) => { let e = byEmp.get(code); if (!e) { e = { emp_code: code, scheduled_hours: 0, scheduled_shifts: 0, actual_hours: 0 }; byEmp.set(code, e); } return e; };
+    for (const s of shifts) { const e = get(s.empCode ?? '(unknown)'); e.scheduled_hours = round2(e.scheduled_hours + n(s.hours)); e.scheduled_shifts += 1; }
+    for (const p of punches) { if (!p.empCode) continue; get(p.empCode).actual_hours = round2(get(p.empCode).actual_hours + n(p.hours)); }
+    const rows = [...byEmp.values()].map((e) => {
+      const variance = round2(e.actual_hours - e.scheduled_hours);
+      let status: 'no_show' | 'under' | 'over' | 'on_track' | 'unscheduled';
+      if (e.scheduled_hours === 0) status = 'unscheduled';            // worked but not rostered
+      else if (e.actual_hours === 0) status = 'no_show';              // rostered but never clocked in
+      else if (e.actual_hours < e.scheduled_hours * 0.9) status = 'under';
+      else if (e.actual_hours > e.scheduled_hours * 1.1) status = 'over';
+      else status = 'on_track';
+      return { ...e, variance, status };
+    }).sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+    return {
+      from: opts.from, to: opts.to, employees: rows,
+      summary: {
+        employees: rows.length,
+        scheduled_hours: round2(rows.reduce((a, r) => a + r.scheduled_hours, 0)),
+        actual_hours: round2(rows.reduce((a, r) => a + r.actual_hours, 0)),
+        no_shows: rows.filter((r) => r.status === 'no_show').length,
+        exceptions: rows.filter((r) => r.status !== 'on_track').length,
+      },
+    };
+  }
+
   // ───────────────────── Step 8: tiered OT rules (Thai LPA) ─────────────────────
   // Effective rules = the statutory defaults overlaid with any per-tenant override rows.
   async getOtRules(user: JwtUser) {

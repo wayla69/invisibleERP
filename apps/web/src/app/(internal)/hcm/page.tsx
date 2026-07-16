@@ -31,6 +31,7 @@ export default function HcmPage() {
         { key: 'leave', label: t('hr.tab_leave'), content: <Leave /> },
         { key: 'accrual', label: t('hr.tab_accrual'), content: <LeaveAccrual /> },
         { key: 'team-attendance', label: t('hr.tab_team_attendance'), content: <TeamAttendance /> },
+        { key: 'adherence', label: t('hr.tab_adherence'), content: <ScheduleAdherence /> },
       ]} />
     </div>
   );
@@ -265,6 +266,65 @@ function TeamAttendance() {
                 { key: 'total_hours', label: t('hr.ta_col_hours'), align: 'right', render: (r: any) => <span className="tabular">{num(r.total_hours)}</span> },
                 { key: 'last_clock_in', label: t('hr.ta_col_last'), render: (r: any) => fmt(r.last_clock_in) },
                 { key: 'status', label: t('hr.ta_col_status'), render: (r: any) => (r.currently_clocked_in ? <Badge variant="success">{t('hr.att_clocked_in')}</Badge> : <Badge variant="muted">{t('hr.att_clocked_out')}</Badge>) },
+              ]}
+            />
+          )}
+        </StateView>
+        <p className="text-xs text-muted-foreground">{t('hr.att_source_note')}</p>
+      </Card>
+    </div>
+  );
+}
+
+// Schedule adherence — rostered shifts (POS) vs actual clocked hours per employee, with a variance flag
+// (GET /api/hcm/schedule-adherence). Read-only; defaults to the last 14 days. The HR workforce-management
+// counterpart to the labor-% view POS ops uses.
+function ScheduleAdherence() {
+  const { t } = useLang();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const qs = [from && `from=${encodeURIComponent(from)}`, to && `to=${encodeURIComponent(to)}`].filter(Boolean).join('&');
+  const q = useQuery<any>({ queryKey: ['hcm-adherence', from, to], queryFn: () => api(`/api/hcm/schedule-adherence${qs ? `?${qs}` : ''}`) });
+  const s = q.data?.summary;
+  const rows = q.data?.employees ?? [];
+  const stBadge = (st: string) => {
+    const m: Record<string, { v: 'success' | 'destructive' | 'warning' | 'info' | 'muted'; k: string }> = {
+      on_track: { v: 'success', k: 'hr.sa_st_on_track' },
+      no_show: { v: 'destructive', k: 'hr.sa_st_no_show' },
+      under: { v: 'warning', k: 'hr.sa_st_under' },
+      over: { v: 'info', k: 'hr.sa_st_over' },
+      unscheduled: { v: 'muted', k: 'hr.sa_st_unscheduled' },
+    };
+    const c = m[st] ?? m.unscheduled!;
+    return <Badge variant={c.v}>{t(c.k)}</Badge>;
+  };
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-muted-foreground">{t('hr.sa_subtitle')}</p>
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.sa_scheduled_hours')}</div><div className="text-2xl font-semibold tabular">{num(s?.scheduled_hours ?? 0)}</div></Card>
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.sa_actual_hours')}</div><div className="text-2xl font-semibold tabular">{num(s?.actual_hours ?? 0)}</div></Card>
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.sa_no_shows')}</div><div className="text-2xl font-semibold tabular">{num(s?.no_shows ?? 0)}</div></Card>
+        <Card className="gap-1 p-5"><div className="text-sm text-muted-foreground">{t('hr.sa_exceptions')}</div><div className="text-2xl font-semibold tabular">{num(s?.exceptions ?? 0)}</div></Card>
+      </div>
+      <Card className="gap-3 p-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5"><Label>{t('hr.sa_from')}</Label><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-44" /></div>
+          <div className="grid gap-1.5"><Label>{t('hr.sa_to')}</Label><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-44" /></div>
+        </div>
+        <StateView q={q}>
+          {q.data && (
+            <DataTable
+              rows={rows}
+              rowKey={(r: any) => r.emp_code}
+              emptyState={{ icon: CalendarClock, title: t('hr.sa_empty_title'), description: t('hr.sa_empty_desc') }}
+              columns={[
+                { key: 'emp_code', label: t('hr.ta_col_employee'), render: (r: any) => <span>{r.name ?? r.emp_code}{r.name && <span className="ml-1 text-xs text-muted-foreground">{r.emp_code}</span>}</span> },
+                { key: 'scheduled_hours', label: t('hr.sa_col_scheduled'), align: 'right', render: (r: any) => <span className="tabular">{num(r.scheduled_hours)}</span> },
+                { key: 'actual_hours', label: t('hr.sa_col_actual'), align: 'right', render: (r: any) => <span className="tabular">{num(r.actual_hours)}</span> },
+                { key: 'variance', label: t('hr.sa_col_variance'), align: 'right', render: (r: any) => <span className="tabular">{r.variance > 0 ? '+' : ''}{num(r.variance)}</span> },
+                { key: 'status', label: t('hr.ta_col_status'), render: (r: any) => stBadge(r.status) },
               ]}
             />
           )}

@@ -178,6 +178,31 @@ time-clock; if a branch does not use it, the tab is simply empty.
 
 ---
 
+## 4d. Schedule adherence (HCM · rostered shifts vs. actual)
+
+**Route:** `/hcm` → tab **การเข้ากะ** (Schedule adherence).
+**Required role:** `hr` / `hr_admin` / `exec`.
+
+Once shifts are rostered on the POS side, HR can see **who actually worked their shift**. This tab compares
+each employee's **scheduled** hours (from the shift roster) against the **actual** hours they clocked, over a
+date range (defaults to the last 14 days):
+
+1. Summary tiles show total **scheduled** vs **actual** hours, the number of **no-shows**, and the total
+   **exceptions**.
+2. The table lists each employee with scheduled hours, actual hours, the **variance** (+ over / − under), and
+   a status badge:
+   - **ตรงตามกะ / On track** — worked within ±10% of the roster.
+   - **ไม่มาตามกะ / No-show** — rostered but never clocked in.
+   - **ทำงานน้อยกว่ากะ / Under** — clocked materially fewer hours than rostered.
+   - **ทำงานเกินกะ / Over** — clocked materially more.
+   - **ไม่ได้จัดกะ / Unscheduled** — worked without a roster entry.
+3. Use the **from / to** filter to change the window.
+
+Read-only — it does not change pay or rosters. It is the HR workforce-management counterpart to the
+labour-cost / labour-% view used in POS operations (both read the same shift roster + time-clock).
+
+---
+
 ## 5. Employee self-service (ESS)
 
 This section is for **every employee** (not just HR). The self-service screen lets

@@ -73,6 +73,13 @@ async function main() {
     ta.json.summary?.employees === 1 && near(ta.json.summary?.total_hours, 8) && ta.json.employees?.[0]?.emp_code === code && ta.json.employees?.[0]?.name === 'Somchai',
     JSON.stringify(ta.json.summary));
 
+  // ── 1c. schedule adherence: an 8h rostered shift matching the 8h actual punch → on_track (docs/42) ──
+  await db.insert(s.shiftSchedules).values({ tenantId: hq, empCode: code, shiftDate: '2026-06-15', startTime: '09:00', endTime: '17:00', hours: '8', hourlyRate: '200', status: 'scheduled' }).onConflictDoNothing();
+  const sa = await inj('GET', '/api/hcm/schedule-adherence?from=2026-06-01&to=2026-06-30', admin);
+  ok('HCM schedule adherence: 8h scheduled vs 8h actual → on_track',
+    near(sa.json.summary?.scheduled_hours, 8) && near(sa.json.summary?.actual_hours, 8) && sa.json.summary?.no_shows === 0 && sa.json.employees?.[0]?.status === 'on_track' && sa.json.employees?.[0]?.name === 'Somchai',
+    JSON.stringify(sa.json.summary));
+
   // ── 2. attendance: 10 OT hours; 3. unpaid leave 2 days (approved by a DIFFERENT user) ──
   // Leave approval is maker-checker (SOD_SELF_APPROVAL): the requester (admin) cannot approve their own
   // leave, so a distinct approver releases it — mirrors the payroll-run and timesheet controls.
