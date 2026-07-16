@@ -258,6 +258,7 @@
       "scanned": 1
     },
     "recurring_create": {
+      "auto_reverse": false,
       "frequency": "monthly",
       "id": 1,
       "lines": [
@@ -277,6 +278,7 @@
       "as_of": "<DATE>",
       "entries": [],
       "posted": 0,
+      "reversals": [],
       "scanned": 0
     },
     "recurring_run_due": {
@@ -289,6 +291,7 @@
         }
       ],
       "posted": 1,
+      "reversals": [],
       "scanned": 1
     },
     "self_approve_blocked": "SOD_VIOLATION",

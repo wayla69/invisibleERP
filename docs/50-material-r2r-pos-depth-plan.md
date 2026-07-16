@@ -1,6 +1,6 @@
 # 50 — Project Material Control · Record-to-Report · POS Sale — Further Development Phase
 
-> **Date:** 2026-07-16 · **Status:** v0.1 DRAFT — PLANNING (no feature code yet) · **Owner:** ERP / Product
+> **Date:** 2026-07-16 · **Status:** v0.3 — **Wave 1 DELIVERED** (A2 · B2 · C1-rescoped); Waves 2–5 planned · **Owner:** ERP / Product
 > **Scope:** the next development phase across three cycles the business runs on daily:
 > **(A) Project material control** (docs/32 + docs/35 spine), **(B) Record-to-report** (PN-04 GL close
 > spine, docs/17/18/35), **(C) POS sale** (`docs/pos-worldclass-roadmap.md` + docs/41 hub spine).
@@ -272,7 +272,7 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 
 | Wave | Ship together (independent PRs) | Why first |
 |---|---|---|
-| **1 — quick wins** | **A2** reservation sweep · **B2** auto-reversing accruals · **C1** wire tip/gift-card events | S-effort, each closes a real control/consistency gap, zero external deps |
+| **1 — quick wins ✅ DELIVERED 2026-07-16** | **A2** reservation sweep · **B2** auto-reversing accruals · **C1 (re-scoped)** blind drawer close | S-effort, each closes a real control/consistency gap, zero external deps |
 | **2 — control gaps** | **A1** material returns · **C2** full tax invoice · **B3** period-end automation | the physical-loop and fiscal gaps auditors/users hit monthly |
 | **3 — anchor features** | **B1** Close Manager · **C3** pricing engine · **A3** material control tower | the big UX/orchestration lifts; B1 subsumes B3's tasks as auto-steps |
 | **4 — depth** | **B4** recon workspace · **A4** BoQ import · **C4** offline completeness | audit-readiness + estimator/store-ops depth |
@@ -294,3 +294,4 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 |---|---|---|
 | v0.1 | 2026-07-16 | Initial plan: codebase audit of the three cycles + 15 phases in 5 waves |
 | v0.2 | 2026-07-16 | Wave 1 build: C1 re-scoped (original was a docs/43-decided non-gap — TIP/GIFTCARD events are visibility-only by design) to **blind drawer close**, DELIVERED |
+| v0.3 | 2026-07-16 | **Wave 1 DELIVERED** — A2 (reservation sweep, ToE projects 336), B2 (auto-reversing accruals, ToE basics 422, golden re-pinned 531→534 for the 3 additive response fields), C1-rescoped (blind close, ToE cashreport 45). Verified: typecheck, api+web build, 4 ratchets, compliance 179, writeflow 36, analytics 17, worldclass 59, pos-p1 19, giftcards 33, taxdocs 131, input-vat 6 |
