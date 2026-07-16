@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, UnauthorizedException, ServiceUnavailableException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes, createHash } from 'node:crypto';
 import { and, eq, sql, gt, isNull } from 'drizzle-orm';
@@ -10,6 +10,7 @@ import { assertPublicUrl } from '../../common/net-guard';
 import { normalizeUsername } from '../../common/username';
 import { PasswordService } from '../auth/password.service';
 import { verifyHs256, type IdTokenClaims } from './jwt-hs256';
+import { isJitForbiddenRole } from './identity-config.service';
 
 // OIDC SSO: build the IdP authorization URL, then on callback verify the id_token, JIT-provision the
 // user (by sso_subject within the tenant), and mint the SAME session JWT as a password login.
@@ -119,6 +120,12 @@ export class SsoService {
   // Find-or-create the SSO user (by sso_subject within the tenant) and mint the session JWT. Runs in a
   // tenant-scoped tx so the user row is created/read under the tenant's RLS policy (no cross-tenant write).
   private async provisionAndMint(tenantId: number, tenantCode: string, defaultRole: string, subject: string, email?: string) {
+    // Defense-in-depth (pentest P2): even if a tenant stored a privileged `default_role` BEFORE the allow-list
+    // was tightened, JIT provisioning must never mint a role that can escalate further (Admin/AccessAdmin). Fail
+    // closed rather than silently downgrade, so a misconfigured tenant is fixed explicitly.
+    if (isJitForbiddenRole(defaultRole)) {
+      throw new ForbiddenException({ code: 'SSO_ROLE_NOT_ALLOWED', message: 'SSO cannot auto-provision a privileged role — reconfigure the SSO default role', messageTh: 'SSO ไม่สามารถสร้างผู้ใช้ที่มีบทบาทระดับสูงโดยอัตโนมัติได้ — โปรดตั้งค่าบทบาทเริ่มต้นใหม่' });
+    }
     const db = this.db;
     const { username, role } = await db.transaction(async (tx: any) => {
       try { await tx.execute(sql`SET LOCAL ROLE app_user`); } catch { /* dev base role */ }

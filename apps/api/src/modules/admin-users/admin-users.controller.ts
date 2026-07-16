@@ -51,6 +51,6 @@ export class AdminUsersController {
   @Post('access-exceptions/:reqNo/reject') rejectException(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectExcBody)) b: z.infer<typeof RejectExcBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectException(reqNo, u, b.reason); }
   @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>, @CurrentUser() actor: JwtUser) { return this.svc.create(b, actor); }
   @Patch(':username') update(@Param('username') u: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>, @CurrentUser() actor: JwtUser) { return this.svc.update(u, b, actor); }
-  @Post(':username/reset-password') reset(@Param('username') u: string, @Body(new ZodValidationPipe(ResetBody)) b: z.infer<typeof ResetBody>) { return this.svc.resetPassword(u, b.password); }
+  @Post(':username/reset-password') reset(@Param('username') u: string, @Body(new ZodValidationPipe(ResetBody)) b: z.infer<typeof ResetBody>, @CurrentUser() actor: JwtUser) { return this.svc.resetPassword(u, b.password, actor); }
   @Delete(':username') remove(@Param('username') u: string, @CurrentUser() actor: JwtUser) { return this.svc.remove(u, actor); }
 }

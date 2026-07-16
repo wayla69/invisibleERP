@@ -230,7 +230,11 @@ export class PlatformAdminGuard implements CanActivate {
     if (!needs) return true;
     const req = ctx.switchToHttp().getRequest();
     const user: JwtUser | undefined = req.user;
-    if (!isPlatformAdmin(user?.username)) {
+    // A machine principal (API key) must NEVER hold platform authority — even when its `created_by` (adopted as
+    // the maker-checker username per security review H-2) is a platform owner. Otherwise a god-minted key would
+    // be an MFA-free "god" credential granting full fleet control if leaked (pentest P3). Only an interactive
+    // god session (no apiKeyPrefix) may pass; the key's machine identity is carried on `apiKeyPrefix`.
+    if (user?.apiKeyPrefix || !isPlatformAdmin(user?.username)) {
       throw new ForbiddenException({ code: 'PLATFORM_ADMIN_REQUIRED', message: 'Platform-admin access required', messageTh: 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น' });
     }
     req.__platformBypass = true; // honoured by TenantTxInterceptor to bypass RLS for tenant provisioning
