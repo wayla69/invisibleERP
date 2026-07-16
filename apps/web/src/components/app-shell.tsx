@@ -79,6 +79,9 @@ const PREFS_PUSH_MS = 600; // debounce for syncing pref changes to the server
 // collide with a real group/subgroup title (those are all `nav.group.*` / `nav.sub.*`). Excluded from the
 // group render because no NavGroup carries this title.
 const ADVANCED_FOLD_KEY = '__show_advanced__';
+// B2 (docs/50): reserved fold-map key for the SME "show hidden menus" escape hatch — reveals the
+// industry-hidden nav domains (B1) without needing the platform owner. Same synced-navFold mechanics.
+const SME_HIDDEN_FOLD_KEY = '__show_sme_hidden__';
 
 type SyncedPrefs = { favorites: string[]; navFold: Record<string, boolean> };
 
@@ -595,12 +598,15 @@ export function AppShell({
   // listed keys start open and every other subgroup starts folded; a user's own navFold toggle always wins,
   // and the domain/subgroup holding the active route still opens. Empty set = enterprise behaviour.
   const smeOpen = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_open_nav_groups ?? [] : []), [me.data]);
+  // B2 (docs/50): the industry fold is a default, not a cage — an SME user can reveal the hidden domains
+  // themselves via the sidebar-footer toggle (synced navFold reserved key, like "show advanced").
+  const showSmeHidden = navFold[SME_HIDDEN_FOLD_KEY] ?? false;
   const groups = React.useMemo(() => {
-    const filtered = filterByPerm(wsNav).filter((g) => !smeHidden.has(g.title));
+    const filtered = filterByPerm(wsNav).filter((g) => showSmeHidden || !smeHidden.has(g.title));
     const base = filtered.length ? filtered : wsNav; // fall back while loading
     const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
     return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
-  }, [filterByPerm, wsNav, groupOrder, isGod, smeHidden]);
+  }, [filterByPerm, wsNav, groupOrder, isGod, smeHidden, showSmeHidden]);
   // "Show advanced menus" — kept in the synced fold map under a reserved key (see ADVANCED_FOLD_KEY). Off by
   // default: infrequent/expert domains (Controls, Customise, Integrations, Intercompany) stay hidden.
   const showAdvanced = navFold[ADVANCED_FOLD_KEY] ?? false;
@@ -884,6 +890,27 @@ export function AppShell({
                 )}
               >
                 <span className={cn('size-3 rounded-full bg-white transition-transform', showAdvanced && 'translate-x-3')} />
+              </span>
+            </button>
+          )}
+          {pinsEnabled && smeHidden.size > 0 && (
+            <button
+              type="button"
+              onClick={() => toggleFold(SME_HIDDEN_FOLD_KEY, false)}
+              aria-pressed={showSmeHidden}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground group-data-[collapsible=icon]:hidden"
+            >
+              <span className="flex items-center gap-1.5">
+                <SlidersHorizontal className="size-3.5 shrink-0" />
+                {t('nav.show_sme_hidden')}
+              </span>
+              <span
+                className={cn(
+                  'flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  showSmeHidden ? 'bg-primary' : 'bg-muted-foreground/30',
+                )}
+              >
+                <span className={cn('size-3 rounded-full bg-white transition-transform', showSmeHidden && 'translate-x-3')} />
               </span>
             </button>
           )}

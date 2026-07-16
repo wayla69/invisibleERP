@@ -1,6 +1,6 @@
 # 50 — SME Launch-Readiness Roadmap (Tracks A–C)
 
-> **Date:** 2026-07-16 · **Status:** v1.0 — Track A DELIVERED · Track B: B1 DELIVERED, B2/B3 planned ·
+> **Date:** 2026-07-16 · **Status:** v1.1 — Track A DELIVERED · Track B: B1+B2 DELIVERED, B3 planned ·
 > **Owner:** ERP / Product
 > **Scope:** The last mile between "the SME single-user edition exists" (`docs/49`, fully delivered
 > v1.0–1.6) and "a solo Thai business owner can be handed a login and succeed on day one." Three tracks:
@@ -67,19 +67,21 @@ band per industry, safe fallback, census drift floor) → api build + `onboardin
 `sme` harness (47, unchanged) → web build + typecheck; all four CI ratchets flat. Docs: manual
 11-administration §14 (v0.24), UAT-ADM-169 + matrix v7.35, docs/49 rev 1.7.
 
-### B2 — Self-service escape hatch + e2e proof (next)
+### B2 — Self-service escape hatch + e2e proof ✅ DELIVERED (this PR)
 
-The industry fold must be a *default, not a cage* — and it must be provably right in a real browser.
+The industry fold is a *default, not a cage* — and it is now provably right in a real browser.
 
-- **"แสดงเมนูที่ซ่อนไว้" toggle** in the sidebar footer (SME tenants with a non-empty hidden set only,
-  beside the existing "แสดงเมนูขั้นสูง"): temporarily reveals the industry-hidden domains for the
-  session/user, persisted like the advanced toggle under a reserved `navFold` key — so an owner who grows
-  into โครงการ doesn't need the platform owner. No API change (the hidden list already rides `/me`;
-  the toggle only changes client-side filtering).
-- **Playwright e2e** (`apps/web/e2e`): SME login (route-mocked `/api/auth/me` with a restaurant profile) →
-  assert hidden domains absent, listed groups open, everything else folded, ⌘K still reaches a hidden
-  item, and the reveal toggle works — desktop + `mobile-iphone` projects (no horizontal overflow per the
-  repo's mobile recipe).
+- **"แสดงเมนูที่ซ่อนไว้" toggle** in the sidebar footer (rendered only for SME tenants with a non-empty
+  hidden set, beside "แสดงเมนูขั้นสูง"): reveals the industry-hidden domains, persisted like the advanced
+  toggle under the reserved `navFold` key `__show_sme_hidden__` (syncs across devices via user-prefs) —
+  an owner who grows into โครงการ doesn't need the platform owner. No API change (the hidden list already
+  rides `/me`; the toggle only changes client-side filtering). i18n key `nav.show_sme_hidden` (5 locales).
+- **Playwright e2e** `apps/web/e2e/sme-nav-folding.spec.ts` (4 specs, route-mocked backend; the SME
+  first-run wizard is stubbed closed via `sme_wizard_done`): restaurant profile hides โครงการ and folds
+  kept domains/subgroups (user toggles still work); the POS workspace opens ขายหน้าร้าน with the frontline
+  + dining items visible and กะ & ควบคุม folded; the reveal toggle shows/re-hides the hidden domain; an
+  enterprise admin sees no toggle and keeps pre-B1 subgroup defaults. Verified locally (17/17 with the
+  `workspace-split` regression suite) + web build/typecheck/ratchets green.
 
 ### B3 — Industry-aware first-run content (after B2)
 
@@ -105,4 +107,5 @@ B1 live + this checklist walked for the target environment.
 ## Revision history
 | Rev | Date | Author | Change |
 |---|---|---|---|
+| 1.1 | 2026-07-16 | ERP/Product | **B2 delivered** — "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (SME-only sidebar footer, reserved synced navFold key `__show_sme_hidden__`, i18n ×5, no API change) + Playwright proof `e2e/sme-nav-folding.spec.ts` (4 specs: hidden domain gone, industry groups open/others folded incl. subgroup defaults, reveal round-trip, enterprise regression; 17/17 with workspace-split). Manual 00-getting-started v0.2. |
 | 1.0 | 2026-07-16 | ERP/Product | Re-created after the working-tree reset (see note). Track A recorded delivered (P1–P4, PRs #797/#798/#799). **B1 delivered** — industry-aware SME nav folding at provisioning (shared `nav-profiles.ts`, `sme_prefs` stamp, `/me` `sme_open_nav_groups`, AppShell fold defaults; onboarding +5, `nav-profiles.test.ts` 6; UAT-ADM-169). B2 (reveal toggle + e2e) and B3 (industry starter kit) planned. |

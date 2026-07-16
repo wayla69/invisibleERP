@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2 · 2026-07-16** · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/50 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/50 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -198,6 +198,13 @@ appear in **both** workspaces.
   by default — the **การควบคุม & ตรวจสอบ** (Controls) domain and the *ปรับแต่ง*, *เชื่อมต่อ & ขยาย* and
   *ระหว่างบริษัท & สกุลเงิน* sub-sections. Turn it on to reveal them. (Anything you've pinned to Favourites or
   can find via search stays reachable regardless of this toggle.)
+- **"แสดงเมนูที่ซ่อนไว้" (Show hidden menus — SME companies only):** an SME company's menu is trimmed to its
+  **business type** at creation (e.g. a restaurant doesn't see โครงการ; a wholesaler doesn't see the POS
+  domains) and only its daily-work groups start open — so your first login shows the ~15 items you actually
+  use. If your business grows into a hidden area, flip this toggle (bottom of the side menu, next to
+  แสดงเมนูขั้นสูง) to reveal every hidden domain yourself — no administrator needed. Search (⌘K) and
+  Favourites always reach hidden items, and any group you open/close yourself stays the way you left it,
+  synced across your devices.
 - **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
   home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
   bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first
