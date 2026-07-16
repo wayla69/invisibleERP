@@ -61,7 +61,11 @@ Effort key: **S** ≈ 1–2 days · **M** ≈ 3–5 days · **L** ≈ 1–2 week
 
 ### Phase P1c — POS audit & control · Effort **S–M**
 - **Central POS audit log** unifying voids/discounts/price-overrides/no-sale/refunds (actor, reason_code, approver, before/after) — reuse `audit_log` + `status-log.service`, add reason-code masters.
-- **Blind drawer close** (count without seeing expected; variance revealed after).
+- **Blind drawer close** (count without seeing expected; variance revealed after). **✅ Delivered
+  (2026-07-16, docs/50 Wave 1):** per-tenant `till_settings.blind_close` policy (manager-only change);
+  open-session X/Z redact expected cash + derivable figures server-side for till-duty callers; the
+  `/pos/till` close dialog submits the count first and reveals the variance after; the session is
+  stamped `blind_close` as evidence. ToE `cashreport` 33→45; PN-07 §7(5) rev 2.0; UAT-O2C-492..497.
 - **Verify:** harness asserts every controlled action writes an audit row with actor+reason; blind-close hides expected until submit.
 
 ---

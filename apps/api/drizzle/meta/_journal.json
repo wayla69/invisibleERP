@@ -2738,6 +2738,13 @@
       "when": 2023820000356,
       "tag": "0417_sme_review_signoffs",
       "breakpoints": true
+    },
+    {
+      "idx": 392,
+      "version": "7",
+      "when": 2023820000357,
+      "tag": "0418_till_blind_close",
+      "breakpoints": true
     }
   ]
 }

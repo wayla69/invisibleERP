@@ -3,6 +3,7 @@ import { assertMakerChecker } from '../../common/control-profile';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests, xzReports, xzReportDenominations, posTipAdjustments } from '../../database/schema';
+import { TillPolicy } from './till-policy';
 import { createHash } from 'node:crypto';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -50,6 +51,7 @@ export interface AdjustTipDto { tip: number; reason?: string }
 export interface RefundDto { payment_no: string; amount: number; reason?: string }
 export interface OpenTillDto { opening_float?: number }
 export interface CloseTillDto { session_no: string; closing_count: number; denominations?: Record<string, number> }
+export interface TillSettingsDto { blind_close?: boolean }
 export interface CashMovementDto { type: 'paid_in' | 'paid_out' | 'drop'; amount: number; reason?: string }
 
 @Injectable()
@@ -61,7 +63,12 @@ export class PaymentService {
     @Optional() private readonly audit?: PosAuditService,   // wiring: central POS audit trail
     @Optional() private readonly journal?: JournalService,   // wiring: electronic journal
     @Optional() private readonly qr?: QrService,             // wiring: render the PromptPay QR as an image
-  ) {}
+  ) {
+    // Blind drawer close (0418, P1c) — ctor-body plain class so the positional ctor stays unchanged
+    // (service-size ratchet, docs/46 §4; same pattern as the projects facade's sub-services).
+    this.tillPolicy = new TillPolicy(this.db);
+  }
+  private readonly tillPolicy: TillPolicy;
 
   // POST /api/payments — run a tender against a gateway, persist the result.
   //
@@ -477,6 +484,10 @@ export class PaymentService {
     return { open: t ? { id: t.id, session_no: t.sessionNo } : null };
   }
 
+  // ── Blind drawer close (0418, docs/50 Wave 1 — P1c): logic lives in till-policy.ts (ratchet). ──
+  getTillSettings(user: JwtUser) { return this.tillPolicy.getSettings(user); }
+  putTillSettings(dto: TillSettingsDto, user: JwtUser) { return this.tillPolicy.putSettings(dto, user); }
+
   // POST /api/payments/till/close — reconcile cash: expected = float + Σ cash captured; variance = counted − expected.
   async closeTill(dto: CloseTillDto, user: JwtUser) {
     const db = this.db;
@@ -517,12 +528,15 @@ export class PaymentService {
       varianceStatus = material ? 'PendingApproval' : 'NotRequired';
     }
 
+    // Blind-close evidence: record whether the tenant policy was ON when this drawer was counted.
+    // The count is already submitted at this point, so the response may reveal expected/variance.
+    const blind = await this.tillPolicy.blindOn(sess.tenantId ?? null);
     await db.update(tillSessions).set({
       closedBy: user.username, closedAt: new Date(), closingCount: fx(dto.closing_count, 4),
       expectedCash: fx(expectedCash, 4), variance: fx(variance, 4), denominations: dto.denominations ?? null, status: 'Closed',
-      varianceJournalNo, varianceStatus,
+      varianceJournalNo, varianceStatus, blindClose: blind,
     }).where(eq(tillSessions.id, sess.id));
-    return { session_no: dto.session_no, status: 'Closed', expected_cash: expectedCash, closing_count: n(dto.closing_count), variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, z_report: { ...a, counted_cash: n(dto.closing_count), variance, denominations: dto.denominations ?? null } };
+    return { session_no: dto.session_no, status: 'Closed', blind_close: blind, expected_cash: expectedCash, closing_count: n(dto.closing_count), variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, z_report: { ...a, counted_cash: n(dto.closing_count), variance, denominations: dto.denominations ?? null } };
   }
 
   // POST /api/payments/till/variance/:sessionNo/approve — manager clears a material cash variance.
@@ -613,22 +627,27 @@ export class PaymentService {
   }
 
   // X-report — mid-shift, non-resetting, works on an open till. No writes.
-  async xReport(tillId: number, _user: JwtUser) {
+  // Blind close (P1c): while the session is OPEN and the tenant policy is ON, till-duty callers get the
+  // drawer-expectation figures redacted (see redactBlind) — they must count first, then close reveals.
+  async xReport(tillId: number, user: JwtUser) {
     const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    const a = await this.aggregateTill(tillId);
+    let a: Record<string, any> = await this.aggregateTill(tillId);
+    if (String(sess.status) === 'Open' && (await this.tillPolicy.mustRedact(user, sess.tenantId ?? null))) a = this.tillPolicy.redactBlind(a);
     return { report: 'X', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: null, variance: null };
   }
 
-  // Z-report — shift summary at/after close.
-  async zReport(tillId: number, _user: JwtUser) {
+  // Z-report — shift summary at/after close. Same blind redaction as X while the session is still open;
+  // once closed the count is on record, so the full reconciliation is always visible.
+  async zReport(tillId: number, user: JwtUser) {
     const db = this.db;
     const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
     if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    const a = await this.aggregateTill(tillId);
+    let a: Record<string, any> = await this.aggregateTill(tillId);
     const closed = String(sess.status) === 'Closed';
-    return { report: 'Z', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: closed ? n(sess.closingCount) : null, variance: closed ? n(sess.variance) : null, denominations: sess.denominations ?? null };
+    if (!closed && (await this.tillPolicy.mustRedact(user, sess.tenantId ?? null))) a = this.tillPolicy.redactBlind(a);
+    return { report: 'Z', session_no: sess.sessionNo, status: sess.status, blind_close: !!sess.blindClose, ...a, counted_cash: closed ? n(sess.closingCount) : null, variance: closed ? n(sess.variance) : null, denominations: sess.denominations ?? null };
   }
 
   // POS-07 — sign the Z-report: snapshot the closed till's shift totals into an immutable, tamper-evident

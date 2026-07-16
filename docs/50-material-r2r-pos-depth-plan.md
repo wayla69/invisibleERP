@@ -197,13 +197,19 @@ The register/KDS/fiscal core is world-class already; what remains are the **edge
 compliance bites**: unwired GL events, B2B invoices, pricing consistency, the offline tail, and real card
 acceptance. C-phases deliberately track the still-open items in `docs/pos-worldclass-roadmap.md` + docs/41.
 
-### C1 — Wire the deferred GL posting events (tips + gift cards) · Effort **S** · quick win
-**Goal:** `TIP.COLLECT` / `TIP.PAYOUT` / `GIFTCARD.ISSUE` / `GIFTCARD.REDEEM` sit `wired:false` in
-`posting-events.sales.ts` — flows post, but outside the GL-24 override path.
-- Route `restaurant/tip.service.ts` + `pos/labor` gift-card flows through
-  `resolvePostingAccountSet`; flip `wired:true`; docs/43 conventions apply.
-- Harness: tenant override on 2300/2200 respected; default unchanged; golden master re-pin **only if**
-  outputs consciously diff.
+### C1 — ~~Wire the deferred GL posting events (tips + gift cards)~~ → **re-scoped: blind drawer close** · Effort **S–M** · quick win · **✅ DELIVERED (2026-07-16)**
+**Correction (v0.2):** the original C1 was a **false gap** — docs/43 explicitly **decided** these events
+stay unwired: `TIP.*` roles are **Tier C both legs, "events exist for visibility only"** (2300 is TIP-01's
+reconciliation account with a live over-distribute guard) and `GIFTCARD.*` roles are Tier C because 2200 is
+a **REC-04 permanent** control account that is never widened (docs/43 §8 Q3). Wiring them would contradict
+a documented architecture decision. Replacement quick win, pulled forward from C4:
+- **Blind drawer close** (roadmap P1c residual): per-tenant `till_settings.blind_close` policy
+  (migration 0418; `GET/PUT /api/payments/till/settings`, change manager-only `ar`/`exec`); open-session
+  X/Z redact expected cash + derivable figures server-side for till-duty callers; the new `/pos/till`
+  close dialog submits the count first, variance revealed after; `blind_close` evidence stamp on the
+  session. Strengthens REV-13/REV-05 (no new control id).
+- Delivered: ToE `cashreport` 33→45; PN-07 §7(5) rev 2.0; manual 01 §6 v0.57; UAT-O2C-492..497;
+  roadmap P1c updated. C4's remaining scope shrinks to the offline-replay items.
 
 ### C2 — Full B2B tax invoice (ใบกำกับเต็มรูป) at POS + e-Tax on demand · Effort **M** · roadmap P1b residual
 **Goal:** B2B walk-ins get a full tax invoice at the counter; today only the abbreviated ATV- auto-issues.
@@ -279,3 +285,4 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-07-16 | Initial plan: codebase audit of the three cycles + 15 phases in 5 waves |
+| v0.2 | 2026-07-16 | Wave 1 build: C1 re-scoped (original was a docs/43-decided non-gap — TIP/GIFTCARD events are visibility-only by design) to **blind drawer close**, DELIVERED |
