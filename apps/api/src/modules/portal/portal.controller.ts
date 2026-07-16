@@ -69,7 +69,7 @@ const OfflineSaleOp = z.object({
 });
 const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleOp).min(1).max(200) });
 
-const SubUserBody = z.object({ username: z.string().min(1), password: z.string().min(6), permissions: z.array(z.string()).optional() });
+const SubUserBody = z.object({ username: z.string().min(1), password: z.string().min(8), permissions: z.array(z.string()).optional() });
 const MyCustomerBody = z.object({ customer_name: z.string().min(1), phone: z.string().optional(), address: z.string().optional(), notes: z.string().optional() });
 const MySupplierBody = z.object({ supplier_name: z.string().min(1), contact_name: z.string().optional(), phone: z.string().optional(), address: z.string().optional() });
 const MyPoBody = z.object({

@@ -6,7 +6,7 @@ import { CoalitionService } from './coalition.service';
 
 const CreateCoalitionBody = z.object({ code: z.string().min(1).max(20), name: z.string().min(1) });
 const AddMemberBody = z.object({ tenant_id: z.number().int().positive() });
-const EarnBody = z.object({ member_id: z.number().int().positive(), net_spend: z.number().positive(), ref_doc: z.string().max(60).optional() });
+const EarnBody = z.object({ member_id: z.number().int().positive(), net_spend: z.number().positive().max(10_000_000), ref_doc: z.string().max(60).optional() });
 const RedeemBody = z.object({ member_id: z.number().int().positive(), points: z.number().int().positive(), ref_doc: z.string().max(60).optional() });
 
 // W2 (docs/27) — coalition network (LYL-19). Config is HQ-only (users/exec + the Admin-role guard in the

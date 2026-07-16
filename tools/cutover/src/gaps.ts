@@ -146,7 +146,7 @@ async function main() {
   ok('scan Issue movement qty=-2', mv.length === 1 && Number(mv[0].qty) === -2, `qty=${mv[0]?.qty}`);
 
   // ── User CRUD ──
-  const uc = await inj('POST', '/api/admin/users', token, { username: 'u1', password: 'secret1', role: 'Sales' });
+  const uc = await inj('POST', '/api/admin/users', token, { username: 'u1', password: 'secret12', role: 'Sales' });
   ok('create user', (uc.status === 200 || uc.status === 201) && uc.json.created === true);
   const ulist = await inj('GET', '/api/admin/users', token);
   ok('list users includes u1', ulist.json.users.some((x: any) => x.username === 'u1'));
@@ -171,7 +171,7 @@ async function main() {
   ok('P9: non-platform admin cannot delete a peer Admin → 403 ADMIN_GRANT_DENIED', udelAdmin.status === 403 && udelAdmin.json.error?.code === 'ADMIN_GRANT_DENIED', `${udelAdmin.status} ${udelAdmin.json.error?.code}`);
 
   // ── Portal sub-accounts (admin tenant = HQ) ──
-  const su = await inj('POST', '/api/portal/my/users', token, { username: 'staff1', password: 'secret1', permissions: ['cust_pos', 'cust_inventory'] });
+  const su = await inj('POST', '/api/portal/my/users', token, { username: 'staff1', password: 'secret12', permissions: ['cust_pos', 'cust_inventory'] });
   ok('create sub-account', (su.status === 200 || su.status === 201) && su.json.created === true);
   const sl = await inj('GET', '/api/portal/my/users', token);
   ok('sub-account appears in my-users', sl.json.users.some((x: any) => x.username === 'staff1'));

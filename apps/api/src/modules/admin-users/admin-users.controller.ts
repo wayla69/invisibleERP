@@ -12,9 +12,9 @@ const ROLES = [
   'InventoryController', 'StockCounter', 'GlAccountant', 'FinancialController',
   'MasterDataAdmin', 'PricingManager', 'CreditManager', 'ReturnsClerk', 'AccessAdmin', 'ExecutiveViewer',
 ] as const;
-const CreateBody = z.object({ username: z.string().min(1), password: z.string().min(6), role: z.enum(ROLES), customer_name: z.string().optional(), permissions: z.array(z.string()).optional(), allow_sod_override: z.boolean().optional(), sod_reason: z.string().optional() });
+const CreateBody = z.object({ username: z.string().min(1), password: z.string().min(8), role: z.enum(ROLES), customer_name: z.string().optional(), permissions: z.array(z.string()).optional(), allow_sod_override: z.boolean().optional(), sod_reason: z.string().optional() });
 const UpdateBody = z.object({ role: z.enum(ROLES).optional(), customer_name: z.string().optional(), permissions: z.array(z.string()).optional(), allow_sod_override: z.boolean().optional(), sod_reason: z.string().optional() });
-const ResetBody = z.object({ password: z.string().min(6) });
+const ResetBody = z.object({ password: z.string().min(8) });
 const CertifyBody = z.object({ period: z.string().min(1), notes: z.string().optional() });
 const RejectExcBody = z.object({ reason: z.string().max(500).optional() });
 const DecideItemBody = z.object({ decision: z.enum(['keep', 'revoke']), notes: z.string().max(500).optional() });

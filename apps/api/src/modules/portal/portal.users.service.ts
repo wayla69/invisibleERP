@@ -27,7 +27,7 @@ export class PortalUsersService {
 
   async create(dto: SubUserDto, u: JwtUser) {
     const tenantId = this.requireTenant(u);
-    if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
+    if (!dto.password || dto.password.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
     const db = this.db;
