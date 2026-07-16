@@ -117,10 +117,36 @@ never log in or be restored again.
 history is still visible in the cross-company activity feed (§ god notification/audit inbox).
 Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.24), migration 0393.
 
+## 13. SME edition launch gate — docs/49 + docs/50 Track B (control_profile='sme')
+
+**Owner:** Platform (console), before provisioning the first REAL SME company.
+**Action:** the SME code paths are all live (docs/49 v1.0–1.6; docs/50 B1/B2/B3), but three launch inputs
+are console-side and per-fleet/per-company:
+1. **Platform SME defaults** — `/platform` → **ค่าเริ่มต้น SME** tab: set the **external accountant email**
+   (this is load-bearing: every new SME company's auto-provisioned monthly **SME-01** self-approval-review
+   subscription takes its recipients from this stamped copy — left empty, only the god-inbox leg operates)
+   and any fleet-wide extra hidden nav groups (the per-industry hiding/folding is automatic — docs/50 B1).
+2. **Provision with the RIGHT edition + industry** — `/platform` → บริษัท → provision form: edition **SME**
+   and the company's true industry (restaurant/retail/distribution/services). Both are **birth attributes**:
+   edition is upgrade-only afterwards, and the B1 nav profile + B3 starter kit are stamped from the industry
+   at creation (a per-company hidden-list fix later is possible via the drawer's ตั้งค่า SME, but the
+   default-open profile and starter kit are not re-derived).
+3. **SME-02 accountant leg** — in the SME company, create the external accountant a **separate limited
+   login** granting only the `sme_review` permission (per-user override in `/admin/users`) so the
+   independent-review sign-off leg (`/sme-review`) is operable from day one; the platform owner signs the
+   other leg via act-as.
+**Verify:** provision a disposable SME test company per target industry → first login shows the folded
+industry menu (โครงการ hidden for a restaurant; ~15 items) + the starter kit (sample menu/tables etc.);
+`/platform` company drawer shows the SME badge + prefs; `report_subscriptions` has the active monthly
+`sme_self_approval_review` row carrying the accountant email; the accountant login reaches `/sme-review`
+and nothing else. Then delete+purge the test company (items 11–12).
+Model: `docs/49` §6, `docs/50` Track B; code gates verified in `docs/50` Track C (rev 1.3).
+
 ## Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.4 | 2026-07-16 | Platform | Added item 13 — **SME edition launch gate** (docs/50 Track C): the three console-side inputs the delivered SME edition needs before real SME provisioning — platform SME defaults (accountant email drives SME-01 recipients), edition+industry chosen correctly at creation (birth attributes: B1 nav profile + B3 starter kit stamp from industry; edition upgrade-only), and the accountant's separate `sme_review`-only login for the SME-02 leg — plus a full per-industry provisioning verification loop using items 11–12 for cleanup. |
 | 1.0 | 2026-07-02 | Platform | Initial runbook consolidating every open human/console item from docs/27 (legal execution, Anthropic DPA → `AI_DPA_ACKNOWLEDGED`, SOC 2 engagement + quarterly evidence, ELC operation, Railway PgBouncer/Redis, prod `db:backfill:pii`, loadtest §4 baseline, `SEED_ADMIN_PASSWORD`, Wave 6) with owner + exact action + verification each. |
 | 1.1 | 2026-07-09 | Platform | Added item 10 — pilot-company test-data factory reset from the Platform Console (**suspend → reset → reactivate**): wipes a pilot's UAT data before real usage while preserving logins/plan/audit-chain; only ever possible on a suspended company, so an active company cannot be wiped in one click. |
 | 1.2 | 2026-07-13 | Platform | Added item 11 — tenant soft-delete (migration 0393, **suspend → delete**): for a pure-test company that should stop existing entirely, lighter than the factory reset (no data touched, only the company row is flagged) and reversible via Restore. Prompted by a request to fully remove a test tenant ("Amber") after the factory reset UI was confused with a full company deletion. |
