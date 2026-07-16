@@ -74,6 +74,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.favorites': { th: 'รายการโปรด', en: 'Favourites', ms: 'Kegemaran', vi: 'Yêu thích', id: 'Favorit' },
   'nav.recents': { th: 'ล่าสุด', en: 'Recent', ms: 'Terkini', vi: 'Gần đây', id: 'Terkini' },
   'nav.show_advanced': { th: 'แสดงเมนูขั้นสูง', en: 'Show advanced', ms: 'Tunjuk lanjutan', vi: 'Hiện nâng cao', id: 'Tampilkan lanjutan' },
+  'nav.show_sme_hidden': { th: 'แสดงเมนูที่ซ่อนไว้', en: 'Show hidden menus', ms: 'Tunjuk menu tersembunyi', vi: 'Hiện menu ẩn', id: 'Tampilkan menu tersembunyi' },
   'nav.items_count': { th: 'รายการ', en: 'items', ms: 'item', vi: 'mục', id: 'item' },
   'nav.fav_add': { th: 'เพิ่ม {label} ในรายการโปรด', en: 'Add {label} to favourites', ms: 'Tambah {label} ke kegemaran', vi: 'Thêm {label} vào yêu thích', id: 'Tambah {label} ke favorit' },
   'nav.fav_remove': { th: 'เอา {label} ออกจากรายการโปรด', en: 'Remove {label} from favourites', ms: 'Buang {label} dari kegemaran', vi: 'Xoá {label} khỏi yêu thích', id: 'Hapus {label} dari favorit' },

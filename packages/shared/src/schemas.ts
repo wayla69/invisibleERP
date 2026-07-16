@@ -59,6 +59,10 @@ export const AuthUser = z.object({
   control_profile: z.enum(['enterprise', 'sme']).optional(),
   // Nav group title keys hidden for this SME tenant (from tenants.sme_prefs, stamped at provisioning).
   sme_hidden_nav_groups: z.array(z.string()).optional(),
+  // B1 (docs/50): group/subgroup title keys that default OPEN in the sidebar for this SME tenant —
+  // the industry-derived nav profile stamped into tenants.sme_prefs at provisioning. A user's own
+  // synced navFold toggle always overrides; absent/empty keeps the only-active-open default.
+  sme_open_nav_groups: z.array(z.string()).optional(),
 });
 export type AuthUser = z.infer<typeof AuthUser>;
 
