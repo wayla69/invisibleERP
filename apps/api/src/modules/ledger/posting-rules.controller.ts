@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PostingService } from './posting.service';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { POSTING_EVENTS } from './posting-events';
 
 // GL-24 (docs/43 PR-1): a posting-rule override re-routes financial statements, so the write surface is
@@ -53,8 +54,8 @@ export class PostingRulesController {
   @Post(':id/approve')
   @HttpCode(200)
   @Permissions('gl_posting_rules', 'exec')
-  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
-    return this.posting.approveRule(id, u);
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.posting.approveRule(id, u, b?.self_approval_reason);
   }
 
   @Post(':id/reject')

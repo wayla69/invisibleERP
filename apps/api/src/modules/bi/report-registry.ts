@@ -17,6 +17,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   crm_funnel: { label: 'วิเคราะห์กรวยการขาย + ความเร็ว', labelEn: 'CRM funnel conversion + velocity' },
   // Lead source → won revenue (win rate + average deal size per channel).
   crm_source_roi: { label: 'ผลตอบแทนตามแหล่งที่มา (Source ROI)', labelEn: 'CRM source ROI (won revenue by source)' },
+  // CRM-15 (docs/44) — multi-touch campaign attribution: won revenue distributed across campaign touchpoints
+  // under an attribution model (first/last/linear/U-shaped); revenue-conserving (control CRM-17).
+  crm_attribution: { label: 'การระบุที่มาแบบหลายจุดสัมผัส (multi-touch attribution)', labelEn: 'CRM multi-touch campaign attribution' },
   // G4 (docs/45): one exec view of marketing spend → lift → margin (campaign attribution + vouchers + B2B + budget)
   marketing_roi: { label: 'ผลตอบแทนการตลาด (spend → lift → margin)', labelEn: 'Marketing ROI (spend → lift → margin)' },
   // G2 (docs/45): market-basket affinity — which menu items sell together (support/confidence/lift)
@@ -31,6 +34,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // (detective control REV-22). Fires lead.stagnant into the automation engine + drops a rail notification.
   crm_followup_digest: { label: 'สรุปการติดตามงานขายประจำวัน', labelEn: 'CRM follow-up digest' },
   crm_account_health: { label: 'บันทึกสุขภาพบัญชีลูกค้า (churn watchlist)', labelEn: 'CRM account health snapshot' },
+  crm_dq_scan: { label: 'ประเมินคุณภาพข้อมูลบัญชีลูกค้า (CRM data quality)', labelEn: 'CRM data-quality scan' },
   crm_forecast_snapshot: { label: 'บันทึกพยากรณ์ยอดขาย (forecast vs actual)', labelEn: 'CRM sales forecast snapshot' },
   crm_sequence_run: { label: 'รันลำดับติดตามการขาย (cadence)', labelEn: 'CRM sequence run (advance due steps)' },
   // Likewise: each run advances every ACTIVE lifecycle journey — segment-entry sweeps + due steps (G1).
@@ -96,6 +100,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // Governance readiness (ELC-01/02/04): each run snapshots acknowledgement coverage, oversight cadence and
   // open-case ageing; the run summary surfaces any breach. Schedule it `weekly` to drive the cadence reminders.
   governance_readiness: { label: 'ความพร้อมธรรมาภิบาล (ELC)', labelEn: 'Governance readiness (ELC)' },
+  // SME-01 (docs/49) — the SME edition's detective compensating control: every logged self-approval in the
+  // window, for independent review. Schedule monthly with recipients = external accountant + platform owner.
+  sme_self_approval_review: { label: 'ทบทวนการอนุมัติด้วยตนเอง (SME-01)', labelEn: 'Self-approval review (SME-01)' },
   // Data-retention purge of DEAD ephemeral security rows only (never financial/audit/PII — statutory hold).
   data_retention_purge: { label: 'ล้างข้อมูลชั่วคราวที่หมดอายุ (นโยบายเก็บข้อมูล)', labelEn: 'Purge expired ephemeral security rows' },
   // Executive cross-module scorecard (RG-1): composes finance/CRM/projects/supply-chain health into one board.
@@ -141,6 +148,8 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   reputation_ga4_sync: { label: 'ซิงก์ Google Analytics (GA4)', labelEn: 'Sync Google Analytics (GA4)' },
   // Read-only dashboard aggregate — also exposed live via GET /api/bi/reputation-summary.
   reputation_summary: { label: 'สรุปชื่อเสียงร้าน + Analytics', labelEn: 'Reputation & analytics summary' },
+  // MKT-16 — review-response SLA breach digest (detective; schedulable). Also live at GET /api/reputation/response-sla.
+  reputation_response_sla: { label: 'SLA การตอบรีวิว (เกินกำหนด)', labelEn: 'Review-response SLA breaches' },
   // docs/48 — Marketing Mix Modeling. mmm_run is a scheduled "action" job (refresh the channel model from
   // the latest ingested signals); mmm_summary is a read-only dashboard aggregate also exposed live via
   // GET /api/bi/mmm-summary.

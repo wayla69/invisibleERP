@@ -1,10 +1,12 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { fxRevalRuns, fxRates, arInvoices, apTransactions } from '../../database/schema';
 import { LedgerService } from './ledger.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { n } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
 
 // WS3.2 — Period-end FX revaluation governance (GL-18). A maker-checker, idempotent-per-(tenant,period)
 // wrapper around the unrealized-FX computation: runReval computes the gain/loss on every open foreign-
@@ -131,13 +133,13 @@ export class FxRevalService {
 
   // postReval — maker-checker post of an Open run (poster ≠ runner ⇒ SELF_POST). Posts the AR/AP control
   // restatements and the net to 5400, then marks the run Posted. Idempotent: a Posted run throws ALREADY_POSTED.
-  async postReval(dto: PostRevalDto) {
+  async postReval(dto: PostRevalDto, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [run] = await db.select().from(fxRevalRuns).where(eq(fxRevalRuns.id, dto.id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'FX_RUN_NOT_FOUND', message: `FX revaluation run ${dto.id} not found`, messageTh: `ไม่พบการปรับปรุงอัตราแลกเปลี่ยน ${dto.id}` });
     if (run.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This FX revaluation is already posted', messageTh: 'การปรับปรุงนี้โพสต์แล้ว' });
     if (run.runBy && run.runBy === dto.postedBy) {
-      throw new ForbiddenException({ code: 'SELF_POST', message: 'Maker-checker: you cannot post an FX revaluation you ran', messageTh: 'ผู้คำนวณโพสต์การปรับปรุงของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.fxreval.post', ref: String(dto.id), reason: selfApprovalReason, code: 'SELF_POST', message: 'Maker-checker: you cannot post an FX revaluation you ran', messageTh: 'ผู้คำนวณโพสต์การปรับปรุงของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const detail: any[] = (run.detail as any[]) ?? [];
     const arDelta = round4(detail.filter((d) => d.scope === 'AR').reduce((a, d) => a + n(d.delta), 0));

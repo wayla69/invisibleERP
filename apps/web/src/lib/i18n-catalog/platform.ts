@@ -232,6 +232,32 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.tab_notifications': { th: 'แจ้งเตือน', en: 'Notifications' },
   'plt.tab_activity': { th: 'กิจกรรม', en: 'Activity' },
   'plt.tab_maintenance': { th: 'ดูแลระบบ', en: 'Maintenance' },
+  // ── SME single-user edition (docs/49) ──
+  'plt.tab_sme': { th: 'ค่าเริ่มต้น SME', en: 'SME defaults' },
+  'plt.col_edition': { th: 'เอดิชัน', en: 'Edition' },
+  'plt.prov_edition': { th: 'เอดิชัน (โปรไฟล์การควบคุม)', en: 'Edition (control profile)' },
+  'plt.edition_enterprise': { th: 'Enterprise — แบ่งแยกหน้าที่เต็มรูปแบบ', en: 'Enterprise — full segregation of duties' },
+  'plt.edition_sme': { th: 'SME — คนเดียวทำได้ทุกงาน', en: 'SME — single operator does everything' },
+  'plt.prov_edition_sme_hint': { th: 'โหมด SME: อนุมัติรายการของตนเองได้โดยต้องระบุเหตุผล ทุกครั้งถูกบันทึกและส่งให้ผู้ตรวจอิสระทบทวน (SME-01) — อัพเกรดเป็น Enterprise ได้ภายหลัง แต่ดาวน์เกรดกลับไม่ได้', en: 'SME mode: self-approval allowed with a mandatory logged reason; every instance is recorded and independently reviewed (SME-01). Upgradable to Enterprise later; never downgradable.' },
+  'plt.prov_edition_ent_hint': { th: 'Enterprise: ผู้จัดทำและผู้อนุมัติต้องเป็นคนละคนเสมอ (maker-checker เต็มรูปแบบ)', en: 'Enterprise: maker and checker must always be different people (full maker-checker).' },
+  'plt.sme_upgrade_btn': { th: 'อัพเกรด', en: 'Upgrade' },
+  'plt.sme_upgrade_title': { th: 'อัพเกรดเป็น Enterprise (ทางเดียว — ย้อนกลับไม่ได้)', en: 'Upgrade to Enterprise (one-way — cannot be reversed)' },
+  'plt.sme_upgrade_confirm': { th: 'อัพเกรด "{name}" เป็น Enterprise? การเปลี่ยนเป็นแบบทางเดียว — บริษัทนี้จะกลับมาเป็นโหมด SME ไม่ได้อีก และทุกการอนุมัติจะต้องผ่านผู้อนุมัติคนที่สองเสมอ', en: 'Upgrade "{name}" to Enterprise? This is one-way — the company can never return to SME mode, and every approval will require a second person.' },
+  'plt.sme_upgraded': { th: 'อัพเกรด {name} เป็น Enterprise แล้ว', en: '{name} upgraded to Enterprise' },
+  'plt.sme_def_title': { th: 'ค่าเริ่มต้นสำหรับบริษัท SME ใหม่', en: 'Defaults for new SME companies' },
+  'plt.sme_def_desc': { th: 'บริษัท SME ใหม่ทุกบริษัทจะเริ่มต้นด้วยค่าเหล่านี้เหมือนกันทั้งหมด (ประทับลงบริษัทตอนสร้าง) — การแก้ไขภายหลังมีผลเฉพาะบริษัทที่สร้างใหม่เท่านั้น', en: 'Every new SME company starts with these identical settings (stamped at creation) — later changes affect only future companies.' },
+  'plt.sme_def_accountant_email': { th: 'อีเมลผู้ตรวจอิสระ (สำนักงานบัญชี)', en: 'Independent reviewer email (external accountant)' },
+  'plt.sme_def_accountant_hint': { th: 'ผู้รับรายงานทบทวนการอนุมัติด้วยตนเอง (SME-01) — เจ้าของแพลตฟอร์มได้รับเสมอ', en: 'Recipient of the self-approval review (SME-01) — the platform owner always receives it too.' },
+  'plt.sme_def_hidden_groups': { th: 'กลุ่มเมนูที่ซ่อนสำหรับ SME', en: 'Nav groups hidden for SME' },
+  'plt.sme_def_hidden_hint': { th: 'เลือกกลุ่มเมนูระดับ Enterprise ที่ไม่แสดงให้บริษัท SME (ลดความซับซ้อนของหน้าจอ)', en: 'Pick the enterprise-depth nav groups an SME company should not see (keeps the UI lean).' },
+  'plt.sme_def_save': { th: 'บันทึกค่าเริ่มต้น', en: 'Save defaults' },
+  'plt.sme_def_saving': { th: 'กำลังบันทึก…', en: 'Saving…' },
+  'plt.sme_def_saved': { th: 'บันทึกค่าเริ่มต้น SME แล้ว', en: 'SME defaults saved' },
+  'plt.sme_def_last_updated': { th: 'แก้ไขล่าสุดโดย {by}', en: 'Last updated by {by}' },
+  // Per-tenant SME settings card in the company drawer (docs/49 H1) — overrides the stamped defaults above.
+  'plt.sme_tenant_title': { th: 'ตั้งค่า SME ของบริษัทนี้', en: 'This company’s SME settings' },
+  'plt.sme_tenant_saved': { th: 'บันทึกการตั้งค่า SME แล้ว', en: 'SME settings saved' },
+  'plt.sme_tenant_sub_note': { th: 'อีเมลผู้ตรวจจะถูกปรับที่รายงาน SME-01 ของบริษัทนี้ให้อัตโนมัติ', en: 'The SME-01 review subscription for this company follows this email automatically.' },
 
   // ── Maintenance tab: global item-master garbage collection (unused shared-catalogue items) ──
   'plt.mnt_title': { th: 'ล้างสินค้าที่ไม่มีใครใช้แล้ว', en: 'Purge unused products' },
@@ -253,6 +279,34 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.mnt_confirm_btn': { th: 'ลบเลย', en: 'Purge now' },
   'plt.mnt_purging': { th: 'กำลังลบ…', en: 'Purging…' },
   'plt.mnt_purge_done': { th: 'ลบสินค้าที่ไม่ใช้แล้ว {n} รายการเรียบร้อย', en: 'Purged {n} unused product(s)' },
+  'plt.mnt_kept_title': { th: 'สินค้าที่ยังเก็บไว้ (เพราะบริษัทเหล่านี้ยังใช้อยู่)', en: 'Kept products (still in use by these companies)' },
+  'plt.mnt_kept_hint': {
+    th: 'สินค้าที่ไม่ถูกลบเพราะยังมีบริษัทอ้างอิงอยู่ (ใน PO, สต็อก, สูตร, ราคา ฯลฯ) ถ้าเห็นบริษัทที่คุณเพิ่งล้างข้อมูลอยู่ในรายการนี้ แปลว่าข้อมูลบริษัทนั้นยังถูกล้างไม่หมด — ล้าง (factory-reset) ให้สมบูรณ์แล้ว purge ซ้ำ',
+    en: 'Products not removed because a company still references them (on a PO, in stock, a recipe, a price list, …). If a company you just reset appears here, its data was not fully wiped — factory-reset it completely, then purge again.',
+  },
+  'plt.mnt_kept_shared': { th: 'ข้อมูลกลาง / ไม่ผูกบริษัท', en: 'Shared / no company' },
+  'plt.mnt_kept_items': { th: '{n} รายการ', en: '{n} product(s)' },
+
+  // ── Force purge (DANGER) — delete products even if a company still uses them ──
+  'plt.mnt_force_title': { th: 'ลบแบบบังคับ (อันตราย)', en: 'Force purge (danger)' },
+  'plt.mnt_force_desc': {
+    th: 'ลบสินค้าทั้งหมดในแคตตาล็อกกลางแม้ยังมีบริษัทใช้อยู่ โดยจะ**ลบข้อมูลอ้างอิงในทุกบริษัท**ทิ้งด้วย (ใบสั่งซื้อ/สต็อก/สูตร/ราคา ฯลฯ) — ใช้เมื่อสินค้าเป็นข้อมูลทดสอบ/ขยะเท่านั้น เพราะถ้ามีบริษัทจริงใช้ ข้อมูลบริษัทนั้นจะเสียหาย กด "ตรวจผลกระทบ" เพื่อดูก่อนว่าบริษัทไหนโดนบ้าง',
+    en: 'Deletes every product in the shared catalogue even if a company still uses it, and **wipes the references in every company** too (POs / stock / recipes / prices / …). Use only for test/junk products — a real company that uses one will lose data. Click "Check impact" to see which companies are affected first.',
+  },
+  'plt.mnt_force_check': { th: 'ตรวจผลกระทบ (blast radius)', en: 'Check impact (blast radius)' },
+  'plt.mnt_force_preview_done': { th: 'จะลบ {n} รายการ + {rows} แถวอ้างอิง', en: '{n} product(s) + {rows} reference row(s) would be deleted' },
+  'plt.mnt_force_result': { th: 'จะลบแบบบังคับ {n} รายการ และลบ {rows} แถวอ้างอิงทั่วทุกบริษัท', en: 'Force-delete {n} product(s) and {rows} reference row(s) across all companies' },
+  'plt.mnt_force_blast_hint': { th: 'บริษัทที่จะเสียข้อมูลอ้างอิง (ตรวจให้แน่ใจว่าไม่มีบริษัทจริงในนี้ก่อนลบ):', en: 'Companies that will lose reference rows (make sure no real company is here before deleting):' },
+  'plt.mnt_force_rows': { th: '{n} แถว', en: '{n} rows' },
+  'plt.mnt_force_no_refs': { th: 'ไม่มีแถวอ้างอิง — ลบได้ปลอดภัย', en: 'No reference rows — safe to delete' },
+  'plt.mnt_force_btn': { th: 'ลบแบบบังคับ {n} รายการ', en: 'Force-purge {n}' },
+  'plt.mnt_force_confirm_title': { th: '⚠️ ยืนยันการลบแบบบังคับ', en: '⚠️ Confirm force purge' },
+  'plt.mnt_force_confirm_desc': {
+    th: 'จะลบสินค้า {n} รายการ และลบข้อมูลอ้างอิง {rows} แถวในทุกบริษัทอย่างถาวร กู้คืนไม่ได้ ยืนยันหรือไม่?',
+    en: 'Permanently delete {n} product(s) and {rows} reference row(s) across all companies. This cannot be undone. Confirm?',
+  },
+  'plt.mnt_force_confirm_btn': { th: 'ลบแบบบังคับ', en: 'Force-purge now' },
+  'plt.mnt_force_done': { th: 'ลบแบบบังคับ {n} รายการ + {rows} แถวอ้างอิงเรียบร้อย', en: 'Force-purged {n} product(s) + {rows} reference row(s)' },
 
   // ── App-shell: GodScopeBanner ──
   'plt.scope_acting_as': { th: 'กำลังดูข้อมูลของ', en: 'Viewing data for' },

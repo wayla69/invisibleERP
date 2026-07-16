@@ -501,6 +501,13 @@ async function main() {
   const usedBeforePurge = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length;
   const orphanBeforePurge = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-ORPHAN'))).length;
   ok('Preview is a dry-run — nothing deleted yet', usedBeforePurge === 1 && orphanBeforePurge === 1, JSON.stringify({ usedBeforePurge, orphanBeforePurge }));
+  // Diagnostic: kept_by attributes each surviving (referenced) item to the company whose data keeps it alive —
+  // here HQ, which holds GC-USED on a PO line. Reveals whether leftover shop items are a reset-leftover of the
+  // viewed company or genuinely in use by another company.
+  const gcHqKept = (gcPreview.json.kept_by ?? []).find((k: any) => Number(k.tenant_id) === hq);
+  ok('Preview kept_by attributes a still-referenced item to the company that uses it (HQ ← GC-USED on a PO)',
+    Array.isArray(gcPreview.json.kept_by) && !!gcHqKept && gcHqKept.items >= 1,
+    `kept_by=${JSON.stringify((gcPreview.json.kept_by ?? []).slice(0, 4))}`);
 
   const gcBad = await inj('POST', '/api/admin/item-maintenance/purge-unused-items', owner, { confirm: 'nope' });
   ok('Purge with a wrong confirm phrase → 400 CONFIRM_MISMATCH', gcBad.status === 400 && gcBad.json.error?.code === 'CONFIRM_MISMATCH', `${gcBad.status} ${gcBad.json.error?.code}`);
@@ -520,6 +527,24 @@ async function main() {
   const gcAgain = await inj('POST', '/api/admin/item-maintenance/purge-unused-items', owner, { confirm: 'PURGE-UNUSED-ITEMS' });
   ok('Purge is idempotent — the collected orphans are not re-reported on a second run',
     gcAgain.status === 200 && !(gcAgain.json.item_ids ?? []).includes('GC-ORPHAN'), `items_deleted=${gcAgain.json.items_deleted}`);
+
+  // ── 3g6. FORCE purge — GC-USED survives the normal purge (HQ references it on a PO). Force purge deletes it
+  //         anyway, wiping the cross-tenant reference. Blast-radius preview shows HQ; strong confirm required. ──
+  const fpPreview = await inj('POST', '/api/admin/item-maintenance/force-preview', owner, { item_ids: ['GC-USED'] });
+  const fpHq = (fpPreview.json.by_tenant ?? []).find((k: any) => Number(k.tenant_id) === hq);
+  ok('Force-preview shows the blast radius per company (HQ loses its GC-USED PO line)',
+    fpPreview.status === 200 && fpPreview.json.items === 1 && !!fpHq && fpHq.ref_rows >= 1 && fpPreview.json.total_ref_rows >= 1,
+    `items=${fpPreview.json.items} total_ref_rows=${fpPreview.json.total_ref_rows} by=${JSON.stringify((fpPreview.json.by_tenant ?? []).slice(0, 3))}`);
+  const fpBad = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'PURGE-UNUSED-ITEMS' });
+  ok('Force-purge rejects the normal confirm phrase (needs the stronger FORCE-PURGE-ITEMS) → 400', fpBad.status === 400 && fpBad.json.error?.code === 'CONFIRM_MISMATCH', `${fpBad.status} ${fpBad.json.error?.code}`);
+  const poBefore = (await db.select().from(s.poItems).where(eq(s.poItems.itemId, 'GC-USED'))).length;
+  const fpPurge = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'FORCE-PURGE-ITEMS' });
+  ok('Force-purge (god + strong confirm) deletes the referenced item AND its cross-tenant reference rows',
+    fpPurge.status === 200 && fpPurge.json.status === 'force_purged' && fpPurge.json.items_deleted === 1 && fpPurge.json.ref_rows_deleted >= 1,
+    `${fpPurge.status} ${JSON.stringify({ items: fpPurge.json.items_deleted, refs: fpPurge.json.ref_rows_deleted, blocked: fpPurge.json.blocked })}`);
+  const usedGoneNow = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length === 0;
+  const poGoneNow = (await db.select().from(s.poItems).where(eq(s.poItems.itemId, 'GC-USED'))).length === 0;
+  ok('Force-purge removed the item and its PO line (nothing dangles)', usedGoneNow && poGoneNow, JSON.stringify({ usedGoneNow, poGoneNow, poBefore }));
 
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 

@@ -788,6 +788,125 @@ export const pmrLines = pgTable(
 export type ProjectMaterialRequisition = typeof projectMaterialRequisitions.$inferSelect;
 export type PmrLine = typeof pmrLines.$inferSelect;
 
+// PROJ-25 — Portfolio selection scenario (PPM Wave P4). A named what-if that models which candidate
+// projects to fund within a budget ENVELOPE. DRAFT until COMMITTED: committing is a maker-checker decision
+// (committer <> created_by → SOD_SELF_APPROVAL) that locks the authorised GO-set; an over-envelope commit is
+// rejected unless an exec overrides with a reason. Read-only aggregation over the projects spine — no
+// project row is mutated. One tenant table (0232 canonical RLS, tenant-leading index).
+export const portfolioScenarios = pgTable(
+  'portfolio_scenarios',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    scenarioNo: text('scenario_no').notNull(),               // PSC-#### per tenant
+    name: text('name').notNull(),
+    status: text('status').notNull().default('draft'),       // draft | committed
+    budgetEnvelope: numeric('budget_envelope', { precision: 18, scale: 2 }), // funding ceiling (null = none)
+    objective: text('objective'),
+    notes: text('notes'),
+    overrideReason: text('override_reason'),                 // set when committed over the envelope (exec override)
+    createdBy: text('created_by').notNull(),
+    committedBy: text('committed_by'),                       // checker — must differ from created_by (SoD)
+    committedAt: timestamp('committed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqNo: unique('uq_portfolio_scenario_no').on(t.tenantId, t.scenarioNo), byTenant: index('idx_portfolio_scenarios_tenant').on(t.tenantId, t.status) }),
+);
+
+export const portfolioScenarioItems = pgTable(
+  'portfolio_scenario_items',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    scenarioId: bigint('scenario_id', { mode: 'number' }).notNull().references(() => portfolioScenarios.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    decision: text('decision').notNull().default('include'), // include | exclude
+    priorityScore: numeric('priority_score', { precision: 6, scale: 2 }).notNull().default('0'), // higher = higher priority
+    rationale: text('rationale'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqItem: unique('uq_portfolio_scenario_item').on(t.tenantId, t.scenarioId, t.projectId), byTenant: index('idx_portfolio_scenario_items_tenant').on(t.tenantId, t.scenarioId) }),
+);
+export type PortfolioScenario = typeof portfolioScenarios.$inferSelect;
+export type PortfolioScenarioItem = typeof portfolioScenarioItems.$inferSelect;
+
+// PROJ-26 — Project phase-gate governance (PPM Wave P4). A stage-gate over a project's lifecycle: a gate is
+// SUBMITTED for review (pending) to advance the project to a target phase, then an INDEPENDENT reviewer
+// records a GO / HOLD / KILL decision (decider <> submitter → SOD_SELF_APPROVAL). A GO advances the project;
+// the current phase is the target of the latest GO gate. One tenant table (0232 canonical RLS, tenant idx).
+export const projectPhaseGates = pgTable(
+  'project_phase_gates',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    projectId: bigint('project_id', { mode: 'number' }).notNull().references(() => projects.id),
+    gateKey: text('gate_key').notNull(),                     // e.g. G1_PLANNING
+    name: text('name'),
+    targetPhase: text('target_phase').notNull(),             // planning | execution | closeout | closed
+    fromPhase: text('from_phase').notNull(),                 // current phase at submit time (audit)
+    status: text('status').notNull().default('pending'),     // pending | go | hold | kill
+    readiness: text('readiness'),                            // submitter's readiness / exit-criteria note
+    submittedBy: text('submitted_by').notNull(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).defaultNow(),
+    decidedBy: text('decided_by'),                           // reviewer — must differ from submitted_by (SoD)
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decisionNotes: text('decision_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_project_phase_gates_tenant').on(t.tenantId, t.projectId), byProject: index('idx_project_phase_gates_project').on(t.projectId, t.status) }),
+);
+export type ProjectPhaseGate = typeof projectPhaseGates.$inferSelect;
+
+// PROJ-27 — Program benefits realization (PPM Wave P4). Benefits justify a program's investment: a program
+// declares expected benefits (baseline/target/target_date/owner); actuals are logged over time (append-only);
+// the realization view compares actual vs target and flags shortfalls. Closing a benefit realized/not_realized
+// is a maker-checker sign-off (confirmer <> created_by → SOD_SELF_APPROVAL). Programs are identified by
+// projects.program_code (no master table). Two tenant tables (0232 canonical RLS, tenant-leading indexes).
+export const programBenefits = pgTable(
+  'program_benefits',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    programCode: text('program_code').notNull(),             // matches projects.program_code
+    benefitNo: text('benefit_no').notNull(),                 // PB-#### per tenant
+    name: text('name').notNull(),
+    category: text('category').notNull().default('financial'), // financial | non_financial
+    unit: text('unit'),
+    baselineValue: numeric('baseline_value', { precision: 18, scale: 2 }).notNull().default('0'),
+    targetValue: numeric('target_value', { precision: 18, scale: 2 }).notNull(),
+    targetDate: date('target_date'),
+    owner: text('owner'),
+    status: text('status').notNull().default('open'),        // open | realized | not_realized
+    createdBy: text('created_by').notNull(),
+    confirmedBy: text('confirmed_by'),                       // reviewer — must differ from created_by (SoD)
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    confirmNotes: text('confirm_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ uqNo: unique('uq_program_benefit_no').on(t.tenantId, t.benefitNo), byTenant: index('idx_program_benefits_tenant').on(t.tenantId, t.programCode) }),
+);
+
+export const programBenefitMeasurements = pgTable(
+  'program_benefit_measurements',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+    benefitId: bigint('benefit_id', { mode: 'number' }).notNull().references(() => programBenefits.id),
+    measuredValue: numeric('measured_value', { precision: 18, scale: 2 }).notNull(),
+    measuredAt: date('measured_at').notNull(),
+    note: text('note'),
+    recordedBy: text('recorded_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({ byTenant: index('idx_program_benefit_measurements_tenant').on(t.tenantId, t.benefitId) }),
+);
+export type ProgramBenefit = typeof programBenefits.$inferSelect;
+export type ProgramBenefitMeasurement = typeof programBenefitMeasurements.$inferSelect;
+
 export type Project = typeof projects.$inferSelect;
 export type ProjectChangeOrder = typeof projectChangeOrders.$inferSelect;
 export type ProjectHealthSnapshot = typeof projectHealthSnapshots.$inferSelect;

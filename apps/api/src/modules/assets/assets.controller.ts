@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { AssetsService } from './assets.service';
 import { CreateCategoryBody, AcquireAssetBody, RunDepreciationBody, DisposeAssetBody, RegisterFromGrBody, OpenCipBody, AddCipCostBody, SettleCipBody, type CreateCategoryDto, type AcquireAssetDto, type DisposeAssetDto, type RegisterFromGrDto, type OpenCipDto, type AddCipCostDto, type SettleCipDto } from './dto';
 import { qint, qintOpt } from '../../common/query';
@@ -33,7 +34,7 @@ export class AssetsController {
 
   // ── FA-11 custody-change maker-checker (a scanned move needs a DIFFERENT user's approval) ──
   @Get('custody') listCustody(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listCustodyRequests(status, u); }
-  @Post('custody/:reqNo/approve') approveCustody(@Param('reqNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveCustody(no, u); }
+  @Post('custody/:reqNo/approve') approveCustody(@Param('reqNo') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveCustody(no, u, b?.self_approval_reason); }
   @Post('custody/:reqNo/reject') rejectCustody(@Param('reqNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCustody(no, u, b?.reason); }
 
   // ── Asset audit (physical count by scan) → reconcile against the register ──
@@ -56,7 +57,7 @@ export class AssetsController {
   @Get('registrations/eligible') eligibleFromGr(@Query('gr_no') grNo: string, @CurrentUser() u: JwtUser) { return this.svc.eligibleFromGr(grNo, u); }
   @Get('registrations') listRegistrations(@Query('status') status: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.listRegistrations(status, u); }
   @Post('registrations') registerFromGr(@Body(new ZodValidationPipe(RegisterFromGrBody)) b: RegisterFromGrDto, @CurrentUser() u: JwtUser) { return this.svc.registerFromGr(b, u); }
-  @Post('registrations/:regNo/approve') approveReg(@Param('regNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveRegistration(no, u); }
+  @Post('registrations/:regNo/approve') approveReg(@Param('regNo') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveRegistration(no, u, b?.self_approval_reason); }
   @Post('registrations/:regNo/reject') rejectReg(@Param('regNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectRegistration(no, u, b?.reason); }
   @Get(':assetNo/schedule') schedule(@Param('assetNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.depreciationSchedule(u, no); }
   // Disposal (FA-03) + FA-09 maker-checker: a dispose request posts a Draft JE + flags disposal_pending; a DIFFERENT user must approve before it is effective.
@@ -84,6 +85,6 @@ export class AssetsController {
   @Get('cip/:cipNo') getCip(@Param('cipNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.getCip(no, u); }
   @Post('cip/:cipNo/cost') addCipCost(@Param('cipNo') no: string, @Body(new ZodValidationPipe(AddCipCostBody)) b: AddCipCostDto, @CurrentUser() u: JwtUser) { return this.svc.addCipCost(no, b, u); }
   @Post('cip/:cipNo/settle') settleCip(@Param('cipNo') no: string, @Body(new ZodValidationPipe(SettleCipBody)) b: SettleCipDto, @CurrentUser() u: JwtUser) { return this.svc.settleCip(no, b, u); }
-  @Post('cip/:cipNo/settle/approve') approveCip(@Param('cipNo') no: string, @CurrentUser() u: JwtUser) { return this.svc.approveCipSettlement(no, u); }
+  @Post('cip/:cipNo/settle/approve') approveCip(@Param('cipNo') no: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveCipSettlement(no, u, b?.self_approval_reason); }
   @Post('cip/:cipNo/settle/reject') rejectCip(@Param('cipNo') no: string, @Body(new ZodValidationPipe(RevalRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCipSettlement(no, u, b?.reason); }
 }

@@ -115,6 +115,15 @@ export const SUITE_LABELS: Record<SuiteKey, { en: string; th: string }> = {
 export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   // Free / trial-limited: base + customer/self-service only.
   free: ['core', 'portal', 'selfservice'],
+  // SME (single-operator edition, docs/49): the full day-to-day operational ERP so one owner can run the
+  // whole business from one place — finance, sales, inventory, procurement, planning, CRM/loyalty, AI — but
+  // NOT the heavy enterprise verticals (manufacturing/projects/hcm/realestate) and single-location only
+  // (features.users/locations cap the seats). The self-approval maker-checker relaxation is orthogonal
+  // (control_profile='sme'), not a suite. Upgrading to Enterprise adds the verticals + multi-seat.
+  sme: [
+    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'procurement', 'planning', 'crm_loyalty', 'ai',
+  ],
   // Standard (current 'starter'): SME finance-first core.
   starter: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice'],
   // Business (mid-tier, 1.9): Standard + procurement + multi-branch. Closes the 5× price jump between

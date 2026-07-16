@@ -1,10 +1,11 @@
-import { Inject, Injectable, Optional, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { revContracts, revBillingSchedules, revrecSchedules } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // ── Track D — Wave 1 (REV-24): contract-asset / contract-liability split + independent billing schedule ──
 // TFRS 15 / IFRS 15 / ASC 606 §105-107. Billing is DECOUPLED from revenue recognition (RevRecService,
@@ -87,15 +88,14 @@ export class RevBillingService {
   // ── POST :id/bill — CHECKER raises an invoice for a scheduled milestone. Reclasses the earned contract
   //    asset (1265 → 1100 AR) and parks any billing-in-excess as a contract liability (2410). SoD: the biller
   //    must differ from the milestone's maker (created_by), else SOD_SELF_BILLING.
-  async bill(contractId: number, dto: BillDto, user: JwtUser) {
+  async bill(contractId: number, dto: BillDto, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const c = await this.assertContract(contractId);
     const [row] = await db.select().from(revBillingSchedules).where(and(eq(revBillingSchedules.id, Number(dto.billing_schedule_id)), eq(revBillingSchedules.contractId, contractId))).limit(1);
     if (!row) throw new NotFoundException({ code: 'MILESTONE_NOT_FOUND', message: `Billing milestone ${dto.billing_schedule_id} not found for contract ${contractId}`, messageTh: 'ไม่พบงวดวางบิล' });
     if (row.status === 'Billed') throw new BadRequestException({ code: 'ALREADY_BILLED', message: 'Milestone already billed', messageTh: 'งวดนี้วางบิลแล้ว' });
     // Maker-checker (REV-24): the invoicer cannot be the person who defined the milestone.
-    if (row.createdBy && row.createdBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_BILLING', message: 'The user who defined a billing milestone may not bill it (segregation of duties)', messageTh: 'ผู้กำหนดงวดวางบิลไม่สามารถวางบิลเองได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: row.createdBy, event: 'rev.billing.bill', ref: String(contractId), amount: n(row.plannedAmount), reason: selfApprovalReason, code: 'SOD_SELF_BILLING', message: 'The user who defined a billing milestone may not bill it (segregation of duties)', messageTh: 'ผู้กำหนดงวดวางบิลไม่สามารถวางบิลเองได้ (แบ่งแยกหน้าที่)' });
 
     const billAmount = round4(n(row.plannedAmount));
     const billedBefore = round4(n(c.billedAmount));

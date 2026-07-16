@@ -21,6 +21,7 @@ const ApproveBudgetBody = z.object({
   account_code: z.string().min(1),
   cost_center_code: z.string().optional(),
   period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  self_approval_reason: z.string().max(500).optional(),
 });
 type ApproveBudgetBodyT = z.infer<typeof ApproveBudgetBody>;
 
@@ -52,9 +53,9 @@ export class BudgetController {
   @Get('budgets/pending') @Permissions('approvals', 'gl_close', 'exec')
   pendingBudgets(@Query('fiscal_year') fy?: string) { return this.svc.listBudgets({ fiscal_year: qintOpt('fiscal_year', fy), status: 'PendingApproval' }); }
   @Post('budgets/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveBudget(@Body(new ZodValidationPipe(ApproveBudgetBody)) b: ApproveBudgetBodyT, @CurrentUser() u: JwtUser) { return this.svc.approveBudget({ ...b, tenantId: u.tenantId ?? null }, u); }
+  approveBudget(@Body(new ZodValidationPipe(ApproveBudgetBody)) b: ApproveBudgetBodyT, @CurrentUser() u: JwtUser) { return this.svc.approveBudget({ ...b, tenantId: u.tenantId ?? null }, u, b.self_approval_reason); }
   @Post('budgets/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  rejectBudget(@Body(new ZodValidationPipe(ApproveBudgetBody)) b: ApproveBudgetBodyT, @CurrentUser() u: JwtUser) { return this.svc.rejectBudget({ ...b, tenantId: u.tenantId ?? null }, u); }
+  rejectBudget(@Body(new ZodValidationPipe(ApproveBudgetBody)) b: ApproveBudgetBodyT, @CurrentUser() u: JwtUser) { return this.svc.rejectBudget({ ...b, tenantId: u.tenantId ?? null }, u, b.self_approval_reason); }
 
   @Delete('budgets')
   remove(@Query('fiscal_year') fy: string, @Query('account_code') account: string, @Query('cost_center_code') cc?: string, @Query('period') period?: string) {

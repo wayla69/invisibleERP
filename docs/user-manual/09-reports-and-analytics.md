@@ -1,12 +1,38 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.9** _(2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
+**Status: DRAFT v0.9** _(2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
+Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
+individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
 `reputation_ga4_sync` scheduled jobs + the dedicated `/reputation` screen, docs/47, control MKT-14;
 2026-07-13: audience export gets a dedicated screen `/crm/audience-export` — preview + register + ROPA-status banner; demand-forecast manual-select model list corrected to match the real 9 backend algorithms (was stale, missing weather/th_holiday/dow_seasonal/etc.); 2026-07-13: audience export now also REMOVES members who withdraw marketing consent from the external audiences (Meta/Google/webhook) on every run — see the register’s rows_removed; 2026-07-13: audience export can now push DIRECTLY to Meta Custom Audiences / Google Customer Match — set the env creds (see .env.example); each platform gets its own register row; 2026-07-12: audience export — `audience_export_sync` pushes SHA-256-hashed, consent-filtered audiences (fail-closed without the DPO's ROPA entry; preview at CRM audience-export); 2026-07-12: menu affinity — คู่เมนูขายด้วยกัน tab (co-purchase support/confidence/lift, per daypart) + schedulable `menu_affinity` report; 2026-07-10: menu engineering — branch picker + quantity-weighted average-margin threshold + on-screen thresholds; 2026-07-09: added the company-level AI opt-out (PDPA) note in the AI-assistant section)_
 
 This chapter is for **managers, planners and executives** — and anyone who needs
 reports. It covers dashboards, Excel / PDF reports, AI-driven forecasting and
 replenishment, anomaly detection, and the AI assistant.
+
+---
+
+## 0. Analytics Home — one door to everything
+
+**Screen:** `/analytics` · **Where:** sidebar → **วางแผน & BI → ศูนย์วิเคราะห์ (Analytics Home)** ·
+**Permission:** any of `exec`, `dashboard`, `planner`, `warehouse`, `marketing`
+
+Instead of hunting through the sidebar for the right analytics tool, open **ศูนย์วิเคราะห์** — a single hub
+that lays out every analytics surface as labelled tiles, grouped by what you want to do:
+
+| Group | Tiles |
+|-------|-------|
+| **สำรวจ & ถามข้อมูล** (Explore & ask) | Insights · BI Analytics · Analytics Studio · NL Analytics |
+| **ติดตาม & แดชบอร์ด** (Monitor & dashboards) | Dashboard · Role Dashboards · Saved Views |
+| **ส่งออก & กำหนดเวลา** (Deliver & schedule) | Scheduled Reports |
+| **วางแผน & พยากรณ์** (Plan & forecast) | Planning · Budget · Demand · Profitability · MMM |
+
+Click any tile to jump straight to that screen. The hub is only a launcher — it shows the full map of what
+exists, and each destination still enforces its own permissions (a tile you open without access shows that
+screen's normal access message). The original sidebar links remain, so existing bookmarks keep working.
+
+**Expected result:** A single, task-grouped landing page for all reporting and analytics.
 
 ---
 
@@ -369,6 +395,41 @@ A lighter, account-level budget that compares directly against the posted ledger
 **Expected result:** A management view of where actual performance is running
 ahead of or behind budget, by account — and, when the policy is on, over-budget
 purchases are flagged, confirmed or blocked at the point of approval.
+
+---
+
+## 5b. Marketing Mix Modeling — MMM (`/mmm`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Mix (MMM)**. **Who:** `marketing` or `exec`.
+
+MMM estimates how much each marketing channel (Facebook, Google, TikTok, a promotion…)
+contributes to sales, then suggests how to split a budget for the best return. It reads
+signals you bring into the system — it never guesses from your live sales tables directly.
+
+The workspace has four tabs:
+
+1. **นำเข้าข้อมูล (Ingest)** — if you don't have an automatic integration feeding the model,
+   enter data by hand here: **Channel sales** (date · channel · revenue · units) and **Social
+   sentiment** (date · platform · mention count · sentiment score −1…1). Add a row per line and
+   press **นำเข้า (Ingest)** — the rows land in the Signals tab immediately and are re-ingestable
+   (re-entering the same day/channel updates rather than duplicates). Skip this tab entirely if an
+   integration already loads your signals.
+2. **สัญญาณ (Signals)** — the marketing signals ingested for the last 30 days: revenue and units
+   per channel, and social mention volume + average sentiment per platform. Read-only view of
+   whatever the Ingest tab or your integration has loaded.
+3. **รันโมเดล (Model)** — choose a **window (days)** and enter the **spend per channel**
+   (add a row per channel), then press **รันโมเดล (Run model)**. Every run is recorded with a
+   run number (`MMM-YYYYMMDD-NNN`), who ran it, and the exact inputs — so any budget
+   recommendation can be reviewed and reproduced later. Prior runs are listed below the form;
+   **click any run** to open its full per-channel results (ROI / lift / recommended budget).
+4. **คำแนะนำ (Recommendation)** — the latest run's result: each channel's **ROI**, its
+   **share of the modelled lift**, and the **recommended budget** (the same total, re-split
+   toward the higher-ROI channels). A channel with no spend shows ROI **—** (undefined, never
+   a fake "infinite" number), and the recommended split always adds back to exactly your total.
+
+**Good to know:** MMM is analysis only — it posts nothing to the general ledger. Each company
+sees only its own signals and runs. The v1 model is a transparent lift-share heuristic (a
+statistical regression can replace it later without changing this screen).
 
 ---
 

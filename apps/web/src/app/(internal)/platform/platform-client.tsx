@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowUpCircle, BadgeCheck, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
+import { INTERNAL_NAV } from '@/lib/nav';
 import { baht, num, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useLang } from '@/lib/i18n';
@@ -52,6 +53,7 @@ interface Company {
   created_at: string | null;
   setup_complete?: boolean;
   tags?: string[];
+  control_profile?: 'enterprise' | 'sme'; // docs/49 — SME single-user edition
 }
 
 interface SignupRequest {
@@ -107,7 +109,14 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const [resetConfirm, setResetConfirm] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [purgeConfirm, setPurgeConfirm] = useState('');
+  // docs/49 H1 — per-tenant SME settings (this company's own copy, editable after provisioning).
+  const [smeEmail, setSmeEmail] = useState('');
+  const [smeHiddenGroups, setSmeHiddenGroups] = useState<string[]>([]);
   useEffect(() => { setTagsInput((detail.data?.tags ?? []).join(', ')); }, [detail.data]);
+  useEffect(() => {
+    setSmeEmail(detail.data?.sme_prefs?.accountant_email ?? '');
+    setSmeHiddenGroups(detail.data?.sme_prefs?.hidden_nav_groups ?? []);
+  }, [detail.data]);
   useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); setPurgeConfirm(''); }, [id]);
 
   const saveTags = useMutation({
@@ -124,6 +133,13 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const extendTrial = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
     onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // docs/49 H1 — save this company's SME overrides (hidden nav groups + accountant email; the server
+  // re-points the SME-01 review subscription to the new email automatically).
+  const saveSmePrefs = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/sme-prefs`, { method: 'POST', body: JSON.stringify({ hidden_nav_groups: smeHiddenGroups, accountant_email: smeEmail.trim() || null }) }),
+    onSuccess: () => { notifySuccess(t('plt.sme_tenant_saved')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
   // Factory reset — the danger-zone section renders only for a SUSPENDED company (mirrors the server's
@@ -241,6 +257,41 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                   <Button size="sm" variant="outline" onClick={() => extendTrial.mutate()} disabled={extendTrial.isPending}>{t('plt.drawer_extend_trial_btn')}</Button>
                 </div>
               </div>
+
+              {/* docs/49 H1 — per-tenant SME settings (only for an 'sme' control profile). This company's
+                  own copy of the SME prefs, editable after provisioning; the SME-01 review subscription
+                  follows the accountant email automatically on the server. */}
+              {d.control_profile === 'sme' && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center gap-1.5 text-xs font-medium">
+                    <BadgeCheck className="size-3.5 text-sky-600 dark:text-sky-400" /> {t('plt.sme_tenant_title')}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t('plt.sme_tenant_sub_note')}</p>
+                  <div className="grid gap-1">
+                    <Label className="text-xs">{t('plt.sme_def_accountant_email')}</Label>
+                    <Input type="email" value={smeEmail} onChange={(e) => setSmeEmail(e.target.value)} placeholder="accountant@example.com" />
+                    <p className="text-xs text-muted-foreground">{t('plt.sme_def_accountant_hint')}</p>
+                  </div>
+                  <div className="grid gap-1">
+                    <Label className="text-xs">{t('plt.sme_def_hidden_groups')}</Label>
+                    <div className="grid gap-1.5 sm:grid-cols-2">
+                      {INTERNAL_NAV.map((g) => (
+                        <label key={g.title} className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={smeHiddenGroups.includes(g.title)}
+                            onChange={(e) => setSmeHiddenGroups(e.target.checked ? [...smeHiddenGroups, g.title] : smeHiddenGroups.filter((k) => k !== g.title))}
+                          />
+                          <span className="truncate">{t(g.title)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={() => saveSmePrefs.mutate()} disabled={saveSmePrefs.isPending}>
+                    {saveSmePrefs.isPending ? t('plt.sme_def_saving') : t('plt.drawer_save')}
+                  </Button>
+                </div>
+              )}
 
               {/* Tags/segments */}
               <div className="space-y-1">
@@ -377,15 +428,32 @@ export default function PlatformConsole({
   // company's factory-reset/purge leaves its catalogue rows behind and they keep showing in every tenant's
   // /shop. Preview counts the items no tenant references any more (cross-tenant, under the @PlatformAdmin
   // bypass); purge deletes exactly those. Manual (not an auto-query) — the scan is a heavy cross-tenant sweep.
-  const [unusedPreview, setUnusedPreview] = useState<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number } | null>(null);
+  type KeptBy = { tenant_id: number | null; code: string | null; name: string | null; items: number };
+  type UnusedPreview = { total: number; item_ids: string[]; sampled: boolean; ref_columns: number; kept_by: KeptBy[] };
+  const [unusedPreview, setUnusedPreview] = useState<UnusedPreview | null>(null);
   const checkUnused = useMutation({
-    mutationFn: () => api<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number }>('/api/admin/item-maintenance/unused-items'),
+    mutationFn: () => api<UnusedPreview>('/api/admin/item-maintenance/unused-items'),
     onSuccess: (r) => { setUnusedPreview(r); notifyInfo(t('plt.mnt_preview_done', { n: r.total })); },
     onError: (e: any) => notifyError(e.message),
   });
   const purgeUnused = useMutation({
     mutationFn: () => api<{ items_deleted: number; images_deleted: number }>('/api/admin/item-maintenance/purge-unused-items', { method: 'POST', body: JSON.stringify({ confirm: 'PURGE-UNUSED-ITEMS' }) }),
     onSuccess: (r) => { notifySuccess(t('plt.mnt_purge_done', { n: r.items_deleted })); setUnusedPreview(null); },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // FORCE purge (DANGER) — deletes products even if a company still uses them, wiping the references across
+  // EVERY company. force-preview is the mandatory blast-radius report shown before the destructive call.
+  type ForcePreview = { items: number; total_ref_rows: number; by_tenant: (KeptBy & { ref_rows: number })[] };
+  const [forcePreview, setForcePreview] = useState<ForcePreview | null>(null);
+  const checkForce = useMutation({
+    mutationFn: () => api<ForcePreview>('/api/admin/item-maintenance/force-preview', { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (r) => { setForcePreview(r); notifyInfo(t('plt.mnt_force_preview_done', { n: r.items, rows: r.total_ref_rows })); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const forcePurge = useMutation({
+    mutationFn: () => api<{ items_deleted: number; ref_rows_deleted: number }>('/api/admin/item-maintenance/force-purge', { method: 'POST', body: JSON.stringify({ confirm: 'FORCE-PURGE-ITEMS' }) }),
+    onSuccess: (r) => { notifySuccess(t('plt.mnt_force_done', { n: r.items_deleted, rows: r.ref_rows_deleted })); setForcePreview(null); setUnusedPreview(null); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -466,16 +534,45 @@ export default function PlatformConsole({
     onError: (e: any) => notifyError(e.message),
   });
 
-  const [prov, setProv] = useState({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant' });
+  const [prov, setProv] = useState({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant', control_profile: 'enterprise' });
   const [provOpen, setProvOpen] = useState(false);
   const provision = useMutation({
     mutationFn: () => api('/api/admin/tenants', { method: 'POST', body: JSON.stringify(prov) }),
     onSuccess: () => {
       notifySuccess(t('plt.prov_created', { name: prov.company_name }));
-      setProv({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant' });
+      setProv({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant', control_profile: 'enterprise' });
       setProvOpen(false);
       refresh();
     },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // docs/49 — upgrade-only edition transition (SME → Enterprise). Enterprise rows never show the button.
+  const upgradeProfile = useMutation({
+    mutationFn: (c: Company) => {
+      if (!confirm(t('plt.sme_upgrade_confirm', { name: c.name }))) return Promise.resolve(null);
+      return api(`/api/admin/tenants/${c.id}/control-profile`, { method: 'POST', body: JSON.stringify({ control_profile: 'enterprise' }) });
+    },
+    onSuccess: (d, c) => { if (d) { notifySuccess(t('plt.sme_upgraded', { name: c.name })); refresh(); } },
+    onError: (e: any) => notifyError(e.message),
+  });
+
+  // docs/49 — platform-wide SME provisioning defaults (identical for every new SME at creation).
+  const smeDefaults = useQuery<{ hidden_nav_groups: string[]; accountant_email: string | null; updated_by: string | null }>({
+    queryKey: ['sme-defaults'],
+    queryFn: () => api('/api/admin/sme-defaults'),
+  });
+  const [smeEmail, setSmeEmail] = useState('');
+  const [smeHiddenGroups, setSmeHiddenGroups] = useState<string[]>([]);
+  useEffect(() => {
+    if (smeDefaults.data) {
+      setSmeEmail(smeDefaults.data.accountant_email ?? '');
+      setSmeHiddenGroups(smeDefaults.data.hidden_nav_groups ?? []);
+    }
+  }, [smeDefaults.data]);
+  const saveSmeDefaults = useMutation({
+    mutationFn: () => api('/api/admin/sme-defaults', { method: 'POST', body: JSON.stringify({ hidden_nav_groups: smeHiddenGroups, accountant_email: smeEmail.trim() || null }) }),
+    onSuccess: () => { notifySuccess(t('plt.sme_def_saved')); smeDefaults.refetch(); },
     onError: (e: any) => notifyError(e.message),
   });
 
@@ -524,6 +621,11 @@ export default function PlatformConsole({
       </div>
     ) },
     { key: 'status', label: t('plt.col_status'), render: (c) => statusBadge(c.purged ? 'Purged' : c.deleted ? 'Deleted' : c.status, t) },
+    { key: 'control_profile', label: t('plt.col_edition'), render: (c) => (
+      c.control_profile === 'sme'
+        ? <Badge variant="secondary" className="bg-sky-500/15 text-sky-700 dark:text-sky-300">SME</Badge>
+        : <Badge variant="outline">Enterprise</Badge>
+    ) },
     { key: 'plan_code', label: t('plt.col_plan'), render: (c) => c.plan_code ?? '—' },
     { key: 'users', label: t('plt.col_users'), align: 'right', sortable: true, render: (c) => c.users },
     { key: 'trial_ends_at', label: t('plt.col_trial_until'), render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },
@@ -534,6 +636,11 @@ export default function PlatformConsole({
         <Button size="sm" variant={c.suspended ? 'outline' : 'ghost'} onClick={() => suspend.mutate(c)} disabled={suspend.isPending || c.deleted}>
           {c.suspended ? <><Play className="size-3.5" /> {t('plt.action_reactivate')}</> : <><Pause className="size-3.5" /> {t('plt.action_suspend')}</>}
         </Button>
+        {c.control_profile === 'sme' && !c.deleted && (
+          <Button size="sm" variant="outline" onClick={() => upgradeProfile.mutate(c)} disabled={upgradeProfile.isPending} title={t('plt.sme_upgrade_title')}>
+            <ArrowUpCircle className="size-3.5" /> {t('plt.sme_upgrade_btn')}
+          </Button>
+        )}
         {c.deleted && (
           <Button size="sm" variant="outline" onClick={() => setDetailId(c.id)}>{t('plt.drawer_restore_btn')}</Button>
         )}
@@ -582,6 +689,14 @@ export default function PlatformConsole({
             <div className="grid gap-1"><Label>{t('plt.prov_admin_password')}</Label><Input type="password" value={prov.admin_password} onChange={(e) => setProv({ ...prov, admin_password: e.target.value })} /></div>
           </div>
           <div className="grid gap-1"><Label>{t('plt.prov_email')}</Label><Input type="email" value={prov.email} onChange={(e) => setProv({ ...prov, email: e.target.value })} /></div>
+          {/* docs/49 — edition chosen AT CREATION; upgrade-only afterwards (SME → Enterprise, never back). */}
+          <div className="grid gap-1"><Label>{t('plt.prov_edition')}</Label>
+            <Select className="w-auto" value={prov.control_profile} onChange={(e) => setProv({ ...prov, control_profile: e.target.value })}>
+              <option value="enterprise">{t('plt.edition_enterprise')}</option>
+              <option value="sme">{t('plt.edition_sme')}</option>
+            </Select>
+            <p className="text-xs text-muted-foreground">{prov.control_profile === 'sme' ? t('plt.prov_edition_sme_hint') : t('plt.prov_edition_ent_hint')}</p>
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={() => provision.mutate()} disabled={provision.isPending || !prov.company_name || !prov.tenant_code || !prov.admin_username || !prov.admin_password}>
@@ -886,6 +1001,7 @@ export default function PlatformConsole({
   );
 
   const maintenanceTab = (
+    <div className="space-y-4">
     <Card className="space-y-4 p-4">
       <div className="flex items-start gap-3">
         <Database className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -929,6 +1045,120 @@ export default function PlatformConsole({
           )}
         </div>
       )}
+      {unusedPreview && unusedPreview.kept_by.length > 0 && (
+        <div className="rounded-md border p-3 text-sm">
+          <div className="mb-1 font-medium">{t('plt.mnt_kept_title')}</div>
+          <p className="mb-2 text-xs text-muted-foreground">{t('plt.mnt_kept_hint')}</p>
+          <ul className="space-y-1">
+            {unusedPreview.kept_by.slice(0, 20).map((k, i) => (
+              <li key={k.tenant_id ?? `shared-${i}`} className="flex items-center justify-between gap-3">
+                <span>{k.tenant_id == null ? t('plt.mnt_kept_shared') : `${k.name ?? k.code ?? `#${k.tenant_id}`}${k.code ? ` (${k.code})` : ''}`}</span>
+                <Badge variant="secondary">{t('plt.mnt_kept_items', { n: k.items })}</Badge>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+
+    <Card className="space-y-4 border-destructive/40 p-4">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+        <div>
+          <h3 className="font-medium text-destructive">{t('plt.mnt_force_title')}</h3>
+          <p className="text-sm text-muted-foreground">{t('plt.mnt_force_desc')}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={() => checkForce.mutate()} disabled={checkForce.isPending}>
+          {checkForce.isPending ? t('plt.mnt_checking') : t('plt.mnt_force_check')}
+        </Button>
+        {forcePreview && (
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="destructive" disabled={forcePreview.items === 0 || forcePurge.isPending}>
+                {t('plt.mnt_force_btn', { n: forcePreview.items })}
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="text-destructive">{t('plt.mnt_force_confirm_title')}</DialogTitle>
+                <DialogDescription>{t('plt.mnt_force_confirm_desc', { n: forcePreview.items, rows: forcePreview.total_ref_rows })}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="destructive" onClick={() => forcePurge.mutate()} disabled={forcePurge.isPending}>
+                  {forcePurge.isPending ? t('plt.mnt_purging') : t('plt.mnt_force_confirm_btn')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+      {forcePreview && (
+        <div className="rounded-md border border-destructive/40 p-3 text-sm">
+          <div className="mb-1 font-medium text-destructive">{t('plt.mnt_force_result', { n: forcePreview.items, rows: forcePreview.total_ref_rows })}</div>
+          {forcePreview.by_tenant.length > 0 ? (
+            <>
+              <p className="mb-2 text-xs text-muted-foreground">{t('plt.mnt_force_blast_hint')}</p>
+              <ul className="space-y-1">
+                {forcePreview.by_tenant.slice(0, 20).map((k, i) => (
+                  <li key={k.tenant_id ?? `shared-${i}`} className="flex items-center justify-between gap-3">
+                    <span>{k.tenant_id == null ? t('plt.mnt_kept_shared') : `${k.name ?? k.code ?? `#${k.tenant_id}`}${k.code ? ` (${k.code})` : ''}`}</span>
+                    <Badge variant="destructive">{t('plt.mnt_force_rows', { n: k.ref_rows })}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('plt.mnt_force_no_refs')}</p>
+          )}
+        </div>
+      )}
+    </Card>
+    </div>
+  );
+
+  // ── docs/49 — platform-wide SME provisioning defaults ─────────────────────
+  // What every NEW SME company is stamped with at creation (identical for all SMEs). Changing these
+  // affects only future companies — existing tenants keep their stamped copy.
+  const smeDefaultsTab = (
+    <Card className="space-y-4 p-4">
+      <div className="flex items-start gap-3">
+        <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
+        <div>
+          <h3 className="font-medium">{t('plt.sme_def_title')}</h3>
+          <p className="text-sm text-muted-foreground">{t('plt.sme_def_desc')}</p>
+        </div>
+      </div>
+      <div className="grid max-w-md gap-1">
+        <Label>{t('plt.sme_def_accountant_email')}</Label>
+        <Input type="email" value={smeEmail} onChange={(e) => setSmeEmail(e.target.value)} placeholder="accountant@example.com" />
+        <p className="text-xs text-muted-foreground">{t('plt.sme_def_accountant_hint')}</p>
+      </div>
+      <div className="grid gap-1">
+        <Label>{t('plt.sme_def_hidden_groups')}</Label>
+        <p className="text-xs text-muted-foreground">{t('plt.sme_def_hidden_hint')}</p>
+        <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+          {INTERNAL_NAV.map((g) => (
+            <label key={g.title} className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={smeHiddenGroups.includes(g.title)}
+                onChange={(e) => setSmeHiddenGroups(e.target.checked ? [...smeHiddenGroups, g.title] : smeHiddenGroups.filter((k) => k !== g.title))}
+              />
+              <span className="truncate">{t(g.title)}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button onClick={() => saveSmeDefaults.mutate()} disabled={saveSmeDefaults.isPending}>
+          {saveSmeDefaults.isPending ? t('plt.sme_def_saving') : t('plt.sme_def_save')}
+        </Button>
+        {smeDefaults.data?.updated_by && (
+          <span className="text-xs text-muted-foreground">{t('plt.sme_def_last_updated', { by: smeDefaults.data.updated_by })}</span>
+        )}
+      </div>
     </Card>
   );
 
@@ -948,6 +1178,7 @@ export default function PlatformConsole({
           { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `${t('plt.tab_notifications')} (${notifs.data?.unread_count})` : t('plt.tab_notifications'), content: notificationsTab },
           { key: 'activity', label: t('plt.tab_activity'), content: activityTab },
           { key: 'maintenance', label: t('plt.tab_maintenance'), content: maintenanceTab },
+          { key: 'sme', label: t('plt.tab_sme'), content: smeDefaultsTab },
         ]}
       />
       <CompanyDrawer id={detailId} onClose={() => setDetailId(null)} onChanged={refresh} />

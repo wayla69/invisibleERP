@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, hrPositions, jobRequisitions, candidates, applications, offers } from '../../database/schema';
 import { StatusLogService } from '../../common/status-log.service';
 import { isUniqueViolation } from '../../common/db-error';
+import { assertMakerChecker } from '../../common/control-profile';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -71,13 +72,13 @@ export class HcmRecruitingService {
   }
 
   // HR-04 maker-checker: the approver must differ from the requester; only a pending/draft requisition may move.
-  async approveRequisition(reqNo: string, user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-approve WITH self_approval_reason — logged, reviewed by SME-01.
+  async approveRequisition(reqNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const req = await this.reqByNo(reqNo);
     if (req.status === 'approved') return { req_no: reqNo, status: 'approved', already: true };
     if (!['pending', 'draft'].includes(req.status))
       throw new BadRequestException({ code: 'REQUISITION_NOT_PENDING', message: `Requisition ${reqNo} is ${req.status}`, messageTh: 'ใบขออัตราไม่อยู่สถานะรออนุมัติ' });
-    if (req.requestedBy && req.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own requisition', messageTh: 'ผู้ขอไม่สามารถอนุมัติใบขออัตราของตนเองได้' });
+    await assertMakerChecker(this.db, { user, maker: req.requestedBy, event: 'hcm.requisition.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own requisition', messageTh: 'ผู้ขอไม่สามารถอนุมัติใบขออัตราของตนเองได้' });
     await this.db.update(jobRequisitions).set({ status: 'approved', approvedBy: user.username }).where(eq(jobRequisitions.id, Number(req.id)));
     await this.statusLog.log('JOBREQ', String(req.id), req.status, 'Approved', user.username, `HR-04 requisition approved (headcount ${req.headcount})`);
     return { req_no: reqNo, status: 'approved', approved_by: user.username };
@@ -246,13 +247,13 @@ export class HcmRecruitingService {
   }
 
   // HR-04 offer authorization: the approver must differ from the offer creator (SOD_SELF_APPROVAL).
-  async approveOffer(id: number, user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-approve WITH self_approval_reason — logged, reviewed by SME-01.
+  async approveOffer(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const offer = await this.offerById(id);
     if (offer.status === 'approved') return { id: Number(id), status: 'approved', already: true };
     if (offer.status !== 'pending')
       throw new BadRequestException({ code: 'OFFER_NOT_PENDING', message: `Offer ${id} is ${offer.status}`, messageTh: 'ข้อเสนอไม่อยู่สถานะรออนุมัติ' });
-    if (offer.createdBy && offer.createdBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The offer creator cannot approve their own offer', messageTh: 'ผู้สร้างข้อเสนอไม่สามารถอนุมัติข้อเสนอของตนเองได้' });
+    await assertMakerChecker(this.db, { user, maker: offer.createdBy, event: 'hcm.offer.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The offer creator cannot approve their own offer', messageTh: 'ผู้สร้างข้อเสนอไม่สามารถอนุมัติข้อเสนอของตนเองได้' });
     await this.db.update(offers).set({ status: 'approved', approvedBy: user.username }).where(eq(offers.id, Number(id)));
     await this.statusLog.log('OFFER', String(id), 'pending', 'Approved', user.username, 'HR-04 offer authorized');
     return { id: Number(id), status: 'approved', approved_by: user.username };

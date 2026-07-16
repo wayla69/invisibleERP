@@ -135,7 +135,21 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
     new numbered control** (god-gated + typed-confirm + dry-run preview, mirroring the §7 step 12 merge and the
     tenant factory-reset/purge gates in PN-08 ITGC / `docs/ops/tenancy-model.md`). On the web the platform
     owner runs both from **`/platform` → ดูแลระบบ (Maintenance)** — a **ตรวจสอบ** (dry-run preview) button then
-    a **ลบ** button behind a confirm dialog. Verified by the `onboarding` harness.
+    a **ลบ** button behind a confirm dialog. The preview also returns a **`kept_by`** diagnostic — for the
+    items that are KEPT (still referenced, so *not* collected), the company (tenant) whose data references them
+    and how many items each keeps alive — so a god can tell a **reset-leftover** (the just-reset company still
+    appears ⇒ its data wasn't fully wiped; factory-reset it completely, then purge again) from a product
+    **genuinely in use by another company** (which the shared catalogue can't remove). **Force purge (escape
+    hatch for junk/test products):** `POST /api/admin/item-maintenance/force-purge` deletes items **even when a
+    company still references them** — it wipes every referencing row across **every** tenant (PO/GR/stock/
+    recipe/price/… lines) then the item + image (`item_ids` targets a list; omitted ⇒ the whole catalogue).
+    Because that corrupts a real company's data if one genuinely uses the item, it is **god-only**, needs a
+    **distinct strong confirm** (`FORCE-PURGE-ITEMS`, else `CONFIRM_MISMATCH`), and is preceded by a mandatory
+    **blast-radius preview** `POST /api/admin/item-maintenance/force-preview` (how many referencing rows each
+    company would lose) rendered in the Maintenance tab's **ลบแบบบังคับ (danger)** card. Each delete is
+    savepoint-wrapped (a blocked table is reported, not a 500) and authorised for append-only rows via the same
+    `app.tenant_wipe` GUC as the tenant-wipe engine; audit-logged (`items_force_purged`). Verified by the
+    `onboarding` harness.
 
 ## 8. Process flow
 
@@ -166,6 +180,8 @@ flowchart TD
 **Swimlane description by role:** **MasterDataSteward** reads the registry, exports / templates, and runs append-mode imports. The **system** enforces the `BAD_ENTITY` guard, structural validation (`NO_ROWS`, `MISSING_COLUMNS`, `REQUIRED_EMPTY`), type casting, the `allowReplace` gate (`REPLACE_FORBIDDEN`), tenant-scoped insert and RLS-scoped delete, and the immutable `audit_log` trigger. **Controller** authorizes higher-risk replace-mode (full-wipe) imports. A **distinct approver** (Controller / EntityDataOwner ≠ the importer) releases any import that sets a financially-sensitive field from its staged `PendingApproval` state (self-approval → `SOD_VIOLATION`). **EntityDataOwner** maintains the vendor, customer/credit, pricing/promotion, and item/BOM masters under segregation (R02 / R09 / R10 / R13). **AccessAdmin** governs COA changes through change management (code-governed, not runtime-editable). **InternalAudit** performs the periodic master-data change-log review.
 
 ## 9. Control matrix
+
+> **SME edition exception (docs/49, control SME-01).** Under `tenants.control_profile='sme'` (single-operator companies, provisioned god-only) the maker-checker self-approval blocks in this narrative are relaxed through the central `common/control-profile.ts` seam: the operator may self-approve **with a mandatory logged justification** (`400 SELF_APPROVAL_REASON_REQUIRED` without one); every allowance writes a `self_approvals` evidence row + an audit `self_approved` marker and is independently reviewed via the auto-scheduled monthly **SME-01** report (external accountant + platform-owner inbox). Enterprise tenants are byte-identical. See `23-customer-onboarding-provisioning.md` §9 row 0b and `docs/49-sme-single-user-edition-plan.md`.
 
 | Step | Risk | Control | Type | RCM ID | Evidence / Record |
 |---|---|---|---|---|---|
@@ -227,7 +243,7 @@ flowchart TD
 | `ALREADY_MERGED` (400) | The duplicate item was already merged into a survivor | Refresh the review queue; the item is already retired |
 | `MERGE_CONFLICT` (409) | Survivor and duplicate both own a child row with the same natural key | Resolve the conflicting child rows manually, then retry the merge |
 | `ITEM_PURGE_HQ_ONLY` (403) | A non-platform-owner called the unused-item preview/purge | The shared item master is cross-tenant — only the platform owner may garbage-collect unused items (§7 step 14) |
-| `CONFIRM_MISMATCH` (400) | The unused-item purge was called without the exact confirm phrase | Type `PURGE-UNUSED-ITEMS` to confirm the destructive purge (§7 step 14) |
+| `CONFIRM_MISMATCH` (400) | The unused-item purge was called without the exact confirm phrase | Type `PURGE-UNUSED-ITEMS` (normal) or `FORCE-PURGE-ITEMS` (force) to confirm the destructive purge (§7 step 14) |
 | `UNSUPPORTED_FIELD` (400) | A scheduled change names an entity:field the registry doesn't support | Use a supported target (item `unit_price`/`status`, customer `credit_limit`) — §7 step 13 |
 | `BAD_DATE` (400) | `effective_date` isn't `YYYY-MM-DD` | Supply a valid ISO date |
 | `SOD_VIOLATION` (403) | The scheduler tried to self-approve a sensitive (credit-limit) scheduled change | A distinct `exec`/`approvals` user must release it (maker ≠ checker; §7 step 13) |
@@ -248,3 +264,4 @@ flowchart TD
 | 0.10 | 2026-07-07 | Platform | **Date-effective (future-dated) master attributes:** §7 step 13 — `POST /api/scheduled-changes` parks a change (item `unit_price`/`status`, customer `credit_limit`) in the new tenant-scoped **`scheduled_master_changes`** table (migration **`0278`**, RLS + change-audited); the idempotent daily job **`apply_scheduled_master_changes`** (BI-scheduler action; `…/run-due` manual) applies it only once the effective business date arrives. A sensitive **customer credit-limit** change is staged `pending_approval` and released only by a **distinct approver** (`…/:id/approve`; self-approval → `SOD_VIOLATION`) — a future-dated bump can't bypass the maker-checker (**strengthens G7 / R09**). `UNSUPPORTED_FIELD`/`BAD_DATE`/`NOT_PENDING` guards; `…/:id/cancel` withdraws an open schedule. Web `/setup/items` per-item schedule/list/cancel section. §13 error codes updated. **No GL, no new numbered control.** This closes the date-effective attribute gap flagged in traceability v5.4. Verified by the `basics` harness. |
 | 0.6 | 2026-07-04 | Platform | **Direct .xlsx import + setup-page IO surface:** §7 step 3b — all import endpoints now accept a base64-encoded **`.xlsx`** workbook (parsed server-side via ExcelJS into the same header-keyed rows as csv), so a downloaded template/export round-trips back in without a Save-As-CSV step. §7 step 3c — **item_categories** and **tax_codes** gain a bulk import/export surface on their own setup screens (`/api/item-setup/io/*`), gated to the setup duties (`md_item`/`md_config`/`masterdata`/`exec`) and restricted by an allow-list to those two entities, so a narrow master-data role gets the bulk surface without the coarse `masterdata` duty (SoD **R13** preserved). §2 in-scope updated. No schema change, no GL, no new control; verified by the `ext` harness (xlsx round-trip, setup IO, and the md_config-only SoD boundary). |
 | 0.11 | 2026-07-14 | Platform | **Global item-master garbage collection (unused-item purge):** §7 step 14 — because `items` is a shared master with no `tenant_id`, the tenant factory-reset/purge never clears it, so a wiped company's catalogue rows survive and keep showing in every tenant's `/shop`. Two **platform-owner-only** ops garbage-collect the items no tenant references any more: preview `GET /api/admin/item-maintenance/unused-items` and destructive `POST /api/admin/item-maintenance/purge-unused-items` (typed confirm `PURGE-UNUSED-ITEMS`). "Unreferenced" is computed **across every tenant** via catalogue-driven discovery of all item-code / `item_relationships` / successor-pointer references (same convention as `md_merge_repoint_text`); an orphan is deleted with its `item_images` row, while a `status='merged'` row is preserved. Both routes are `@PlatformAdmin` (full cross-tenant RLS bypass even when act-as-scoped, so another company's in-use item is never mistaken for an orphan); non-owner → `ITEM_PURGE_HQ_ONLY`. Idempotent + audit-logged (`items_unused_purged`). §13 error codes updated (`ITEM_PURGE_HQ_ONLY`, `CONFIRM_MISMATCH`). **No GL, no new numbered control** (god-gated + typed-confirm + dry-run, mirroring §7 step 12 merge and the PN-08 tenant reset/purge gates). Verified by the `onboarding` harness. |
+| 0.12 | 2026-07-15 | Platform / Compliance | SME edition exception note added to the control matrix (docs/49 v1.2, control SME-01) — maker-checker self-approval blocks are conditionally relaxed for `control_profile='sme'` tenants via the central seam; no control logic changed in this cycle. |

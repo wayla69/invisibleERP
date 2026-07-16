@@ -11,6 +11,8 @@ import { hmacSha256Hex, verifyWebhookSignature, verifyWebhookWithTimestamp } fro
 import { hitRateLimit } from '../src/common/rate-limit-store';
 import { verifyInboundWebhook } from '../src/common/webhook-auth';
 import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+import { assertMakerChecker, isControlProfile, SelfApprovalBody, assertSmeAllowsDistinctApprovers, isSmeProfile } from '../src/common/control-profile';
+import type { JwtUser } from '../src/common/decorators';
 
 describe('e-Tax by Email composer (ETDA, no CA)', () => {
   // Stub TaxDocsPdfService — a plain unit test has no Chromium, and the point of this suite is the message
@@ -309,4 +311,80 @@ describe('DocNumberService formats', () => {
   const d = new DocNumberService(undefined as never);
   it('sales order SO-YYYYMMDD-HHMM', () => expect(d.nextSalesOrder(new Date('2026-06-21T09:30:00'))).toMatch(/^SO-\d{8}-\d{4}$/));
   it('tenant-stamped SALE-prefix', () => expect(d.nextTenantStamped('SALE', 'Oshinei')).toMatch(/^SALE-OSHI-\d{14}$/));
+});
+
+describe('SME edition maker-checker seam — assertMakerChecker (docs/49, SME-01)', () => {
+  // A minimal db stub capturing the self_approvals evidence insert.
+  const makeDb = () => {
+    const inserted: any[] = [];
+    return { inserted, insert: () => ({ values: async (v: any) => { inserted.push(v); } }) };
+  };
+  const user = (profile: 'enterprise' | 'sme' | null, username = 'owner', tenantId: number | null = 7): JwtUser =>
+    ({ username, role: 'Admin', customerName: null, tenantId, permissions: [], controlProfile: profile });
+  const baseCtx = { event: 'gl.je.approve', ref: 'JE-1', amount: 123.45 };
+
+  it('different maker/checker passes for every profile (no evidence written)', async () => {
+    const db = makeDb();
+    await assertMakerChecker(db, { ...baseCtx, user: user('enterprise'), maker: 'someone-else' });
+    await assertMakerChecker(db, { ...baseCtx, user: user('sme'), maker: 'someone-else' });
+    await assertMakerChecker(db, { ...baseCtx, user: user(null), maker: null }); // legacy row, no maker
+    expect(db.inserted).toHaveLength(0);
+  });
+  it('enterprise self-approval throws the site error even WITH a reason', async () => {
+    const db = makeDb();
+    await expect(assertMakerChecker(db, { ...baseCtx, user: user('enterprise'), maker: 'owner', reason: 'x', code: 'SOD_VIOLATION' }))
+      .rejects.toMatchObject({ response: { code: 'SOD_VIOLATION' } });
+    expect(db.inserted).toHaveLength(0);
+  });
+  it('unresolved profile (API key / member / HQ) is fail-closed enterprise', async () => {
+    await expect(assertMakerChecker(makeDb(), { ...baseCtx, user: user(null), maker: 'owner', reason: 'x' }))
+      .rejects.toMatchObject({ response: { code: 'SOD_SELF_APPROVAL' } });
+    // sme profile but a NULL tenantId can't attribute evidence — also fail-closed.
+    await expect(assertMakerChecker(makeDb(), { ...baseCtx, user: user('sme', 'owner', null), maker: 'owner', reason: 'x' }))
+      .rejects.toMatchObject({ response: { code: 'SOD_SELF_APPROVAL' } });
+  });
+  it('sme self-approval without a reason → SELF_APPROVAL_REASON_REQUIRED (blank counts as missing)', async () => {
+    await expect(assertMakerChecker(makeDb(), { ...baseCtx, user: user('sme'), maker: 'owner' }))
+      .rejects.toMatchObject({ response: { code: 'SELF_APPROVAL_REASON_REQUIRED' } });
+    await expect(assertMakerChecker(makeDb(), { ...baseCtx, user: user('sme'), maker: 'owner', reason: '   ' }))
+      .rejects.toMatchObject({ response: { code: 'SELF_APPROVAL_REASON_REQUIRED' } });
+  });
+  it('sme self-approval WITH a reason is allowed and writes the evidence row', async () => {
+    const db = makeDb();
+    await assertMakerChecker(db, { ...baseCtx, user: user('sme'), maker: 'owner', reason: ' เจ้าของอนุมัติเอง ' });
+    expect(db.inserted).toHaveLength(1);
+    expect(db.inserted[0]).toMatchObject({ tenantId: 7, event: 'gl.je.approve', ref: 'JE-1', username: 'owner', amount: '123.45', reason: 'เจ้าของอนุมัติเอง' });
+  });
+  it('SelfApprovalBody accepts a missing/null body (back-compat) and rejects an over-long reason', () => {
+    expect(SelfApprovalBody.parse(undefined)).toEqual({});
+    expect(SelfApprovalBody.parse(null)).toEqual({});
+    expect(SelfApprovalBody.parse({ self_approval_reason: 'ok' })).toEqual({ self_approval_reason: 'ok' });
+    expect(() => SelfApprovalBody.parse({ self_approval_reason: 'x'.repeat(501) })).toThrow();
+  });
+  it('isControlProfile guards admin input', () => {
+    expect(isControlProfile('sme')).toBe(true);
+    expect(isControlProfile('enterprise')).toBe(true);
+    expect(isControlProfile('SME')).toBe(false);
+    expect(isControlProfile('')).toBe(false);
+  });
+  it('isSmeProfile is fail-closed (only explicit sme)', () => {
+    expect(isSmeProfile({ controlProfile: 'sme' })).toBe(true);
+    expect(isSmeProfile({ controlProfile: 'enterprise' })).toBe(false);
+    expect(isSmeProfile({ controlProfile: null })).toBe(false);
+    expect(isSmeProfile({ controlProfile: undefined })).toBe(false);
+  });
+  it('assertSmeAllowsDistinctApprovers blocks all_of_n>1 only for an sme tenant (docs/49 v1.3)', () => {
+    const sme = { controlProfile: 'sme' as const };
+    const ent = { controlProfile: 'enterprise' as const };
+    // SME: >1 throws SME_MULTI_APPROVER_STEP; 1 / null / undefined pass.
+    expect(() => assertSmeAllowsDistinctApprovers(sme, 2)).toThrow();
+    let threw: any; try { assertSmeAllowsDistinctApprovers(sme, 3); } catch (e) { threw = e; }
+    expect(threw?.response?.code).toBe('SME_MULTI_APPROVER_STEP');
+    expect(() => assertSmeAllowsDistinctApprovers(sme, 1)).not.toThrow();
+    expect(() => assertSmeAllowsDistinctApprovers(sme, null)).not.toThrow();
+    expect(() => assertSmeAllowsDistinctApprovers(sme, undefined)).not.toThrow();
+    // Enterprise (and null/fail-closed) never blocked, at any N.
+    expect(() => assertSmeAllowsDistinctApprovers(ent, 5)).not.toThrow();
+    expect(() => assertSmeAllowsDistinctApprovers({ controlProfile: null }, 9)).not.toThrow();
+  });
 });

@@ -3,6 +3,7 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { AdminUsersService } from './admin-users.service';
 
 const ROLES = [
@@ -47,7 +48,7 @@ export class AdminUsersController {
   // A SoD-conflicting grant is staged (by create/update with allow_sod_override + reason) and listed here;
   // a DIFFERENT admin (≠ requester, ≠ the affected user) approves it to apply, or rejects it.
   @Get('access-exceptions') listExceptions(@Query('status') status?: string) { return this.svc.listExceptions(status); }
-  @Post('access-exceptions/:reqNo/approve') approveException(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveException(reqNo, u); }
+  @Post('access-exceptions/:reqNo/approve') approveException(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveException(reqNo, u, b?.self_approval_reason); }
   @Post('access-exceptions/:reqNo/reject') rejectException(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectExcBody)) b: z.infer<typeof RejectExcBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectException(reqNo, u, b.reason); }
   @Post() create(@Body(new ZodValidationPipe(CreateBody)) b: z.infer<typeof CreateBody>, @CurrentUser() actor: JwtUser) { return this.svc.create(b, actor); }
   @Patch(':username') update(@Param('username') u: string, @Body(new ZodValidationPipe(UpdateBody)) b: z.infer<typeof UpdateBody>, @CurrentUser() actor: JwtUser) { return this.svc.update(u, b, actor); }

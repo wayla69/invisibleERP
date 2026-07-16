@@ -1,7 +1,7 @@
-import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -9,9 +9,13 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
+import { ProjectsPortfolioService } from './projects-portfolio.service';
+import { ProjectsGateService } from './projects-gate.service';
+import { ProgramBenefitsService } from './program-benefits.service';
 import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, depsCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
 import { shapeTemplateItem, shapeRisk, shapeChangeOrder, shapeBoqLine } from './projects.shapes';
 
@@ -29,6 +33,17 @@ export interface TaskDto { name: string; parent_id?: number; wbs_code?: string; 
 export interface TaskPatchDto { name?: string; status?: string; planned_start?: string; planned_end?: string; planned_hours?: number; planned_cost?: number; pct_complete?: number; assignee?: string; depends_on?: number[]; dependencies?: TaskDependencyDto[]; constraint_type?: 'SNET' | 'FNLT' | null; constraint_offset_days?: number | null; accountable?: string; responsible?: string[]; consulted?: string[]; informed?: string[] }
 export interface ProjectCalendarDto { enabled?: boolean; non_working_weekdays?: number[] }
 export interface CalendarExceptionDto { exception_date: string; description?: string }
+// PROJ-25 portfolio selection scenarios (PPM Wave P4)
+export interface PortfolioScenarioDto { name: string; budget_envelope?: number; objective?: string; notes?: string }
+export interface PortfolioItemDto { project_code: string; decision?: 'include' | 'exclude'; priority_score?: number; rationale?: string }
+export interface PortfolioCommitDto { override?: boolean; override_reason?: string; self_approval_reason?: string }
+// PROJ-26 project phase-gate governance (PPM Wave P4)
+export interface PhaseGateDto { target_phase: string; gate_key?: string; name?: string; readiness?: string }
+export interface GateDecisionDto { decision: 'go' | 'hold' | 'kill'; notes?: string; self_approval_reason?: string }
+// PROJ-27 program benefits realization (PPM Wave P4)
+export interface BenefitDto { name: string; category?: 'financial' | 'non_financial'; unit?: string; baseline_value?: number; target_value: number; target_date?: string; owner?: string }
+export interface BenefitMeasurementDto { measured_value: number; measured_at?: string; note?: string }
+export interface BenefitConfirmDto { result: 'realized' | 'not_realized'; notes?: string; self_approval_reason?: string }
 export interface MilestoneDto { name: string; due_date?: string; owner?: string; billing_percent?: number }
 export interface RateCardDto { role: string; cost_rate?: number; bill_rate?: number; effective_from?: string; effective_to?: string }
 export interface ResourceDto { resource_name: string; role?: string; task_id?: number; alloc_pct?: number; period_start?: string; period_end?: string }
@@ -54,6 +69,9 @@ export class ProjectsService {
   private readonly resourcing: ProjectsResourcingService;
   private readonly wbs: ProjectsWbsService;
   private readonly evmSvc: ProjectsEvmService;
+  private readonly portfolio: ProjectsPortfolioService;
+  private readonly gates: ProjectsGateService;
+  private readonly benefits: ProgramBenefitsService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -73,6 +91,9 @@ export class ProjectsService {
     this.resourcing = new ProjectsResourcingService(db, (code) => this.row(code));
     this.wbs = new ProjectsWbsService(db, (code) => this.row(code), (code, dto, user) => this.bill(code, dto, user));
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
+    this.portfolio = new ProjectsPortfolioService(db);
+    this.gates = new ProjectsGateService(db, (code) => this.row(code));
+    this.benefits = new ProgramBenefitsService(db);
   }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -326,6 +347,8 @@ export class ProjectsService {
   async eacScenarios(code: string) { return this.evmSvc.eacScenarios(code); }
   async schedule(code: string) { return this.evmSvc.schedule(code); }
   async evmSeries(code: string, dto?: { months?: number; as_of?: string }) { return this.evmSvc.evmSeries(code, dto); }
+  // PROJ-24: read-only change-order impact simulation (projected cost/margin/EVM before authorisation).
+  async simulateChangeOrder(coId: number) { return this.evmSvc.simulateChangeOrder(coId); }
   async earnedSchedule(code: string, asOf?: string) { return this.evmSvc.earnedSchedule(code, asOf); }
   async setProgram(code: string, dto: ProgramDto, user: JwtUser) { return this.evmSvc.setProgram(code, dto, user); }
   async programCriticalPath(programCode: string, user: JwtUser) { return this.evmSvc.programCriticalPath(programCode, user); }
@@ -342,6 +365,25 @@ export class ProjectsService {
   async setCalendar(dto: ProjectCalendarDto, user: JwtUser) { return this.evmSvc.setCalendar(dto, user); }
   async addCalendarException(dto: CalendarExceptionDto, user: JwtUser) { return this.evmSvc.addCalendarException(dto, user); }
   async listCalendarExceptions(user: JwtUser) { return this.evmSvc.listCalendarExceptions(user); }
+
+  // ── PROJ-25 (PPM Wave P4): portfolio selection scenarios live in ProjectsPortfolioService; thin delegators. ──
+  async createPortfolioScenario(dto: PortfolioScenarioDto, user: JwtUser) { return this.portfolio.createScenario(dto, user); }
+  async listPortfolioScenarios(user: JwtUser) { return this.portfolio.listScenarios(user); }
+  async getPortfolioScenario(scenarioNo: string) { return this.portfolio.analyze(scenarioNo); }
+  async upsertPortfolioItem(scenarioNo: string, dto: PortfolioItemDto, user: JwtUser) { return this.portfolio.upsertItem(scenarioNo, dto, user); }
+  async removePortfolioItem(scenarioNo: string, projectCode: string, user: JwtUser) { return this.portfolio.removeItem(scenarioNo, projectCode, user); }
+  async commitPortfolioScenario(scenarioNo: string, dto: PortfolioCommitDto, user: JwtUser) { return this.portfolio.commitScenario(scenarioNo, dto, user); }
+
+  // ── PROJ-26 (PPM Wave P4): project phase-gate governance lives in ProjectsGateService; thin delegators. ──
+  async listPhaseGates(code: string) { return this.gates.listGates(code); }
+  async submitPhaseGate(code: string, dto: PhaseGateDto, user: JwtUser) { return this.gates.submitGate(code, dto, user); }
+  async decidePhaseGate(gateId: number, dto: GateDecisionDto, user: JwtUser) { return this.gates.decideGate(gateId, dto, user); }
+
+  // ── PROJ-27 (PPM Wave P4): program benefits realization lives in ProgramBenefitsService; thin delegators. ──
+  async listProgramBenefits(programCode: string) { return this.benefits.listBenefits(programCode); }
+  async declareProgramBenefit(programCode: string, dto: BenefitDto, user: JwtUser) { return this.benefits.declareBenefit(programCode, dto, user); }
+  async recordBenefitMeasurement(benefitId: number, dto: BenefitMeasurementDto, user: JwtUser) { return this.benefits.recordMeasurement(benefitId, dto, user); }
+  async confirmProgramBenefit(benefitId: number, dto: BenefitConfirmDto, user: JwtUser) { return this.benefits.confirmBenefit(benefitId, dto, user); }
 
   // ── docs/38 projects PR-3: WBS (tasks/milestones/RACI) lives in ProjectsWbsService; thin delegators. ──
   async addTask(code: string, dto: TaskDto, user: JwtUser) { return this.wbs.addTask(code, dto, user); }
@@ -366,6 +408,85 @@ export class ProjectsService {
   async listResourceCalendar(user: JwtUser, resourceName?: string) { return this.resourcing.listResourceCalendar(user, resourceName); }
   async roleSupplyDemand(user: JwtUser, dto?: { months?: number; from?: string }) { return this.resourcing.roleSupplyDemand(user, dto); }
 
+  // ── Resource leveling (PPM-A2, PROJ-23) ───────────────────────────────────
+  // Detects a month where a named resource is over-allocated WITHIN this project's own assignments (the
+  // same calendar-aware ceiling as the tenant-wide resourceCapacity heatmap — default 100% absent a
+  // resource_calendar override), then cross-references the CPM schedule's per-task SLACK (schedule(),
+  // PROJ-06/21) to suggest which task-linked assignment could be shifted later — by up to its slack, in
+  // days — without delaying the critical path. An over-allocated resource-month where every contributing
+  // task is already on the critical path (slack 0) is flagged NO_SLACK: genuinely unresolvable without
+  // accepting a project delay. Project-scoped (unlike the tenant-wide resourceCapacity) because slack is a
+  // property of THIS project's own schedule. Read-only/detective — suggests, never moves anything; a
+  // project with no over-allocated resource carries empty over_allocations/suggestions/unresolvable.
+  // Composed directly in the facade (spans both evmSvc's schedule and the resourcing sub-service's data),
+  // mirroring the existing forecast() cross-sub-service composition.
+  async resourceLeveling(code: string, _user: JwtUser) {
+    const db = this.db;
+    const p = await this.row(code);
+    const sched = await this.evmSvc.schedule(code);
+    const slackByTask = new Map<number, number>(sched.tasks.map((t: any) => [t.id, Number(t.slack) || 0]));
+    const taskById = new Map<number, any>(sched.tasks.map((t: any) => [t.id, t]));
+
+    const assignments = (await db.select().from(projectResources).where(eq(projectResources.projectId, Number(p.id))))
+      .filter((r: any) => r.taskId != null)
+      .map((r: any) => {
+        const t = taskById.get(Number(r.taskId));
+        return { ...r, effStart: r.periodStart ?? t?.planned_start ?? null, effEnd: r.periodEnd ?? t?.planned_end ?? null };
+      });
+
+    const calendarRows = await db.select().from(resourceCalendar);
+    const availByResMonth = new Map<string, number>();
+    for (const c of calendarRows) availByResMonth.set(`${c.resourceName}|${String(c.month).slice(0, 7)}`, n(c.availablePct));
+
+    const activeIn = (ps: string | null, pe: string | null, month: string) => {
+      const mStart = `${month}-01`, mEnd = `${month}-31`;
+      return (ps == null || ps <= mEnd) && (pe == null || pe >= mStart);
+    };
+    const months = new Set<string>();
+    for (const r of assignments) {
+      if (r.effStart) months.add(String(r.effStart).slice(0, 7));
+      if (r.effEnd) months.add(String(r.effEnd).slice(0, 7));
+    }
+
+    const byResMonth = new Map<string, { alloc: number; contributors: { taskId: number; allocPct: number }[] }>();
+    for (const month of months) {
+      for (const r of assignments) {
+        if (!activeIn(r.effStart, r.effEnd, month)) continue;
+        const key = `${r.resourceName}|${month}`;
+        const bucket = byResMonth.get(key) ?? { alloc: 0, contributors: [] };
+        bucket.alloc = r2(bucket.alloc + n(r.allocPct));
+        bucket.contributors.push({ taskId: Number(r.taskId), allocPct: n(r.allocPct) });
+        byResMonth.set(key, bucket);
+      }
+    }
+
+    const overAllocations: any[] = [], suggestions: any[] = [], unresolvable: any[] = [];
+    for (const [key, bucket] of byResMonth) {
+      const [resourceName, month] = key.split('|');
+      const available = availByResMonth.get(key) ?? 100;
+      if (bucket.alloc <= available) continue;
+      overAllocations.push({ resource_name: resourceName, month, allocated_pct: r2(bucket.alloc), available_pct: available, over_by_pct: r2(bucket.alloc - available) });
+      const candidates = bucket.contributors
+        .map((c) => ({ ...c, slack: slackByTask.get(c.taskId) ?? 0, task: taskById.get(c.taskId) }))
+        .filter((c) => c.slack > 0)
+        .sort((a, b) => b.slack - a.slack);
+      const top = candidates[0];
+      if (!top) { unresolvable.push({ resource_name: resourceName, month, reason: 'NO_SLACK' }); continue; }
+      const newStart = top.task?.planned_start ? addDays(top.task.planned_start, top.slack) : null;
+      suggestions.push({
+        resource_name: resourceName, month, task_id: top.taskId, task_name: top.task?.name ?? null,
+        alloc_pct: top.allocPct, slack_days: top.slack, suggested_shift_days: top.slack,
+        shifted_to_month: newStart ? newStart.slice(0, 7) : null,
+      });
+    }
+    return {
+      project_code: code,
+      over_allocations: overAllocations.sort((a, b) => a.month.localeCompare(b.month) || a.resource_name.localeCompare(b.resource_name)),
+      suggestions: suggestions.sort((a, b) => a.month.localeCompare(b.month)),
+      unresolvable: unresolvable.sort((a, b) => a.month.localeCompare(b.month)),
+      over_allocated_count: overAllocations.length,
+    };
+  }
 
 
 
@@ -800,11 +921,11 @@ export class ProjectsService {
   // Approve a BoQ (maker-checker: approver ≠ author, SOD_SELF_APPROVAL). On approval the sum of line budgets
   // is snapshotted onto the BoQ and synced to the project's budget_amount — the enforceable material budget
   // baseline (M1's commitment ledger draws remaining = budget − actual − commitments against it).
-  async approveBoq(boqId: number, user: JwtUser) {
+  async approveBoq(boqId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const boq = await this.boqRow(boqId);
     if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is already ${boq.status}`, messageTh: 'BoQ ถูกดำเนินการแล้ว' });
-    if (boq.createdBy && boq.createdBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: boq.createdBy, event: 'proj.boq.approve', ref: String(boqId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     const [tot] = await db.select({ v: sql<string>`coalesce(sum(${projectBoqLines.budgetAmount}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
     const budgetTotal = r2(n(tot?.v));
     await db.update(projectBoq).set({ status: 'approved', budgetTotal: fx(budgetTotal, 2), approvedBy: user.username, approvedAt: new Date() }).where(eq(projectBoq.id, Number(boqId)));
@@ -855,12 +976,12 @@ export class ProjectsService {
   // Approve a change order (maker-checker): the approver MUST differ from the requester (SOD_SELF_APPROVAL).
   // On approval the contract/budget/EAC deltas are applied to the project AND a new baseline is auto-captured
   // (reason = the CO), so the scope/contract change is authorised, segregated, and re-baselined (ties to PROJ-07).
-  async approveChangeOrder(coId: number, user: JwtUser) {
+  async approveChangeOrder(coId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
     if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
     if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
-    if (co.requestedBy && co.requestedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: co.requestedBy, event: 'proj.change-order.approve', ref: String(coId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
     const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
     const newContract = r2(Math.max(0, n(proj!.contractAmount) + n(co.contractDelta)));
     const newBudget = r2(Math.max(0, n(proj!.budgetAmount) + n(co.budgetDelta)));
@@ -1156,12 +1277,12 @@ export class ProjectsService {
 
   // Checker: sign off (SoD — approver ≠ preparer). Detective review, so no hard numeric gate; the independent
   // sign-off IS the control.
-  async approveCloseReview(period: string, user: JwtUser) {
+  async approveCloseReview(period: string, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
     if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
     if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    if (rp.preparedBy && rp.preparedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: rp.preparedBy, event: 'proj.close-review.approve', ref: period, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
     await db.update(projectCloseReviews).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectCloseReviews.id, rp.id));
     return this.getCloseReview(period, user);
   }

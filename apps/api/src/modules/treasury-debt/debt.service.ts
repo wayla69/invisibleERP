@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { debtFacilities, debtDrawdowns, debtCovenants, debtCovenantTests } from '../../database/schema';
@@ -114,13 +115,11 @@ export class DebtService {
   }
 
   // Checker: approve a PendingApproval facility (approver ≠ requester ⇒ SOD_SELF_APPROVAL, binds even Admin).
-  async approveFacility(id: number, user: JwtUser) {
+  async approveFacility(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const f = await this.loadFacility(id);
     if (f.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Facility is ${f.status}, not pending approval`, messageTh: 'วงเงินไม่ได้อยู่ในสถานะรออนุมัติ' });
-    if (f.requestedBy && f.requestedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a debt facility you created', messageTh: 'ผู้สร้างอนุมัติวงเงินของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user, maker: f.requestedBy, event: 'tre.facility.approve', ref: String(id), amount: n(f.limitAmount), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a debt facility you created', messageTh: 'ผู้สร้างอนุมัติวงเงินของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await db.update(debtFacilities).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(debtFacilities.id, id));
     return this.getFacility(id);
   }

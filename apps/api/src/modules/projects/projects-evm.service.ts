@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { projects, projectTasks, projectEntries, projectBaselines, projectHealthSnapshots, projectTaskDependencies, projectCalendars, projectCalendarExceptions, projectEtc } from '../../database/schema';
+import { projects, projectTasks, projectEntries, projectBaselines, projectHealthSnapshots, projectTaskDependencies, projectCalendars, projectCalendarExceptions, projectEtc, projectChangeOrders } from '../../database/schema';
 import { n, fx, ymd } from '../../database/queries';
 import { r2, r4, clampPct, addDays, peopleCsv, csvToList, workingDaysBetween } from './projects.helpers';
 import { shapeTask, shapeBaseline, shapeHealth } from './projects.shapes';
@@ -50,6 +50,52 @@ export class ProjectsEvmService {
       project_code: code, as_of: today, bac, pv, ev, ac,
       cost_variance: r2(ev - ac), schedule_variance: r2(ev - pv),
       cpi, spi, eac, etc: r2(eac - ac), task_count: tasks.length,
+    };
+  }
+
+  // ── Change-order impact simulation (PROJ-24) ─────────────────────────────
+  // A read-only WHAT-IF: the projected cost / margin / EVM impact of a PENDING change order, computed as if its
+  // money deltas were applied — WITHOUT committing. Mirrors approveChangeOrder's arithmetic
+  // (contract/budget/estimated-cost each += its delta, floored at 0) so the preview matches what authorisation
+  // would produce, then re-runs the closed-form EVM on the projected budget. A change order in this system moves
+  // the MONEY envelope only (there is no schedule/duration delta stored), so the simulation quantifies the
+  // financial + earned-value effect — margin, EAC, and budget headroom — a change would cause before it is
+  // authorised. Mutates nothing (the golden-master `evm`/`schedule`/`get` outputs are untouched).
+  async simulateChangeOrder(coId: number) {
+    const db = this.db;
+    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
+    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
+    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status} — its impact is already reflected in the project`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว ผลกระทบสะท้อนในโครงการแล้ว' });
+    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
+    if (!proj) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found', messageTh: 'ไม่พบโครงการ' });
+    const code = proj.projectCode;
+
+    // Money projection (identical to approveChangeOrder, but not persisted).
+    const cc = n(proj.contractAmount), cb = n(proj.budgetAmount), ce = n(proj.estimatedCost);
+    const pContract = r2(Math.max(0, cc + n(co.contractDelta)));
+    const pBudget = r2(Math.max(0, cb + n(co.budgetDelta)));
+    const pEst = r2(Math.max(0, ce + n(co.estimatedCostDelta)));
+    const marginNow = r2(cc - ce), marginProj = r2(pContract - pEst);
+    const marginPctNow = cc > 0 ? r4(marginNow / cc * 100) : null;
+    const marginPctProj = pContract > 0 ? r4(marginProj / pContract * 100) : null;
+
+    // EVM projection: EV / AC / PV / CPI are unchanged by a money change order; the BAC only moves when it is
+    // budget-derived (the project has no task planned cost — evm()'s fallback). Recompute EAC + budget headroom
+    // on the projected figures so the reviewer sees whether the (possibly larger) budget still covers the forecast.
+    const e = await this.evm(code);
+    const [tp] = await db.select({ v: sql<string>`coalesce(sum(${projectTasks.plannedCost}),0)` }).from(projectTasks)
+      .where(and(eq(projectTasks.projectId, Number(proj.id)), sql`${projectTasks.status} <> 'cancelled'`));
+    const bacBasis = n(tp?.v) > 0 ? 'tasks' : 'budget';
+    const pBac = bacBasis === 'budget' ? pBudget : e.bac; // a budget-derived BAC moves with the CO; a task-derived one doesn't
+    const pEac = e.cpi && e.cpi > 0 ? r2(e.ac + (pBac - e.ev) / e.cpi) : r2(e.ac + (pBac - e.ev));
+    const headroomNow = r2(cb - e.eac);   // budget vs current forecast cost (>0 = the budget covers the EAC)
+    const headroomProj = r2(pBudget - pEac);
+
+    return {
+      change_order: co.coNo, project_code: code, status: co.status, bac_basis: bacBasis,
+      current:   { contract_amount: cc, budget_amount: cb, estimated_cost: ce, margin: marginNow, margin_pct: marginPctNow, bac: e.bac, eac: e.eac, budget_headroom: headroomNow },
+      projected: { contract_amount: pContract, budget_amount: pBudget, estimated_cost: pEst, margin: marginProj, margin_pct: marginPctProj, bac: pBac, eac: pEac, budget_headroom: headroomProj },
+      delta:     { contract: r2(pContract - cc), budget: r2(pBudget - cb), estimated_cost: r2(pEst - ce), margin: r2(marginProj - marginNow), eac: r2(pEac - e.eac), budget_headroom: r2(headroomProj - headroomNow) },
     };
   }
 

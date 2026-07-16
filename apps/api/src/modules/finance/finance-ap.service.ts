@@ -10,6 +10,7 @@ import { AccountDeterminationService } from '../ledger/account-determination.ser
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { ApTxnDto } from './finance.service';
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -148,14 +149,12 @@ export class FinanceApService {
   // Step 2 (CHECKER, approval authority) — APPROVE a pending payment. The approver MUST differ from the
   // requester (segregation of duties) regardless of permissions held — even an Admin cannot approve their
   // own request. Only here does paid_amount move (under a row lock) and the cash-disbursement GL post.
-  async approveApPayment(paymentNo: string, approver: JwtUser) {
+  async approveApPayment(paymentNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [p] = await db.select().from(apPayments).where(eq(apPayments.paymentNo, paymentNo)).limit(1);
     if (!p) throw new NotFoundException({ code: 'NOT_FOUND', message: 'AP payment not found', messageTh: 'ไม่พบรายการจ่าย' });
     if (p.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Payment ${paymentNo} is ${p.status}, not pending approval`, messageTh: 'รายการนี้ไม่ได้รออนุมัติ' });
-    if (p.requestedBy && p.requestedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a payment you requested', messageTh: 'ผู้ขอจ่ายอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user: approver, maker: p.requestedBy, event: 'ap.payment.approve', ref: paymentNo, amount: n(p.amount), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a payment you requested', messageTh: 'ผู้ขอจ่ายอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const apTenant = p.tenantId ?? approver.tenantId ?? null;
     let newPaid = 0; let billStatus = '';
     let billGross = 0, billVat = 0;

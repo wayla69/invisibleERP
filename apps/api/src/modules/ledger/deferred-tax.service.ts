@@ -1,10 +1,12 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, lt, sql, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { deferredTaxRuns, arAllowance, fixedAssets } from '../../database/schema';
 import { LedgerService } from './ledger.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { n } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
 
 // WS3.2 — Deferred tax (TAS 12 / TFRS, TAX-06). A maker-checker, idempotent-per-(tenant,period) run that
 // computes deferred tax from book-vs-tax TEMPORARY differences and posts the DELTA vs the prior posted run.
@@ -143,13 +145,13 @@ export class DeferredTaxService {
 
   // postDeferredTax — maker-checker post of an Open run (poster ≠ runner ⇒ SELF_POST). Posts the period
   // DELTA to 1700/5950 per the sign convention above; marks the run Posted. A Posted run throws ALREADY_POSTED.
-  async postDeferredTax(dto: PostDeferredTaxDto) {
+  async postDeferredTax(dto: PostDeferredTaxDto, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [run] = await db.select().from(deferredTaxRuns).where(eq(deferredTaxRuns.id, dto.id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'DT_RUN_NOT_FOUND', message: `Deferred tax run ${dto.id} not found`, messageTh: `ไม่พบรายการภาษีเงินได้รอการตัดบัญชี ${dto.id}` });
     if (run.status === 'Posted') throw new BadRequestException({ code: 'ALREADY_POSTED', message: 'This deferred tax run is already posted', messageTh: 'รายการนี้โพสต์แล้ว' });
     if (run.runBy && run.runBy === dto.postedBy) {
-      throw new ForbiddenException({ code: 'SELF_POST', message: 'Maker-checker: you cannot post a deferred tax run you ran', messageTh: 'ผู้คำนวณโพสต์รายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.deferred-tax.post', ref: String(dto.id), reason: selfApprovalReason, code: 'SELF_POST', message: 'Maker-checker: you cannot post a deferred tax run you ran', messageTh: 'ผู้คำนวณโพสต์รายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     const delta = round4(n(run.deltaPosted));
     let entryNo: string | null = null;

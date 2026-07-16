@@ -6,6 +6,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const r4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -129,14 +130,13 @@ export class LandedCostService {
   }
 
   // ── Post — maker-checker; capitalise on-hand share into the sub-ledger, expense the issued residual, book GL. ──
-  async post(voucherNo: string, user: JwtUser) {
+  async post(voucherNo: string, user: JwtUser, selfApprovalReason?: string | null) {
     const tenantId = this.tenant(user);
     const v = await this.header(tenantId, voucherNo);
     if (v.status === 'Posted') throw bad('ALREADY_POSTED', `Voucher ${voucherNo} is already posted`, 'ใบนี้ผ่านรายการแล้ว');
     if (v.status !== 'Draft') throw bad('NOT_DRAFT', `Voucher ${voucherNo} is ${v.status}`, 'ผ่านรายการได้เฉพาะใบที่เป็นแบบร่าง');
     // Maker-checker (SoD): the poster must differ from the preparer.
-    if (v.preparedBy && v.preparedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot post a landed-cost voucher you prepared', messageTh: 'ผู้จัดทำผ่านรายการใบต้นทุนแฝงของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(this.db, { user, maker: v.preparedBy, event: 'inv.landed-cost.post', ref: voucherNo, amount: n(v.totalCharges), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot post a landed-cost voucher you prepared', messageTh: 'ผู้จัดทำผ่านรายการใบต้นทุนแฝงของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
 
     const lines = await this.lines(tenantId, voucherNo);
     const total = n(v.totalCharges);

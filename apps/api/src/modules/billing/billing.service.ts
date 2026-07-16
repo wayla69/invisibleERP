@@ -47,6 +47,12 @@ interface PlanSeed {
 // ENTITLEMENTS_ENFORCE. resolveEntitledSuites() still falls back to the code default if it is ever absent.
 const PLAN_SEED: PlanSeed[] = [
   { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
+  // SME single-operator edition (docs/49 / docs/36 §SME): the default plan a control_profile='sme' company
+  // provisions onto. Full day-to-day operational ERP (PLAN_SUITES.sme) at a solo price, capped to ONE seat +
+  // ONE location — the seat cap is the commercial fence vs Enterprise (per-seat). Volume caps are generous
+  // for a solo operator; AI is metered as overage. The self-approval relaxation is control_profile, not a
+  // plan feature, so it stays orthogonal (a company could in principle run 'sme' profile on any plan).
+  { code: 'sme', name: 'SME (เจ้าของคนเดียว)', priceMonthly: '690', priceYearly: '6900', currency: 'THB', prices: { USD: { monthly: 20, yearly: 200 } }, features: { suites: PLAN_SUITES.sme, users: 1, locations: 1, ai_chat: true, reports: 'standard', ai_tokens_daily: 100_000, ai_tokens_daily_max: 200_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 200, pos_txns_monthly: 5000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
   { code: 'starter', name: 'Standard', priceMonthly: '2900', priceYearly: '29000', currency: 'THB', prices: { USD: { monthly: 85, yearly: 850 } }, features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 100, pos_txns_monthly: 3000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
   // 1.9 — Business mid-tier: closes the Standard→Professional price cliff (2,900 → 9,900 was a 3.4× jump
   // with no rung). Standard + procurement + multi-branch; planning/loyalty/AI stay Professional-only.
@@ -116,6 +122,11 @@ export class BillingService {
   extendTrial(id: number, days: number) { return this.platformAdmin.extendTrial(id, days); }
   suspendTenant(id: number, by: string, reason?: string) { return this.platformAdmin.suspendTenant(id, by, reason); }
   reactivateTenant(id: number, by: string) { return this.platformAdmin.reactivateTenant(id, by); }
+  // SME single-user edition (docs/49) — upgrade-only profile transition + platform SME defaults.
+  upgradeControlProfile(id: number, target: 'enterprise', actor: string) { return this.platformAdmin.upgradeControlProfile(id, target, actor); }
+  setTenantSmePrefs(id: number, b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) { return this.platformAdmin.setTenantSmePrefs(id, b, actor); }
+  getSmeDefaults() { return this.platformAdmin.getSmeDefaults(); }
+  setSmeDefaults(b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) { return this.platformAdmin.setSmeDefaults(b, actor); }
 
   // ───────────────────── Tenant lifecycle — docs/46 Phase 4c cut 2 ─────────────────────
   // Signup gate + invites + approval queue + provisioning + factory reset live in

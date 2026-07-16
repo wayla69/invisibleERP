@@ -32,6 +32,33 @@ current stage** (an age over 30 days shows red — a stalling deal).
   won value and win rate. For loss reasons, per-owner win rates and the monthly trend, open
   **วิเคราะห์ Win/Loss** (`/projects/pipeline`) from the header.
 
+## 16.1b Stage playbooks — exit criteria & WIP limits (Playbook ขั้นตอน — CRM-7, control CRM-13)
+
+A **stage playbook** governs *what a deal needs before it can enter a stage* and *how many deals a stage may
+hold*, so the pipeline advances on discipline rather than on drag alone. The rules bind on **every** move path
+— board drag, the list *ย้ายไป…* dropdown, the deal-page stepper, and the bulk move — and every move is still
+audited (**REV-17**).
+
+- **On the board columns you'll see** a **WIP badge** (e.g. `3/5` — open deals vs the cap; it turns amber at
+  the cap and red over it, and the column outlines red when over), and, when configured, a **ต้องมี
+  (Requires)** chip list of the fields a deal needs to enter, plus the stage's **guidance** note.
+- **Required-field exit criteria:** if you try to advance a deal into a stage before its required fields are
+  filled (e.g. a deal amount, an expected close date, a primary contact), the move is refused with
+  **ยังเข้าสู่ขั้น … ไม่ได้ ต้องกรอก:** and the missing fields listed (`STAGE_REQUIREMENTS_UNMET`). Fill them on
+  the deal, then move it. (Closing a deal as **Lost** is never blocked this way — only a Lost reason is
+  required.)
+- **WIP limit:** if a stage is already at its cap, advancing one more open deal into it is refused
+  **ขั้น … เต็มขีดจำกัดงานระหว่างทำแล้ว** (`WIP_LIMIT_EXCEEDED`). Work down the stage (advance or close deals)
+  first — this keeps a stage from silently overloading and stalling.
+- **Configure the playbooks (supervisors):** users with the CRM supervisor duty (`crm`/`exec`) see a
+  **Playbook ขั้นตอน** button on the board. It opens an editor with one card per stage where you set the
+  **WIP limit** (blank = unlimited), tick the **required fields**, and write a short **guidance** note; save
+  each stage on its own. An unknown field or a negative limit is rejected. Playbooks are per-company.
+- **Bulk move:** in **list** view, tick the checkboxes on several open deals, pick a target stage in the bar
+  that appears, and **ย้ายที่เลือก (Move selected)** advances them all through the same governed path. The
+  result reports how many moved and how many failed (a deal blocked by its own missing field or WIP limit is
+  skipped without affecting the others — it is *not* all-or-nothing).
+
 ## 16.2 The deal page (`/crm/deals/<OPP-…>`)
 
 Click any card (or a row in list view) to open the deal:
@@ -41,9 +68,17 @@ Click any card (or a row in list view) to open the deal:
   reason dialog as the board).
 - **งานถัดไป (Next step):** the nearest unfinished task on the deal is highlighted with its due date —
   tick **ทำเสร็จแล้ว** when done.
-- **ไทม์ไลน์กิจกรรม (Timeline):** every activity (call / email / meeting / note / task), every **stage
-  change** (from the audit trail) and every **linked quotation** merged in time order. Log a new activity
-  from the quick-add row (a *task* takes a due date).
+- **ไทม์ไลน์กิจกรรม (Timeline) — CRM-8, control CRM-14:** every activity (call / email / meeting / note /
+  task, **including emails/LINE sent from the deal, inbound replies, and cadence touches**), every **stage
+  change** (from the audit trail), every **linked quotation**, and every **team note** merged in one time
+  order — the complete interaction history of the deal in one place. Log a new activity from the quick-add row
+  (a *task* takes a due date). *(The same unified stream is available per lead/opportunity/account via
+  `GET /api/crm/timeline`.)*
+- **บันทึกทีม (Team notes / collaboration feed) — CRM-8:** post an **internal note** on the deal from the
+  composer under the quick-add row. Type **`@username`** to mention a teammate — they get a **private
+  notification** in their bell inbox (only they see it). Notes are **append-only**: once posted they can't be
+  edited or deleted, so they stand as a permanent, auditable decision trail. Mentions of unknown users are
+  ignored.
 - **ใบเสนอราคาที่เชื่อมโยง (Linked quotes):** the CPQ quotes created against this deal, with status and
   amount (create new ones on `/cpq` — pass the deal when creating so they link).
 - A **Won** deal shows **เป็นโครงการ (To project)** — it seeds a project's contract from the deal value
@@ -217,6 +252,50 @@ cadence and every touch is recorded. It posts nothing to the ledger. *(Control C
   the next step; on the last step the enrolment **completes**. **หยุด (Stop)** ends an enrolment. **รันที่ถึง
   กำหนด (Run due)** advances every enrolment whose next step is due (also runs on a schedule via the *CRM
   sequence run* BI report), so the whole cadence keeps moving without manual nudging.
+
+---
+
+## 16.4g Data quality (คุณภาพข้อมูล — the "Data quality" tab, CRM-17, control CRM-16)
+
+Keeps the **customer master** clean and de-duplicated — the data your revenue and forecast rest on.
+
+- **Score worklist.** Every account gets a **0–100 data-quality score** from the completeness *and validity* of
+  its key fields — tax ID (must be 13 digits), email (must parse), phone, an assigned **owner**, at least one
+  **contact of record**, industry, website, size. A field that's filled with *junk* (e.g. a 5-digit tax ID)
+  scores the same as blank — **present isn't enough, it must be valid**. Accounts are banded
+  **ดี (good ≥ 80) / พอใช้ (fair) / ต้องแก้ไข (poor)** and listed **worst-first**, each with its **missing /
+  invalid** fields as chips, so you fix the weakest records first. **บันทึกสแนปช็อต (Snapshot now)** — or the
+  scheduled *CRM data-quality scan* report — records a dated score per account for the trend.
+- **Duplicate surveillance.** The **บัญชีที่อาจซ้ำ** panel proactively lists **likely-duplicate account pairs**
+  — same tax ID / email / phone, or a near-identical name (e.g. "Acme Robotics Ltd" ≈ "Acme Robotics Limited")
+  — with the match reasons and a similarity %. This goes beyond the check you get when *creating* an account:
+  it finds duplicates that already slipped in. Open either account and **merge** them the governed way (a
+  *different* person must merge an account-with-data you created — maker-checker).
+- **Merge audit log.** The **ประวัติการรวมบัญชี** panel is the append-only record of every merge — which account
+  was retired into which survivor, how many contacts/deals were reassigned, and who did it — so a merge (which
+  rewrites ownership) is always traceable. Read-only to the ledger.
+
+---
+
+## 16.4h Campaign attribution (การระบุที่มาแคมเปญ — on the deal page, CRM-15, control CRM-17)
+
+Gives **every** marketing campaign that touched a deal its fair share of the credit, instead of handing it all to
+the lead source. On a deal page (`/crm/deals/{oppNo}`) a **การระบุที่มาแคมเปญ (Campaign attribution)** card lets you:
+
+- **Record touchpoints** — add each campaign that influenced the deal, with a **type** (lead source, meeting,
+  email, event, webinar, content) and a **date**. They're kept in chronological order.
+- **See the split.** Once the deal is **won**, pick an attribution **model** and the card shows how the deal's
+  revenue is shared across its touchpoints:
+  - **First-touch** — all to the first campaign; **Last-touch** — all to the last.
+  - **Linear** — split evenly.
+  - **U-shaped** — 40 % to the first, 40 % to the last, 20 % across the middle.
+- Whatever model you pick, the amounts **always add up to exactly the deal value** — nothing is double-counted or
+  lost. An **open** deal shows no amounts yet (only won revenue is attributed).
+
+Across the whole book, the **CRM multi-touch attribution** report (schedulable) totals attributed revenue per
+campaign under a chosen model, so marketing ROI reflects the *whole* journey — not just who got there first.
+*Control CRM-17 (Detective): campaign ROI is no longer mis-stated by single-touch crediting; attribution is
+model-governed and revenue-conserving.* Read-only to the ledger.
 
 ---
 
@@ -472,6 +551,22 @@ Your Google OAuth tokens are encrypted at rest and never shown back to you or an
 connected account's email and sync status are visible. **Wongnai reviews are not supported** — no
 documented public API exists yet for pulling a business's own Wongnai reviews.
 
+### 16.14a Response-SLA tab — don't let a bad review sit unanswered (docs/47, control MKT-16)
+
+A negative review left unanswered quietly drags your public rating down. The **Response-SLA** tab turns
+that into a managed worklist. Set your **policy** once — *respond to reviews rated **≤ N★** within **H
+hours*** (default ≤3★ within 48h) — and the tab then shows, over the reviews you've already synced:
+
+- **SLA breached** — low-rated, still-unreplied reviews that are **older than your window**. These are the
+  ones hurting you right now; reply from the **Reviews** tab and they drop off the list.
+- **Open (within SLA)** — low-rated unreplied reviews that are still inside the window (respond before they
+  breach). A 5★ review, or any review you've already replied to, never appears here.
+
+Tighten or loosen the policy anytime (changing the threshold to ≤1★, say, hides 2★/3★ reviews from the
+list). To be alerted automatically, add a **`reputation_response_sla`** subscription on **Scheduled
+Reports** — you'll get the breach count on your usual schedule. Each company sees only its own reviews and
+policy. This is a monitoring view — it posts nothing to the ledger.
+
 ---
 
 ## Common errors on these screens
@@ -512,6 +607,10 @@ documented public API exists yet for pulling a business's own Wongnai reviews.
 
 | Version | Date | Notes |
 |---|---|---|
+| 2.10 | 2026-07-15 | **Campaign attribution — multi-touch credit on the deal page (`/crm/deals/{oppNo}`) — CRM-15, control CRM-17:** new §16.4h + a *Campaign attribution* card. Record each campaign **touchpoint** that influenced a deal (type + date); once the deal is **won**, pick an attribution **model** (first-touch / last-touch / linear / U-shaped) and see the deal's revenue split across its touchpoints — the amounts always sum to exactly the deal value. A schedulable **CRM multi-touch attribution** report totals attributed revenue per campaign, so marketing ROI reflects the whole journey, not just the first touch. Read-only to the ledger. |
+| 2.9 | 2026-07-14 | **Data quality — score worklist + duplicate surveillance + merge audit (`/crm`) — CRM-17, control CRM-16:** new §16.4g + a new *Data quality* tab. Every account gets a 0–100 **data-quality score** from the completeness **and validity** of its key fields (tax ID must be 13 digits, email must parse, owner + a contact of record, etc. — junk scores like blank), banded good/fair/poor, listed **worst-first** with the missing/invalid fields as chips; **Snapshot now** (or the scheduled *CRM data-quality scan* report) records the trend. A **likely-duplicates** panel proactively surfaces near-duplicate account pairs (same tax/email/phone or near-identical name) to merge the governed (maker-checker) way, and a **merge audit log** records every merge. Read-only to the ledger. |
+| 2.8 | 2026-07-14 | **Unified timeline + team notes on the deal page (`/crm/deals/…`) — CRM-8, control CRM-14:** §16.2 timeline now merges **every** touch (all-channel activities incl. sent comms / inbound replies / cadence touches, stage changes, linked quotes, **team notes**) into one time-ordered stream (same stream available per lead/opportunity/account via `GET /api/crm/timeline`). New **collaboration feed** composer: post an **append-only** internal note (can't be edited/deleted) and **`@mention`** a teammate to send them a private notification. Read-only to the ledger. |
+| 2.7 | 2026-07-14 | **Stage playbooks — exit criteria & WIP limits (`/crm`) — CRM-7, control CRM-13:** new §16.1b. Each pipeline stage can require a set of **fields before a deal enters** it (blocked with `STAGE_REQUIREMENTS_UNMET` + the missing list) and cap how many open deals it holds (a **WIP limit**, `WIP_LIMIT_EXCEEDED`), enforced on every move path and shown as a WIP badge + *Requires* chips + guidance on the board columns. Supervisors (`crm`/`exec`) configure them from the new **Playbook ขั้นตอน** editor. List view gains a multi-select **bulk stage move** (per-item result, not all-or-nothing). Read-only to the ledger. |
 | 2.6 | 2026-07-13 | **Reputation & external analytics (docs/47, new control MKT-14) — new §16.14, `/reputation`.** Connect Google Maps reviews (Business Profile OAuth2) and Google Analytics (GA4) — neither offers a webhook, so this is scheduled-poll ingestion (`reputation_review_sync`/`reputation_ga4_sync` via Scheduled Reports). New errors `OAUTH_NOT_CONFIGURED`/`BAD_STATE`/`NO_REFRESH_TOKEN`/`CONNECTION_NOT_FOUND`. |
 | 2.5 | 2026-07-13 | **Audience export screen (docs/45) — new §16.13, `/crm/audience-export`.** No new control (extends PDPA-05, documented in manual 09 §7) — a dedicated preview + register + ROPA-status view over the existing consent-gated hashed audience export, cross-linked to Scheduled Reports for actually running it. |
 | 2.4 | 2026-07-13 | **Sequences & cadences (`/crm`) — CRM-8, control CRM-11:** new §16.4f + a new *Sequences* tab. Multi-step outreach **playbooks** (channel + wait-days steps) on the comms rail: enroll a lead (`LEAD-…`) or deal (`OPP-…`), and the cadence **advances** each enrolment step-by-step — sending the message (or logging a task), recording the touch on the timeline, and scheduling the next step — until it **completes**; enrolments can be **stopped**, and **Run due** (also a scheduled *CRM sequence run* BI report) advances everything that's due. Read-only to the ledger. |

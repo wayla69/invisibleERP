@@ -25,6 +25,9 @@ ERP /api/v1 ──▶ (Celery + Redis)      │ staging → core → analytics  
 
 Each service has its own `Dockerfile` (build context = repo root, so `shared/` is included).
 
+**Deploying?** See **[`DEPLOY.md`](./DEPLOY.md)** — a step-by-step Railway runbook (add-ons, per-service
+config-as-code `railway.*.json`, env vars, minting the `analytics:read` ERP key, and a smoke test).
+
 ## ERP integration (the only coupling)
 
 1. In the ERP, a tenant admin mints an API key with the `analytics:read` scope:

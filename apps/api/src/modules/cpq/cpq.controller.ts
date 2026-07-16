@@ -2,9 +2,11 @@ import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, Query, HttpCode,
 import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { CpqService } from './cpq.service';
+import { CpqPricebookService } from './cpq-pricebook.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 const EmailBody = z.object({ to_email: z.string().email() });
 
@@ -16,8 +18,12 @@ const QuoteBody = z.object({
   qty: z.number().positive().optional(), unit_cost: z.number().nonnegative().optional(),
   selected_options: z.array(z.object({ group_name: z.string().min(1), option_code: z.string().min(1) })).optional(),
   validity_days: z.number().int().positive().optional(), notes: z.string().optional(),
-  lines: z.array(z.object({ description: z.string().min(1), qty: z.number().optional(), unit_price: z.number().optional(), unit_cost: z.number().nonnegative().optional() })).optional(),
+  pricebook_id: z.number().int().optional(), // CRM-15: price the lines from a governed pricebook
+  lines: z.array(z.object({ description: z.string().min(1), qty: z.number().optional(), unit_price: z.number().optional(), unit_cost: z.number().nonnegative().optional(), item_code: z.string().optional() })).optional(),
 });
+// CRM-15 CPQ pricebooks — master-data CRUD (masterdata duty).
+const PricebookBody = z.object({ code: z.string().min(1), name: z.string().min(1), currency: z.string().optional(), effective_from: z.string().optional().nullable(), effective_to: z.string().optional().nullable(), is_active: z.boolean().optional() });
+const PricebookEntriesBody = z.object({ entries: z.array(z.object({ item_code: z.string().min(1), unit_price: z.number().nonnegative() })).min(1).max(2000) });
 // CPQ-01 (SVC-1): per-tenant discount/margin floor. CRM-14 (CRM-12): exec_discount_pct is the optional
 // tier-2 ceiling (null clears tiering).
 const SettingsBody = z.object({ min_margin_pct: z.number().min(0).max(100).optional(), max_discount_pct: z.number().min(0).max(100).optional(), exec_discount_pct: z.number().min(0).max(100).nullable().optional() });
@@ -30,7 +36,13 @@ const BundleLineBody = z.object({ bundle_code: z.string().min(1), qty: z.number(
 
 @Controller('api/cpq')
 export class CpqController {
-  constructor(private readonly svc: CpqService) {}
+  constructor(private readonly svc: CpqService, private readonly pricebooks: CpqPricebookService) {}
+
+  // ── CRM-15 pricebooks: governed, effective-dated price lists a quote can be priced from ──
+  @Get('pricebooks') @Permissions('exec', 'cpq') listPricebooks(@CurrentUser() u: JwtUser) { return this.pricebooks.listPricebooks(u); }
+  @Get('pricebooks/:code') @Permissions('exec', 'cpq') getPricebook(@Param('code') code: string, @CurrentUser() u: JwtUser) { return this.pricebooks.getPricebook(code, u); }
+  @Post('pricebooks') @Permissions('masterdata') createPricebook(@Body(new ZodValidationPipe(PricebookBody)) dto: z.infer<typeof PricebookBody>, @CurrentUser() u: JwtUser) { return this.pricebooks.createPricebook(dto, u); }
+  @Post('pricebooks/:code/entries') @Permissions('masterdata') upsertEntries(@Param('code') code: string, @Body(new ZodValidationPipe(PricebookEntriesBody)) dto: z.infer<typeof PricebookEntriesBody>, @CurrentUser() u: JwtUser) { return this.pricebooks.upsertEntries(code, dto.entries, u); }
 
   @Get('configs')
   @Permissions('exec')
@@ -84,7 +96,7 @@ export class CpqController {
   @Post('quotes/:id/approve')
   @Permissions('exec', 'cpq_approve')
   @HttpCode(200)
-  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.approveDiscount(id, user); }
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveDiscount(id, user, b?.self_approval_reason); }
 
   // Printable ใบเสนอราคา (Quotation) — HTML→PDF via the shared renderer, HTML fallback when Chromium absent.
   @Get('quotes/:id/pdf')
@@ -108,14 +120,14 @@ export class CpqController {
   @Post('quotes/:id/accept')
   @Permissions('exec', 'cpq')
   @HttpCode(200)
-  accept(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.acceptQuote(id, user); }
+  accept(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.acceptQuote(id, user, b?.self_approval_reason); }
 
   // Reject: for a PendingApproval quote this is the checker declining the discount/margin breach (→ Draft,
   // SOD_SELF_APPROVAL); for a Sent/Draft quote it is the classic quote rejection (→ Rejected).
   @Post('quotes/:id/reject')
   @Permissions('exec', 'cpq', 'cpq_approve')
   @HttpCode(200)
-  reject(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) { return this.svc.rejectQuote(id, user); }
+  reject(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.rejectQuote(id, user, b?.self_approval_reason); }
 
   // ── CRM-14 (CRM-12): bundles — master data (masterdata-gated, mirrors config/rule creation) ──
   @Get('bundles')

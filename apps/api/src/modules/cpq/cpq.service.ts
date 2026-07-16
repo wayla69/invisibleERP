@@ -13,7 +13,9 @@ import { DocEmailService } from '../mail/doc-email.service';
 import { sellerParty } from '../../common/doc-party';
 import { normalizeA4Template } from '../../common/a4-template';
 import { DocumentTemplatesService } from '../document-templates/document-templates.service';
+import { CpqPricebookService } from './cpq-pricebook.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
@@ -31,6 +33,9 @@ export class CpqService {
     // Resolve the tenant's active no-code quotation template at print time (presentation only). @Optional so
     // the standalone cpq harness still constructs; absent ⇒ the built-in default layout.
     @Optional() private readonly docTemplates?: DocumentTemplatesService,
+    // CRM-15: resolve a quote's line prices from a governed pricebook. @Optional so a partial harness still
+    // constructs; when a pricebook_id is supplied without it, createQuote rejects rather than silently skipping.
+    @Optional() private readonly pricebooks?: CpqPricebookService,
   ) {}
 
   // ── Product Configs ──
@@ -95,7 +100,8 @@ export class CpqService {
   async createQuote(dto: {
     customer_name: string; opportunity_id?: number; config_id?: number;
     qty?: number; selected_options?: { group_name: string; option_code: string }[]; unit_cost?: number;
-    validity_days?: number; notes?: string; lines?: { description: string; qty?: number; unit_price?: number; unit_cost?: number }[];
+    validity_days?: number; notes?: string; pricebook_id?: number;
+    lines?: { description: string; qty?: number; unit_price?: number; unit_cost?: number; item_code?: string }[];
   }, user: JwtUser) {
     const db = this.db;
     const tenantId = user.tenantId!;
@@ -136,16 +142,25 @@ export class CpqService {
       const discountPct = bestRule ? n(bestRule.discountPct) : 0;
 
       const lineTotal = round4(unitPrice * qty * (1 - discountPct / 100));
-      lineValues.push({ lineNo: 1, description: cfg.name, qty: fx(qty, 2), unitPrice: fx(unitPrice, 4), unitCost: fx(dto.unit_cost ?? 0, 2), discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4) });
+      lineValues.push({ lineNo: 1, itemCode: cfg.code, description: cfg.name, qty: fx(qty, 2), unitPrice: fx(unitPrice, 4), unitCost: fx(dto.unit_cost ?? 0, 2), discountPct: fx(discountPct, 4), lineTotal: fx(lineTotal, 4) });
       subtotal = lineTotal;
     } else if (dto.lines?.length) {
       let lineNo = 1;
       for (const l of dto.lines) {
         const q = l.qty ?? 1; const up = l.unit_price ?? 0;
         const lt = round4(q * up);
-        lineValues.push({ lineNo: lineNo++, description: l.description, qty: fx(q, 2), unitPrice: fx(up, 4), unitCost: fx(l.unit_cost ?? 0, 2), discountPct: '0', lineTotal: fx(lt, 4) });
+        lineValues.push({ lineNo: lineNo++, itemCode: l.item_code ?? null, description: l.description, qty: fx(q, 2), unitPrice: fx(up, 4), unitCost: fx(l.unit_cost ?? 0, 2), discountPct: '0', lineTotal: fx(lt, 4) });
         subtotal += lt;
       }
+    }
+
+    // CRM-15: price the lines FROM a governed pricebook when one is selected (validated: tenant + active +
+    // effective window). A covered line takes the pricebook price; the CPQ-01 floor still governs the result.
+    let pricebookId: number | null = null;
+    if (dto.pricebook_id != null) {
+      if (!this.pricebooks) throw new BadRequestException({ code: 'PRICEBOOK_UNAVAILABLE', message: 'Pricebook pricing is not available', messageTh: 'ระบบตารางราคาไม่พร้อมใช้งาน' });
+      const applied = await this.pricebooks.applyToLines(lineValues, dto.pricebook_id, user);
+      subtotal = applied.subtotal; pricebookId = applied.pricebookId;
     }
 
     // SVC-1 (CPQ-01): compute the quote's effective discount% (gross→net) and margin% (net vs unit cost) up
@@ -162,7 +177,7 @@ export class CpqService {
       issuedDate, expiresDate, currency: 'THB',
       subtotal: fx(subtotal, 4), discountTotal: '0', total: fx(subtotal, 4),
       discountPct: fx(metrics.discountPct, 3), marginPct: fx(metrics.marginPct, 3),
-      notes: dto.notes ?? null, createdBy: user.username,
+      notes: dto.notes ?? null, createdBy: user.username, pricebookId,
     }).returning();
 
     if (lineValues.length) {
@@ -216,13 +231,11 @@ export class CpqService {
 
   // CPQ-01 (SVC-1): approve a floor-breaching quote (PendingApproval → Sent). The approver MUST differ from
   // the quote's author — one person may not both discount below the floor and approve it (SOD_SELF_APPROVAL).
-  async approveDiscount(quoteId: number, user: JwtUser) {
+  async approveDiscount(quoteId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const q = await this.assertQuote(quoteId);
     if (q.status !== 'PendingApproval') throw new BadRequestException({ code: 'INVALID_TRANSITION', message: `Quote ${q.quoteNo} is not pending approval (status ${q.status})` });
-    if (q.createdBy && q.createdBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot approve their own discount/margin breach — a different authorised user must approve', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติส่วนลด/มาร์จิ้นของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
-    }
+    await assertMakerChecker(db, { user, maker: q.createdBy, event: 'cpq.discount.approve', ref: q.quoteNo, amount: n(q.total), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot approve their own discount/margin breach — a different authorised user must approve', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติส่วนลด/มาร์จิ้นของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
     // CRM-14 (CRM-12): a breach tiered to 'exec' needs a caller holding `exec` specifically — a plain
     // cpq_approve holder (manager tier) may not clear it, even though the /approve route admits both.
     const [pending] = await db.select({ requiredTier: quoteApprovals.requiredTier }).from(quoteApprovals)
@@ -239,7 +252,7 @@ export class CpqService {
     return this.fmtQuote(updated);
   }
 
-  async acceptQuote(quoteId: number, user: JwtUser) {
+  async acceptQuote(quoteId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const q = await this.assertQuote(quoteId);
     if (q.expiresDate && new Date(q.expiresDate) < new Date()) {
       throw new BadRequestException({ code: 'QUOTE_EXPIRED', message: 'Cannot accept expired quote', messageTh: 'ใบเสนอราคาหมดอายุแล้ว' });
@@ -249,8 +262,8 @@ export class CpqService {
     // self-recognise its revenue. Enforced only when revenue actually posts (ledger wired + billable total),
     // which is always so in production (CpqModule provides the ledger); the ledger-less standalone quote
     // pipeline (no GL) is a pure status transition and is unaffected.
-    if (this.ledger && n(q.total) > 0 && q.createdBy && q.createdBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Quote author cannot accept their own quote — revenue recognition needs a second person', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติรับใบเสนอราคาของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
+    if (this.ledger && n(q.total) > 0) {
+      await assertMakerChecker(this.db, { user, maker: q.createdBy, event: 'cpq.quote.accept', ref: q.quoteNo, amount: n(q.total), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Quote author cannot accept their own quote — revenue recognition needs a second person', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติรับใบเสนอราคาของตนเองได้ ต้องให้ผู้อื่นอนุมัติ' });
     }
     const res = await this.transitionQuote(quoteId, 'Accepted', ['Sent'], user);
     // quote-to-cash: book the won quote to AR + revenue (idempotent per quote)
@@ -274,13 +287,11 @@ export class CpqService {
   // Rejecting a quote in 'PendingApproval' is the CHECKER declining the discount/margin breach (CPQ-01): the
   // quote returns to Draft for re-work and the approver must differ from the author (SOD_SELF_APPROVAL). A
   // quote in Sent/Draft is rejected the classic way (→ Rejected).
-  async rejectQuote(quoteId: number, user: JwtUser) {
+  async rejectQuote(quoteId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const q = await this.assertQuote(quoteId);
     if (q.status === 'PendingApproval') {
-      if (q.createdBy && q.createdBy === user.username) {
-        throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot decide their own discount/margin breach — a different authorised user must approve/reject', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติ/ปฏิเสธส่วนลดของตนเองได้ ต้องให้ผู้อื่นดำเนินการ' });
-      }
+      await assertMakerChecker(db, { user, maker: q.createdBy, event: 'cpq.quote.reject', ref: q.quoteNo, amount: n(q.total), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Quote author cannot decide their own discount/margin breach — a different authorised user must approve/reject', messageTh: 'ผู้จัดทำใบเสนอราคาไม่สามารถอนุมัติ/ปฏิเสธส่วนลดของตนเองได้ ต้องให้ผู้อื่นดำเนินการ' });
       await db.update(quoteApprovals)
         .set({ status: 'rejected', approvedBy: user.username, decidedAt: new Date() })
         .where(and(eq(quoteApprovals.quoteId, quoteId), eq(quoteApprovals.status, 'pending')));
@@ -574,5 +585,5 @@ export class CpqService {
   private fmtConfig(c: any) { return { id: Number(c.id), code: c.code, name: c.name, base_price: n(c.basePrice), currency: c.currency, description: c.description }; }
   // opportunity_id resolves the unified spine link first (crm_opportunity_id), falling back to the
   // read-legacy Batch 2A pointer for pre-0293 rows that predate the data-migration backfill.
-  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), discount_pct: n(q.discountPct), margin_pct: q.marginPct != null ? n(q.marginPct) : null, requires_approval: !!q.requiresApproval, approved_by: q.approvedBy ?? null, notes: q.notes, created_by: q.createdBy }; }
+  private fmtQuote(q: any) { return { id: Number(q.id), quote_no: q.quoteNo, opportunity_id: q.crmOpportunityId != null ? Number(q.crmOpportunityId) : (q.opportunityId != null ? Number(q.opportunityId) : null), customer_name: q.customerName, status: q.status, issued_date: q.issuedDate, expires_date: q.expiresDate, subtotal: n(q.subtotal), discount_total: n(q.discountTotal), total: n(q.total), discount_pct: n(q.discountPct), margin_pct: q.marginPct != null ? n(q.marginPct) : null, requires_approval: !!q.requiresApproval, approved_by: q.approvedBy ?? null, notes: q.notes, created_by: q.createdBy, pricebook_id: q.pricebookId != null ? Number(q.pricebookId) : null }; }
 }

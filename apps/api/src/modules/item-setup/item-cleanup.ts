@@ -78,10 +78,49 @@ async function unusedItemRows(db: DrizzleDb): Promise<UnusedRow[]> {
 
 const SAMPLE = 500; // cap the preview list so a huge purge doesn't return an unbounded payload
 
-// Read-only preview (dry-run): how many items would be collected + a bounded sample of their codes.
-export async function previewUnusedItems(db: DrizzleDb): Promise<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number }> {
-  const [rows, refs] = [await unusedItemRows(db), await itemRefColumns(db)];
-  return { total: rows.length, item_ids: rows.slice(0, SAMPLE).map((r) => r.itemId), sampled: rows.length > SAMPLE, ref_columns: refs.length };
+// The base tables that carry a real `tenant_id` column — used to attribute a reference to the company that
+// owns it (a referencing table without one is platform/shared, reported as tenant_id=null).
+async function tablesWithTenantId(db: DrizzleDb): Promise<Set<string>> {
+  const res: any = await db.execute(sql`
+    SELECT c.table_name AS tbl FROM information_schema.columns c
+    JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+    WHERE c.table_schema = 'public' AND c.column_name = 'tenant_id' AND t.table_type = 'BASE TABLE'`);
+  return new Set(rowsOf(res).map((r: any) => String(r.tbl)));
+}
+
+export interface KeptByTenant { tenant_id: number | null; code: string | null; name: string | null; items: number }
+
+// DIAGNOSTIC — for the items that are KEPT (still referenced, so NOT collected by a purge), attribute them to
+// the company whose data references them. Answers "why do N products survive the purge?": if they map to the
+// company you just reset, its data wasn't fully wiped; if they map to OTHER companies, the shared catalogue is
+// simply in use elsewhere and a purge can't remove them. Grouped by referencing tenant, distinct items each
+// (an item used by two companies counts for both). Computed cross-tenant — the caller holds the god bypass.
+export async function keptByTenant(db: DrizzleDb): Promise<KeptByTenant[]> {
+  const refs = await itemRefColumns(db);
+  if (!refs.length) return [];
+  const tenantTables = await tablesWithTenantId(db);
+  const parts = refs.map((r) => {
+    const join = r.kind === 'code' ? `i.item_id = r.${q(r.col)}::text` : `i.id = r.${q(r.col)}::bigint`;
+    const tExpr = tenantTables.has(r.table) ? 'r.tenant_id' : 'NULL::bigint';
+    return `SELECT ${tExpr} AS tenant_id, i.id AS item_id FROM ${q(r.table)} r JOIN items i ON ${join} WHERE r.${q(r.col)} IS NOT NULL`;
+  });
+  const res: any = await db.execute(sql.raw(`
+    WITH refs AS (${parts.join(' UNION ALL ')})
+    SELECT refs.tenant_id, t.code, t.name, count(DISTINCT refs.item_id)::int AS items
+    FROM refs LEFT JOIN tenants t ON t.id = refs.tenant_id
+    GROUP BY refs.tenant_id, t.code, t.name
+    ORDER BY items DESC`));
+  return rowsOf(res).map((r: any) => ({
+    tenant_id: r.tenant_id != null ? Number(r.tenant_id) : null,
+    code: r.code ?? null, name: r.name ?? null, items: Number(r.items ?? 0),
+  }));
+}
+
+// Read-only preview (dry-run): how many items would be collected + a bounded sample of their codes, PLUS the
+// diagnostic breakdown of who keeps the rest alive (so a god can tell a reset-leftover from an in-use item).
+export async function previewUnusedItems(db: DrizzleDb): Promise<{ total: number; item_ids: string[]; sampled: boolean; ref_columns: number; kept_by: KeptByTenant[] }> {
+  const [rows, refs, keptBy] = [await unusedItemRows(db), await itemRefColumns(db), await keptByTenant(db)];
+  return { total: rows.length, item_ids: rows.slice(0, SAMPLE).map((r) => r.itemId), sampled: rows.length > SAMPLE, ref_columns: refs.length, kept_by: keptBy };
 }
 
 // Destructive purge — deletes the unreferenced items and their images. Idempotent: a second run finds nothing
@@ -104,4 +143,85 @@ export async function purgeUnusedItems(db: DrizzleDb): Promise<{ items_deleted: 
 function sqlList(values: (string | number)[]) {
   const parts = values.map((v) => sql`${v}`);
   return sql`(${sql.join(parts, sql`, `)})`;
+}
+
+// ── FORCE purge (DANGEROUS — deletes referenced items too) ──────────────────────────────────────────────
+// The normal purge KEEPS an item any company still references. Force purge is the escape hatch for junk/test
+// products that must go regardless: it DELETES every referencing row across EVERY tenant (PO/GR/stock/recipe/
+// price/… lines), then deletes the item + its image. This corrupts a real company's data if one genuinely
+// uses the item, so it is god-only, needs a distinct strong confirm, and the caller must show the blast-radius
+// preview first. Targets an explicit item_id list, or ALL items in the catalogue when none is given.
+
+interface ForceTargets { ids: number[]; itemIds: string[] }
+
+async function forceTargets(db: DrizzleDb, itemIds?: string[]): Promise<ForceTargets> {
+  const where = itemIds && itemIds.length ? sql`WHERE item_id IN ${sqlList(itemIds)}` : sql``;
+  const res: any = await db.execute(sql`SELECT id, item_id FROM items ${where}`);
+  const rows = rowsOf(res).map((r: any) => ({ id: Number(r.id), itemId: String(r.item_id) }));
+  return { ids: rows.map((r: any) => r.id), itemIds: rows.map((r: any) => r.itemId) };
+}
+
+// Blast-radius preview for a force purge: how many referencing rows would be deleted, grouped by the company
+// (tenant) that owns them — so a god sees exactly which companies are affected BEFORE committing. Read-only.
+export async function forcePurgePreview(db: DrizzleDb, itemIds?: string[]): Promise<{ items: number; total_ref_rows: number; by_tenant: (KeptByTenant & { ref_rows: number })[] }> {
+  const targets = await forceTargets(db, itemIds);
+  if (!targets.ids.length) return { items: 0, total_ref_rows: 0, by_tenant: [] };
+  const refs = await itemRefColumns(db);
+  const tenantTables = await tablesWithTenantId(db);
+  const scoped = !!(itemIds && itemIds.length);
+  // When an explicit id list is given, restrict via a `target(item_id)` VALUES CTE so the codes are BOUND, not
+  // string-interpolated. Table/column identifiers come from pg_catalog (safe to raw-embed).
+  const parts = refs.map((r) => {
+    const join = r.kind === 'code' ? `i.item_id = r.${q(r.col)}::text` : `i.id = r.${q(r.col)}::bigint`;
+    const tExpr = tenantTables.has(r.table) ? 'r.tenant_id' : 'NULL::bigint';
+    const targetJoin = scoped ? 'JOIN target g ON g.item_id = i.item_id' : '';
+    return `SELECT ${tExpr} AS tenant_id FROM ${q(r.table)} r JOIN items i ON ${join} ${targetJoin} WHERE r.${q(r.col)} IS NOT NULL`;
+  });
+  const refsCte = sql.raw(parts.join(' UNION ALL '));
+  const body = sql`SELECT refs.tenant_id, t.code, t.name, count(*)::int AS ref_rows
+    FROM refs LEFT JOIN tenants t ON t.id = refs.tenant_id
+    GROUP BY refs.tenant_id, t.code, t.name ORDER BY ref_rows DESC`;
+  const res: any = scoped
+    ? await db.execute(sql`WITH target(item_id) AS (VALUES ${sql.join(targets.itemIds.map((v) => sql`(${v})`), sql`, `)}), refs AS (${refsCte}) ${body}`)
+    : await db.execute(sql`WITH refs AS (${refsCte}) ${body}`);
+  const by_tenant = rowsOf(res).map((r: any) => ({
+    tenant_id: r.tenant_id != null ? Number(r.tenant_id) : null, code: r.code ?? null, name: r.name ?? null,
+    items: 0, ref_rows: Number(r.ref_rows ?? 0),
+  }));
+  const total = by_tenant.reduce((s, r) => s + r.ref_rows, 0);
+  return { items: targets.itemIds.length, total_ref_rows: total, by_tenant };
+}
+
+// Execute the force purge: delete every referencing row for the target items across all tenants, then the
+// images + items. A savepoint wraps each statement so an unforeseen FK/immutability block degrades to a
+// reported "blocked" table instead of a raw 500. app.tenant_wipe authorises deleting append-only rows (mirrors
+// the tenant-wipe engine). Runs inside the caller's request transaction (atomic).
+export async function forcePurgeItems(db: DrizzleDb, itemIds?: string[]): Promise<{ items_deleted: number; ref_rows_deleted: number; images_deleted: number; blocked: string[] }> {
+  const targets = await forceTargets(db, itemIds);
+  if (!targets.ids.length) return { items_deleted: 0, ref_rows_deleted: 0, images_deleted: 0, blocked: [] };
+  await db.execute(sql`SET LOCAL app.tenant_wipe = 'on'`);
+  const refs = await itemRefColumns(db);
+  const affected = (res: any) => Number(res?.rowCount ?? res?.affectedRows ?? rowsOf(res).length ?? 0);
+  const blocked: string[] = [];
+  let refRows = 0;
+  const savepoint = async (label: string, run: () => Promise<number>) => {
+    await db.execute(sql`SAVEPOINT force_purge_stmt`);
+    try { const n = await run(); await db.execute(sql`RELEASE SAVEPOINT force_purge_stmt`); return n; }
+    catch { await db.execute(sql`ROLLBACK TO SAVEPOINT force_purge_stmt`); blocked.push(label); return 0; }
+  };
+  // 1. Referencing rows, per column. code cols match the text item_id; id cols match the bigint items.id.
+  for (const r of refs) {
+    const list = r.kind === 'code' ? sqlList(targets.itemIds) : sqlList(targets.ids);
+    refRows += await savepoint(r.table, async () => {
+      const res: any = await db.execute(sql`DELETE FROM ${sql.raw(q(r.table))} WHERE ${sql.raw(q(r.col))} IN ${list}`);
+      return affected(res);
+    });
+  }
+  // 2. items-self successor pointers that named a doomed item — null them so no surviving item dangles.
+  await savepoint('items.superseded_by', async () => affected(await db.execute(sql`UPDATE items SET superseded_by = NULL WHERE superseded_by IN ${sqlList(targets.ids)}`)));
+  await savepoint('items.merged_into', async () => affected(await db.execute(sql`UPDATE items SET merged_into = NULL WHERE merged_into IN ${sqlList(targets.ids)}`)));
+  // 3. Images, then the items themselves.
+  const imagesDeleted = await savepoint('item_images', async () => affected(await db.execute(sql`DELETE FROM item_images WHERE item_id IN ${sqlList(targets.itemIds)}`)));
+  const itemsDeleted = await savepoint('items', async () => affected(await db.execute(sql`DELETE FROM items WHERE id IN ${sqlList(targets.ids)}`)));
+  return { items_deleted: itemsDeleted, ref_rows_deleted: refRows, images_deleted: imagesDeleted, blocked };
 }

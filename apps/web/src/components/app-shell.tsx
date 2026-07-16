@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, Star } from 'lucide-react';
+import { BadgeCheck, Building2, Check, ChevronDown, ChevronRight, ChevronsUpDown, ChevronUp, Globe, LogOut, Search, ShieldCheck, SlidersHorizontal, Star } from 'lucide-react';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -14,6 +14,7 @@ import {
   INTERNAL_NAV,
   PORTAL_NAV,
   allGroupItems,
+  filterAdvancedNav,
   navForWorkspace,
   orderGroups,
   orderItems,
@@ -55,6 +56,8 @@ import {
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
+import { SmeReasonDialog } from '@/components/sme-reason-dialog';
+import { SmeSetupWizard } from '@/components/sme-setup-wizard';
 import { AssistantWidget } from '@/components/assistant-widget';
 import { NotificationBell } from '@/components/notification-bell';
 
@@ -71,6 +74,11 @@ const RECENTS_KEY = 'ie-nav-recents'; // recently visited hrefs (auto, most-rece
 const RECENTS_SHOWN = 5; // how many recent items to surface
 const RECENTS_STORED = 12; // how many to retain so favourites filtering doesn't starve the list
 const PREFS_PUSH_MS = 600; // debounce for syncing pref changes to the server
+// Reserved fold-map key holding the "show advanced menus" toggle. Stored inside `navFold` (a free-form
+// {key: boolean} synced via /api/user-prefs) so it syncs across devices with no backend change; it can't
+// collide with a real group/subgroup title (those are all `nav.group.*` / `nav.sub.*`). Excluded from the
+// group render because no NavGroup carries this title.
+const ADVANCED_FOLD_KEY = '__show_advanced__';
 
 type SyncedPrefs = { favorites: string[]; navFold: Record<string, boolean> };
 
@@ -114,6 +122,54 @@ function NavSubSection({
   );
 }
 
+/** A collapsible TOP-LEVEL sidebar domain. The label becomes a fold toggle (chevron + title, with an
+ *  item-count badge when collapsed). Default-open is driven by the caller (only the domain containing the
+ *  active route opens on load); an explicit user toggle persists and overrides. In icon-collapsed (rail)
+ *  mode the header hides and items stay visible (icons only), matching NavSubSection. */
+function NavGroupSection({
+  title,
+  count,
+  open,
+  active,
+  onToggle,
+  children,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  active: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <SidebarGroup>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden',
+          active ? 'text-sidebar-foreground' : 'text-sidebar-foreground/60',
+        )}
+      >
+        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} />
+        <span className="flex-1 truncate text-left">{title}</span>
+        {!open && count > 0 && (
+          <span
+            aria-hidden="true"
+            className="rounded-full bg-sidebar-accent px-1.5 text-[10px] font-medium tabular-nums text-sidebar-foreground/70"
+          >
+            {count}
+          </span>
+        )}
+      </button>
+      <SidebarGroupContent className={cn(open ? 'block' : 'hidden', 'group-data-[collapsible=icon]:block')}>
+        {children}
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+}
+
 // God-only nav group (Platform Console). Appended AFTER the permission filter so it is gated solely on
 // is_platform_owner — a per-tenant Admin (who also passes every perm) never sees it.
 const PLATFORM_GROUP: NavGroup = {
@@ -150,6 +206,21 @@ function GodScopeBanner() {
     <div className="flex items-center gap-2 border-b border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-1 text-[11px] text-muted-foreground">
       <Globe className="size-3.5 shrink-0" />
       <span>{t('plt.scope_combined_mode_pre')} <b>{t('plt.scope_all_companies')}</b> {t('plt.scope_combined_mode_post')}</span>
+    </div>
+  );
+}
+
+/**
+ * Persistent SME-mode banner (docs/49) — shown to EVERY user of a control_profile='sme' tenant so nobody
+ * mistakes the relaxed single-operator control environment for the full enterprise maker-checker one.
+ * Names the compensating control: self-approvals require a logged reason and are independently reviewed.
+ */
+function SmeModeBanner() {
+  const { t } = useLang();
+  return (
+    <div className="flex items-center gap-2 border-b border-sky-500/40 bg-sky-500/10 px-4 py-1 text-[11px]">
+      <BadgeCheck className="size-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
+      <span className="truncate"><b>{t('sme.mode_badge')}</b> — {t('sme.mode_banner_desc')}</span>
     </div>
   );
 }
@@ -518,12 +589,20 @@ export function AppShell({
   const groupOrder = moduleFlags.data?.groupOrder;
   const itemOrder = moduleFlags.data?.itemOrder;
   const isGod = me.data?.is_platform_owner ?? false;
+  // SME edition (docs/49): hide the group title-keys the tenant was stamped with at provisioning.
+  const smeHidden = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_hidden_nav_groups ?? [] : []), [me.data]);
   const groups = React.useMemo(() => {
-    const filtered = filterByPerm(wsNav);
+    const filtered = filterByPerm(wsNav).filter((g) => !smeHidden.has(g.title));
     const base = filtered.length ? filtered : wsNav; // fall back while loading
     const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
     return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
-  }, [filterByPerm, wsNav, groupOrder, isGod]);
+  }, [filterByPerm, wsNav, groupOrder, isGod, smeHidden]);
+  // "Show advanced menus" — kept in the synced fold map under a reserved key (see ADVANCED_FOLD_KEY). Off by
+  // default: infrequent/expert domains (Controls, Customise, Integrations, Intercompany) stay hidden.
+  const showAdvanced = navFold[ADVANCED_FOLD_KEY] ?? false;
+  // The domain tree hides `advanced` groups/subgroups when the toggle is off. Favourites/recents and the ⌘K
+  // palette resolve against the UNFILTERED `groups`, so a pinned advanced item stays reachable regardless.
+  const sidebarGroups = React.useMemo(() => filterAdvancedNav(groups, showAdvanced), [groups, showAdvanced]);
   const paletteGroups = React.useMemo(() => {
     const filtered = filterByPerm(nav);
     const base = filtered.length ? filtered : nav;
@@ -741,32 +820,64 @@ export function AppShell({
               </SidebarGroupContent>
             </SidebarGroup>
           )}
-          {groups.map((group) => (
-            <SidebarGroup key={group.title}>
-              <SidebarGroupLabel>{t(group.title)}</SidebarGroupLabel>
-              <SidebarGroupContent>
+          {sidebarGroups.map((group) => {
+            // Only-active-open default: the domain holding the current route opens on load; an explicit user
+            // toggle (navFold[group.title]) persists and overrides. Count feeds the collapsed badge.
+            const groupActive = allGroupItems(group).some((it) => isActive(it.href));
+            const open = navFold[group.title] ?? groupActive;
+            const count = allGroupItems(group).length;
+            return (
+              <NavGroupSection
+                key={group.title}
+                title={t(group.title)}
+                count={count}
+                open={open}
+                active={groupActive}
+                onToggle={() => toggleFold(group.title, groupActive)}
+              >
                 {group.items && group.items.length > 0 && (
                   <SidebarMenu>{orderItems(group.items, itemOrder?.[group.title]).map(renderItem)}</SidebarMenu>
                 )}
                 {group.subgroups?.map((sub) => {
-                  const open = navFold[sub.title] ?? sub.defaultOpen ?? true;
+                  const subOpen = navFold[sub.title] ?? sub.defaultOpen ?? true;
                   return (
                     <NavSubSection
                       key={sub.title}
                       title={t(sub.title)}
-                      open={open}
+                      open={subOpen}
                       onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
                     >
                       <SidebarMenu>{orderItems(sub.items, itemOrder?.[sub.title]).map(renderItem)}</SidebarMenu>
                     </NavSubSection>
                   );
                 })}
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
+              </NavGroupSection>
+            );
+          })}
         </SidebarContent>
 
         <SidebarFooter>
+          {pinsEnabled && (
+            <button
+              type="button"
+              onClick={() => toggleFold(ADVANCED_FOLD_KEY, false)}
+              aria-pressed={showAdvanced}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground group-data-[collapsible=icon]:hidden"
+            >
+              <span className="flex items-center gap-1.5">
+                <SlidersHorizontal className="size-3.5 shrink-0" />
+                {t('nav.show_advanced')}
+              </span>
+              <span
+                className={cn(
+                  'flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  showAdvanced ? 'bg-primary' : 'bg-muted-foreground/30',
+                )}
+              >
+                <span className={cn('size-3 rounded-full bg-white transition-transform', showAdvanced && 'translate-x-3')} />
+              </span>
+            </button>
+          )}
           {me.data && (
             <div className="flex items-center gap-2 rounded-md px-1 py-1.5 group-data-[collapsible=icon]:hidden">
               <Avatar className="size-8">
@@ -840,6 +951,7 @@ export function AppShell({
         </header>
 
         {isGod && <GodScopeBanner />}
+        {me.data?.control_profile === 'sme' && <SmeModeBanner />}
         <div className={cn('flex-1 pt-4 sm:pt-6 app-content-pad')}>{children}</div>
       </SidebarInset>
 
@@ -850,6 +962,14 @@ export function AppShell({
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
       />
+
+      {/* SME self-approval reason dialog (docs/49 H2) — invisible until api() dispatches a
+          SELF_APPROVAL_REASON_REQUIRED request to it via lib/sme-reason.ts. Mounted unconditionally. */}
+      <SmeReasonDialog />
+
+      {/* SME first-run setup wizard (docs/49 v1.3) — self-hides unless the tenant is 'sme', setup is
+          incomplete, and the wizard hasn't been completed/dismissed (sme_wizard_done user-pref). */}
+      <SmeSetupWizard />
 
       {/* Global floating AI helper — contextual assistance from any screen, for users who can use the
           assistant (self-hides otherwise). Shares chat logic with the full /assistant page. */}

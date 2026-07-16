@@ -109,7 +109,7 @@ jobs:
           - shard: platform-b
             run: >-
               cutover:worldclass cutover:migration-parity cutover:ai-eval
-              cutover:onboarding cutover:opening-balances
+              cutover:onboarding cutover:opening-balances cutover:sme
           # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
           - shard: controls
             run: >-
@@ -149,7 +149,7 @@ jobs:
           - shard: analytics
             run: >-
               cutover:epm-planning cutover:bi cutover:demand-ml cutover:customers
-              cutover:branch cutover:channel cutover:offline-sync cutover:workflow cutover:reputation
+              cutover:branch cutover:channel cutover:offline-sync cutover:workflow cutover:reputation cutover:mmm
           # ── AI / HR / portal ──
           - shard: ai-hr
             run: >-

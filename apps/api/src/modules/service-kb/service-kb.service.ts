@@ -1,9 +1,10 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, or, desc, ilike, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { kbArticles, kbDeflections } from '../../database/schema/service-kb';
 import { docCountersTenant } from '../../database/schema/system';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // SVC-6 — Service Cloud: Knowledge Base + Case Deflection (SVC-06 control). A governed KB publish lifecycle
 // (draft → published → archived) where an article is published only by a DIFFERENT user than its author
@@ -66,10 +67,10 @@ export class ServiceKbService {
 
   // SVC-06 control: publish a draft — the publisher MUST differ from the author (maker-checker), so no one
   // publishes their own unreviewed article. draft → published only.
-  async publishArticle(user: JwtUser, id: number) {
+  async publishArticle(user: JwtUser, id: number, selfApprovalReason?: string | null) {
     const a = await this.load(user, id);
     if (a.status !== 'draft') throw new BadRequestException({ code: 'ARTICLE_NOT_DRAFT', message: `Article ${a.articleNo} is not a draft (status=${a.status})`, messageTh: `บทความ ${a.articleNo} ไม่ใช่ฉบับร่าง` });
-    if (a.author && a.author === user.username) throw new ForbiddenException({ code: 'SOD_SELF_PUBLISH', message: 'The publisher must differ from the article author', messageTh: 'ผู้เผยแพร่ต้องไม่ใช่ผู้เขียนบทความ' });
+    await assertMakerChecker(this.db, { user, maker: a.author, event: 'svc.kb.publish', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_PUBLISH', message: 'The publisher must differ from the article author', messageTh: 'ผู้เผยแพร่ต้องไม่ใช่ผู้เขียนบทความ' });
     const [row] = await this.db.update(kbArticles).set({ status: 'published', publishedBy: user.username, publishedAt: new Date(), updatedAt: new Date() }).where(eq(kbArticles.id, a.id)).returning();
     return fmt(row!);
   }

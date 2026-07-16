@@ -2,6 +2,7 @@ import { Controller, Get, Post, Query, Body, Param, HttpCode } from '@nestjs/com
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { LessorLeasesService, type LessorLeaseDto } from './lessor-leases.service';
 
 const LessorLeaseBody = z.object({
@@ -60,7 +61,7 @@ export class LessorLeasesController {
   // Maker-checker: a DIFFERENT user approves the classification → books commencement (LSE-02).
   @Post(':leaseNo/approve')
   @HttpCode(200)
-  approve(@Param('leaseNo') leaseNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveLease(leaseNo, u); }
+  approve(@Param('leaseNo') leaseNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveLease(leaseNo, u, b?.self_approval_reason); }
 
   // Post every due lessor-lease period now (cron-callable).
   @Post('run')

@@ -39,7 +39,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
-  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'eac', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'risks', 'change-orders', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
+  const refresh = () => { for (const k of ['detail', 'evm', 'es', 'eac', 'series', 'schedule', 'tasks', 'milestones', 'resources', 'leveling', 'risks', 'change-orders', 'gates', 'health', 'boq', 'commitments', 'pmr', 'reservations', 'sitecash']) qc.invalidateQueries({ queryKey: ['proj', code, k] }); };
 
   // detail + evm are server-prefetched (see page.tsx) so the first paint carries data; react-query still
   // owns the cache and refetches on invalidation exactly as before (null prefetch = old client-only path).
@@ -53,6 +53,8 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const tasks = useQuery<any>({ queryKey: ['proj', code, 'tasks'], queryFn: () => api(`/api/projects/${code}/tasks`) });
   const milestones = useQuery<any>({ queryKey: ['proj', code, 'milestones'], queryFn: () => api(`/api/projects/${code}/milestones`) });
   const resources = useQuery<any>({ queryKey: ['proj', code, 'resources'], queryFn: () => api(`/api/projects/${code}/resources`) });
+  // PPM-A2 (PROJ-23): over-allocated resource-months within this project + slack-based leveling suggestions.
+  const leveling = useQuery<any>({ queryKey: ['proj', code, 'leveling'], queryFn: () => api(`/api/projects/${code}/resource-leveling`) });
   const risks = useQuery<any>({ queryKey: ['proj', code, 'risks'], queryFn: () => api(`/api/projects/${code}/risks`) });
 
   const p = detail.data;
@@ -158,6 +160,24 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const decideCo = useMutation({
     mutationFn: (v: { id: number; action: 'approve' | 'reject' }) => api(`/api/projects/change-orders/${v.id}/${v.action}`, { method: 'POST', body: '{}' }),
     onSuccess: () => { notifySuccess(t('pj.toast_co_updated')); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  // PROJ-24: read-only change-order impact simulation (projected cost/margin/EVM before authorising).
+  const [simCo, setSimCo] = useState<any>(null);
+  const simulateCo = useMutation({
+    mutationFn: (id: number) => api<any>(`/api/projects/change-orders/${id}/simulate`),
+    onSuccess: (r) => setSimCo(r), onError: (err: any) => notifyError(err.message),
+  });
+  // PROJ-26: project phase-gate governance — advance through lifecycle phases only via an independently-decided gate.
+  const gates = useQuery<any>({ queryKey: ['proj', code, 'gates'], queryFn: () => api(`/api/projects/${code}/gates`) });
+  const [gateTarget, setGateTarget] = useState('');
+  const [gateReadiness, setGateReadiness] = useState('');
+  const submitGate = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/gates`, { method: 'POST', body: JSON.stringify({ target_phase: gateTarget, readiness: gateReadiness || undefined }) }),
+    onSuccess: () => { notifySuccess(t('pj.gate_submitted')); setGateTarget(''); setGateReadiness(''); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  const decideGate = useMutation({
+    mutationFn: (v: { id: number; decision: 'go' | 'hold' | 'kill' }) => api(`/api/projects/gates/${v.id}/decide`, { method: 'POST', body: JSON.stringify({ decision: v.decision }) }),
+    onSuccess: (_r, v) => { notifySuccess(t(v.decision === 'go' ? 'pj.gate_go_done' : v.decision === 'hold' ? 'pj.gate_hold_done' : 'pj.gate_kill_done')); refresh(); }, onError: (err: any) => notifyError(err.message),
   });
   // Project health history (PPM upgrade) — dated EVM/RAG trend.
   const health = useQuery<any>({ queryKey: ['proj', code, 'health'], queryFn: () => api(`/api/projects/${code}/health`) });
@@ -679,6 +699,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               </span>
               {c.status === 'pending' && (
                 <span className="flex gap-1">
+                  <Button size="sm" variant="ghost" title={t('pj.co_simulate_tip')} onClick={() => simulateCo.mutate(c.id)} disabled={simulateCo.isPending}><TrendingUp className="size-4" /></Button>
                   <Button size="sm" variant="ghost" title={t('pj.approve_not_requester')} onClick={() => decideCo.mutate({ id: c.id, action: 'approve' })}><CheckCircle2 className="size-4" /></Button>
                 </span>
               )}
@@ -687,6 +708,108 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           {!cos.data?.count && <p className="py-2 text-sm text-muted-foreground">{t('pj.co_empty')}</p>}
         </div>
       </Card>
+
+      {/* PROJ-26 phase-gate governance — advance through lifecycle phases only via an independently-decided gate */}
+      <Card className="gap-3 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-base font-semibold"><Flag className="size-4" /> {t('pj.gate_title')}</h3>
+          {gates.data && <Badge variant="info">{t('pj.gate_current', { phase: t(`pj.phase_${gates.data.current_phase}`) })}</Badge>}
+        </div>
+        {gates.data && (
+          <>
+            {/* phase ladder strip */}
+            <div className="flex flex-wrap items-center gap-1 text-xs">
+              {gates.data.phase_ladder.map((p: string, i: number) => {
+                const ci = gates.data.phase_ladder.indexOf(gates.data.current_phase);
+                const state = i < ci ? 'done' : i === ci ? 'current' : 'future';
+                return (
+                  <span key={p} className="flex items-center gap-1">
+                    <span className={`rounded-full px-2 py-0.5 ${state === 'current' ? 'bg-primary text-primary-foreground' : state === 'done' ? 'bg-success/30' : 'bg-muted text-muted-foreground'}`}>{t(`pj.phase_${p}`)}</span>
+                    {i < gates.data.phase_ladder.length - 1 && <span className="text-muted-foreground">→</span>}
+                  </span>
+                );
+              })}
+            </div>
+            {/* gate history */}
+            {gates.data.gates.length > 0 && (
+              <ul className="divide-y divide-border/50">
+                {gates.data.gates.map((g: any) => (
+                  <li key={g.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                    <span className="min-w-0 truncate">
+                      <span className="font-medium">{g.gate_key}</span> <span className="text-muted-foreground">{t(`pj.phase_${g.from_phase}`)} → {t(`pj.phase_${g.target_phase}`)}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{t('pj.gate_submitted_by', { who: g.submitted_by })}{g.decided_by ? ` · ${t('pj.gate_decided_by', { who: g.decided_by })}` : ''}</span>
+                    </span>
+                    {g.status === 'pending' ? (
+                      <span className="flex shrink-0 gap-1">
+                        <Button size="sm" variant="outline" title={t('pj.gate_go')} onClick={() => decideGate.mutate({ id: g.id, decision: 'go' })} disabled={decideGate.isPending}><Check className="size-4" /></Button>
+                        <Button size="sm" variant="ghost" title={t('pj.gate_hold')} onClick={() => decideGate.mutate({ id: g.id, decision: 'hold' })} disabled={decideGate.isPending}><Lock className="size-4" /></Button>
+                        <Button size="sm" variant="ghost" title={t('pj.gate_kill')} onClick={() => decideGate.mutate({ id: g.id, decision: 'kill' })} disabled={decideGate.isPending}><X className="size-4" /></Button>
+                      </span>
+                    ) : (
+                      <Badge variant={g.status === 'go' ? 'success' : g.status === 'kill' ? 'destructive' : 'warning'}>{t(`pj.gate_status_${g.status}`)}</Badge>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* submit a gate (only when none pending and there's a phase ahead) */}
+            {!gates.data.pending_gate && gates.data.next_phase && (
+              <div className="flex flex-wrap items-end gap-2 border-t border-border/50 pt-3">
+                <div className="min-w-40 flex-1">
+                  <label className="text-xs text-muted-foreground">{t('pj.gate_target')}</label>
+                  <Select value={gateTarget} onChange={(e) => setGateTarget(e.target.value)}>
+                    <option value="">{t('pj.gate_pick_phase')}</option>
+                    {gates.data.phase_ladder.slice(gates.data.phase_ladder.indexOf(gates.data.current_phase) + 1).map((p: string) => <option key={p} value={p}>{t(`pj.phase_${p}`)}</option>)}
+                  </Select>
+                </div>
+                <div className="min-w-40 flex-[2]"><label className="text-xs text-muted-foreground">{t('pj.gate_readiness')}</label><Input value={gateReadiness} onChange={(e) => setGateReadiness(e.target.value)} placeholder={t('pj.gate_readiness_hint')} /></div>
+                <Button size="sm" disabled={!gateTarget || submitGate.isPending} onClick={() => submitGate.mutate()}><Plus className="size-4" /> {t('pj.gate_submit')}</Button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">{t('pj.gate_hint')}</p>
+          </>
+        )}
+      </Card>
+
+      {/* PROJ-24 change-order impact simulation — projected cost/margin/EVM before authorisation (read-only) */}
+      <Dialog open={!!simCo} onOpenChange={(o) => !o && setSimCo(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('pj.co_sim_title', { no: simCo?.change_order ?? '' })}</DialogTitle></DialogHeader>
+          {simCo && (() => {
+            const rows: { label: string; cur: number; proj: number; delta: number; good?: 'up' | 'down' }[] = [
+              { label: t('pj.co_sim_contract'), cur: simCo.current.contract_amount, proj: simCo.projected.contract_amount, delta: simCo.delta.contract },
+              { label: t('pj.co_sim_budget'), cur: simCo.current.budget_amount, proj: simCo.projected.budget_amount, delta: simCo.delta.budget },
+              { label: t('pj.co_sim_est_cost'), cur: simCo.current.estimated_cost, proj: simCo.projected.estimated_cost, delta: simCo.delta.estimated_cost, good: 'down' },
+              { label: t('pj.co_sim_margin'), cur: simCo.current.margin, proj: simCo.projected.margin, delta: simCo.delta.margin, good: 'up' },
+              { label: t('pj.co_sim_eac'), cur: simCo.current.eac, proj: simCo.projected.eac, delta: simCo.delta.eac, good: 'down' },
+              { label: t('pj.co_sim_headroom'), cur: simCo.current.budget_headroom, proj: simCo.projected.budget_headroom, delta: simCo.delta.budget_headroom, good: 'up' },
+            ];
+            return (
+              <div className="grid gap-2">
+                <p className="text-xs text-muted-foreground">{t('pj.co_sim_hint')} · {t('pj.co_sim_basis', { basis: simCo.bac_basis })}</p>
+                <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">{t('pj.co_sim_metric')}</span>
+                  <span className="text-end text-xs font-medium text-muted-foreground">{t('pj.co_sim_current')}</span>
+                  <span className="text-end text-xs font-medium text-muted-foreground">{t('pj.co_sim_projected')}</span>
+                  <span className="text-end text-xs font-medium text-muted-foreground">Δ</span>
+                  {rows.map((r) => {
+                    const favourable = r.good == null || r.delta === 0 ? null : (r.good === 'up' ? r.delta > 0 : r.delta < 0);
+                    return (
+                      <div key={r.label} className="col-span-4 grid grid-cols-4 gap-x-3 border-t py-1">
+                        <span>{r.label}</span>
+                        <span className="text-end tabular">{baht(r.cur)}</span>
+                        <span className="text-end tabular font-medium">{baht(r.proj)}</span>
+                        <span className={`text-end tabular ${favourable == null ? 'text-muted-foreground' : favourable ? 'text-success' : 'text-destructive'}`}>{r.delta >= 0 ? '+' : ''}{baht(r.delta)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+          <DialogFooter><Button variant="outline" onClick={() => setSimCo(null)}>{t('pj.btn_close')}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Project health history (PPM upgrade) — CPI/SPI trend over snapshots */}
       <Card className="gap-3 p-5">
@@ -787,6 +910,36 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
 
   const resourcesTab = (
     <div className="space-y-4">
+      {!!leveling.data?.over_allocated_count && (
+        <Card className="gap-3 p-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold">{t('pj.leveling_title')}</h3>
+            <Badge variant="warning">{t('pj.leveling_count', { n: leveling.data.over_allocated_count })}</Badge>
+          </div>
+          <div className="flex flex-col divide-y">
+            {(leveling.data.over_allocations ?? []).map((o: any, i: number) => {
+              const sugg = (leveling.data.suggestions ?? []).find((s: any) => s.resource_name === o.resource_name && s.month === o.month);
+              const unres = (leveling.data.unresolvable ?? []).find((u: any) => u.resource_name === o.resource_name && u.month === o.month);
+              return (
+                <div key={i} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{o.resource_name}</span>
+                    <span className="text-muted-foreground">{o.month}</span>
+                    <Badge variant="destructive">{t('pj.leveling_over', { pct: o.allocated_pct, ceiling: o.available_pct })}</Badge>
+                  </span>
+                  {sugg ? (
+                    <span className="text-xs text-muted-foreground">
+                      {t('pj.leveling_suggest', { task: sugg.task_name ?? `#${sugg.task_id}`, days: sugg.suggested_shift_days, month: sugg.shifted_to_month ?? '—' })}
+                    </span>
+                  ) : unres ? (
+                    <Badge variant="muted">{t('pj.leveling_no_slack')}</Badge>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
       <div className="flex justify-end"><Button size="sm" onClick={() => setResDlg(true)}><Plus className="size-4" /> {t('pj.btn_alloc_resource')}</Button></div>
       {resources.data && (
         <DataTable

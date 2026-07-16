@@ -17,6 +17,7 @@ import { CrmPipelineAnalyticsService } from './crm-pipeline-analytics.service';
 import { CrmPipelineLegacyService } from './crm-pipeline-legacy.service';
 import { CrmLeadEngineService } from './crm-lead-engine.service';
 import { CrmPipelineCommsService } from './crm-pipeline-comms.service';
+import { CrmStagePlaybookService, type PutPlaybookBody, type BulkStageBody } from './crm-stage-playbook.service';
 // Re-exported from the lead engine so any existing import path keeps working (the scoring model + version
 // live with the scorer now).
 export { LEAD_SCORE_VERSION, LEAD_SCORE_COEFFS } from './crm-lead-engine.service';
@@ -58,6 +59,7 @@ export class CrmPipelineService {
   private readonly comms: CrmPipelineCommsService;
   private readonly leadEngine: CrmLeadEngineService;
   private readonly legacy: CrmPipelineLegacyService;
+  private readonly playbooks: CrmStagePlaybookService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -73,6 +75,7 @@ export class CrmPipelineService {
       leadByNo: (no, u) => this.leadByNo(no, u),
       emitEvent: (e, pl, u) => this.emitEvent(e, pl, u),
     });
+    this.playbooks = new CrmStagePlaybookService(db);
     this.legacy = new CrmPipelineLegacyService(db, {
       listStages: (u) => this.listStages(u),
       legacyNameOf: (s) => this.legacyNameOf(s),
@@ -355,6 +358,9 @@ export class CrmPipelineService {
     const legacyName = this.legacyNameOf(target);
     const status = this.statusOf(target);
     if (status === 'Lost' && !dto.lost_reason) throw new BadRequestException({ code: 'LOST_REASON_REQUIRED', message: 'A lost reason is required', messageTh: 'ต้องระบุเหตุผลที่เสียโอกาส' });
+    // CRM-7 (control CRM-13): the target stage's playbook — required-field exit criteria + WIP limit — gates
+    // the move (STAGE_REQUIREMENTS_UNMET / WIP_LIMIT_EXCEEDED). No-op when the stage has no active playbook.
+    await this.playbooks.assertStageEntry(o, target, status, user);
     const set: any = { stage: legacyName, stageId: target.id ?? null, status, probability: dto.probability ?? target.defaultProbability ?? o.probability };
     if (status !== 'Open') {
       set.closedAt = new Date();
@@ -376,6 +382,43 @@ export class CrmPipelineService {
     const o = await this.oppByNo(oppNo, user);
     const rows = await db.select().from(crmStageHistory).where(eq(crmStageHistory.opportunityId, Number(o.id))).orderBy(crmStageHistory.id);
     return { opp_no: oppNo, history: rows.map((h: any) => ({ id: Number(h.id), from_stage: h.fromStage, to_stage: h.toStage, changed_by: h.changedBy, changed_at: h.changedAt })), count: rows.length };
+  }
+
+  // ── CRM-7 kanban depth (control CRM-13) — stage playbooks + bulk moves ──
+  // Board/config view: every stage + its playbook config (WIP limit, required fields, guidance) + the live
+  // open-opp count for the WIP badge. Reads gate crm/exec/ar.
+  async listPlaybooks(user: JwtUser) {
+    const stages = await this.listStages(user);
+    return this.playbooks.listView(stages, user);
+  }
+
+  // Upsert one stage's playbook (supervisor: crm/exec). The stage is resolved against the tenant's stage list
+  // so a foreign/unknown stage id is rejected before it reaches the sub-service.
+  async putPlaybook(stageId: number, dto: PutPlaybookBody, user: JwtUser) {
+    const stages = await this.listStages(user);
+    const stage = stages.find((s) => s.id != null && Number(s.id) === Number(stageId));
+    if (!stage) throw new BadRequestException({ code: 'BAD_STAGE', message: `Unknown stage id ${stageId}`, messageTh: 'ไม่พบสถานะที่ระบุ' });
+    return this.playbooks.putPlaybook(stage, dto, user);
+  }
+
+  // Bulk stage move — move a selected set of opportunities through the SAME governed setStage path (so every
+  // playbook gate, terminal guard, audit row and automation event fires per opp). Per-item result (partial
+  // success is expected on a board multi-select); never atomic across unrelated deals.
+  async bulkSetStage(dto: BulkStageBody, user: JwtUser) {
+    const oppNos = [...new Set((dto.opp_nos ?? []).map((x) => String(x)).filter(Boolean))];
+    if (!oppNos.length) throw new BadRequestException({ code: 'NO_OPPORTUNITIES', message: 'opp_nos is required', messageTh: 'ต้องระบุรายการโอกาสการขาย' });
+    if (oppNos.length > 100) throw new BadRequestException({ code: 'TOO_MANY', message: 'At most 100 opportunities per bulk move', messageTh: 'ย้ายได้ครั้งละไม่เกิน 100 รายการ' });
+    if (!dto.stage) throw new BadRequestException({ code: 'BAD_STAGE', message: 'stage is required', messageTh: 'ต้องระบุสถานะ' });
+    const results: Array<{ opp_no: string; ok: boolean; error?: string; stage?: string }> = [];
+    for (const oppNo of oppNos) {
+      try {
+        const r = await this.setStage(oppNo, dto.stage, { lost_reason: dto.lost_reason, win_reason: dto.win_reason, probability: dto.probability }, user);
+        results.push({ opp_no: oppNo, ok: true, stage: r.stage });
+      } catch (e: any) {
+        results.push({ opp_no: oppNo, ok: false, error: e?.response?.code ?? e?.code ?? 'ERROR' });
+      }
+    }
+    return { results, moved: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
   }
 
   // ── Pipeline analytics (docs/46 Phase 4b cut 1) ────────────────────────

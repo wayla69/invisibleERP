@@ -5,6 +5,7 @@ import { aiActionRequests } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 export type AiActionKind = 'journal_entry' | 'purchase_order';
 
@@ -86,12 +87,12 @@ export class AiActionService {
   }
 
   /** Approve + EXECUTE a pending action. Enforces SoD (approver ≠ proposer) + the action's permission. */
-  async approve(id: number, user: JwtUser) {
+  async approve(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const row = await this.load(id);
     if (row.status !== 'pending') throw new ConflictException({ code: 'NOT_PENDING', message: `Action is ${row.status}`, messageTh: 'คำสั่งนี้ไม่ได้อยู่ในสถานะรออนุมัติ' });
     // SoD R-style: the approver must differ from the proposer (no self-approval of one's own AI proposal).
-    if (row.proposedBy === user.username) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Approver must differ from proposer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้เสนอ' });
+    await assertMakerChecker(db, { user, maker: row.proposedBy, event: 'ai.action.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Approver must differ from proposer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้เสนอ', httpStatus: 400 });
     // The approver must hold the permission required to perform this kind of action.
     const need = KIND_PERMISSION[row.kind as AiActionKind];
     if (!(user.permissions ?? []).includes(need)) throw new ForbiddenException({ code: 'FORBIDDEN', message: `Approving a ${row.kind} requires permission '${need}'`, messageTh: `ต้องมีสิทธิ์ '${need}' จึงจะอนุมัติได้` });

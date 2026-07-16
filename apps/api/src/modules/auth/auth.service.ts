@@ -284,10 +284,18 @@ export class AuthService {
     return { enabled: !!row?.enabled, required: requiresMfa(user.role as Role, overrides.length ? overrides : null) };
   }
 
-  async me(user: AuthUser): Promise<AuthUser> {
+  async me(user: AuthUser, opts?: { controlProfile?: 'enterprise' | 'sme' | null; tenantId?: number | null }): Promise<AuthUser> {
     const [row] = await this.db.select({ m: users.mustChangePassword }).from(users).where(eq(users.username, user.username)).limit(1);
+    // SME single-user edition (docs/49) — surface the tenant's profile + its stamped hidden-nav prefs so
+    // the web shows the persistent SME badge and hides the configured groups. 'enterprise' sends neither.
+    let sme: Pick<AuthUser, 'control_profile' | 'sme_hidden_nav_groups'> = {};
+    if (opts?.controlProfile === 'sme' && opts.tenantId != null) {
+      const [t] = await this.db.select({ prefs: tenants.smePrefs }).from(tenants).where(eq(tenants.id, opts.tenantId)).limit(1);
+      const hidden = (t?.prefs as { hidden_nav_groups?: unknown } | null)?.hidden_nav_groups;
+      sme = { control_profile: 'sme', sme_hidden_nav_groups: Array.isArray(hidden) ? hidden.map(String) : [] };
+    }
     // is_platform_owner drives the web company-switcher (only a "god" sees it). Env-derived, never a claim.
-    return { ...user, must_change_password: !!row?.m, is_platform_owner: isPlatformAdmin(user.username) };
+    return { ...user, ...sme, must_change_password: !!row?.m, is_platform_owner: isPlatformAdmin(user.username) };
   }
 
   // A5 — rotate password (verify current, set new, clear the force-change flag). Min 8 chars.

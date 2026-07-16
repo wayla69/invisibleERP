@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { InventoryLedgerService } from './inventory-ledger.service';
 import { qint } from '../../common/query';
 
@@ -86,8 +87,8 @@ export class InventoryLedgerController {
 
   @Post('writeoffs/:id/approve')
   @Permissions('wh_adjust')
-  approveWriteoff(@Param('id') id: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveWriteOff(Number(id), u);
+  approveWriteoff(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveWriteOff(Number(id), u, b?.self_approval_reason);
   }
 
   @Post('writeoffs/:id/reject')

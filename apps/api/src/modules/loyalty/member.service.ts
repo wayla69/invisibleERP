@@ -9,6 +9,7 @@ import { WebhookService } from '../platform/webhook.service';
 import { MembershipService } from './membership.service';
 import { AutomationService } from '../automation/automation.service';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { isUniqueViolation } from '../../common/db-error';
 import { verifyLineIdToken } from './line-auth';
 
@@ -303,13 +304,12 @@ export class MemberService {
   }
 
   // Approve a staged transfer (checker; approver ≠ requester → 403 SOD_VIOLATION). Runs the real locked move.
-  async approvePendingTransfer(user: JwtUser, reqNo: string) {
+  async approvePendingTransfer(user: JwtUser, reqNo: string, selfApprovalReason?: string | null) {
     const db = this.db; const tenantId = this.tid(user);
     const cfg = await this.config();
-    const [r] = await db.select().from(pendingPointTransfers)
-      .where(and(eq(pendingPointTransfers.tenantId, tenantId), eq(pendingPointTransfers.reqNo, reqNo))).limit(1);
+    const [r] = await db.select().from(pendingPointTransfers).where(and(eq(pendingPointTransfers.tenantId, tenantId), eq(pendingPointTransfers.reqNo, reqNo))).limit(1);
     if (!r || r.status !== 'PendingApproval') throw new NotFoundException({ code: 'NO_PENDING_TRANSFER', message: 'No point transfer pending approval', messageTh: 'ไม่พบคำขอโอนแต้มที่รออนุมัติ' });
-    if (r.requestedBy && r.requestedBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'The requester cannot approve their own point transfer', messageTh: 'ผู้ขอไม่สามารถอนุมัติการโอนแต้มของตนเองได้' });
+    await assertMakerChecker(db, { user, maker: r.requestedBy, event: 'loyalty.transfer.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'The requester cannot approve their own point transfer', messageTh: 'ผู้ขอไม่สามารถอนุมัติการโอนแต้มของตนเองได้' });
     // Attribute the ledger rows to the maker (requester); the authoritative balance/cap re-check runs here.
     const move = await this.executeTransfer(tenantId, Number(r.fromMemberId), Number(r.toMemberId), n(r.points), r.note ?? undefined, cfg, r.requestedBy ?? user.username);
     await db.update(pendingPointTransfers).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(pendingPointTransfers.id, Number(r.id)));

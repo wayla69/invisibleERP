@@ -261,7 +261,7 @@ export class FinanceService {
   // as callback ports). Thin delegators keep the public API byte-identical.
   createApTxn(dto: ApTxnDto, user: JwtUser) { return this.apSvc.createApTxn(dto, user); }
   requestApPayment(txnNo: string, amount: number, user: JwtUser, idempotencyKey?: string, wht?: { income_type?: string; rate?: number; tax_code?: string }) { return this.apSvc.requestApPayment(txnNo, amount, user, idempotencyKey, wht); }
-  approveApPayment(paymentNo: string, approver: JwtUser) { return this.apSvc.approveApPayment(paymentNo, approver); }
+  approveApPayment(paymentNo: string, approver: JwtUser, selfApprovalReason?: string | null) { return this.apSvc.approveApPayment(paymentNo, approver, selfApprovalReason); }
   rejectApPayment(paymentNo: string, approver: JwtUser, reason?: string) { return this.apSvc.rejectApPayment(paymentNo, approver, reason); }
   listPendingApPayments(limit: number, offset: number) { return this.apSvc.listPendingApPayments(limit, offset); }
 

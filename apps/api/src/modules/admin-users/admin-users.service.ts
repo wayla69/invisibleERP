@@ -7,6 +7,7 @@ import { BillingService } from '../billing/billing.service';
 import { DocNumberService } from '../../common/doc-number.service';
 import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
 import { appendAuditMeta } from '../../common/tenant-context';
+import { assertMakerChecker } from '../../common/control-profile';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { normalizeUsername } from '../../common/username';
 
@@ -190,10 +191,11 @@ export class AdminUsersService {
 
   // Approve a staged SoD exception — the checker must differ from the requester AND from the affected user
   // (a grantor cannot self-authorize, and no one can approve granting themselves). Applies the grant on approval.
-  async approveException(reqNo: string, actor: JwtUser) {
+  async approveException(reqNo: string, actor: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const ex = await this.pendingException(reqNo);
-    if (ex.requestedBy && ex.requestedBy === actor.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an access exception you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติคำขอข้ามสิทธิ์ของตนเองได้' });
+    await assertMakerChecker(db, { user: actor, maker: ex.requestedBy, event: 'itgc.sod-exception.approve', ref: reqNo, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an access exception you requested', messageTh: 'แยกหน้าที่: ผู้ขอไม่สามารถอนุมัติคำขอข้ามสิทธิ์ของตนเองได้' });
+    // Self-benefit authorization (approving an exception that grants YOURSELF) stays a hard block even under docs/49 SME mode — it is not plain maker-checker.
     if (ex.targetUsername === actor.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an access exception that grants yourself', messageTh: 'แยกหน้าที่: อนุมัติการให้สิทธิ์แก่ตนเองไม่ได้' });
     const permissions: string[] = ex.permissions ? JSON.parse(ex.permissions) : [];
     // ITGC-AC-09 evidence: persist WHO requested, WHO approved, WHY, and the rules into the hash-chained audit row.

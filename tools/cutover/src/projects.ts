@@ -604,6 +604,45 @@ async function main() {
   ok('PROJ-22: existing evm()/schedule() callers are unaffected by ETC entries (formulaic figures unchanged)',
     near(etc3.json.formulaic?.eac, 400) && near(etc3.json.formulaic?.etc, 200), JSON.stringify(etc3.json.formulaic));
 
+  // ── resource leveling: over-allocation vs the CPM schedule's slack (PPM-A2, PROJ-23) ──
+  // LVL-A (5d) → LVL-B (3d, depends on A) forms the critical path (8d, both slack 0); LVL-C (2d,
+  // independent) carries slack 6 (project duration 8 − its own 2d). Dev1 is booked on LVL-B (100%) + LVL-C
+  // (60%) in the same month → 160% over-allocated, and LVL-C (positive slack) is the leveling candidate.
+  // Dev2 is booked on LVL-A (100%) + LVL-B (100%) in the same month → 200% over-allocated, but BOTH
+  // contributors are critical-path (slack 0) → NO_SLACK, nothing to suggest.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-LEVEL', name: 'งานปรับสมดุลกำลังคน', billing_type: 'TM' });
+  const lvlA = await inj('POST', '/api/projects/PRJ-LEVEL/tasks', admin, { name: 'LVL-A', planned_hours: 40 }); // 5d
+  const lvlAid = lvlA.json.tasks[0].id;
+  const lvlB = await inj('POST', '/api/projects/PRJ-LEVEL/tasks', admin, { name: 'LVL-B', planned_hours: 24, depends_on: [lvlAid] }); // 3d
+  const lvlBid = lvlB.json.tasks[0].id;
+  // LVL-C's own planned_start (2026-08-27) is independent of its assignment's period_start (2026-08-01,
+  // set below) — the assignment's period_start drives which month is over-allocated, while the task's own
+  // planned_start is what a suggested shift (+6d slack) is measured from, crossing into September.
+  await inj('POST', '/api/projects/PRJ-LEVEL/tasks', admin, { name: 'LVL-C', planned_hours: 16, planned_start: '2026-08-27' }); // 2d, independent
+  const lvlList = await inj('GET', '/api/projects/PRJ-LEVEL/tasks', admin);
+  const lvlCid = lvlList.json.tasks.find((t: any) => t.name === 'LVL-C').id;
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev1', task_id: lvlBid, alloc_pct: 100, period_start: '2026-08-01' });
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev1', task_id: lvlCid, alloc_pct: 60, period_start: '2026-08-01' });
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev2', task_id: lvlAid, alloc_pct: 100, period_start: '2026-08-01' });
+  await inj('POST', '/api/projects/PRJ-LEVEL/resources', admin, { resource_name: 'Dev2', task_id: lvlBid, alloc_pct: 100, period_start: '2026-08-01' });
+  const leveling = await inj('GET', '/api/projects/PRJ-LEVEL/resource-leveling', admin);
+  const dev1Over = leveling.json.over_allocations?.find((o: any) => o.resource_name === 'Dev1' && o.month === '2026-08');
+  const dev2Over = leveling.json.over_allocations?.find((o: any) => o.resource_name === 'Dev2' && o.month === '2026-08');
+  ok('PROJ-23: Dev1 (LVL-B 100% + LVL-C 60%) over-allocated at 160% vs a 100% ceiling', near(dev1Over?.allocated_pct, 160) && near(dev1Over?.over_by_pct, 60), JSON.stringify(dev1Over));
+  ok('PROJ-23: Dev2 (LVL-A 100% + LVL-B 100%) over-allocated at 200% vs a 100% ceiling', near(dev2Over?.allocated_pct, 200) && near(dev2Over?.over_by_pct, 100), JSON.stringify(dev2Over));
+  const dev1Sugg = leveling.json.suggestions?.find((s: any) => s.resource_name === 'Dev1');
+  ok('PROJ-23: Dev1\'s over-allocation suggests shifting LVL-C (its only positive-slack contributor) by its full slack (6d) into 2026-09',
+    dev1Sugg?.task_id === lvlCid && dev1Sugg?.slack_days === 6 && dev1Sugg?.suggested_shift_days === 6 && dev1Sugg?.shifted_to_month === '2026-09',
+    JSON.stringify(dev1Sugg));
+  ok('PROJ-23: no suggestion is offered for LVL-B (slack 0) despite contributing to BOTH over-allocations', !leveling.json.suggestions?.some((s: any) => s.task_id === lvlBid), JSON.stringify(leveling.json.suggestions));
+  const dev2Unres = leveling.json.unresolvable?.find((u: any) => u.resource_name === 'Dev2');
+  ok('PROJ-23: Dev2\'s over-allocation is NO_SLACK — both contributing tasks (LVL-A, LVL-B) are on the critical path', dev2Unres?.reason === 'NO_SLACK', JSON.stringify(dev2Unres));
+  ok('PROJ-23: over_allocated_count reflects both resources (2)', leveling.json.over_allocated_count === 2, String(leveling.json.over_allocated_count));
+  const levelEmpty = await inj('GET', '/api/projects/PRJ-ETC/resource-leveling', admin); // no resource assignments on this project → nothing over-allocated
+  ok('PROJ-23: a project with no over-allocated resource reports empty results (regression)',
+    levelEmpty.json.over_allocated_count === 0 && !(levelEmpty.json.over_allocations ?? []).length && !(levelEmpty.json.suggestions ?? []).length && !(levelEmpty.json.unresolvable ?? []).length,
+    JSON.stringify(levelEmpty.json));
+
   const oppLost = await inj('POST', '/api/crm/pipeline/opportunities', admin, { name: 'ดีลที่เสีย', amount: 50000, owner: 'sales1' });
   await inj('PATCH', `/api/crm/pipeline/opportunities/${oppLost.json.opp_no}/stage`, admin, { stage: 'lost', lost_reason: 'ราคาสูงเกินไป (price)' });
   const wl = await inj('GET', '/api/crm/pipeline/win-loss', admin);
@@ -792,6 +831,172 @@ async function main() {
   ok('Change-order register: approved 1, approved_contract_delta 20000', coList.json.summary?.approved === 1 && near(coList.json.summary?.approved_contract_delta, 20000), JSON.stringify({ a: coList.json.summary?.approved }));
   const coReApp = await inj('POST', `/api/projects/change-orders/${coId}/approve`, mgr, {});
   ok('Re-approve a decided change order → 400 CHANGE_ORDER_DECIDED', coReApp.status === 400 && coReApp.json.error?.code === 'CHANGE_ORDER_DECIDED', `${coReApp.status} ${coReApp.json.error?.code}`);
+
+  // ── 24b. change-order impact simulation (PROJ-24) — read-only cost/margin/EVM what-if before authorisation ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-SIM', name: 'งานจำลองผลกระทบ', billing_type: 'Fixed', contract_amount: 200000, budget_amount: 150000, estimated_cost: 140000 });
+  const simCo = await inj('POST', '/api/projects/PRJ-SIM/change-orders', admin, { description: 'เพิ่มขอบเขต', contract_delta: 50000, budget_delta: 30000, estimated_cost_delta: 45000, reason: 'ลูกค้าขอเพิ่ม' });
+  const simCoId = simCo.json.change_orders?.find((c: any) => c.status === 'pending')?.id;
+
+  // Current margin 60000 (200000−140000); projected 65000 (250000−185000) → the CO ADDS 5000 margin but at a
+  // thinner ratio (30%→26%); budget-derived BAC/EAC move with the budget delta.
+  const sim = await inj('GET', `/api/projects/change-orders/${simCoId}/simulate`, admin);
+  ok('PROJ-24 simulate: projected contract/budget/estimated-cost + margin + EVM impact computed',
+    sim.status === 200 && near(sim.json.projected.contract_amount, 250000) && near(sim.json.projected.estimated_cost, 185000) &&
+    near(sim.json.current.margin, 60000) && near(sim.json.projected.margin, 65000) && near(sim.json.delta.margin, 5000) &&
+    sim.json.bac_basis === 'budget' && near(sim.json.projected.eac, 180000) && near(sim.json.delta.eac, 30000),
+    JSON.stringify({ pm: sim.json.projected.margin, dm: sim.json.delta.margin, peac: sim.json.projected.eac }));
+
+  // Read-only proof: nothing changed on the project.
+  const simBefore = await inj('GET', '/api/projects/PRJ-SIM', admin);
+  ok('PROJ-24 simulate is READ-ONLY: the project is unchanged (contract still 200000)', near(simBefore.json.contract_amount, 200000), JSON.stringify({ c: simBefore.json.contract_amount }));
+
+  // Authorising the CO produces exactly the simulated figures.
+  const simApp = await inj('POST', `/api/projects/change-orders/${simCoId}/approve`, mgr, {});
+  ok('PROJ-24 the authorised change matches the simulation (contract 250000, budget 180000)',
+    simApp.json.status === 'approved' && near(simApp.json.contract_amount, 250000) && near(simApp.json.budget_amount, 180000), JSON.stringify({ c: simApp.json.contract_amount, b: simApp.json.budget_amount }));
+
+  // A decided CO can't be re-simulated (its impact is already reflected); an unknown CO 404s.
+  const simDecided = await inj('GET', `/api/projects/change-orders/${simCoId}/simulate`, admin);
+  const simBad = await inj('GET', '/api/projects/change-orders/999999/simulate', admin);
+  ok('PROJ-24 simulate guards: decided → 400 CHANGE_ORDER_DECIDED, unknown → 404 CHANGE_ORDER_NOT_FOUND',
+    simDecided.status === 400 && simDecided.json.error?.code === 'CHANGE_ORDER_DECIDED' && simBad.status === 404 && simBad.json.error?.code === 'CHANGE_ORDER_NOT_FOUND',
+    `${simDecided.json.error?.code}/${simBad.json.error?.code}`);
+
+  // Task-anchored EVM: on a project whose BAC comes from task planned cost, a pure budget CO leaves BAC/EAC
+  // unchanged (only the budget headroom moves) — the simulation reports bac_basis='tasks'.
+  const simTaskCo = await inj('POST', '/api/projects/PRJ-EVM/change-orders', admin, { description: 'budget top-up', budget_delta: 500 });
+  const simTaskCoId = simTaskCo.json.change_orders?.find((c: any) => c.status === 'pending')?.id;
+  const simTask = await inj('GET', `/api/projects/change-orders/${simTaskCoId}/simulate`, admin);
+  ok('PROJ-24 task-anchored EVM: a budget-only CO leaves BAC/EAC unchanged (bac_basis=tasks), only headroom moves +500',
+    simTask.status === 200 && simTask.json.bac_basis === 'tasks' && near(simTask.json.projected.bac, simTask.json.current.bac) && near(simTask.json.delta.eac, 0) && near(simTask.json.delta.budget_headroom, 500),
+    JSON.stringify({ basis: simTask.json.bac_basis, dbac: simTask.json.delta.eac, dh: simTask.json.delta.budget_headroom }));
+
+  // ── 24c. Portfolio selection scenarios (PPM Wave P4, PROJ-25) — what-if funding within a budget envelope
+  // + maker-checker commit (committer ≠ author; over-envelope needs an exec override). Read-only aggregation
+  // over the projects spine; no project row is mutated. ──
+  for (const [code, contract, budget, est] of [['PRJ-PF1', 100000, 60000, 50000], ['PRJ-PF2', 80000, 50000, 40000], ['PRJ-PF3', 120000, 70000, 60000]] as const)
+    await inj('POST', '/api/projects', admin, { project_code: code, name: `พอร์ต ${code}`, billing_type: 'Fixed', contract_amount: contract, budget_amount: budget, estimated_cost: est });
+
+  const pfCreate = await inj('POST', '/api/projects/portfolio/scenarios', admin, { name: 'FY27 candidate slate', budget_envelope: 100000, objective: 'จัดลำดับโครงการปีหน้า' });
+  ok('PROJ-25 create scenario → draft, PSC-#### numbered', pfCreate.status < 300 && /^PSC-\d{4}$/.test(pfCreate.json.scenario_no) && pfCreate.json.status === 'draft', JSON.stringify({ s: pfCreate.status, no: pfCreate.json.scenario_no }));
+  const psc = pfCreate.json.scenario_no;
+
+  await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF1', decision: 'include', priority_score: 10 });
+  await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF2', decision: 'include', priority_score: 5 });
+  const pfAnalyze = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF3', decision: 'exclude' });
+  ok('PROJ-25 analyze: included Σbudget 110000 (>envelope 100000) → over_envelope, over_by 10000, Σmargin 90000, priority-ranked',
+    pfAnalyze.status < 300 && pfAnalyze.json.totals.included_count === 2 && pfAnalyze.json.totals.excluded_count === 1 &&
+    near(pfAnalyze.json.totals.selected_budget, 110000) && near(pfAnalyze.json.totals.selected_margin, 90000) &&
+    pfAnalyze.json.totals.over_envelope === true && near(pfAnalyze.json.totals.over_by, 10000) &&
+    pfAnalyze.json.included[0].project_code === 'PRJ-PF1',
+    JSON.stringify({ inc: pfAnalyze.json.totals.included_count, b: pfAnalyze.json.totals.selected_budget, over: pfAnalyze.json.totals.over_by, first: pfAnalyze.json.included[0]?.project_code }));
+
+  const pfUnknown = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-NOPE', decision: 'include' });
+  ok('PROJ-25 unknown candidate → 404 PROJECT_NOT_FOUND', pfUnknown.status === 404 && pfUnknown.json.error?.code === 'PROJECT_NOT_FOUND', `${pfUnknown.status}/${pfUnknown.json.error?.code}`);
+
+  const pfSelf = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, admin, {});
+  ok('PROJ-25 author self-commit → 400 SOD_SELF_APPROVAL', pfSelf.status === 400 && pfSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${pfSelf.status}/${pfSelf.json.error?.code}`);
+
+  const pfOver = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, mgr, {});
+  ok('PROJ-25 different-user commit over envelope w/o override → 400 OVER_ENVELOPE (over_by 10000)',
+    pfOver.status === 400 && pfOver.json.error?.code === 'OVER_ENVELOPE' && near(pfOver.json.error?.details?.over_by, 10000), `${pfOver.status}/${pfOver.json.error?.code}`);
+
+  const pfCommit = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, mgr, { override: true, override_reason: 'อนุมัติเกินวงเงินโดยผู้บริหาร' });
+  ok('PROJ-25 exec override commit → committed, committed_by=mgr, override_reason recorded',
+    pfCommit.status < 300 && pfCommit.json.status === 'committed' && pfCommit.json.committed_by === 'mgr' && !!pfCommit.json.override_reason, JSON.stringify({ st: pfCommit.json.status, by: pfCommit.json.committed_by }));
+
+  const pfLocked = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/items`, admin, { project_code: 'PRJ-PF3', decision: 'include' });
+  const pfRecommit = await inj('POST', `/api/projects/portfolio/scenarios/${psc}/commit`, mgr, {});
+  ok('PROJ-25 a committed scenario is locked: edit → 400 SCENARIO_LOCKED, re-commit → 400 SCENARIO_NOT_DRAFT',
+    pfLocked.status === 400 && pfLocked.json.error?.code === 'SCENARIO_LOCKED' && pfRecommit.status === 400 && pfRecommit.json.error?.code === 'SCENARIO_NOT_DRAFT',
+    `${pfLocked.json.error?.code}/${pfRecommit.json.error?.code}`);
+
+  // Within-envelope clean commit path (no override needed) + removeItem regression.
+  const pfB = await inj('POST', '/api/projects/portfolio/scenarios', admin, { name: 'FY27 conservative', budget_envelope: 200000 });
+  await inj('POST', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/items`, admin, { project_code: 'PRJ-PF1', decision: 'include', priority_score: 8 });
+  await inj('POST', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/items`, admin, { project_code: 'PRJ-PF2', decision: 'include', priority_score: 3 });
+  const pfBremove = await inj('DELETE', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/items/PRJ-PF2`, admin);
+  ok('PROJ-25 removeItem drops a candidate → included_count 1', pfBremove.status < 300 && pfBremove.json.totals.included_count === 1, JSON.stringify({ inc: pfBremove.json.totals?.included_count }));
+  const pfBcommit = await inj('POST', `/api/projects/portfolio/scenarios/${pfB.json.scenario_no}/commit`, mgr, {});
+  ok('PROJ-25 within-envelope commit needs no override → committed, over_envelope false, headroom 140000',
+    pfBcommit.status < 300 && pfBcommit.json.status === 'committed' && pfBcommit.json.totals.over_envelope === false && near(pfBcommit.json.totals.budget_headroom, 140000),
+    JSON.stringify({ st: pfBcommit.json.status, hr: pfBcommit.json.totals?.budget_headroom }));
+
+  const pfList = await inj('GET', '/api/projects/portfolio/scenarios', admin);
+  ok('PROJ-25 list surfaces both scenarios with included counts', pfList.status < 300 && pfList.json.count >= 2 && pfList.json.scenarios.some((x: any) => x.scenario_no === psc && x.status === 'committed'), JSON.stringify({ n: pfList.json.count }));
+
+  // ── 24d. Project phase-gate governance (PPM Wave P4, PROJ-26) — a project advances through its lifecycle
+  // phases only through a gate that is submitted then independently decided (GO/HOLD/KILL, decider ≠ submitter). ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-GATE', name: 'งานตรวจเฟส', billing_type: 'TM' });
+  const gInit = await inj('GET', '/api/projects/PRJ-GATE/gates', admin);
+  ok('PROJ-26 a fresh project starts at the concept phase with no gates', gInit.status < 300 && gInit.json.current_phase === 'concept' && gInit.json.next_phase === 'planning' && gInit.json.gates.length === 0, JSON.stringify({ p: gInit.json.current_phase, n: gInit.json.next_phase }));
+
+  const gSubmit = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'planning', gate_key: 'G1', name: 'Concept review', readiness: 'ผ่านเกณฑ์ความพร้อม' });
+  ok('PROJ-26 submit a gate → pending, from_phase concept, target planning', gSubmit.status < 300 && gSubmit.json.pending_gate?.status === 'pending' && gSubmit.json.pending_gate?.from_phase === 'concept' && gSubmit.json.pending_gate?.target_phase === 'planning', JSON.stringify({ st: gSubmit.json.pending_gate?.status }));
+  const g1 = gSubmit.json.pending_gate.id;
+
+  const gDouble = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'execution' });
+  ok('PROJ-26 a second pending gate is rejected → GATE_ALREADY_PENDING', gDouble.status === 400 && gDouble.json.error?.code === 'GATE_ALREADY_PENDING', `${gDouble.status}/${gDouble.json.error?.code}`);
+
+  const gSelf = await inj('POST', `/api/projects/gates/${g1}/decide`, admin, { decision: 'go' });
+  ok('PROJ-26 the submitter cannot decide their own gate → SOD_SELF_APPROVAL', gSelf.status === 400 && gSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${gSelf.status}/${gSelf.json.error?.code}`);
+
+  const gGo = await inj('POST', `/api/projects/gates/${g1}/decide`, mgr, { decision: 'go', notes: 'อนุมัติเข้าเฟสวางแผน' });
+  ok('PROJ-26 an independent GO advances the project to planning; decided_by=mgr', gGo.status < 300 && gGo.json.current_phase === 'planning' && gGo.json.gates.find((x: any) => x.id === g1)?.status === 'go' && gGo.json.gates.find((x: any) => x.id === g1)?.decided_by === 'mgr', JSON.stringify({ p: gGo.json.current_phase }));
+
+  const gDecided = await inj('POST', `/api/projects/gates/${g1}/decide`, mgr, { decision: 'hold' });
+  ok('PROJ-26 a decided gate cannot be re-decided → GATE_ALREADY_DECIDED', gDecided.status === 400 && gDecided.json.error?.code === 'GATE_ALREADY_DECIDED', `${gDecided.status}/${gDecided.json.error?.code}`);
+
+  const gBackward = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'planning' });
+  ok('PROJ-26 a gate that does not advance past the current phase → BAD_PHASE_ORDER', gBackward.status === 400 && gBackward.json.error?.code === 'BAD_PHASE_ORDER', `${gBackward.status}/${gBackward.json.error?.code}`);
+
+  // A HOLD decision records the outcome WITHOUT advancing the phase.
+  const gHoldSubmit = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'execution', gate_key: 'G2' });
+  const g2 = gHoldSubmit.json.pending_gate.id;
+  const gHold = await inj('POST', `/api/projects/gates/${g2}/decide`, mgr, { decision: 'hold', notes: 'ยังไม่พร้อม' });
+  ok('PROJ-26 a HOLD records the decision but the project stays in planning (no advance)', gHold.status < 300 && gHold.json.current_phase === 'planning' && gHold.json.gates.find((x: any) => x.id === g2)?.status === 'hold', JSON.stringify({ p: gHold.json.current_phase }));
+
+  const gUnknownPhase = await inj('POST', '/api/projects/PRJ-GATE/gates', admin, { target_phase: 'lunch' });
+  const gBadDecision = await inj('POST', `/api/projects/gates/999999/decide`, mgr, { decision: 'go' });
+  ok('PROJ-26 guards: unknown phase → BAD_PHASE, unknown gate → GATE_NOT_FOUND', gUnknownPhase.status === 400 && gUnknownPhase.json.error?.code === 'BAD_PHASE' && gBadDecision.status === 404 && gBadDecision.json.error?.code === 'GATE_NOT_FOUND', `${gUnknownPhase.json.error?.code}/${gBadDecision.json.error?.code}`);
+
+  // ── 24e. Program benefits realization (PPM Wave P4, PROJ-27) — declare expected benefits, log actuals over
+  // time, and close each realized/not-realized as a maker-checker sign-off (confirmer ≠ author). ──
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-BEN', name: 'โครงการวัดผลประโยชน์', billing_type: 'TM' });
+  await inj('PATCH', '/api/projects/PRJ-BEN/program', admin, { program_code: 'PGBEN' });
+
+  const bUnknownProg = await inj('POST', '/api/projects/programs/NOPE/benefits', admin, { name: 'x', target_value: 100 });
+  ok('PROJ-27 declaring a benefit under an unknown program → 404 PROGRAM_NOT_FOUND', bUnknownProg.status === 404 && bUnknownProg.json.error?.code === 'PROGRAM_NOT_FOUND', `${bUnknownProg.status}/${bUnknownProg.json.error?.code}`);
+
+  const bDecl = await inj('POST', '/api/projects/programs/PGBEN/benefits', admin, { name: 'ลดต้นทุนต่อหน่วย', category: 'financial', unit: 'THB', baseline_value: 0, target_value: 1000000, target_date: '2027-12-31', owner: 'CFO' });
+  ok('PROJ-27 declare a benefit → open, PB-#### numbered, 0% realized against a 1,000,000 target',
+    bDecl.status < 300 && bDecl.json.benefits.length === 1 && /^PB-\d{4}$/.test(bDecl.json.benefits[0].benefit_no) && bDecl.json.benefits[0].status === 'open' && near(bDecl.json.benefits[0].realization_pct, 0) && near(bDecl.json.rollup.financial_target, 1000000),
+    JSON.stringify({ no: bDecl.json.benefits[0]?.benefit_no, pct: bDecl.json.benefits[0]?.realization_pct }));
+  const benId = bDecl.json.benefits[0].id;
+
+  const bMeasure = await inj('POST', `/api/projects/benefits/${benId}/measurements`, admin, { measured_value: 600000, measured_at: '2027-06-30' });
+  ok('PROJ-27 record an actual measurement → realization tracks to 60% (600,000 of 1,000,000)',
+    bMeasure.status < 300 && near(bMeasure.json.benefits[0].current_actual, 600000) && near(bMeasure.json.benefits[0].realization_pct, 60) && bMeasure.json.benefits[0].health === 'on_track' && bMeasure.json.benefits[0].measurements_count === 1,
+    JSON.stringify({ actual: bMeasure.json.benefits[0]?.current_actual, pct: bMeasure.json.benefits[0]?.realization_pct }));
+
+  const bMeasure2 = await inj('POST', `/api/projects/benefits/${benId}/measurements`, admin, { measured_value: 300000, measured_at: '2027-09-30' });
+  ok('PROJ-27 the latest measurement is current (300,000 → 30%, at_risk); count reflects both entries',
+    bMeasure2.status < 300 && near(bMeasure2.json.benefits[0].current_actual, 300000) && near(bMeasure2.json.benefits[0].realization_pct, 30) && bMeasure2.json.benefits[0].health === 'at_risk' && bMeasure2.json.benefits[0].measurements_count === 2,
+    JSON.stringify({ actual: bMeasure2.json.benefits[0]?.current_actual, health: bMeasure2.json.benefits[0]?.health }));
+
+  const bSelf = await inj('POST', `/api/projects/benefits/${benId}/confirm`, admin, { result: 'realized' });
+  ok('PROJ-27 the benefit author cannot sign off their own benefit → SOD_SELF_APPROVAL', bSelf.status === 400 && bSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${bSelf.status}/${bSelf.json.error?.code}`);
+
+  const bConfirm = await inj('POST', `/api/projects/benefits/${benId}/confirm`, mgr, { result: 'not_realized', notes: 'ไม่ถึงเป้าหมาย' });
+  ok('PROJ-27 an independent reviewer signs off (not_realized); status + confirmed_by recorded',
+    bConfirm.status < 300 && bConfirm.json.benefits[0].status === 'not_realized' && bConfirm.json.benefits[0].confirmed_by === 'mgr' && bConfirm.json.rollup.not_realized_count === 1,
+    JSON.stringify({ st: bConfirm.json.benefits[0]?.status, by: bConfirm.json.benefits[0]?.confirmed_by }));
+
+  const bClosedMeasure = await inj('POST', `/api/projects/benefits/${benId}/measurements`, admin, { measured_value: 1 });
+  const bReconfirm = await inj('POST', `/api/projects/benefits/${benId}/confirm`, mgr, { result: 'realized' });
+  ok('PROJ-27 a closed benefit rejects new measurements (BENEFIT_CLOSED) and re-confirmation (BENEFIT_ALREADY_CONFIRMED)',
+    bClosedMeasure.status === 400 && bClosedMeasure.json.error?.code === 'BENEFIT_CLOSED' && bReconfirm.status === 400 && bReconfirm.json.error?.code === 'BENEFIT_ALREADY_CONFIRMED',
+    `${bClosedMeasure.json.error?.code}/${bReconfirm.json.error?.code}`);
 
   // ── 25. time-phased resource capacity calendar (PPM upgrade) ──
   await inj('POST', '/api/projects', admin, { project_code: 'PRJ-CAP', name: 'งานวางกำลังคน', billing_type: 'TM' });

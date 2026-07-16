@@ -178,6 +178,44 @@ export const crmAccountHealthSnapshots = pgTable('crm_account_health_snapshots',
   byAccount: index('idx_crm_acct_health_account').on(t.tenantId, t.accountId),
 }));
 
+// CRM-17 data-quality scoring (control CRM-16, migration 0409) — a per-account DATA-QUALITY snapshot (mirrors
+// the health snapshot). The live score (weighted completeness + validity of the customer-master fields:
+// tax_id / email / phone / industry / owner / website / size / has-contact) is computed in CrmDqService;
+// this table is the schedulable daily snapshot (upsert on (tenant_id, account_id, snapshot_date)) for trend.
+export const crmDqScores = pgTable('crm_dq_scores', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  accountId: bigint('account_id', { mode: 'number' }).notNull().references(() => crmAccounts.id),
+  snapshotDate: date('snapshot_date').notNull(),
+  score: integer('score').notNull().default(0),         // 0..100 (100 = complete + valid)
+  band: text('band').notNull().default('poor'),         // good | fair | poor
+  signals: jsonb('signals').notNull().default({}),      // per-field breakdown snapshot
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqDay: unique('uq_crm_dq_day').on(t.tenantId, t.accountId, t.snapshotDate),
+  byAccount: index('idx_crm_dq_account').on(t.tenantId, t.accountId),
+}));
+
+// CRM-17 merge audit log (control CRM-16, migration 0409) — an append-only record of every account merge
+// (survivor, retired duplicate, children reassigned, which survivor fields were survivorship-filled, who/when).
+// Written inside the merge transaction so it commits atomically with the merge (a MERGE_CONFLICT rollback
+// discards it). The maker-checker (caller ≠ duplicate creator when children reassign) lives in the merge itself.
+export const crmMergeLog = pgTable('crm_merge_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  survivorAccountId: bigint('survivor_account_id', { mode: 'number' }).notNull(),
+  survivorNo: text('survivor_no').notNull(),
+  duplicateAccountId: bigint('duplicate_account_id', { mode: 'number' }).notNull(),
+  duplicateNo: text('duplicate_no').notNull(),
+  reassignedChildren: integer('reassigned_children').notNull().default(0),
+  filledFields: jsonb('filled_fields').notNull().default('[]'), // survivor fields backfilled from the duplicate
+  mergedBy: text('merged_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  bySurvivor: index('idx_crm_merge_log_survivor').on(t.tenantId, t.survivorAccountId),
+}));
+
 // CRM-12 (CRM-09, migration 0378): sales-forecasting depth over the REV-17 pipeline forecast.
 // A rep→manager manual OVERRIDE: per (period, owner) a rep submits their own commit / best-case number
 // (governed draft → submitted); the manager roll-up reconciles it against the system-weighted forecast.
@@ -410,6 +448,26 @@ export const crmFollowupSettings = pgTable('crm_followup_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ uqTenant: unique('uq_crm_followup_settings').on(t.tenantId) }));
 
+// CRM-7 kanban depth (control CRM-13, migration 0406) — a per-stage PLAYBOOK: the exit criteria a deal must
+// satisfy to ENTER a stage. `wip_limit` caps how many OPEN opportunities may sit in the stage at once (null =
+// unlimited; ignored for terminal Won/Lost); `required_fields` is a whitelist-validated list of opportunity
+// field keys that must be populated before a deal can advance into the stage; `guidance` is the coach's note
+// the board shows. One row per (tenant, stage). RLS (0232 canonical policy). Enforced in setStage.
+export const crmStagePlaybooks = pgTable('crm_stage_playbooks', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  stageId: bigint('stage_id', { mode: 'number' }).notNull().references(() => pipelineStages.id),
+  wipLimit: integer('wip_limit'),                             // max OPEN opps in this stage; null = unlimited
+  requiredFields: jsonb('required_fields').notNull().default('[]'), // string[] of opportunity field keys (whitelist)
+  guidance: text('guidance'),                                 // exit-criteria playbook note shown on the board
+  isActive: boolean('is_active').notNull().default(true),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqStage: unique('uq_crm_stage_playbook').on(t.tenantId, t.stageId),
+  byTenant: index('idx_crm_stage_playbook_tenant').on(t.tenantId, t.stageId),
+}));
+
 export type CrmLead = typeof crmLeads.$inferSelect;
 export type CrmOpportunity = typeof crmOpportunities.$inferSelect;
 export type CrmAccount = typeof crmAccounts.$inferSelect;
@@ -417,3 +475,65 @@ export type CrmContact = typeof crmContacts.$inferSelect;
 export type CrmLeadScore = typeof crmLeadScores.$inferSelect;
 export type CrmFollowupSettings = typeof crmFollowupSettings.$inferSelect;
 export type CrmInboundMessage = typeof crmInboundMessages.$inferSelect;
+export type CrmStagePlaybook = typeof crmStagePlaybooks.$inferSelect;
+
+// CRM-8 unified timeline + collaboration feed (control CRM-14, migration 0407) — an APPEND-ONLY internal note
+// on a lead / opportunity / account. Posts are immutable (no updated_at, no edit/delete path) so the
+// collaboration + decision trail on the customer record cannot be silently rewritten. `mentions` is the set of
+// @-mentioned usernames validated against the tenant's active users at post time (each is routed a directed
+// notification). Feed posts surface in the unified timeline (kind='feed'). Tenant-scoped (RLS 0232).
+export const crmFeedPosts = pgTable('crm_feed_posts', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  entityType: text('entity_type').notNull(),           // lead | opportunity | account
+  entityNo: text('entity_no').notNull(),               // lead_no | opp_no | account_no
+  body: text('body').notNull(),
+  mentions: jsonb('mentions').notNull().default('[]'), // string[] of validated @-mentioned usernames
+  author: text('author'),                              // posting username
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byEntity: index('idx_crm_feed_post_entity').on(t.tenantId, t.entityType, t.entityNo),
+}));
+
+// CRM-15 multi-touch campaign attribution (control CRM-17, migration 0413). Each row is a campaign TOUCHPOINT
+// that influenced an opportunity; campaign_name is CRM-owned free text (no cross-domain FK/join). A won deal's
+// amount is distributed across its touchpoints under an attribution model (first/last/linear/u_shaped) — every
+// model conserves the total, so attributed campaign revenue reconciles to won revenue.
+export const crmCampaignInfluence = pgTable('crm_campaign_influence', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  opportunityId: bigint('opportunity_id', { mode: 'number' }).notNull().references(() => crmOpportunities.id),
+  campaignName: text('campaign_name').notNull(),
+  touchType: text('touch_type').notNull().default('other'), // lead_source | meeting | email | event | webinar | content | other
+  touchedAt: date('touched_at').notNull(),
+  note: text('note'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_crm_campaign_influence_tenant').on(t.tenantId, t.opportunityId),
+  byOpp: index('idx_crm_campaign_influence_opp').on(t.opportunityId, t.touchedAt),
+}));
+
+export type CrmFeedPost = typeof crmFeedPosts.$inferSelect;
+export type CrmDqScore = typeof crmDqScores.$inferSelect;
+export type CrmMergeLog = typeof crmMergeLog.$inferSelect;
+export type CrmCampaignInfluence = typeof crmCampaignInfluence.$inferSelect;
+
+// CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0415). Links a DELIVERED project to the renewal
+// opportunity raised from it (idempotent, one per project), so delivered-project business gets a renewal
+// motion instead of silently lapsing, and a detective gap list can be computed. The opportunity itself is
+// created through the CRM pipeline service (CRM-domain write); this is the CRM-owned link + idempotency key.
+export const projectRenewals = pgTable('project_renewals', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  projectCode: text('project_code').notNull(),           // delivered project (projects.project_code)
+  opportunityNo: text('opportunity_no').notNull(),       // raised renewal opportunity (crm_opportunities.opp_no)
+  accountNo: text('account_no'),
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull().default('0'),
+  raisedBy: text('raised_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  uqProject: unique('uq_project_renewal').on(t.tenantId, t.projectCode),
+  byTenant: index('idx_project_renewals_tenant').on(t.tenantId, t.projectCode),
+}));
+export type ProjectRenewal = typeof projectRenewals.$inferSelect;

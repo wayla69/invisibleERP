@@ -8,7 +8,7 @@ const StepBody = z.object({ step_no: z.number().int().positive(), approver_role:
 const DefinitionBody = z.object({ doc_type: z.string().min(1), name: z.string().min(1), sla_hours: z.number().int().positive().optional(), steps: z.array(StepBody).min(1) });
 const UpdateDefinitionBody = z.object({ name: z.string().optional(), sla_hours: z.number().int().positive().optional(), steps: z.array(StepBody).min(1).optional() });
 const ActiveBody = z.object({ active: z.boolean() });
-const ActBody = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().optional() });
+const ActBody = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 const DelegationBody = z.object({ to_user: z.string().min(1), from_date: z.string().min(1), to_date: z.string().min(1) });
 
 @Controller('api/workflow')
@@ -35,7 +35,7 @@ export class WorkflowController {
   @Get('my-approvals') @Permissions('approvals')
   myApprovals(@CurrentUser() u: JwtUser) { return this.svc.myApprovals(u); }
   @Post('instances/:id/act') @Permissions('approvals')
-  act(@Param('id') id: string, @Body(new ZodValidationPipe(ActBody)) b: { decision: 'approve' | 'reject'; comment?: string }, @CurrentUser() u: JwtUser) { return this.svc.act(+id, b, u); }
+  act(@Param('id') id: string, @Body(new ZodValidationPipe(ActBody)) b: { decision: 'approve' | 'reject'; comment?: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.act(+id, b, u); }
   @Get('instances/:id') @Permissions('approvals', 'exec')
   instance(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.svc.getInstance(+id, u); }
 

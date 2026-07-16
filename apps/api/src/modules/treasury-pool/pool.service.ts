@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { cashPools, cashPoolMembers, icLoans, icLoanAccruals } from '../../database/schema';
@@ -200,13 +201,11 @@ export class PoolService {
 
   // Checker: approve a PendingApproval loan (approver ≠ requester ⇒ SOD_SELF_APPROVAL) → post the mirrored
   // drawdown: creditor Dr 1155 / Cr 1010; debtor Dr 1010 / Cr 2155.
-  async approveLoan(id: number, user: JwtUser) {
+  async approveLoan(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const loan = await this.loadLoan(id);
     if (loan.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Loan is ${loan.status}, not pending approval`, messageTh: 'เงินกู้ไม่ได้อยู่ในสถานะรออนุมัติ' });
-    if (loan.requestedBy && loan.requestedBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve an intercompany loan you registered', messageTh: 'ผู้ลงทะเบียนอนุมัติเงินกู้ระหว่างบริษัทของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(db, { user, maker: loan.requestedBy, event: 'tre.loan.approve', ref: String(id), amount: n(loan.principal), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve an intercompany loan you registered', messageTh: 'ผู้ลงทะเบียนอนุมัติเงินกู้ระหว่างบริษัทของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const principal = n(loan.principal);
     const startDate = String(loan.startDate ?? ymd());
     const receivable = postingDefault('ICLOAN.DRAWDOWN', 'ic_loan_receivable'); // 1155

@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { qualitySpecs, coaCertificates, coaResults } from '../../database/schema/quality-coa';
 import { docCountersTenant } from '../../database/schema/system';
 import { n, fx } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 const round4 = (x: unknown) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -120,7 +121,7 @@ export class CoaService {
 
   // Release — QC-03 gate. A pass CoA can be released by its recorder. A FAIL (out-of-spec) CoA can be released
   // ONLY by a DIFFERENT user (SOD_SELF_APPROVAL) WITH a mandatory deviation_reason (DEVIATION_REASON_REQUIRED).
-  async release(id: number, dto: { deviation_reason?: string }, user: JwtUser) {
+  async release(id: number, dto: { deviation_reason?: string; self_approval_reason?: string }, user: JwtUser) {
     const tenantId = user.tenantId!;
     const coa = await this.assertCoa(id, tenantId);
     if (coa.releaseStatus !== 'held')
@@ -136,8 +137,8 @@ export class CoaService {
       const perms = user.permissions ?? [];
       if (!perms.includes('quality_approve') && !perms.includes('exec'))
         throw new ForbiddenException({ code: 'DEVIATION_APPROVER_REQUIRED', message: 'releasing an out-of-spec lot requires the quality-approver duty (quality_approve/exec)', messageTh: 'การปล่อยล็อตที่ไม่ผ่านสเปกต้องมีสิทธิ์ผู้อนุมัติการเบี่ยงเบน (quality_approve/exec)' });
-      if (coa.createdBy && coa.createdBy === user.username)
-        throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: an out-of-spec lot must be released by a different user than the CoA recorder', messageTh: 'แบ่งแยกหน้าที่: ล็อตที่ไม่ผ่านสเปกต้องปล่อยโดยผู้ใช้ที่ต่างจากผู้บันทึกใบรับรอง' });
+      // Exception (docs/49): an 'sme' tenant may self-release WITH self_approval_reason — logged, reviewed by SME-01.
+      await assertMakerChecker(this.db, { user, maker: coa.createdBy, event: 'qc.coa.release', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: an out-of-spec lot must be released by a different user than the CoA recorder', messageTh: 'แบ่งแยกหน้าที่: ล็อตที่ไม่ผ่านสเปกต้องปล่อยโดยผู้ใช้ที่ต่างจากผู้บันทึกใบรับรอง' });
       deviationReason = (dto.deviation_reason ?? '').trim();
       if (!deviationReason)
         throw new BadRequestException({ code: 'DEVIATION_REASON_REQUIRED', message: 'a deviation_reason is required to release an out-of-spec lot', messageTh: 'ต้องระบุเหตุผลการเบี่ยงเบนเพื่อปล่อยล็อตที่ไม่ผ่านสเปก' });

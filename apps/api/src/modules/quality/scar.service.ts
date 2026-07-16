@@ -1,10 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { supplierScars } from '../../database/schema/supplier-scar';
 import { vendors, grClaims } from '../../database/schema/procurement';
 import { docCountersTenant } from '../../database/schema/system';
 import { ymd } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 const OPEN_STATES = ['open', 'supplier_responded', 'pending_closure'];
@@ -110,7 +111,7 @@ export class ScarService {
   // ── Close the SCAR (QC-04 maker-checker). closer ≠ raiser; requires a complete 8D response; records an
   //    effectiveness verdict. Closing an `effective` SCAR is the gate that lets a suppressed supplier be
   //    requalified — we RECORD the verdict here (we never touch the scorecard math). ──
-  async close(id: number, dto: { effectiveness?: string }, user: JwtUser) {
+  async close(id: number, dto: { effectiveness?: string; self_approval_reason?: string }, user: JwtUser) {
     const db = this.db;
     const s = await this.assertScar(id);
     if (s.status === 'closed' || s.status === 'rejected') throw new BadRequestException({ code: 'SCAR_ALREADY_CLOSED', message: `SCAR ${s.scarNo} is already ${s.status}`, messageTh: `SCAR ${s.scarNo} ถูกปิด/ปฏิเสธแล้ว` });
@@ -118,8 +119,8 @@ export class ScarService {
     if (!s.supplierRespondedAt || !s.rootCause?.trim() || !s.correctiveAction?.trim())
       throw new BadRequestException({ code: 'SCAR_INCOMPLETE', message: 'Cannot close a SCAR without a supplier response and populated root_cause + corrective_action', messageTh: 'ไม่สามารถปิด SCAR โดยไม่มีการตอบกลับจากผู้ขายและสาเหตุรากเหง้า/การแก้ไข' });
     // QC-04 gate 2: the closer must differ from the raiser (maker-checker; binds even Admin).
-    if (s.raisedBy && s.raisedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The SCAR raiser cannot close their own SCAR — a different authorised reviewer must sign off the 8D closure', messageTh: 'ผู้เปิด SCAR ไม่สามารถปิด SCAR ของตนเองได้ ต้องให้ผู้ตรวจสอบรายอื่นอนุมัติการปิด' });
+    // Exception (docs/49): an 'sme' tenant may self-close WITH self_approval_reason — logged, reviewed by SME-01.
+    await assertMakerChecker(db, { user, maker: s.raisedBy, event: 'qc.scar.close', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The SCAR raiser cannot close their own SCAR — a different authorised reviewer must sign off the 8D closure', messageTh: 'ผู้เปิด SCAR ไม่สามารถปิด SCAR ของตนเองได้ ต้องให้ผู้ตรวจสอบรายอื่นอนุมัติการปิด' });
     const effectiveness = dto.effectiveness ?? 'effective';
     if (!['effective', 'ineffective'].includes(effectiveness))
       throw new BadRequestException({ code: 'BAD_EFFECTIVENESS', message: 'effectiveness must be effective|ineffective', messageTh: 'ผลลัพธ์ต้อง effective|ineffective' });
@@ -128,13 +129,13 @@ export class ScarService {
   }
 
   // ── Reject the SCAR closure (reviewer declines the 8D response; ≠ raiser). reason required. ──
-  async reject(id: number, dto: { reason?: string }, user: JwtUser) {
+  async reject(id: number, dto: { reason?: string; self_approval_reason?: string }, user: JwtUser) {
     const db = this.db;
     const s = await this.assertScar(id);
     if (s.status === 'closed' || s.status === 'rejected') throw new BadRequestException({ code: 'SCAR_ALREADY_CLOSED', message: `SCAR ${s.scarNo} is already ${s.status}`, messageTh: `SCAR ${s.scarNo} ถูกปิด/ปฏิเสธแล้ว` });
     if (!dto.reason?.trim()) throw new BadRequestException({ code: 'REASON_REQUIRED', message: 'A rejection reason is required', messageTh: 'ต้องระบุเหตุผลการปฏิเสธ' });
-    if (s.raisedBy && s.raisedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The SCAR raiser cannot decide their own SCAR — a different authorised reviewer must reject the closure', messageTh: 'ผู้เปิด SCAR ไม่สามารถตัดสิน SCAR ของตนเองได้ ต้องให้ผู้ตรวจสอบรายอื่นดำเนินการ' });
+    // Exception (docs/49): an 'sme' tenant may self-reject WITH self_approval_reason — logged, reviewed by SME-01.
+    await assertMakerChecker(db, { user, maker: s.raisedBy, event: 'qc.scar.reject', ref: String(id), reason: dto.self_approval_reason, code: 'SOD_SELF_APPROVAL', message: 'The SCAR raiser cannot decide their own SCAR — a different authorised reviewer must reject the closure', messageTh: 'ผู้เปิด SCAR ไม่สามารถตัดสิน SCAR ของตนเองได้ ต้องให้ผู้ตรวจสอบรายอื่นดำเนินการ' });
     const [row] = await db.update(supplierScars).set({ status: 'rejected', rejectReason: dto.reason.trim(), closedBy: user.username, closedAt: new Date() }).where(eq(supplierScars.id, id)).returning();
     return this.fmt(row);
   }

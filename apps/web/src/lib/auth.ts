@@ -10,6 +10,8 @@ export interface Me {
   permissions: string[];
   must_change_password?: boolean;
   is_platform_owner?: boolean; // configured platform owner ("god") — gates the cross-company switcher
+  control_profile?: 'enterprise' | 'sme'; // docs/49 — 'sme' shows the SME-mode banner + hides configured nav groups
+  sme_hidden_nav_groups?: string[];       // nav group title-keys hidden for this SME tenant
 }
 
 export function useMe() {

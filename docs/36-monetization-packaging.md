@@ -54,10 +54,22 @@ PLAN (free / starter / business / pro / enterprise)
 | Plan (code) | Commercial name | THB/mo | THB/yr (2 mo free) | USD/mo · USD/yr | Seats | Suites |
 |-------------|-----------------|--------|--------------------|------------------|-------|--------|
 | `free` | Free / trial-limited | 0 | — | — | 2 | core, portal, selfservice |
+| `sme` | **SME (เจ้าของคนเดียว)** | 690 | 6,900 | $20 · $200 | 1 | core, finance, sales, inventory, masterdata, procurement, planning, crm_loyalty, ai, portal, selfservice |
 | `starter` | **Standard** | 2,900 | 29,000 | $85 · $850 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
 | `business` | **Business** | 4,900 | 49,000 | $140 · $1,400 | 25 | + procurement, multibranch |
 | `pro` | **Professional** | 9,900 | 99,000 | $285 · $2,850 | 50 | + planning, crm_loyalty, ai |
 | `enterprise` | **Enterprise** | quote (custom) | quote | quote | ∞ | all suites (custom deals tune via `features.suites`) |
+
+**SME single-operator edition (docs/49):** the `sme` plan is the DEFAULT a `control_profile='sme'` company
+provisions onto (`provisionTenant` picks `sme` when the edition is SME and no explicit `plan_code` is passed;
+an explicit plan always wins — the plan and the control profile stay orthogonal). Its differentiator is the
+**one-seat / one-location cap**, not a thin module set: a solo owner gets the *full* day-to-day operational
+ERP (finance→procurement→planning→CRM/AI) so "one person does every job" is literally true. The seat cap is
+the commercial fence versus per-seat Enterprise — at 690/mo for one seat it sits *below* Standard's 2,900
+(which buys 10 seats + higher volume quotas), so it does not undercut the multi-seat ladder. Volume caps are
+solo-appropriate (200 e-Tax docs, 5,000 POS txns/mo; AI 100k tokens/day, both metered as overage). Upgrading
+to Enterprise (`upgradeControlProfile`) adds the heavy verticals (manufacturing/projects/hcm/realestate) +
+multi-seat and re-instates full maker-checker segregation; the transition is upgrade-only.
 
 **Ladder rationale (1.9):** the old Standard→Professional step was a 5.2× cliff (1,900 → 9,900) with no
 rung in between — customers parked at Standard. `business` (2,900 → 4,900 → 9,900 ≈ 1.7× per step) gives
@@ -163,6 +175,7 @@ meter (AIG-03) — per-event capture, a monthly included quota on the plan, and 
 
   | Plan | e-Tax docs/mo | POS txns/mo | e-Tax overage | POS overage |
   |---|---|---|---|---|
+  | SME | 200 | 5,000 | ฿3/doc | ฿0.5/txn |
   | Standard | 100 | 3,000 | ฿3/doc | ฿0.5/txn |
   | Professional | 1,000 | 30,000 | ฿2/doc | ฿0.3/txn |
   | Enterprise | unlimited | unlimited | — | — |
@@ -188,6 +201,7 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.3 | 2026-07-15 | Platform | **SME single-operator plan** (docs/49) — new `sme` plan seeded (฿690/mo · ฿6,900/yr · $20/$200), full day-to-day operational suites (`PLAN_SUITES.sme` = core/finance/sales/inventory/masterdata/procurement/planning/crm_loyalty/ai/portal/selfservice) but capped to **1 seat / 1 location** (the commercial fence vs per-seat Enterprise; sits below Standard on price). `provisionTenant` defaults a `control_profile='sme'` company with no explicit `plan_code` to the `sme` plan (explicit plan always wins; plan and control profile stay orthogonal). Volume caps solo-appropriate (200 e-Tax/mo, 5,000 POS/mo; AI 100k/day, metered as overage). Seeded via `PLAN_SEED` upsert — existing subscriptions untouched. Commercial policy + seed data; no control/RCM change. |
 | 1.2 | 2026-07-13 | Platform | **CI wiring** — `check-entitlements.mjs` added as a step in the `.github/workflows/ci.yml` `build` job (right after the shared build), so entitlement-map drift now fails every PR instead of accumulating silently (the rev-1.1 orphaned-token drift went unnoticed for a week because the guard was doc-only). No map/behaviour change. |
 | 1.1 | 2026-07-12 | Platform | **Entitlement-map drift repaired** — four coarse MODULE_KEYs added by post-1.1 waves were never assigned to a suite, failing `check-entitlements.mjs` (`hr, hr_admin, quality, treasury`). Mapped: `treasury` → **finance** (TRE-01..05 is finance depth), `quality` → **manufacturing** (QMS rides the premium suite the doc already scoped as "Manufacturing/MRP/QC/APS"), `hr`+`hr_admin` → **hcm** (those controllers already carry `@RequiresSuite('hcm')`). The `*_approve` checker duties are sub-permissions (not suite-gated). `TOKENLESS_SUITES` narrowed to projects/realestate. Map-only — no runtime change while `ENTITLEMENTS_ENFORCE` is off; guard now reports 46 module keys across 16 suites. No control/RCM change. |
 | 1.0 | 2026-07-09 | Platform | 1.9 — **pricing-ladder restructure**: new `business` mid-tier ฿4,900/mo (Standard + procurement + multibranch, 25 seats, metered quotas between Standard/Pro); Standard re-priced ฿1,900→฿2,900 ($85/$850); premium-suite **list prices published** (§4b — was quote-only); **implementation packages** defined (§4c, one-time ฿30k/฿80k/฿150k). `PLAN_SUITES.business` added in `entitlements.ts` (validated by `check-entitlements.mjs`); seeded via `PLAN_SEED` upsert — existing subscriptions untouched (`seedPlans()` never writes `subscriptions`). No control/RCM change (commercial policy + seed data). |

@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { revContracts, performanceObligations, revrecSchedules, revVariableEstimates } from '../../database/schema';
@@ -6,6 +6,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { RevRecService } from '../revenue/revrec.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 // ── Track D — Wave 2 (REV-25): variable consideration + the constraint (TFRS 15 / IFRS 15 / ASC 606 §50-59) ──
 // The REV-19 engine (RevRecService) holds a FIXED transaction price (rev_contracts.total_price). Variable
@@ -110,15 +111,14 @@ export class RevVariableService {
   // ── POST :id/variable-consideration/:vcId/approve — CHECKER approves the estimate (Pending → Approved).
   //    SoD: the approver must differ from the estimator (created_by), else SOD_SELF_APPROVAL. Approval is
   //    MANDATORY before an estimate can drive revenue — /reestimate only applies APPROVED estimates.
-  async approveEstimate(contractId: number, vcId: number, user: JwtUser) {
+  async approveEstimate(contractId: number, vcId: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     await this.assertContract(contractId);
     const [e] = await db.select().from(revVariableEstimates).where(and(eq(revVariableEstimates.id, vcId), eq(revVariableEstimates.contractId, contractId))).limit(1);
     if (!e) throw new NotFoundException({ code: 'ESTIMATE_NOT_FOUND', message: `Variable-consideration estimate ${vcId} not found for contract ${contractId}`, messageTh: 'ไม่พบค่าประมาณสิ่งตอบแทนผันแปร' });
     if (e.status !== 'Pending') throw new BadRequestException({ code: 'ESTIMATE_NOT_PENDING', message: `Estimate ${vcId} is ${e.status}, not Pending`, messageTh: 'ค่าประมาณไม่ได้อยู่ในสถานะรอการอนุมัติ' });
     // Maker-checker (SoD): the estimator cannot approve their own management judgement.
-    if (e.createdBy && e.createdBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The estimator cannot approve their own variable-consideration estimate (segregation of duties)', messageTh: 'ผู้ประมาณการไม่สามารถอนุมัติค่าประมาณของตนเองได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: e.createdBy, event: 'rev.estimate.approve', ref: `${contractId}:${vcId}`, amount: n(e.constrainedAmount), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The estimator cannot approve their own variable-consideration estimate (segregation of duties)', messageTh: 'ผู้ประมาณการไม่สามารถอนุมัติค่าประมาณของตนเองได้ (แบ่งแยกหน้าที่)' });
     await db.update(revVariableEstimates).set({ status: 'Approved', approvedBy: user.username }).where(eq(revVariableEstimates.id, vcId));
     return { id: vcId, contract_id: contractId, status: 'Approved', approved_by: user.username };
   }

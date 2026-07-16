@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
 import { eq, and, isNull, or } from 'drizzle-orm';
 // (governance below uses only eq/and/or/isNull — the resolver keeps its original read shape)
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -7,6 +7,8 @@ import { LedgerService, type PostEntryDto } from './ledger.service';
 import { currentTenantStore } from '../../common/tenant-context';
 import { POSTING_EVENTS, postingRole } from './posting-events';
 import { bustPostingOverridesCache } from './posting-overrides-cache';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
 
 export interface PostingContext {
   tenantId?: number | null;
@@ -257,16 +259,14 @@ export class PostingService {
   }
 
   /** GL-24 approve: a DIFFERENT user activates the pending rule (SoD binds even Admin). */
-  async approveRule(id: number, user: { username: string }) {
+  async approveRule(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const tenantId = currentTenantStore()?.tenantId ?? null;
     const [row] = await this.db.select().from(postingRules).where(eq(postingRules.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'RULE_NOT_FOUND', message: `Posting rule ${id} not found`, messageTh: `ไม่พบกฎ ${id}` });
     if (row.status !== 'PendingApproval') {
       throw new BadRequestException({ code: 'NOT_PENDING', message: `Rule ${id} is ${row.status}, not pending approval`, messageTh: 'กฎนี้ไม่ได้รออนุมัติ' });
     }
-    if (row.createdBy && row.createdBy === user.username) {
-      throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a posting rule you created', messageTh: 'ผู้สร้างอนุมัติกฎของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(this.db, { user, maker: row.createdBy, event: 'gl.posting-rule.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a posting rule you created', messageTh: 'ผู้สร้างอนุมัติกฎของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const [upd] = await this.db.update(postingRules)
       .set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() })
       .where(eq(postingRules.id, id)).returning();

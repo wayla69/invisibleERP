@@ -1,7 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
-import { eq, sql, desc } from 'drizzle-orm';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { and, eq, sql, desc } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
-import { subscriptions, tenants, users, branches, auditLog, aiTokenUsage } from '../../database/schema';
+import { subscriptions, tenants, users, branches, auditLog, aiTokenUsage, platformSmeDefaults } from '../../database/schema';
+import { reportSubscriptions } from '../../database/schema/bi';
 import { logger } from '../../observability/logger';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 
@@ -32,7 +33,7 @@ export class PlatformAdminService {
         suspendedAt: tenants.suspendedAt, createdAt: tenants.createdAt,
         deletedAt: tenants.deletedAt, deletedBy: tenants.deletedBy, purgedAt: tenants.purgedAt,
         legalName: tenants.legalName, taxId: tenants.taxId, addressLine1: tenants.addressLine1, province: tenants.province,
-        tags: tenants.tags,
+        tags: tenants.tags, controlProfile: tenants.controlProfile,
         planCode: subscriptions.planCode, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt,
       })
       .from(tenants)
@@ -67,6 +68,7 @@ export class PlatformAdminService {
         // Setup essentials for issuing tax invoices — mirrors TenantController.fmt's setup_complete.
         setup_complete: !!(t.legalName && t.taxId && t.addressLine1 && t.province),
         tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
+        control_profile: t.controlProfile === 'sme' ? 'sme' : 'enterprise',
       });
     }
     return out;
@@ -79,6 +81,70 @@ export class PlatformAdminService {
     const clean = Array.from(new Set((tags ?? []).map((s) => String(s).trim()).filter(Boolean))).slice(0, 20);
     await this.db.update(tenants).set({ tags: clean }).where(eq(tenants.id, id));
     return { tenant_id: id, tags: clean };
+  }
+
+  // ── SME single-user edition (docs/49) ────────────────────────────────────
+  // UPGRADE-ONLY control-profile transition: sme → enterprise. A downgrade is refused — an entity that has
+  // operated under the full maker-checker environment may not weaken it later (keeps the control narrative
+  // monotonic). The change is audit-logged (AuditInterceptor) and notified to the god inbox.
+  async upgradeControlProfile(id: number, target: 'enterprise', actor: string) {
+    const [t] = await this.db.select({ id: tenants.id, code: tenants.code, profile: tenants.controlProfile }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    if (target !== 'enterprise' || t.profile === 'enterprise') {
+      // Idempotent no-op when already enterprise; any other direction is a downgrade.
+      if (t.profile === 'enterprise' && target === 'enterprise') return { tenant_id: id, control_profile: 'enterprise', changed: false };
+      throw new ForbiddenException({ code: 'PROFILE_DOWNGRADE_FORBIDDEN', message: 'Control profile can only be upgraded (sme → enterprise), never downgraded', messageTh: 'โปรไฟล์การควบคุมอัปเกรดได้ทางเดียว (SME → Enterprise) ไม่สามารถดาวน์เกรดได้' });
+    }
+    await this.db.update(tenants).set({ controlProfile: 'enterprise' }).where(eq(tenants.id, id));
+    logger.warn({ tenantId: id, code: t.code, actor }, 'control profile upgraded sme -> enterprise');
+    await this.platformNotifs?.emit({ type: 'control_profile_upgraded', title: `อัปเกรดโปรไฟล์ควบคุม: ${t.code} → Enterprise`, body: `โดย ${actor}`, tenantId: id, refType: 'tenant', refId: String(id) });
+    return { tenant_id: id, control_profile: 'enterprise', changed: true };
+  }
+
+  // Per-tenant SME prefs edit (docs/49 v1.2, audit gap H1) — the platform defaults are only a stamp at
+  // creation; an EXISTING SME company's accountant routing / hidden nav groups are edited here. Changing
+  // the accountant email also re-points the auto-provisioned SME-01 subscription's recipients, so the
+  // detective control keeps operating against the live address (never a stale one).
+  async setTenantSmePrefs(id: number, b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) {
+    const [t] = await this.db.select({ id: tenants.id, profile: tenants.controlProfile, prefs: tenants.smePrefs }).from(tenants).where(eq(tenants.id, id)).limit(1);
+    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Company not found', messageTh: 'ไม่พบบริษัท' });
+    if (t.profile !== 'sme') throw new ForbiddenException({ code: 'NOT_SME_TENANT', message: 'SME prefs apply only to a control_profile=sme company', messageTh: 'ตั้งค่า SME ได้เฉพาะบริษัทโหมด SME เท่านั้น' });
+    const cur = (t.prefs ?? {}) as { hidden_nav_groups?: string[]; accountant_email?: string | null };
+    const hidden = b.hidden_nav_groups !== undefined
+      ? Array.from(new Set(b.hidden_nav_groups.map((s) => String(s).trim()).filter(Boolean))).slice(0, 50)
+      : (Array.isArray(cur.hidden_nav_groups) ? cur.hidden_nav_groups : []);
+    const email = b.accountant_email !== undefined ? b.accountant_email : (cur.accountant_email ?? null);
+    const prefs = { hidden_nav_groups: hidden, accountant_email: email };
+    await this.db.update(tenants).set({ smePrefs: prefs }).where(eq(tenants.id, id));
+    if (b.accountant_email !== undefined) {
+      await this.db.update(reportSubscriptions)
+        .set({ recipients: email ? [{ email }] : [] })
+        .where(and(eq(reportSubscriptions.tenantId, id), eq(reportSubscriptions.reportType, 'sme_self_approval_review')));
+    }
+    logger.info({ tenantId: id, actor, prefs }, 'sme prefs updated');
+    return { tenant_id: id, sme_prefs: prefs };
+  }
+
+  // Platform-wide SME provisioning defaults — the single config row every NEW SME company is stamped from
+  // (tenants.sme_prefs copy at provisionTenant). Changing it affects only future companies.
+  async getSmeDefaults() {
+    const [row] = await this.db.select().from(platformSmeDefaults).where(eq(platformSmeDefaults.id, 1)).limit(1);
+    return {
+      hidden_nav_groups: Array.isArray(row?.hiddenNavGroups) ? (row!.hiddenNavGroups as string[]) : [],
+      accountant_email: row?.accountantEmail ?? null,
+      updated_by: row?.updatedBy ?? null,
+      updated_at: row?.updatedAt ?? null,
+    };
+  }
+
+  async setSmeDefaults(b: { hidden_nav_groups?: string[]; accountant_email?: string | null }, actor: string) {
+    const current = await this.getSmeDefaults();
+    const hidden = Array.from(new Set((b.hidden_nav_groups ?? current.hidden_nav_groups).map((s) => String(s).trim()).filter(Boolean))).slice(0, 50);
+    const email = b.accountant_email === undefined ? current.accountant_email : b.accountant_email;
+    await this.db.insert(platformSmeDefaults)
+      .values({ id: 1, hiddenNavGroups: hidden, accountantEmail: email, updatedBy: actor, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: platformSmeDefaults.id, set: { hiddenNavGroups: hidden, accountantEmail: email, updatedBy: actor, updatedAt: new Date() } });
+    return { hidden_nav_groups: hidden, accountant_email: email, updated_by: actor };
   }
 
   // Cross-company AI-token usage aggregate (Platform Console) — total in/out/overage per company, ordered by
@@ -133,6 +199,8 @@ export class PlatformAdminService {
       deleted: !!t.deletedAt, deleted_at: t.deletedAt ?? null, deleted_by: t.deletedBy ?? null,
       purged: !!t.purgedAt, purged_at: t.purgedAt ?? null, purged_by: t.purgedBy ?? null,
       tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
+      control_profile: t.controlProfile === 'sme' ? 'sme' : 'enterprise',
+      sme_prefs: t.controlProfile === 'sme' ? ((t.smePrefs ?? {}) as Record<string, unknown>) : null,
       subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
       ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },

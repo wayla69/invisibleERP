@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { priceRules, comboComponents, menuItems } from '../../database/schema';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const pad = (x: number) => String(x).padStart(2, '0');
@@ -54,12 +55,12 @@ export class PricingService {
     return { id: r!.id, created: true, status: 'PendingApproval', pending: true };
   }
   // Approve a staged rule — a DIFFERENT user than the author activates it (self-approval → SOD_VIOLATION).
-  async approveRule(id: number, user: JwtUser) {
+  async approveRule(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [r] = await db.select().from(priceRules).where(eq(priceRules.id, id)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: `Price rule ${id} not found`, messageTh: 'ไม่พบกฎราคา' });
     if (r.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Rule ${id} is ${r.status}, not pending approval`, messageTh: 'กฎนี้ไม่ได้รออนุมัติ' });
-    if (r.createdBy && r.createdBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a price rule you created', messageTh: 'ผู้สร้างกฎราคาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: r.createdBy, event: 'price.rule.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a price rule you created', messageTh: 'ผู้สร้างกฎราคาอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     await db.update(priceRules).set({ active: true, status: 'Active', approvedBy: user.username, approvedAt: new Date() }).where(eq(priceRules.id, id));
     return { id, status: 'Active', active: true, approved_by: user.username, created_by: r.createdBy };
   }

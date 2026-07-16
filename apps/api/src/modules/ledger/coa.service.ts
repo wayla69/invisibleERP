@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { eq, and, isNull, or, sql, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
@@ -9,6 +9,8 @@ import {
   coaChangeRequests,
 } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
+import { assertMakerChecker } from '../../common/control-profile';
+import type { JwtUser } from '../../common/decorators';
 
 @Injectable()
 export class CoaService {
@@ -185,15 +187,11 @@ export class CoaService {
   }
 
   /** A DIFFERENT Admin activates the pending change (SoD binds even Admin). */
-  async approveChange(id: number, user: { username: string }) {
+  async approveChange(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const [row] = await this.db.select().from(coaChangeRequests).where(eq(coaChangeRequests.id, id)).limit(1);
     if (!row) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND', message: `CoA change request ${id} not found`, messageTh: `ไม่พบคำขอ ${id}` });
     if (row.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Request ${id} is ${row.status}, not pending approval`, messageTh: 'คำขอนี้ไม่ได้รออนุมัติ' });
-    if (row.createdBy === user.username) throw new ForbiddenException({
-      code: 'SOD_VIOLATION',
-      message: 'A canonical CoA change must be approved by a DIFFERENT user than its creator',
-      messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้สร้างคำขอ (แบ่งแยกหน้าที่)',
-    });
+    await assertMakerChecker(this.db, { user, maker: row.createdBy, event: 'gl.coa.change.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'A canonical CoA change must be approved by a DIFFERENT user than its creator', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้สร้างคำขอ (แบ่งแยกหน้าที่)' });
     await this.validateChange(row.action, row.accountCode, (row.payload ?? undefined) as Record<string, unknown> | undefined);
     const result = await this.applyChange(row.action, row.accountCode, (row.payload ?? undefined) as Record<string, unknown> | undefined);
     const [upd] = await this.db.update(coaChangeRequests)

@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto } from './projects.service';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
+import { ProjectsService, type CreateProjectDto, type CostDto, type BillDto, type FromOpportunityDto, type TaskDto, type TaskPatchDto, type TaskDependencyDto, type MilestoneDto, type RateCardDto, type ResourceDto, type ResourceSkillDto, type ResourceCalendarDto, type ProjectCalendarDto, type CalendarExceptionDto, type BaselineDto, type EtcDto, type TemplateDto, type ApplyTemplateDto, type RiskDto, type RiskPatchDto, type RecognizeDto, type ChangeOrderDto, type ProgramDto, type BoqDto, type BoqLineDto, type RemeasureDto, type PortfolioScenarioDto, type PortfolioItemDto, type PortfolioCommitDto, type PhaseGateDto, type GateDecisionDto, type BenefitDto, type BenefitMeasurementDto, type BenefitConfirmDto } from './projects.service';
 
 // BoQ (M0, docs/32) — line: amount is budget_qty × rate unless an explicit budget_amount is given.
 const BoqLineBody = z.object({
@@ -201,6 +202,27 @@ const ResourceCalendarBody = z.object({
   available_pct: z.number().optional(),
   reason: z.string().optional(),
 });
+// PROJ-25 portfolio selection scenarios (PPM Wave P4)
+const PortfolioScenarioBody = z.object({
+  name: z.string().min(1),
+  budget_envelope: z.number().nonnegative().optional(),
+  objective: z.string().optional(),
+  notes: z.string().optional(),
+});
+const PortfolioItemBody = z.object({
+  project_code: z.string().min(1),
+  decision: z.enum(['include', 'exclude']).optional(),
+  priority_score: z.number().nonnegative().optional(),
+  rationale: z.string().optional(),
+});
+const PortfolioCommitBody = z.object({ override: z.boolean().optional(), override_reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
+// PROJ-26 project phase-gate governance (PPM Wave P4)
+const PhaseGateBody = z.object({ target_phase: z.string().min(1), gate_key: z.string().optional(), name: z.string().optional(), readiness: z.string().optional() });
+const GateDecisionBody = z.object({ decision: z.enum(['go', 'hold', 'kill']), notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
+// PROJ-27 program benefits realization (PPM Wave P4)
+const BenefitBody = z.object({ name: z.string().min(1), category: z.enum(['financial', 'non_financial']).optional(), unit: z.string().optional(), baseline_value: z.number().optional(), target_value: z.number(), target_date: z.string().optional(), owner: z.string().optional() });
+const BenefitMeasurementBody = z.object({ measured_value: z.number(), measured_at: z.string().optional(), note: z.string().optional() });
+const BenefitConfirmBody = z.object({ result: z.enum(['realized', 'not_realized']), notes: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
 
 @Controller('api/projects')
 @Permissions('exec', 'planner', 'ar')
@@ -305,8 +327,8 @@ export class ProjectsController {
 
   // Approve a BoQ (maker-checker: approver ≠ author). Syncs the project budget to the approved BoQ total.
   @Post('boq/:boqId/approve')
-  approveBoq(@Param('boqId') boqId: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveBoq(Number(boqId), u);
+  approveBoq(@Param('boqId') boqId: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveBoq(Number(boqId), u, b?.self_approval_reason);
   }
 
   @Post('boq/:boqId/lock')
@@ -391,6 +413,13 @@ export class ProjectsController {
     return this.svc.eacScenarios(code);
   }
 
+  // PPM-A2 (PROJ-23): resource leveling — over-allocated resource-months within this project cross-referenced
+  // against the CPM schedule's slack, suggesting which task-linked assignment could shift later.
+  @Get(':code/resource-leveling')
+  resourceLeveling(@Param('code') code: string, @CurrentUser() u: JwtUser) {
+    return this.svc.resourceLeveling(code, u);
+  }
+
   // Project health history (PPM upgrade): capture a dated EVM/RAG snapshot; read the trajectory.
   @Post(':code/health')
   captureHealth(@Param('code') code: string, @Body() b: { as_of?: string }, @CurrentUser() u: JwtUser) {
@@ -446,13 +475,94 @@ export class ProjectsController {
 
   // Approve / reject — static 'change-orders' segment, so it never collides with :code. Approver ≠ requester.
   @Post('change-orders/:coId/approve')
-  approveChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser) {
-    return this.svc.approveChangeOrder(Number(coId), u);
+  approveChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.approveChangeOrder(Number(coId), u, b?.self_approval_reason);
   }
 
   @Post('change-orders/:coId/reject')
   rejectChangeOrder(@Param('coId') coId: string, @CurrentUser() u: JwtUser) {
     return this.svc.rejectChangeOrder(Number(coId), u);
+  }
+
+  // PROJ-24: read-only what-if — the projected cost/margin/EVM impact of a pending change order before it is
+  // authorised. Mutates nothing; inherits the class gate (exec/planner/ar).
+  @Get('change-orders/:coId/simulate')
+  simulateChangeOrder(@Param('coId') coId: string) {
+    return this.svc.simulateChangeOrder(Number(coId));
+  }
+
+  // ── Portfolio selection scenarios (PPM Wave P4, PROJ-25) — what-if funding within a budget envelope +
+  // maker-checker commit. Static `portfolio/*` paths sit above the `:code` param routes; inherit the class
+  // gate (exec/planner/ar), with the commit's segregation-of-duties enforced in the service. ──
+  @Post('portfolio/scenarios')
+  createPortfolioScenario(@Body(new ZodValidationPipe(PortfolioScenarioBody)) b: PortfolioScenarioDto, @CurrentUser() u: JwtUser) {
+    return this.svc.createPortfolioScenario(b, u);
+  }
+
+  @Get('portfolio/scenarios')
+  listPortfolioScenarios(@CurrentUser() u: JwtUser) {
+    return this.svc.listPortfolioScenarios(u);
+  }
+
+  @Get('portfolio/scenarios/:scenarioNo')
+  getPortfolioScenario(@Param('scenarioNo') scenarioNo: string) {
+    return this.svc.getPortfolioScenario(scenarioNo);
+  }
+
+  @Post('portfolio/scenarios/:scenarioNo/items')
+  upsertPortfolioItem(@Param('scenarioNo') scenarioNo: string, @Body(new ZodValidationPipe(PortfolioItemBody)) b: PortfolioItemDto, @CurrentUser() u: JwtUser) {
+    return this.svc.upsertPortfolioItem(scenarioNo, b, u);
+  }
+
+  @Delete('portfolio/scenarios/:scenarioNo/items/:projectCode')
+  removePortfolioItem(@Param('scenarioNo') scenarioNo: string, @Param('projectCode') projectCode: string, @CurrentUser() u: JwtUser) {
+    return this.svc.removePortfolioItem(scenarioNo, projectCode, u);
+  }
+
+  @Post('portfolio/scenarios/:scenarioNo/commit')
+  commitPortfolioScenario(@Param('scenarioNo') scenarioNo: string, @Body(new ZodValidationPipe(PortfolioCommitBody)) b: PortfolioCommitDto, @CurrentUser() u: JwtUser) {
+    return this.svc.commitPortfolioScenario(scenarioNo, b, u);
+  }
+
+  // ── Project phase-gate governance (PPM Wave P4, PROJ-26) — a project advances through its lifecycle phases
+  // only through a gate that is submitted then independently decided (GO/HOLD/KILL, decider ≠ submitter).
+  // Inherits the class gate (exec/planner/ar); the segregation-of-duties check is enforced in the service. ──
+  @Get(':code/gates')
+  listPhaseGates(@Param('code') code: string) {
+    return this.svc.listPhaseGates(code);
+  }
+
+  @Post(':code/gates')
+  submitPhaseGate(@Param('code') code: string, @Body(new ZodValidationPipe(PhaseGateBody)) b: PhaseGateDto, @CurrentUser() u: JwtUser) {
+    return this.svc.submitPhaseGate(code, b, u);
+  }
+
+  @Post('gates/:gateId/decide')
+  decidePhaseGate(@Param('gateId') gateId: string, @Body(new ZodValidationPipe(GateDecisionBody)) b: GateDecisionDto, @CurrentUser() u: JwtUser) {
+    return this.svc.decidePhaseGate(Number(gateId), b, u);
+  }
+
+  // ── Program benefits realization (PPM Wave P4, PROJ-27) — declare expected benefits, log actuals over time,
+  // and close each realized/not-realized as a maker-checker sign-off (confirmer ≠ author). Inherits the class
+  // gate (exec/planner/ar); the segregation-of-duties check is enforced in the service. ──
+  @Get('programs/:programCode/benefits')
+  listProgramBenefits(@Param('programCode') programCode: string) {
+    return this.svc.listProgramBenefits(programCode);
+  }
+
+  @Post('programs/:programCode/benefits')
+  declareProgramBenefit(@Param('programCode') programCode: string, @Body(new ZodValidationPipe(BenefitBody)) b: BenefitDto, @CurrentUser() u: JwtUser) {
+    return this.svc.declareProgramBenefit(programCode, b, u);
+  }
+
+  @Post('benefits/:benefitId/measurements')
+  recordBenefitMeasurement(@Param('benefitId') benefitId: string, @Body(new ZodValidationPipe(BenefitMeasurementBody)) b: BenefitMeasurementDto, @CurrentUser() u: JwtUser) {
+    return this.svc.recordBenefitMeasurement(Number(benefitId), b, u);
+  }
+
+  @Post('benefits/:benefitId/confirm')
+  confirmProgramBenefit(@Param('benefitId') benefitId: string, @Body(new ZodValidationPipe(BenefitConfirmBody)) b: BenefitConfirmDto, @CurrentUser() u: JwtUser) {
+    return this.svc.confirmProgramBenefit(Number(benefitId), b, u);
   }
 
   // ── Risk & issue register (B4, PROJ-08) ──
@@ -606,7 +716,7 @@ export class ProjectsController {
   prepareCloseReview(@Query('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.prepareCloseReview(period, u); }
 
   @Post('close-review/:period/approve') @Permissions('exec')
-  approveCloseReview(@Param('period') period: string, @CurrentUser() u: JwtUser) { return this.svc.approveCloseReview(period, u); }
+  approveCloseReview(@Param('period') period: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveCloseReview(period, u, b?.self_approval_reason); }
 
   @Post('close-review/:period/reject') @Permissions('exec')
   rejectCloseReview(@Param('period') period: string, @Body(new ZodValidationPipe(z.object({ reason: z.string().optional() }))) b: { reason?: string }, @CurrentUser() u: JwtUser) { return this.svc.rejectCloseReview(period, b.reason ?? '', u); }

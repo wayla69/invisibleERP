@@ -100,6 +100,24 @@ async function main() {
   const rdyAfter = await inj('GET', '/api/workflow/readiness', mgr1);
   ok('Readiness: after seeding the PR definition, PR has an active workflow (no longer auto-approves)', rdyAfter.json.doc_types?.find((d: any) => d.doc_type === 'PR')?.has_active_definition === true && !rdyAfter.json.missing?.includes('PR'), JSON.stringify({ missing: rdyAfter.json.missing }));
 
+  // ── 1b. SME edition (docs/49 v1.3): a single-operator company cannot build an all_of_n>1 step (it would
+  //    deadlock — no second distinct approver exists). Blocked at build time; enterprise is unaffected. ──
+  {
+    // A dedicated SME tenant + masterdata owner (kept apart from T1/T2 so their isolation tests are untouched).
+    await db.insert(s.tenants).values([{ code: 'SMEW', name: 'ร้านเจ้าของคนเดียว', controlProfile: 'sme' }]).onConflictDoNothing();
+    const smeTid = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'SMEW')))[0].id);
+    await db.insert(s.users).values([{ username: 'smeowner', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: smeTid }]).onConflictDoNothing();
+    const smeowner = await login('smeowner', 'pw');
+    const smeMulti = await inj('POST', '/api/workflow/definitions', smeowner, { doc_type: 'PR', name: 'SME multi', steps: [{ step_no: 1, approver_role: 'Procurement', all_of_n: 2 }] });
+    ok('SME: creating an all_of_n>1 workflow step → 400 SME_MULTI_APPROVER_STEP (deadlock prevented)', smeMulti.status === 400 && smeMulti.json.error?.code === 'SME_MULTI_APPROVER_STEP', `${smeMulti.status} ${smeMulti.json.error?.code}`);
+    const smeSingle = await inj('POST', '/api/workflow/definitions', smeowner, { doc_type: 'PR', name: 'SME single', steps: [{ step_no: 1, approver_role: 'Procurement', all_of_n: 1 }] });
+    ok('SME: an all_of_n=1 step is allowed (single-approver workflows are fine for a solo operator)', smeSingle.status === 200 || smeSingle.status === 201, `${smeSingle.status} ${JSON.stringify(smeSingle.json).slice(0, 80)}`);
+    // Enterprise regression: the T1 masterdata user (control_profile null ⇒ enterprise) may still build all_of_n>1.
+    // Uses a throwaway doc_type so it can't collide with the Phase-2 PO/PR builder tests below.
+    const entMulti = await inj('POST', '/api/workflow/definitions', mgr1, { doc_type: 'ENTREG', name: 'Ent multi', steps: [{ step_no: 1, approver_role: 'Procurement', all_of_n: 2 }] });
+    ok('Enterprise regression: an all_of_n>1 step is still accepted for a non-SME tenant', entMulti.status === 200 || entMulti.status === 201, `${entMulti.status}`);
+  }
+
   // ── 2. submit routes to step 1 ──
   const pr1 = await mkPr(proc1, 5000);
   const i1 = await instOf(pr1.json.pr_no);

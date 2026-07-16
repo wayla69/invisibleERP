@@ -8,6 +8,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { n, fx } from '../../database/queries';
 import { bizYmdDash } from '../../common/bizdate';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const r4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
@@ -109,13 +110,11 @@ export class StdCostService {
   }
 
   // ── Checker: a DISTINCT user approves → roll the standard + post the revaluation JE ──
-  async approve(tenantId: number, revNo: string, approver: JwtUser) {
+  async approve(tenantId: number, revNo: string, approver: JwtUser, selfApprovalReason?: string | null) {
     const [h] = await this.db.select().from(stdCostRevisions).where(and(eq(stdCostRevisions.tenantId, tenantId), eq(stdCostRevisions.revNo, revNo))).limit(1);
     if (!h) throw new NotFoundException({ code: 'REVISION_NOT_FOUND', message: `Standard-cost revision ${revNo} not found`, messageTh: `ไม่พบคำขอปรับปรุงต้นทุนมาตรฐาน ${revNo}` });
     if (h.status !== 'Draft') throw new ConflictException({ code: 'NOT_DRAFT', message: `Revision ${revNo} is already ${h.status}`, messageTh: `คำขอ ${revNo} ไม่ได้อยู่สถานะร่างแล้ว` });
-    if (h.preparedBy && h.preparedBy === approver.username) {
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a standard-cost revision you prepared', messageTh: 'ผู้จัดทำไม่สามารถอนุมัติคำขอปรับปรุงต้นทุนของตนเองได้ (แบ่งแยกหน้าที่)' });
-    }
+    await assertMakerChecker(this.db, { user: approver, maker: h.preparedBy, event: 'inv.stdcost.approve', ref: revNo, reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a standard-cost revision you prepared', messageTh: 'ผู้จัดทำไม่สามารถอนุมัติคำขอปรับปรุงต้นทุนของตนเองได้ (แบ่งแยกหน้าที่)' });
     const lineRows = await this.db.select().from(stdCostRevisionLines).where(and(eq(stdCostRevisionLines.tenantId, tenantId), eq(stdCostRevisionLines.revNo, revNo))).orderBy(stdCostRevisionLines.id);
     // Roll the stored standard forward on every STD-costed item line (subsequent issues cost at the new std).
     for (const l of lineRows) {

@@ -15,6 +15,7 @@ const ApproveRateBody = z.object({
   currency: z.string().min(3).max(3),
   rate_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   shared: z.boolean().optional(),
+  self_approval_reason: z.string().max(500).optional(),
 });
 const RevalueBody = z.object({
   as_of: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -41,7 +42,7 @@ export class FxController {
   @Get('rates/pending') @Permissions('approvals', 'gl_close', 'exec')
   pendingRates() { return this.svc.listRates({ status: 'PendingApproval' }); }
   @Post('rates/approve') @HttpCode(200) @Permissions('approvals', 'gl_close')
-  approveRate(@Body(new ZodValidationPipe(ApproveRateBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.approveRate(b.currency, b.rate_date, b.shared ? null : (u.tenantId ?? null), u); }
+  approveRate(@Body(new ZodValidationPipe(ApproveRateBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.approveRate(b.currency, b.rate_date, b.shared ? null : (u.tenantId ?? null), u, b.self_approval_reason); }
   @Post('rates/reject') @HttpCode(200) @Permissions('approvals', 'gl_close')
   rejectRate(@Body(new ZodValidationPipe(ApproveRateBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.rejectRate(b.currency, b.rate_date, b.shared ? null : (u.tenantId ?? null), u); }
 

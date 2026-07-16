@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Body, Param, HttpCode, ParseIntPipe } from 
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { DisclosureService } from './disclosure.service';
 
 const OpenBody = z.object({
@@ -60,8 +61,8 @@ export class DisclosureController {
   @Post(':id/review')
   @HttpCode(200)
   @Permissions('gl_close')
-  review(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
-    return this.svc.review({ checklistId: id, reviewedBy: u.username });
+  review(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.review({ checklistId: id, reviewedBy: u.username }, u, b?.self_approval_reason);
   }
 
   @Post(':id/issue')

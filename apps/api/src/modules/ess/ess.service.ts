@@ -8,8 +8,10 @@ import { FinanceService } from '../finance/finance.service';
 import { PayrollService } from '../payroll/payroll.service';
 import type { PayslipPrintData } from '../payroll/payslip-pdf.service';
 import { n, ymd } from '../../database/queries';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 import { LineNotifyService } from '../messaging/line-notify.service';
+import { TimeClockService } from '../pos/labor/timeclock.service';
 
 export interface LeaveSelfDto { leave_type?: string; from_date: string; to_date: string; days: number; paid?: boolean; reason?: string }
 export interface ExpenseDto { claim_date?: string; category?: string; amount: number; description?: string; project_code?: string }
@@ -28,6 +30,9 @@ export class EssService {
     // Payslip download (PDPA-scoped to the caller's own slip). @Optional so a hand-constructed EssService
     // still builds; the own-payslip PDF route 404s when absent.
     @Optional() private readonly payroll?: PayrollService,
+    // POS time-clock attendance (read-only contract). @Optional so a hand-constructed EssService still builds;
+    // the attendance route degrades to an empty read when the POS labor module isn't wired.
+    @Optional() private readonly timeClock?: TimeClockService,
   ) {}
 
   // Resolve the logged-in user → their employee row (by user_name link, emp_code fallback). RLS scopes
@@ -70,6 +75,19 @@ export class EssService {
       `🔔 ใบลารออนุมัติ: ${emp.name ?? emp.empCode} ลา ${n(dto.days)} วัน (${dto.from_date} → ${dto.to_date})${dto.reason ? ` — ${dto.reason}` : ''}\nอนุมัติที่หน้า /hcm`,
       user.username);
     return { id: Number(r!.id), status: 'Pending', emp_code: emp.empCode, days: n(dto.days) };
+  }
+
+  // My attendance — the caller's OWN clock-in/out from the POS time-clock, surfaced inside HR self-service so
+  // an hourly employee sees the same attendance the POS register recorded (docs/42 HCM depth). Resolves the
+  // employee from the JWT (never a body param); the POS labor service owns the data, ESS only reads via its
+  // contract. Degrades to an empty read if the POS labor module isn't wired (@Optional).
+  async myAttendance(user: JwtUser) {
+    const emp = await this.me(user);
+    if (!this.timeClock) {
+      return { emp_code: emp.empCode, entries: [], summary: { total_hours: 0, days_worked: 0, sessions: 0, currently_clocked_in: false }, source: 'pos_timeclock', unavailable: true };
+    }
+    const a = await this.timeClock.employeeAttendance(Number(emp.id), { limit: 90 });
+    return { emp_code: emp.empCode, ...a, source: 'pos_timeclock' };
   }
 
   async myPayslips(user: JwtUser) {
@@ -140,7 +158,8 @@ export class EssService {
   // (Dr 5100 Operating Expense / Cr 2000 AP) AND creates the AP sub-ledger row, so the reimbursement shows
   // in AP aging, is settled through the normal AP pay flow, and keeps the AP sub-ledger ↔ GL control
   // account (2000) reconciled. Reimbursements carry no claimable input VAT (vat_treatment 'exempt').
-  async approveExpense(id: number, approve: boolean, user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-approve WITH self_approval_reason — logged, reviewed by SME-01.
+  async approveExpense(id: number, approve: boolean, user: JwtUser, selfApprovalReason?: string | null) {
     const db = this.db;
     const [c] = await db.select().from(expenseClaims).where(eq(expenseClaims.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Claim not found', messageTh: 'ไม่พบรายการเบิก' });
@@ -148,7 +167,9 @@ export class EssService {
     const [emp] = await db.select().from(employees).where(eq(employees.id, Number(c.employeeId))).limit(1);
     // SoD: block self-approval. me() resolves a user to their employee by user_name OR emp_code, so match
     // on BOTH here — otherwise an employee linked only by emp_code (user_name null) could approve their own.
-    if (emp && (emp.userName === user.username || emp.empCode === user.username)) throw new BadRequestException({ code: 'SOD_SELF_APPROVAL', message: 'Cannot approve your own expense claim', messageTh: 'อนุมัติรายการเบิกของตนเองไม่ได้' });
+    if (emp && (emp.userName === user.username || emp.empCode === user.username)) {
+      await assertMakerChecker(db, { user, maker: user.username, event: 'hcm.expense.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Cannot approve your own expense claim', messageTh: 'อนุมัติรายการเบิกของตนเองไม่ได้', httpStatus: 400 });
+    }
     if (!approve) {
       await db.update(expenseClaims).set({ status: 'Rejected', decidedBy: user.username, decidedAt: new Date() }).where(eq(expenseClaims.id, id));
       return { id, status: 'Rejected' };

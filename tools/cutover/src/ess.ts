@@ -65,6 +65,12 @@ async function main() {
     { payrunId: Number(prun[0].id), tenantId: t1, employeeId: e1, empCode: 'E001', empName: 'Somchai', gross: '20000', net: '18500' },
     { payrunId: Number(prun[0].id), tenantId: t1, employeeId: e3, empCode: 'E003', empName: 'Other', gross: '18000', net: '16800' },
   ]).onConflictDoNothing();
+  // POS time-clock punches: a closed 8h session for E001 (must surface in ESS attendance) + one for E003
+  // (SAME tenant — proves the attendance read self-scopes by employee_id, not just by RLS tenant).
+  await db.insert(s.timeClock).values([
+    { tenantId: t1, employeeId: e1, empCode: 'E001', clockIn: new Date('2026-05-02T02:00:00Z'), clockOut: new Date('2026-05-02T10:00:00Z'), hours: '8', status: 'Closed', clockInMethod: 'PIN' },
+    { tenantId: t1, employeeId: e3, empCode: 'E003', clockIn: new Date('2026-05-02T02:00:00Z'), clockOut: new Date('2026-05-02T10:00:00Z'), hours: '7', status: 'Closed', clockInMethod: 'PIN' },
+  ]).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -97,6 +103,12 @@ async function main() {
   // 4. payslips self-scoped (must NOT see the other employee's slip)
   const ps = await inj('GET', '/api/ess/payslips', emp1);
   ok('ESS payslips self-scoped (1 own, no leak)', ps.json.count === 1 && ps.json.payslips?.[0]?.emp_code === 'E001', JSON.stringify(ps.json).slice(0, 80));
+
+  // 4b. attendance from the POS time-clock, self-scoped by employee_id (own 8h punch only — E003's 7h excluded)
+  const att = await inj('GET', '/api/ess/attendance', emp1);
+  ok('ESS attendance self-scoped (own punch only, 8h)',
+    att.json.emp_code === 'E001' && att.json.summary?.sessions === 1 && near(att.json.summary?.total_hours, 8) && att.json.entries?.length === 1,
+    JSON.stringify(att.json.summary));
 
   // 5. expense submit + manager approve → AP reimbursement payable raised (GL Dr 5100 / Cr 2000 + AP sub-ledger)
   const ex = await inj('POST', '/api/ess/expenses', emp1, { category: 'travel', amount: 500, description: 'taxi' });

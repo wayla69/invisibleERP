@@ -4,6 +4,7 @@ import { ReconciliationService } from './reconciliation.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 const OpenPeriodBody = z.object({ account_code: z.string().min(1), period: z.string().min(1) });
 const AddItemBody = z.object({ source: z.enum(['Subledger', 'Adjustment']), amount: z.number(), ref_doc: z.string().optional(), notes: z.string().optional() });
@@ -55,7 +56,7 @@ export class ReconciliationController {
   @Post('periods/:id/certify')
   @Permissions('approvals')
   @HttpCode(200)
-  certify(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
-    return this.svc.certify(id, user);
+  certify(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) {
+    return this.svc.certify(id, user, b?.self_approval_reason);
   }
 }

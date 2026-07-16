@@ -13,9 +13,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Target, TrendingUp, Layers, Search, LayoutGrid, List as ListIcon, Upload, Download, Handshake,
   UserCheck, ArrowRightLeft, XCircle, Building2, Users, BarChart3, Star, Bookmark, Trash2, GripVertical,
+  SlidersHorizontal, AlertTriangle, History,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { baht, num } from '@/lib/format';
+import { useMe, hasPerm } from '@/lib/auth';
+import { baht, num, thaiDate } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
@@ -56,6 +58,14 @@ interface ForecastDepth { period: string; totals: { system_commit: number; syste
 interface TerritoryRow { code: string; name: string; manager: string | null; active: boolean; parent_code: string | null }
 interface Attainment { period: string; owners: { owner: string; won_amount: number; quota: number; attainment_pct: number | null }[]; territories: { code: string; name: string; manager: string | null; member_count: number; subtree_won: number; quota: number; attainment_pct: number | null }[] }
 interface SequenceRow { code: string; name: string; active: boolean; description: string | null }
+// CRM-7 kanban depth: per-stage playbook view (WIP limit + required-field exit criteria + guidance + live counts).
+interface PlaybookStage { stage_id: number | null; name: string; sequence: number; is_won: boolean; is_lost: boolean; wip_limit: number | null; required_fields: string[]; guidance: string | null; open_count: number; over_wip: boolean; at_wip: boolean }
+interface PlaybookView { stages: PlaybookStage[]; field_catalog: { key: string; label: string }[] }
+// CRM-17 data-quality shapes.
+interface DqRow { account_no: string; name: string; score: number; band: string; missing_count: number; missing: string[] }
+interface DqWorklist { accounts: DqRow[]; count: number; band_counts: Record<string, number> }
+interface DqDuplicate { a: string; b: string; a_name: string; b_name: string; reasons: string[]; similarity: number }
+interface DqMergeRow { id: number; survivor_no: string; duplicate_no: string; reassigned_children: number; filled_fields: string[]; merged_by: string | null; created_at: string }
 interface EnrollmentRow { id: number; entity_type: string; entity_no: string; current_step: number; status: string; next_due_at: string | null }
 
 // The six seeded default stage names ↔ the legacy lowercase machine kept in sync on `opp.stage`.
@@ -90,6 +100,7 @@ export default function CrmWorkspaceClient() {
           { key: 'contacts', label: t('crmx.tab_contacts'), content: <ContactsTab /> },
           { key: 'plans', label: t('crmx.tab_plans'), content: <PlansTab /> },
           { key: 'health', label: t('crmx.tab_health'), content: <AccountHealthTab /> },
+          { key: 'dq', label: t('crmx.tab_dq'), content: <DataQualityTab /> },
           { key: 'forecast', label: t('crmx.tab_forecast'), content: <ForecastTab /> },
           { key: 'territory', label: t('crmx.tab_territory'), content: <TerritoryTab /> },
           { key: 'sequences', label: t('crmx.tab_sequences'), content: <SequencesTab /> },
@@ -107,9 +118,15 @@ function DealsBoard() {
   const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
+  const { data: me } = useMe();
+  const canEditPlaybooks = hasPerm(me, 'crm', 'exec');
   const stagesQ = useQuery<Stage[]>({ queryKey: ['crm-stages'], queryFn: () => api('/api/pipeline/stages') });
   const oppsQ = useQuery<{ opportunities: Opp[]; count: number }>({ queryKey: ['crm-opps'], queryFn: () => api('/api/crm/pipeline/opportunities') });
   const sumQ = useQuery<{ open_amount: number; weighted_forecast: number; won_amount: number; win_rate: number }>({ queryKey: ['crm-summary'], queryFn: () => api('/api/crm/pipeline/summary') });
+  // CRM-7 kanban depth: per-stage playbooks (WIP limits + required-field exit criteria + guidance + live counts).
+  const playbooksQ = useQuery<PlaybookView>({ queryKey: ['crm-playbooks'], queryFn: () => api('/api/crm/pipeline/playbooks') });
+  const pbByStageId = useMemo(() => new Map((playbooksQ.data?.stages ?? []).filter((p) => p.stage_id != null).map((p) => [Number(p.stage_id), p])), [playbooksQ.data]);
+  const pbFor = (st: Stage): PlaybookStage | undefined => (st.id != null ? pbByStageId.get(Number(st.id)) : undefined);
 
   const [view, setView] = useState<'kanban' | 'list'>(() => {
     if (typeof window === 'undefined') return 'kanban';
@@ -157,7 +174,7 @@ function DealsBoard() {
     },
     onError: (e: Error, _v, ctx) => { if (ctx?.prev) qc.setQueryData(['crm-opps'], ctx.prev); notifyError(e.message); },
     onSuccess: () => notifySuccess(t('crmx.toast_stage_moved')),
-    onSettled: () => { qc.invalidateQueries({ queryKey: ['crm-opps'] }); qc.invalidateQueries({ queryKey: ['crm-summary'] }); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['crm-opps'] }); qc.invalidateQueries({ queryKey: ['crm-summary'] }); qc.invalidateQueries({ queryKey: ['crm-playbooks'] }); },
   });
 
   // ── tiny in-house HTML5 DnD ──
@@ -177,6 +194,22 @@ function DealsBoard() {
     setDragNo(null);
     if (opp) requestMove(opp, stage);
   };
+
+  // ── CRM-7 bulk stage move (list view multi-select) — same governed path, per-item result ──
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkStage, setBulkStage] = useState('');
+  const [pbOpen, setPbOpen] = useState(false);
+  const toggleSel = (no: string) => setSelected((s) => { const n = new Set(s); n.has(no) ? n.delete(no) : n.add(no); return n; });
+  const bulkMove = useMutation({
+    mutationFn: (v: { opp_nos: string[]; stage: string }) => api<{ moved: number; failed: number }>('/api/crm/pipeline/opportunities/bulk-stage', { method: 'POST', body: JSON.stringify(v) }),
+    onSuccess: (r) => {
+      if (r.failed) notifyError(t('crmx.pb_bulk_partial', { moved: r.moved, failed: r.failed }));
+      else notifySuccess(t('crmx.pb_bulk_done', { moved: r.moved }));
+      setSelected(new Set()); setBulkStage('');
+      qc.invalidateQueries({ queryKey: ['crm-opps'] }); qc.invalidateQueries({ queryKey: ['crm-summary'] }); qc.invalidateQueries({ queryKey: ['crm-playbooks'] });
+    },
+    onError: (e: Error) => notifyError(e.message),
+  });
 
   // ── saved filter views (reuses the saved-views module, module key 'crm-board') ──
   const viewsQ = useQuery<{ views: SavedView[] }>({ queryKey: ['crm-views'], queryFn: () => api('/api/saved-views?module=crm-board') });
@@ -246,6 +279,9 @@ function DealsBoard() {
           </Select>
         )}
         <Button size="sm" variant="outline" onClick={() => { setViewName(''); setSaveOpen(true); }} title={t('crmx.btn_save_view')}><Bookmark className="size-4" /><span className="hidden md:inline"> {t('crmx.btn_save_view')}</span></Button>
+        {canEditPlaybooks && (
+          <Button size="sm" variant="outline" onClick={() => setPbOpen(true)} title={t('crmx.pb_title')}><SlidersHorizontal className="size-4" /><span className="hidden md:inline"> {t('crmx.pb_btn')}</span></Button>
+        )}
         <div className="ms-auto">
           <Button size="sm" onClick={() => setCreateOpen(true)}><Plus className="size-4" /> {t('crmx.btn_new_deal')}</Button>
         </div>
@@ -259,10 +295,13 @@ function DealsBoard() {
               const cards = filtered.filter((o) => inStage(o, st));
               const total = cards.reduce((x, o) => x + o.amount, 0);
               const closed = !!(st.isWon || st.isLost);
+              const pb = pbFor(st);
+              const overWip = !!pb && pb.wip_limit != null && pb.open_count > pb.wip_limit;
+              const atWip = !!pb && pb.wip_limit != null && pb.open_count >= pb.wip_limit;
               return (
                 <div
                   key={colKey}
-                  className={`flex w-64 shrink-0 flex-col rounded-lg border bg-muted/30 ${overCol === colKey ? 'ring-2 ring-primary/60' : ''}`}
+                  className={`flex w-64 shrink-0 flex-col rounded-lg border bg-muted/30 ${overCol === colKey ? 'ring-2 ring-primary/60' : ''} ${overWip ? 'border-destructive/60' : ''}`}
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverCol(colKey); }}
                   onDragLeave={() => setOverCol((c) => (c === colKey ? null : c))}
                   onDrop={(e) => { e.preventDefault(); handleDrop(st); }}
@@ -270,10 +309,28 @@ function DealsBoard() {
                   <div className="flex items-center justify-between border-b px-3 py-2">
                     <div className="flex items-center gap-2">
                       <Badge variant={st.isWon ? 'success' : st.isLost ? 'destructive' : 'secondary'}>{st.name}</Badge>
-                      <span className="text-xs text-muted-foreground">{num(cards.length)}</span>
+                      {/* CRM-7: WIP badge — open count vs the configured cap */}
+                      {pb && pb.wip_limit != null
+                        ? <Badge variant={overWip ? 'destructive' : atWip ? 'warning' : 'muted'} title={t('crmx.pb_wip_hint')}>{num(cards.length)}/{pb.wip_limit}</Badge>
+                        : <span className="text-xs text-muted-foreground">{num(cards.length)}</span>}
                     </div>
                     <span className="text-xs tabular text-muted-foreground">{baht(total)}</span>
                   </div>
+                  {/* CRM-7: exit-criteria — required fields + coach's guidance shown on the column */}
+                  {pb && (pb.required_fields.length > 0 || pb.guidance) && (
+                    <div className="border-b bg-muted/40 px-3 py-1.5 text-[11px] leading-tight text-muted-foreground">
+                      {pb.required_fields.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="font-medium">{t('crmx.pb_requires')}:</span>
+                          {pb.required_fields.map((f) => {
+                            const lbl = playbooksQ.data?.field_catalog.find((c) => c.key === f)?.label ?? f;
+                            return <Badge key={f} variant="outline" className="px-1 py-0 text-[10px]">{lbl}</Badge>;
+                          })}
+                        </div>
+                      )}
+                      {pb.guidance && <div className="mt-0.5 italic">{pb.guidance}</div>}
+                    </div>
+                  )}
                   <div className="flex min-h-24 flex-col gap-2 p-2">
                     {cards.slice(0, closed ? 15 : 100).map((o) => (
                       <div
@@ -309,15 +366,35 @@ function DealsBoard() {
           </div>
         ) : (
           <div className="grid gap-3">
-            <Select className="w-auto" aria-label={t('crmx.f_stage')} value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
-              <option value="">{t('crmx.f_stage_all')}</option>
-              {stages.map((st) => <option key={st.name} value={st.name}>{st.name}</option>)}
-            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select className="w-auto" aria-label={t('crmx.f_stage')} value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                <option value="">{t('crmx.f_stage_all')}</option>
+                {stages.map((st) => <option key={st.name} value={st.name}>{st.name}</option>)}
+              </Select>
+              {/* CRM-7 bulk stage move — appears when deals are selected; targets non-terminal stages only */}
+              {selected.size > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-2 py-1">
+                  <span className="text-sm font-medium">{t('crmx.pb_selected', { n: selected.size })}</span>
+                  <Select className="w-40" aria-label={t('crmx.pb_bulk_to')} value={bulkStage} onChange={(e) => setBulkStage(e.target.value)}>
+                    <option value="">{t('crmx.pb_bulk_to')}</option>
+                    {stages.filter((st) => !st.isWon && !st.isLost).map((st) => <option key={st.name} value={st.name}>{st.name}</option>)}
+                  </Select>
+                  <Button size="sm" disabled={!bulkStage || bulkMove.isPending} onClick={() => bulkMove.mutate({ opp_nos: [...selected], stage: bulkStage })}><ArrowRightLeft className="size-4" /> {t('crmx.pb_bulk_move')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>{t('crmx.btn_cancel')}</Button>
+                </div>
+              )}
+            </div>
             <DataTable
               rows={filtered.filter((o) => !stageFilter || inStage(o, stages.find((x) => x.name === stageFilter)!))}
               rowKey={(r) => r.opp_no}
               emptyState={{ icon: Target, title: t('crmx.empty_deals_title'), description: t('crmx.empty_deals_desc') }}
               columns={[
+                {
+                  key: 'sel', label: '', sortable: false,
+                  render: (r: Opp) => r.status === 'Open'
+                    ? <input type="checkbox" aria-label={t('crmx.pb_select_row')} className="size-4 align-middle" checked={selected.has(r.opp_no)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSel(r.opp_no)} />
+                    : null,
+                },
                 { key: 'opp_no', label: t('dash.col_no'), render: (r: Opp) => <Link className="text-primary underline-offset-2 hover:underline" href={`/crm/deals/${encodeURIComponent(r.opp_no)}`}>{r.opp_no}</Link> },
                 { key: 'name', label: t('crmx.col_deal'), render: (r: Opp) => <Link className="hover:underline" href={`/crm/deals/${encodeURIComponent(r.opp_no)}`}>{r.name}</Link> },
                 { key: 'account_name', label: t('crmx.col_account'), render: (r: Opp) => r.account_name ?? '—' },
@@ -394,6 +471,9 @@ function DealsBoard() {
         </DialogContent>
       </Dialog>
 
+      {/* CRM-7 stage playbook editor (supervisor) */}
+      <PlaybookDialog open={pbOpen} onClose={() => setPbOpen(false)} data={playbooksQ.data} />
+
       {/* quick-create dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
@@ -419,6 +499,81 @@ function DealsBoard() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ── CRM-7 stage playbook editor — per-stage WIP limit + required-field exit criteria + guidance (supervisor
+//    crm/exec). Saves one stage at a time via PUT …/playbooks/:stageId. Terminal Won/Lost stages are shown
+//    read-only (a WIP cap / entry gate on a terminal stage is meaningless). ────────────────────────────────
+function PlaybookDialog({ open, onClose, data }: { open: boolean; onClose: () => void; data: PlaybookView | undefined }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const editable = (data?.stages ?? []).filter((s) => s.stage_id != null && !s.is_won && !s.is_lost);
+  const [draft, setDraft] = useState<Record<number, { wip: string; fields: string[]; guidance: string }>>({});
+  // Seed the local draft from the server view whenever the dialog opens (keyed by stage id).
+  const seed = useMemo(() => Object.fromEntries(editable.map((s) => [Number(s.stage_id), {
+    wip: s.wip_limit != null ? String(s.wip_limit) : '', fields: [...s.required_fields], guidance: s.guidance ?? '',
+  }])), [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const row = (id: number) => draft[id] ?? seed[id] ?? { wip: '', fields: [], guidance: '' };
+  const setRow = (id: number, patch: Partial<{ wip: string; fields: string[]; guidance: string }>) => setDraft((d) => ({ ...d, [id]: { ...row(id), ...patch } }));
+  const save = useMutation({
+    mutationFn: (v: { stageId: number; body: { wip_limit: number | null; required_fields: string[]; guidance: string | null } }) =>
+      api(`/api/crm/pipeline/playbooks/${v.stageId}`, { method: 'PUT', body: JSON.stringify(v.body) }),
+    onSuccess: () => { notifySuccess(t('crmx.pb_saved')); qc.invalidateQueries({ queryKey: ['crm-playbooks'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const saveRow = (s: PlaybookStage) => {
+    const r = row(Number(s.stage_id));
+    const wip = r.wip.trim() === '' ? null : Math.max(0, Math.trunc(Number(r.wip)));
+    save.mutate({ stageId: Number(s.stage_id), body: { wip_limit: Number.isFinite(wip as number) ? wip : null, required_fields: r.fields, guidance: r.guidance.trim() || null } });
+  };
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><SlidersHorizontal className="size-4" /> {t('crmx.pb_title')}</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground">{t('crmx.pb_help')}</p>
+        <div className="grid max-h-[60vh] gap-3 overflow-y-auto py-1">
+          {editable.map((s) => {
+            const r = row(Number(s.stage_id));
+            return (
+              <Card key={s.stage_id!} className="grid gap-2 p-3">
+                <div className="flex items-center justify-between">
+                  <Badge variant="secondary">{s.name}</Badge>
+                  <span className="text-xs text-muted-foreground">{t('crmx.pb_open_now', { n: s.open_count })}</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-[8rem_1fr]">
+                  <div className="grid gap-1">
+                    <Label htmlFor={`wip-${s.stage_id}`} className="text-xs">{t('crmx.pb_wip_limit')}</Label>
+                    <Input id={`wip-${s.stage_id}`} type="number" min="0" placeholder={t('crmx.pb_unlimited')} value={r.wip} onChange={(e) => setRow(Number(s.stage_id), { wip: e.target.value })} />
+                  </div>
+                  <div className="grid gap-1">
+                    <Label className="text-xs">{t('crmx.pb_required_fields')}</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {(data?.field_catalog ?? []).map((f) => (
+                        <label key={f.key} className="flex items-center gap-1 rounded border px-2 py-0.5 text-xs">
+                          <input type="checkbox" className="size-3.5" checked={r.fields.includes(f.key)}
+                            onChange={(e) => setRow(Number(s.stage_id), { fields: e.target.checked ? [...r.fields, f.key] : r.fields.filter((x) => x !== f.key) })} />
+                          {f.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-1">
+                  <Label htmlFor={`gd-${s.stage_id}`} className="text-xs">{t('crmx.pb_guidance')}</Label>
+                  <Input id={`gd-${s.stage_id}`} value={r.guidance} maxLength={2000} placeholder={t('crmx.pb_guidance_ph')} onChange={(e) => setRow(Number(s.stage_id), { guidance: e.target.value })} />
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" variant="outline" disabled={save.isPending} onClick={() => saveRow(s)}>{t('crmx.btn_save')}</Button>
+                </div>
+              </Card>
+            );
+          })}
+          {!editable.length && <div className="flex items-center gap-2 text-sm text-muted-foreground"><AlertTriangle className="size-4" /> {t('crmx.pb_none')}</div>}
+        </div>
+        <DialogFooter><Button variant="outline" onClick={onClose}>{t('crmx.btn_close')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -973,6 +1128,92 @@ function AccountHealthTab() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ── CRM-17 — customer-master data quality: score worklist + duplicate surveillance + merge audit ────
+const DQ_BAND_VARIANT: Record<string, 'success' | 'warning' | 'destructive'> = { good: 'success', fair: 'warning', poor: 'destructive' };
+function DataQualityTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [band, setBand] = useState('');
+  const wlQ = useQuery<DqWorklist>({ queryKey: ['crm-dq', band], queryFn: () => api(`/api/crm/dq${band ? `?band=${band}` : ''}`) });
+  const dupQ = useQuery<{ candidates: DqDuplicate[]; count: number }>({ queryKey: ['crm-dq-dups'], queryFn: () => api('/api/crm/dq/duplicates') });
+  const logQ = useQuery<{ merges: DqMergeRow[]; count: number }>({ queryKey: ['crm-dq-log'], queryFn: () => api('/api/crm/dq/merge-log') });
+  const snapshot = useMutation({
+    mutationFn: () => api<{ captured: number }>('/api/crm/dq/snapshot', { method: 'POST' }),
+    onSuccess: (r) => { notifySuccess(t('crmx.dq_snapshot_done', { n: r.captured })); qc.invalidateQueries({ queryKey: ['crm-dq'] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const counts = wlQ.data?.band_counts ?? {};
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatCard label={t('crmx.dq_poor')} value={String(counts.poor ?? 0)} icon={XCircle} tone="danger" />
+        <StatCard label={t('crmx.dq_fair')} value={String(counts.fair ?? 0)} icon={BarChart3} tone="warning" />
+        <StatCard label={t('crmx.dq_good')} value={String(counts.good ?? 0)} icon={Target} tone="success" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select className="w-auto" aria-label={t('crmx.dq_band')} value={band} onChange={(e) => setBand(e.target.value)}>
+          <option value="">{t('crmx.dq_band_all')}</option>
+          <option value="poor">{t('crmx.dq_poor')}</option>
+          <option value="fair">{t('crmx.dq_fair')}</option>
+          <option value="good">{t('crmx.dq_good')}</option>
+        </Select>
+        <div className="ms-auto"><Button size="sm" variant="outline" disabled={snapshot.isPending} onClick={() => snapshot.mutate()}><BarChart3 className="size-4" /> {t('crmx.dq_snapshot')}</Button></div>
+      </div>
+
+      <StateView q={wlQ}>
+        <DataTable
+          rows={wlQ.data?.accounts ?? []}
+          rowKey={(r) => r.account_no}
+          columns={[
+            { key: 'band', label: t('crmx.dq_band'), render: (r: DqRow) => <Badge variant={DQ_BAND_VARIANT[r.band] ?? 'outline'}>{t(`crmx.dq_${r.band}`)}</Badge> },
+            { key: 'score', label: t('crmx.dq_score'), render: (r: DqRow) => <span className="tabular-nums">{r.score}</span> },
+            { key: 'account', label: t('crmx.col_account'), render: (r: DqRow) => <Link className="text-primary underline-offset-2 hover:underline" href={`/crm/accounts/${encodeURIComponent(r.account_no)}`}>{r.name}</Link> },
+            { key: 'missing', label: t('crmx.dq_missing'), render: (r: DqRow) => r.missing.length ? <div className="flex flex-wrap gap-1">{r.missing.map((m) => <Badge key={m} variant="outline" className="px-1 py-0 text-[10px]">{m}</Badge>)}</div> : <span className="text-muted-foreground">—</span> },
+          ]}
+          emptyState={{ icon: Building2, title: t('crmx.dq_empty_title'), description: t('crmx.dq_empty_desc') }}
+        />
+      </StateView>
+
+      <Card className="p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Users className="size-4 text-primary" /> {t('crmx.dq_dups_title')} <span className="text-xs text-muted-foreground">({dupQ.data?.count ?? 0})</span></div>
+        {(dupQ.data?.candidates?.length ?? 0) === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('crmx.dq_dups_empty')}</p>
+        ) : (
+          <div className="grid gap-1.5">
+            {(dupQ.data?.candidates ?? []).slice(0, 25).map((c) => (
+              <div key={`${c.a}-${c.b}`} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1 text-sm">
+                <Link className="text-primary hover:underline" href={`/crm/accounts/${encodeURIComponent(c.a)}`}>{c.a_name}</Link>
+                <ArrowRightLeft className="size-3.5 text-muted-foreground" />
+                <Link className="text-primary hover:underline" href={`/crm/accounts/${encodeURIComponent(c.b)}`}>{c.b_name}</Link>
+                <div className="flex flex-wrap gap-1">{c.reasons.map((r) => <Badge key={r} variant="secondary" className="px-1 py-0 text-[10px]">{r}</Badge>)}</div>
+                <span className="ms-auto text-xs text-muted-foreground">{t('crmx.dq_similarity')}: {Math.round(c.similarity * 100)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium"><History className="size-4 text-primary" /> {t('crmx.dq_mergelog_title')} <span className="text-xs text-muted-foreground">({logQ.data?.count ?? 0})</span></div>
+        {(logQ.data?.merges?.length ?? 0) === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('crmx.dq_mergelog_empty')}</p>
+        ) : (
+          <div className="grid gap-1.5">
+            {(logQ.data?.merges ?? []).slice(0, 25).map((m) => (
+              <div key={m.id} className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{m.duplicate_no}</span> → <span className="font-medium text-foreground">{m.survivor_no}</span>
+                <span className="text-xs">· {t('crmx.dq_children', { n: m.reassigned_children })} · {m.merged_by ?? ''} · {thaiDate(m.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { n, ymd } from '../../database/queries';
 import { DocNumberService } from '../../common/doc-number.service';
 import { isUniqueViolation } from '../../common/db-error';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 // unambiguous code alphabet (no 0/O/1/I) — codes are read out / typed at the till
@@ -78,12 +79,12 @@ export class VouchersService {
   // then do its codes redeem at checkout (the redemption path reads status='Active' only). Like the
   // pricing-rule approve (G6), the lookup is by id with RLS scoping the caller — the checker is commonly
   // an HQ/Admin user outside the shop's own tenant.
-  async approveCampaign(user: JwtUser, id: number) {
+  async approveCampaign(user: JwtUser, id: number, selfApprovalReason?: string | null) {
     const db = this.db;
     const [c] = await db.select().from(voucherCampaigns).where(eq(voucherCampaigns.id, id)).limit(1);
     if (!c) throw new NotFoundException({ code: 'CAMPAIGN_NOT_FOUND', message: 'Voucher campaign not found', messageTh: 'ไม่พบแคมเปญคูปอง' });
     if (c.status !== 'PendingApproval') throw new BadRequestException({ code: 'NOT_PENDING', message: `Campaign is ${c.status}, not pending approval`, messageTh: 'แคมเปญนี้ไม่ได้รออนุมัติ' });
-    if (c.createdBy && c.createdBy === user.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a voucher campaign you created', messageTh: 'ผู้สร้างแคมเปญอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
+    await assertMakerChecker(db, { user, maker: c.createdBy, event: 'crm.campaign.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a voucher campaign you created', messageTh: 'ผู้สร้างแคมเปญอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
     const [r] = await db.update(voucherCampaigns).set({ status: 'Active', approvedBy: user.username, approvedAt: new Date(), updatedAt: new Date() }).where(eq(voucherCampaigns.id, id)).returning();
     return shapeCampaign(r);
   }

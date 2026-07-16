@@ -12,8 +12,8 @@ const CycleBody = z.object({ name: z.string().min(1), period_start: z.string().o
 const GoalBody = z.object({ cycle_id: z.number().int().positive(), emp_code: z.string().min(1), title: z.string().min(1), description: z.string().optional(), weight_pct: z.number().nonnegative().optional(), metric: z.string().optional(), target: z.string().optional(), status: z.enum(['draft', 'active', 'achieved', 'missed']).optional() });
 const GoalPatchBody = z.object({ progress_pct: z.number().optional(), status: z.enum(['draft', 'active', 'achieved', 'missed']).optional() });
 const ReviewBody = z.object({ cycle_id: z.number().int().positive(), emp_code: z.string().min(1), self_rating: z.number().optional(), comments: z.string().optional() });
-const ManagerBody = z.object({ manager_emp_code: z.string().min(1), manager_rating: z.number(), comments: z.string().optional() });
-const SignBody = z.object({ calibrated_rating: z.number().optional() });
+const ManagerBody = z.object({ manager_emp_code: z.string().min(1), manager_rating: z.number(), comments: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
+const SignBody = z.object({ calibrated_rating: z.number().optional(), self_approval_reason: z.string().max(500).optional() });
 
 // HR-3 Performance management. Reads: hr / hr_admin / exec / ess (own, self-scoped in the service). Writes:
 // hr / hr_admin. Sign-off: hr_admin / exec. Control HR-03 enforces the review sign-off SoD in the service.

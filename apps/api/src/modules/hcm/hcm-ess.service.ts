@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, essProfileChangeRequests, employeeDocuments } from '../../database/schema';
 import { StatusLogService } from '../../common/status-log.service';
 import { isSafeObjectKey } from '../../common/object-storage';
+import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
 
 export interface ProfileChangeDto { field: string; new_value: string; reason?: string }
@@ -147,13 +148,13 @@ export class HcmEssService {
 
   // HR-08 maker-checker — approve a pending SENSITIVE change. approved_by MUST differ from requested_by
   // (SOD_SELF_APPROVAL); only hr/hr_admin approve (controller-gated). The employees master is written here.
-  async approveRequest(id: number, user: JwtUser) {
+  // Exception (docs/49): an 'sme' tenant may self-approve WITH self_approval_reason — logged, reviewed by SME-01.
+  async approveRequest(id: number, user: JwtUser, selfApprovalReason?: string | null) {
     const [r] = await this.db.select().from(essProfileChangeRequests).where(eq(essProfileChangeRequests.id, Number(id))).limit(1);
     if (!r) throw new NotFoundException({ code: 'CHANGE_NOT_FOUND', message: `Change request ${id} not found`, messageTh: 'ไม่พบคำขอแก้ไขข้อมูล' });
     if (r.status === 'approved' || r.status === 'applied') return { id: Number(id), status: r.status, already: true };
     if (r.status === 'rejected') throw new BadRequestException({ code: 'CHANGE_REJECTED', message: 'Change request already rejected', messageTh: 'คำขอถูกปฏิเสธแล้ว' });
-    if (r.requestedBy && r.requestedBy === user.username)
-      throw new ForbiddenException({ code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own profile change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
+    await assertMakerChecker(this.db, { user, maker: r.requestedBy, event: 'hcm.ess-request.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'The requester cannot approve their own profile change', messageTh: 'ผู้ขอไม่สามารถอนุมัติคำขอของตนเองได้' });
 
     await this.applyToMaster(r.empCode, r.field as EssField, r.newValue);
     await this.db.update(essProfileChangeRequests)

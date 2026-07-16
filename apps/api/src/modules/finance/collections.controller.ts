@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
+import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { CollectionsService, DUNNING_STAGES } from './collections.service';
 
 // to_email optional — defaults to the customer's email on file (master data) when omitted.
@@ -16,6 +17,8 @@ const DunningBody = z.object({
 });
 const CreditCheckBody = z.object({ tenant_id: z.number().int().positive(), amount: z.number().nonnegative() });
 const HoldBody = z.object({ tenant_id: z.number().int().positive(), reason: z.string().optional() });
+// Release carries the (optional) SME self-approval justification alongside the release reason (docs/49).
+const ReleaseHoldBody = HoldBody.extend({ self_approval_reason: z.string().max(500).optional() });
 const LimitBody = z.object({ tenant_id: z.number().int().positive(), new_limit: z.number().nonnegative(), reason: z.string().optional() });
 const ReasonBody = z.object({ reason: z.string().max(500).optional() });
 
@@ -75,7 +78,7 @@ export class CollectionsController {
 
   // Release a hold — requires `approvals` (SoD: releaser ≠ the person who placed it).
   @Post('credit-release') @Permissions('approvals', 'exec')
-  releaseHold(@Body(new ZodValidationPipe(HoldBody)) b: z.infer<typeof HoldBody>, @CurrentUser() u: JwtUser) { return this.svc.releaseHold(b.tenant_id, b.reason, u); }
+  releaseHold(@Body(new ZodValidationPipe(ReleaseHoldBody)) b: z.infer<typeof ReleaseHoldBody>, @CurrentUser() u: JwtUser) { return this.svc.releaseHold(b.tenant_id, b.reason, u, b.self_approval_reason); }
 
   // Request a credit-limit change (audit G7 / REV-08). Staged PendingApproval — a DIFFERENT user must
   // approve it (the requesting duty is crm/exec; approval requires `approvals`, mirroring credit-release).
@@ -86,7 +89,7 @@ export class CollectionsController {
   @Get('credit-limit/pending') @Permissions('approvals', 'exec', 'ar')
   pendingLimitChanges() { return this.svc.listPendingLimitChanges(); }
   @Post('credit-limit/:reqNo/approve') @Permissions('approvals', 'exec')
-  approveLimitChange(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser) { return this.svc.approveLimitChange(reqNo, u); }
+  approveLimitChange(@Param('reqNo') reqNo: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveLimitChange(reqNo, u, b?.self_approval_reason); }
   @Post('credit-limit/:reqNo/reject') @Permissions('approvals', 'exec')
   rejectLimitChange(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(ReasonBody)) b: z.infer<typeof ReasonBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectLimitChange(reqNo, u, b.reason); }
 

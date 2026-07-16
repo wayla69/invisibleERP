@@ -27,6 +27,7 @@ import {
   CheckCheck,
   ChefHat,
   CircleDollarSign,
+  Compass,
   KeyRound,
   ClipboardCheck,
   ListChecks,
@@ -54,6 +55,7 @@ import {
   GraduationCap,
   Goal,
   Landmark,
+  PenLine,
   Layers,
   ListTree,
   LayoutDashboard,
@@ -126,6 +128,9 @@ export interface NavSubGroup {
   /** Whether the sub-section starts expanded. Defaults to `true`; set `false` for advanced/infrequent
    *  sections so the group opens compact. A saved user toggle (localStorage) overrides this. */
   defaultOpen?: boolean;
+  /** Advanced/infrequent sub-section: hidden from the sidebar unless the user enables "show advanced".
+   *  Purely presentational (like `defaultOpen`) — hrefs/perms are unaffected. */
+  advanced?: boolean;
   /** Workspaces this sub-section belongs to. Items may override per-item. Defaults to the parent group's. */
   workspace?: Workspace[];
 }
@@ -136,6 +141,9 @@ export interface NavGroup {
   items?: NavItem[];
   /** Optional collapsible sub-sections rendered after any flat `items`. */
   subgroups?: NavSubGroup[];
+  /** Advanced/infrequent domain: hidden from the sidebar unless the user enables "show advanced".
+   *  Purely presentational — hrefs/perms are unaffected. */
+  advanced?: boolean;
   /** Workspaces this group belongs to. Items may override per-item. Defaults to both. */
   workspace?: Workspace[];
 }
@@ -154,7 +162,12 @@ const BOTH: Workspace[] = ['erp', 'pos'];
  *  switcher. Restructured 2026-06-25 (see docs/15-ui-ux-menu-restructure-plan.md): clearer per-domain
  *  groups, a dedicated Loyalty group, and a `subgroups`-segmented System group. **Every `href` is
  *  unchanged** — this is a regrouping/relabelling only, never a route change.
- *  C3 (2026-06-28): all title/label strings are now i18n keys resolved via t() in app-shell. */
+ *  C3 (2026-06-28): all title/label strings are now i18n keys resolved via t() in app-shell.
+ *  Rev 2 (2026-07-14, docs/15 §2bis): the ~18 ERP top-level groups are consolidated into ~10 collapsible
+ *  DOMAINS by nesting former flat groups as `subgroups` (Commercial ⊃ CRM/Loyalty/Pricing; Supply-Chain ⊃
+ *  Inventory/Procurement/Production; Projects ⊃ PM/Real-Estate; Tax folded into Finance). Former group
+ *  `title` keys are reused as subgroup titles so saved item-order survives. `advanced` marks expert areas
+ *  hidden behind the sidebar "show advanced" toggle. Still href/perm-stable. */
 export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'nav.group.overview',
@@ -166,189 +179,227 @@ export const INTERNAL_NAV: NavGroup[] = [
   },
 
   // ─── POS surface ────────────────────────────────────────────────────────────────────────────────
+  // docs/15 rev 3 (2026-07-14): POS consolidated like ERP. The 16-item Sell group is broken into foldable
+  // subgroups (frontline · dining · shift); Store + Devices + Restaurant collapse under one "ร้าน & อุปกรณ์"
+  // domain. Hrefs/perms unchanged; former group `title` keys reused as subgroup titles.
   {
     title: 'nav.group.pos_sales',
     workspace: ['pos'],
-    items: [
-      // pos_sell = primary sell perm; coarse 'pos' holders (e.g. Sales role) still pass via implication.
-      { label: 'nav.pos_register', href: '/pos/register', icon: ShoppingCart, perms: ['pos_sell', 'pos', 'order_mgt'] },
-      { label: 'nav.pos_orders', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
-      // SoD R12 complement: AR staff (ar) and refund supervisors (pos_refund) must also reach /returns
-      // to view the return record before acting. The "บันทึกคืนสินค้า" record button inside the page
-      // is further gated on canRefund (pos_refund|pos|ar) — the nav perm only controls visibility.
-      { label: 'nav.returns', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt', 'ar', 'pos_refund'] },
-      // SoD R08/R12: refund authorization is a supervisor duty (pos_refund), not a cashier duty (pos_sell).
-      { label: 'nav.refund_auth', href: '/pos/refunds', icon: Banknote, perms: ['pos_refund', 'pos'] },
-      { label: 'nav.giftcards', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
-      { label: 'nav.tables', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.reservations', href: '/reservations', icon: CalendarClock, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.tips', href: '/tips', icon: HandCoins, perms: ['order_mgt', 'exec', 'pos'] },
-      { label: 'nav.kds', href: '/kds', icon: ChefHat, perms: ['pos'] },
-      { label: 'nav.menu', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.buffet', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
-      { label: 'nav.pos_control', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
-      // SoD R08: till management (open/close/variance) is pos_till — segregated from pos_sell cashier.
-      { label: 'nav.till', href: '/pos/till', icon: CircleDollarSign, perms: ['pos_till', 'pos'] },
-      { label: 'nav.close_of_day', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
-      // Self-service: any POS staffer sets their own quick-login PIN (ITGC-AC-17).
-      { label: 'nav.pos_pin', href: '/pos-pin', icon: KeyRound, perms: ['pos_sell', 'pos', 'pos_till', 'order_mgt'] },
-      { label: 'nav.print', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
+    subgroups: [
+      {
+        title: 'nav.sub.pos_frontline',
+        items: [
+          // pos_sell = primary sell perm; coarse 'pos' holders (e.g. Sales role) still pass via implication.
+          { label: 'nav.pos_register', href: '/pos/register', icon: ShoppingCart, perms: ['pos_sell', 'pos', 'order_mgt'] },
+          { label: 'nav.pos_orders', href: '/pos', icon: ReceiptText, perms: ['pos', 'order_mgt'] },
+          // SoD R12 complement: AR staff (ar) and refund supervisors (pos_refund) must also reach /returns
+          // to view the return record before acting. The "บันทึกคืนสินค้า" record button inside the page
+          // is further gated on canRefund (pos_refund|pos|ar) — the nav perm only controls visibility.
+          { label: 'nav.returns', href: '/returns', icon: RotateCcw, perms: ['returns', 'pos', 'order_mgt', 'ar', 'pos_refund'] },
+          // SoD R08/R12: refund authorization is a supervisor duty (pos_refund), not a cashier duty (pos_sell).
+          { label: 'nav.refund_auth', href: '/pos/refunds', icon: Banknote, perms: ['pos_refund', 'pos'] },
+          { label: 'nav.giftcards', href: '/giftcards', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
+          { label: 'nav.print', href: '/print', icon: Printer, perms: ['pos', 'order_mgt'] },
+        ],
+      },
+      {
+        title: 'nav.sub.pos_dining',
+        items: [
+          { label: 'nav.tables', href: '/tables', icon: Utensils, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.reservations', href: '/reservations', icon: CalendarClock, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.kds', href: '/kds', icon: ChefHat, perms: ['pos'] },
+          { label: 'nav.menu', href: '/menu', icon: BookOpen, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.buffet', href: '/buffet', icon: Timer, perms: ['pos', 'order_mgt', 'masterdata'] },
+          { label: 'nav.tips', href: '/tips', icon: HandCoins, perms: ['order_mgt', 'exec', 'pos'] },
+        ],
+      },
+      {
+        title: 'nav.sub.pos_shift',
+        items: [
+          { label: 'nav.pos_control', href: '/pos-control', icon: ClipboardList, perms: ['pos', 'order_mgt'] },
+          // SoD R08: till management (open/close/variance) is pos_till — segregated from pos_sell cashier.
+          { label: 'nav.till', href: '/pos/till', icon: CircleDollarSign, perms: ['pos_till', 'pos'] },
+          { label: 'nav.close_of_day', href: '/pos/close-of-day', icon: ReceiptText, perms: ['pos', 'pos_till', 'pos_close'] },
+          // Self-service: any POS staffer sets their own quick-login PIN (ITGC-AC-17).
+          { label: 'nav.pos_pin', href: '/pos-pin', icon: KeyRound, perms: ['pos_sell', 'pos', 'pos_till', 'order_mgt'] },
+        ],
+      },
     ],
   },
   {
-    title: 'nav.group.store',
+    title: 'nav.group.store_ops',
     workspace: ['pos'],
-    items: [
-      { label: 'nav.claims', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
-      { label: 'nav.delivery', href: '/delivery', icon: Truck, perms: ['delivery'] },
-      { label: 'nav.channels', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
-    ],
-  },
-  {
-    title: 'nav.group.devices',
-    workspace: ['pos'],
-    items: [
-      { label: 'nav.peripherals', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
-      { label: 'nav.terminals', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
-      { label: 'nav.payment_accounts', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
-    ],
-  },
-  {
-    title: 'nav.group.restaurant',
-    workspace: ['pos'],
-    items: [
-      { label: 'nav.food_cost', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
-      { label: 'nav.restaurant_analytics', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
-      { label: 'nav.production_plan', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
+    subgroups: [
+      {
+        title: 'nav.group.store',
+        items: [
+          { label: 'nav.claims', href: '/claims', icon: ShieldAlert, perms: ['claim_mgt'] },
+          { label: 'nav.delivery', href: '/delivery', icon: Truck, perms: ['delivery'] },
+          { label: 'nav.channels', href: '/channels', icon: Truck, perms: ['pos', 'order_mgt', 'exec'] },
+        ],
+      },
+      {
+        title: 'nav.group.devices',
+        items: [
+          { label: 'nav.peripherals', href: '/peripherals', icon: Cable, perms: ['pos', 'order_mgt'] },
+          { label: 'nav.terminals', href: '/payments/terminals', icon: CreditCard, perms: ['pos', 'creditors', 'exec'] },
+          { label: 'nav.payment_accounts', href: '/payments/accounts', icon: Wallet, perms: ['pos', 'order_mgt', 'exec'] },
+        ],
+      },
+      {
+        title: 'nav.group.restaurant',
+        items: [
+          { label: 'nav.food_cost', href: '/food-cost', icon: PieChart, perms: ['pos', 'order_mgt', 'masterdata', 'exec'] },
+          { label: 'nav.restaurant_analytics', href: '/restaurant-analytics', icon: BarChart3, perms: ['dashboard', 'exec', 'planner', 'order_mgt'] },
+          { label: 'nav.production_plan', href: '/production-plan', icon: Boxes, perms: ['pos', 'order_mgt', 'masterdata', 'planner', 'exec'] },
+        ],
+      },
     ],
   },
 
   // ─── ERP: customers & commercial ────────────────────────────────────────────────────────────────
+  // docs/15 rev 2 (2026-07-14): CRM + Loyalty + Pricing collapse under ONE "ขาย & ลูกค้า" domain; each
+  // former top-level group is now a foldable subgroup. Hrefs/perms unchanged; the former group `title`
+  // keys are reused as subgroup titles (so saved per-container item order survives).
   {
-    title: 'nav.group.crm',
-    workspace: ['erp'],
-    items: [
-      // CRM-2 (docs/41): ONE sales-CRM workspace at /crm (kanban board + leads + accounts + contacts;
-      // deep-linkable tabs /crm?tab=…; deal page /crm/deals/[oppNo]; account page /crm/accounts/[accountNo]).
-      // The old /pipeline and /projects/crm pages now redirect here. The retail member CRM 360 (branch KPI,
-      // member lookup, messaging) moved to /crm/members.
-      { label: 'nav.crm_workspace', href: '/crm', icon: Target, perms: ['crm', 'marketing', 'exec', 'ar'] },
-      { label: 'nav.crm_members', href: '/crm/members', icon: Users, perms: ['marketing', 'exec'] },
-      { label: 'nav.audience_export', href: '/crm/audience-export', icon: Upload, perms: ['marketing', 'exec'] },
-      { label: 'nav.reputation', href: '/reputation', icon: MapPin, perms: ['marketing', 'exec'] },
-      { label: 'nav.customer_master', href: '/customers', icon: Users, perms: ['crm', 'ar', 'exec'] },
-      { label: 'nav.cpq', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
-      { label: 'nav.service', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
-      { label: 'nav.service_renewals', href: '/service/renewals', icon: CalendarClock, perms: ['marketing', 'exec'] },
-      { label: 'nav.warranty', href: '/service/warranty', icon: ShieldCheck, perms: ['marketing', 'exec'] },
-      { label: 'nav.marketing', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
-      { label: 'nav.campaigns', href: '/campaigns', icon: Megaphone, perms: ['marketing', 'crm'] },
-    ],
-  },
-  {
-    // Loyalty runs at POS but is configured/analysed in ERP → BOTH. POS Ops is POS-only.
-    title: 'nav.group.loyalty',
+    title: 'nav.group.commercial',
     workspace: BOTH,
-    items: [
-      { label: 'nav.pos_ops', href: '/pos-ops', icon: Star, perms: ['pos', 'loyalty', 'users', 'exec'], workspace: ['pos'] },
-      { label: 'nav.loyalty_members', href: '/loyalty/members', icon: Star, perms: ['loyalty', 'marketing'] },
-      { label: 'nav.loyalty_rewards', href: '/loyalty/rewards', icon: Gift, perms: ['loyalty', 'marketing'] },
-      { label: 'nav.loyalty_missions', href: '/loyalty/missions', icon: Target, perms: ['loyalty', 'marketing'] },
-      { label: 'nav.loyalty_wheels', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'] },
-      { label: 'nav.loyalty_campaigns', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'] },
-      { label: 'nav.loyalty_segments', href: '/loyalty/segments', icon: Filter, perms: ['marketing', 'exec'] },
-      { label: 'nav.loyalty_journeys', href: '/loyalty/journeys', icon: Route, perms: ['marketing', 'exec'] },
-      { label: 'nav.loyalty_partners', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'] },
-      { label: 'nav.loyalty_analytics', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'] },
-      // LYL-17 — review queue for member-submitted receipt photos (points post on approval)
-      { label: 'nav.loyalty_receipt_approvals', href: '/loyalty/receipt-approvals', icon: ReceiptText, perms: ['crm_points_adjust', 'loyalty', 'exec'], workspace: ['erp'] },
-      // previously unreachable from the sidebar (only typed-URL) — wired in per Phase 0 audit
-      { label: 'nav.loyalty_settings', href: '/loyalty', icon: SlidersHorizontal, perms: ['loyalty', 'marketing'], workspace: ['erp'] },
-    ],
-  },
-  {
-    // dual-use commercial config: priced/branched back-office, used at POS → BOTH, kept together so it
-    // reads as one coherent group in either surface.
-    title: 'nav.group.pricing',
-    workspace: BOTH,
-    items: [
-      // SoD R10: price/promo maintenance is a separate duty from selling (pos/order_mgt).
-      // Only PricingManager (pricelist, promos) or exec/admin may reach this screen.
-      { label: 'nav.pricing', href: '/pricing', icon: Coins, perms: ['pricelist', 'promos', 'exec'] },
-      { label: 'nav.branches', href: '/branches', icon: Store, perms: ['branch', 'exec'] },
+    subgroups: [
+      {
+        title: 'nav.group.crm',
+        workspace: ['erp'],
+        items: [
+          // CRM-2 (docs/41): ONE sales-CRM workspace at /crm (kanban board + leads + accounts + contacts;
+          // deep-linkable tabs /crm?tab=…; deal page /crm/deals/[oppNo]; account page /crm/accounts/[accountNo]).
+          // The old /pipeline and /projects/crm pages now redirect here. The retail member CRM 360 (branch KPI,
+          // member lookup, messaging) moved to /crm/members.
+          { label: 'nav.crm_workspace', href: '/crm', icon: Target, perms: ['crm', 'marketing', 'exec', 'ar'] },
+          { label: 'nav.crm_members', href: '/crm/members', icon: Users, perms: ['marketing', 'exec'] },
+          { label: 'nav.audience_export', href: '/crm/audience-export', icon: Upload, perms: ['marketing', 'exec'] },
+          { label: 'nav.reputation', href: '/reputation', icon: MapPin, perms: ['marketing', 'exec'] },
+          { label: 'nav.customer_master', href: '/customers', icon: Users, perms: ['crm', 'ar', 'exec'] },
+          { label: 'nav.cpq', href: '/cpq', icon: FileSignature, perms: ['marketing', 'exec'] },
+          { label: 'nav.service', href: '/service', icon: LifeBuoy, perms: ['marketing', 'exec'] },
+          { label: 'nav.service_renewals', href: '/service/renewals', icon: CalendarClock, perms: ['marketing', 'exec'] },
+          { label: 'nav.warranty', href: '/service/warranty', icon: ShieldCheck, perms: ['marketing', 'exec'] },
+          { label: 'nav.marketing', href: '/marketing', icon: Megaphone, perms: ['marketing'] },
+          { label: 'nav.campaigns', href: '/campaigns', icon: Megaphone, perms: ['marketing', 'crm'] },
+        ],
+      },
+      {
+        // Loyalty runs at POS but is configured/analysed in ERP → BOTH. POS Ops is POS-only.
+        title: 'nav.group.loyalty',
+        workspace: BOTH,
+        items: [
+          { label: 'nav.pos_ops', href: '/pos-ops', icon: Star, perms: ['pos', 'loyalty', 'users', 'exec'], workspace: ['pos'] },
+          { label: 'nav.loyalty_members', href: '/loyalty/members', icon: Star, perms: ['loyalty', 'marketing'] },
+          { label: 'nav.loyalty_rewards', href: '/loyalty/rewards', icon: Gift, perms: ['loyalty', 'marketing'] },
+          { label: 'nav.loyalty_missions', href: '/loyalty/missions', icon: Target, perms: ['loyalty', 'marketing'] },
+          { label: 'nav.loyalty_wheels', href: '/loyalty/wheels', icon: Disc3, perms: ['loyalty', 'marketing'] },
+          { label: 'nav.loyalty_campaigns', href: '/loyalty/campaigns', icon: Megaphone, perms: ['marketing', 'exec'] },
+          { label: 'nav.loyalty_segments', href: '/loyalty/segments', icon: Filter, perms: ['marketing', 'exec'] },
+          { label: 'nav.loyalty_journeys', href: '/loyalty/journeys', icon: Route, perms: ['marketing', 'exec'] },
+          { label: 'nav.loyalty_partners', href: '/loyalty/partners', icon: Handshake, perms: ['loyalty', 'marketing'] },
+          { label: 'nav.loyalty_analytics', href: '/loyalty/analytics', icon: BarChart3, perms: ['marketing', 'exec'] },
+          // LYL-17 — review queue for member-submitted receipt photos (points post on approval)
+          { label: 'nav.loyalty_receipt_approvals', href: '/loyalty/receipt-approvals', icon: ReceiptText, perms: ['crm_points_adjust', 'loyalty', 'exec'], workspace: ['erp'] },
+          // previously unreachable from the sidebar (only typed-URL) — wired in per Phase 0 audit
+          { label: 'nav.loyalty_settings', href: '/loyalty', icon: SlidersHorizontal, perms: ['loyalty', 'marketing'], workspace: ['erp'] },
+        ],
+      },
+      {
+        // dual-use commercial config: priced/branched back-office, used at POS → BOTH, kept together so it
+        // reads as one coherent group in either surface.
+        title: 'nav.group.pricing',
+        workspace: BOTH,
+        items: [
+          // SoD R10: price/promo maintenance is a separate duty from selling (pos/order_mgt).
+          // Only PricingManager (pricelist, promos) or exec/admin may reach this screen.
+          { label: 'nav.pricing', href: '/pricing', icon: Coins, perms: ['pricelist', 'promos', 'exec'] },
+          { label: 'nav.branches', href: '/branches', icon: Store, perms: ['branch', 'exec'] },
+        ],
+      },
     ],
   },
 
   // ─── ERP: supply chain ──────────────────────────────────────────────────────────────────────────
+  // docs/15 rev 2 (2026-07-14): Inventory + Procurement + Production collapse under ONE "ซัพพลายเชน"
+  // domain as foldable subgroups. Hrefs/perms unchanged; former group `title` keys reused as subgroups.
   {
-    title: 'nav.group.inventory',
+    title: 'nav.group.supply_chain',
     workspace: ['erp'],
-    items: [
-      { label: 'nav.inventory', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
-      // SoD R11: counting (wh_count) is separated from posting adjustments (wh_adjust).
-      { label: 'nav.stocktake', href: '/stocktake', icon: ClipboardCheck, perms: ['wh_count', 'warehouse', 'mobile'] },
-      // SoD R11: wh_adjust (Inventory Controller) posts variance from counts and approves write-offs.
-      { label: 'nav.stock_adjustment', href: '/stock-adjustment', icon: SlidersHorizontal, perms: ['wh_adjust', 'warehouse'] },
-      // INV-17: ABC-classified, cadence-driven blind cycle-count program (counting = wh_count; posting reuses /stock-adjustment).
-      { label: 'nav.cycle_counts', href: '/stock-ops/cycle-counts', icon: ListChecks, perms: ['wh_count', 'wh_adjust', 'warehouse'] },
-      { label: 'nav.waste', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
-      { label: 'nav.receiving', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
-      { label: 'nav.goods_issue', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
-      // INV-2/INV-16: two-step inter-warehouse transfer ORDERS (ship→receive, in-transit GL + cutoff aging).
-      { label: 'nav.transfer_orders', href: '/stock-ops/transfer-orders', icon: Truck, perms: ['wh_custody', 'warehouse'] },
-      { label: 'nav.lots', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
-      { label: 'nav.quality_coa', href: '/quality/coa', icon: FlaskConical, perms: ['quality', 'quality_approve', 'exec'] },
-      { label: 'nav.mobile_scan', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
-      { label: 'nav.images', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
-      { label: 'nav.wms', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
-      { label: 'nav.costing', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
-      // INV-1 (COST-01) — landed-cost allocation voucher: apportion freight/duty/insurance/broker into unit cost.
-      { label: 'nav.landed_cost', href: '/costing/landed-cost', icon: Ship, perms: ['procurement', 'wh_receive', 'exec'] },
-      { label: 'nav.std_cost', href: '/costing/std-cost', icon: Layers, perms: ['masterdata', 'exec', 'planner'] },
-      { label: 'nav.inventory_ledger', href: '/inventory-ledger', icon: Wallet, perms: ['warehouse', 'dashboard'] },
-      { label: 'nav.replenishment', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
-    ],
-  },
-  {
-    title: 'nav.group.procurement',
-    workspace: ['erp'],
-    items: [
-      // Quick Capture (docs/34): any staffer holding a bill snaps/uploads it → AI extracts → NeedsReview
-      // draft for Accounting. Low-risk `pr_raise` duty (never books/GL), cross-listed to BOTH surfaces.
-      { label: 'nav.ap_capture', href: '/capture', icon: Camera, perms: ['pr_raise', 'procurement', 'creditors'], workspace: BOTH },
-      // PR is company-wide (anyone can request) → cross-listed to BOTH surfaces so POS staff can raise one
-      // without switching workspaces; buying (PO) + receiving (GR) stay role-segregated (SoD R03/R04).
-      { label: 'nav.requisitions', href: '/requisitions', icon: FileText, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
-      // Friendly "shop" front-end for the same PR: browse the catalog by category → basket → checkout a PR.
-      // Same low-risk pr_raise duty, cross-listed to BOTH so POS/store staff can order supplies too.
-      { label: 'nav.shop', href: '/shop', icon: ShoppingCart, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
-      { label: 'nav.suppliers', href: '/inventory/suppliers', icon: Building2, perms: ['procurement', 'warehouse'] },
-      { label: 'nav.purchase_orders', href: '/inventory/purchase-orders', icon: ReceiptText, perms: ['procurement'] },
-      { label: 'nav.procurement', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },
-      { label: 'nav.rfqs', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
-      { label: 'nav.po_match', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
-      // scan → PO auto-map → automated 3-way match (EXP-10); booking the bill stays a creditors action
-      { label: 'nav.ap_intake', href: '/procurement/ap-intake', icon: ScanLine, perms: ['procurement', 'creditors'] },
-      { label: 'nav.supplier_scorecards', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
-      // QMS-4 — Supplier Corrective Action Request (SCAR / 8D) register + QC-04 closure maker-checker.
-      { label: 'nav.supplier_scar', href: '/quality/scar', icon: ClipboardCheck, perms: ['quality', 'quality_approve', 'procurement', 'creditors', 'exec'] },
-      { label: 'nav.supplier_prices', href: '/supplier-prices', icon: Tag, perms: ['procurement', 'md_vendor', 'planner', 'exec'] },
-      { label: 'nav.doc_ai', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
-      // vendor self-service surface — visible only to users granted the vendor_portal permission
-      { label: 'nav.supplier_portal', href: '/supplier', icon: PackageCheck, perms: ['vendor_portal'] },
-    ],
-  },
-  {
-    title: 'nav.group.production',
-    workspace: ['erp'],
-    items: [
-      { label: 'nav.bom', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
-      { label: 'nav.manufacturing', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
-      { label: 'nav.production', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
-      { label: 'nav.aps_schedule', href: '/production/schedule', icon: CalendarRange, perms: ['bom_master', 'warehouse', 'planner'] },
-      { label: 'nav.quality_ncr', href: '/quality/ncr', icon: ShieldAlert, perms: ['quality', 'quality_approve', 'exec'] },
-      { label: 'nav.eam', href: '/eam', icon: Wrench, perms: ['exec', 'warehouse', 'creditors'] },
-      { label: 'nav.capa', href: '/quality/capa', icon: ClipboardCheck, perms: ['quality', 'quality_approve', 'exec'] },
+    subgroups: [
+      {
+        title: 'nav.group.inventory',
+        workspace: ['erp'],
+        items: [
+          { label: 'nav.inventory', href: '/inventory', icon: Package, perms: ['warehouse', 'dashboard', 'planner'] },
+          // SoD R11: counting (wh_count) is separated from posting adjustments (wh_adjust).
+          { label: 'nav.stocktake', href: '/stocktake', icon: ClipboardCheck, perms: ['wh_count', 'warehouse', 'mobile'] },
+          // SoD R11: wh_adjust (Inventory Controller) posts variance from counts and approves write-offs.
+          { label: 'nav.stock_adjustment', href: '/stock-adjustment', icon: SlidersHorizontal, perms: ['wh_adjust', 'warehouse'] },
+          // INV-17: ABC-classified, cadence-driven blind cycle-count program (counting = wh_count; posting reuses /stock-adjustment).
+          { label: 'nav.cycle_counts', href: '/stock-ops/cycle-counts', icon: ListChecks, perms: ['wh_count', 'wh_adjust', 'warehouse'] },
+          { label: 'nav.waste', href: '/waste', icon: Trash2, perms: ['warehouse', 'pos', 'order_mgt'] },
+          { label: 'nav.receiving', href: '/receiving', icon: PackageCheck, perms: ['wh_receive', 'warehouse'] },
+          { label: 'nav.goods_issue', href: '/goods-issue', icon: ArrowLeftRight, perms: ['warehouse', 'mobile'] },
+          // INV-2/INV-16: two-step inter-warehouse transfer ORDERS (ship→receive, in-transit GL + cutoff aging).
+          { label: 'nav.transfer_orders', href: '/stock-ops/transfer-orders', icon: Truck, perms: ['wh_custody', 'warehouse'] },
+          { label: 'nav.lots', href: '/lots', icon: Boxes, perms: ['lots', 'warehouse'] },
+          { label: 'nav.quality_coa', href: '/quality/coa', icon: FlaskConical, perms: ['quality', 'quality_approve', 'exec'] },
+          { label: 'nav.mobile_scan', href: '/mobile-scan', icon: ScanLine, perms: ['mobile', 'warehouse'] },
+          { label: 'nav.images', href: '/images', icon: Camera, perms: ['images', 'masterdata'] },
+          { label: 'nav.wms', href: '/wms', icon: Warehouse, perms: ['warehouse'] },
+          { label: 'nav.costing', href: '/costing', icon: Calculator, perms: ['warehouse', 'exec'] },
+          // INV-1 (COST-01) — landed-cost allocation voucher: apportion freight/duty/insurance/broker into unit cost.
+          { label: 'nav.landed_cost', href: '/costing/landed-cost', icon: Ship, perms: ['procurement', 'wh_receive', 'exec'] },
+          { label: 'nav.std_cost', href: '/costing/std-cost', icon: Layers, perms: ['masterdata', 'exec', 'planner'] },
+          { label: 'nav.inventory_ledger', href: '/inventory-ledger', icon: Wallet, perms: ['warehouse', 'dashboard'] },
+          { label: 'nav.replenishment', href: '/replenishment', icon: PackagePlus, perms: ['warehouse', 'planner'] },
+        ],
+      },
+      {
+        title: 'nav.group.procurement',
+        workspace: ['erp'],
+        items: [
+          // Quick Capture (docs/34): any staffer holding a bill snaps/uploads it → AI extracts → NeedsReview
+          // draft for Accounting. Low-risk `pr_raise` duty (never books/GL), cross-listed to BOTH surfaces.
+          { label: 'nav.ap_capture', href: '/capture', icon: Camera, perms: ['pr_raise', 'procurement', 'creditors'], workspace: BOTH },
+          // PR is company-wide (anyone can request) → cross-listed to BOTH surfaces so POS staff can raise one
+          // without switching workspaces; buying (PO) + receiving (GR) stay role-segregated (SoD R03/R04).
+          { label: 'nav.requisitions', href: '/requisitions', icon: FileText, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
+          // Friendly "shop" front-end for the same PR: browse the catalog by category → basket → checkout a PR.
+          // Same low-risk pr_raise duty, cross-listed to BOTH so POS/store staff can order supplies too.
+          { label: 'nav.shop', href: '/shop', icon: ShoppingCart, perms: ['pr_raise', 'procurement', 'planner'], workspace: BOTH },
+          { label: 'nav.suppliers', href: '/inventory/suppliers', icon: Building2, perms: ['procurement', 'warehouse'] },
+          { label: 'nav.purchase_orders', href: '/inventory/purchase-orders', icon: ReceiptText, perms: ['procurement'] },
+          { label: 'nav.procurement', href: '/procurement', icon: ShoppingBag, perms: ['procurement'] },
+          { label: 'nav.rfqs', href: '/procurement/rfqs', icon: ClipboardList, perms: ['procurement'] },
+          { label: 'nav.po_match', href: '/procurement/match', icon: CheckCheck, perms: ['procurement'] },
+          // scan → PO auto-map → automated 3-way match (EXP-10); booking the bill stays a creditors action
+          { label: 'nav.ap_intake', href: '/procurement/ap-intake', icon: ScanLine, perms: ['procurement', 'creditors'] },
+          { label: 'nav.supplier_scorecards', href: '/supplier-scorecards', icon: Award, perms: ['procurement', 'exec'] },
+          // QMS-4 — Supplier Corrective Action Request (SCAR / 8D) register + QC-04 closure maker-checker.
+          { label: 'nav.supplier_scar', href: '/quality/scar', icon: ClipboardCheck, perms: ['quality', 'quality_approve', 'procurement', 'creditors', 'exec'] },
+          { label: 'nav.supplier_prices', href: '/supplier-prices', icon: Tag, perms: ['procurement', 'md_vendor', 'planner', 'exec'] },
+          { label: 'nav.doc_ai', href: '/doc-ai', icon: FileScan, perms: ['procurement', 'creditors', 'exec'] },
+          // vendor self-service surface — visible only to users granted the vendor_portal permission
+          { label: 'nav.supplier_portal', href: '/supplier', icon: PackageCheck, perms: ['vendor_portal'] },
+        ],
+      },
+      {
+        title: 'nav.group.production',
+        workspace: ['erp'],
+        items: [
+          { label: 'nav.bom', href: '/bom', icon: FlaskConical, perms: ['bom_master'] },
+          { label: 'nav.manufacturing', href: '/manufacturing', icon: Factory, perms: ['bom_master', 'warehouse'] },
+          { label: 'nav.production', href: '/production', icon: Network, perms: ['bom_master', 'warehouse', 'planner'] },
+          { label: 'nav.aps_schedule', href: '/production/schedule', icon: CalendarRange, perms: ['bom_master', 'warehouse', 'planner'] },
+          { label: 'nav.quality_ncr', href: '/quality/ncr', icon: ShieldAlert, perms: ['quality', 'quality_approve', 'exec'] },
+          { label: 'nav.eam', href: '/eam', icon: Wrench, perms: ['exec', 'warehouse', 'creditors'] },
+          { label: 'nav.capa', href: '/quality/capa', icon: ClipboardCheck, perms: ['quality', 'quality_approve', 'exec'] },
+        ],
+      },
     ],
   },
 
@@ -419,24 +470,27 @@ export const INTERNAL_NAV: NavGroup[] = [
       {
         title: 'nav.sub.interco',
         defaultOpen: false, // advanced multi-entity / treasury — collapsed by default
+        advanced: true,
         items: [
           { label: 'nav.intercompany', href: '/intercompany', icon: ArrowLeftRight, perms: ['exec', 'creditors'] },
           { label: 'nav.fx', href: '/fx', icon: Coins, perms: ['exec', 'creditors', 'ar'] },
         ],
       },
-    ],
-  },
-  {
-    title: 'nav.group.tax',
-    workspace: ['erp'],
-    items: [
-      { label: 'nav.tax_invoices', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
-      { label: 'nav.tax_reports', href: '/tax/reports', icon: FileSpreadsheet, perms: ['exec', 'ar', 'creditors'] },
-      { label: 'nav.tax_provision', href: '/tax/provision', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
-      { label: 'nav.wht', href: '/tax/wht', icon: FileMinus, perms: ['exec', 'creditors'] },
-      { label: 'nav.tax_utp', href: '/tax/utp', icon: Scale, perms: ['gl_close', 'gl_post', 'exec'] },
-      // dual-use: the fiscal/e-Tax journal is generated at POS, reconciled in ERP → cross-listed
-      { label: 'nav.pos_fiscal', href: '/pos-fiscal', icon: FileSpreadsheet, perms: ['exec', 'ar', 'pos'], workspace: BOTH },
+      {
+        // Tax folded into the Finance domain (docs/15 rev 2). Former `nav.group.tax` key reused as the
+        // subgroup title so saved per-container item order survives. Collapsed by default — infrequent.
+        title: 'nav.group.tax',
+        defaultOpen: false,
+        items: [
+          { label: 'nav.tax_invoices', href: '/tax/invoices', icon: FileText, perms: ['exec', 'ar', 'creditors'] },
+          { label: 'nav.tax_reports', href: '/tax/reports', icon: FileSpreadsheet, perms: ['exec', 'ar', 'creditors'] },
+          { label: 'nav.tax_provision', href: '/tax/provision', icon: Calculator, perms: ['gl_close', 'gl_post', 'exec'] },
+          { label: 'nav.wht', href: '/tax/wht', icon: FileMinus, perms: ['exec', 'creditors'] },
+          { label: 'nav.tax_utp', href: '/tax/utp', icon: Scale, perms: ['gl_close', 'gl_post', 'exec'] },
+          // dual-use: the fiscal/e-Tax journal is generated at POS, reconciled in ERP → cross-listed
+          { label: 'nav.pos_fiscal', href: '/pos-fiscal', icon: FileSpreadsheet, perms: ['exec', 'ar', 'pos'], workspace: BOTH },
+        ],
+      },
     ],
   },
   {
@@ -467,43 +521,53 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.expense_approvals', href: '/expense-approvals', icon: ReceiptText, perms: ['approvals'], workspace: BOTH },
     ],
   },
-  // ─── Project Management (PPM) — its own workspace home (docs/20 C1). URL-stable: hrefs unchanged. ───
+  // ─── Projects domain (docs/15 rev 2): PPM + Real Estate collapse under ONE "โครงการ" domain as
+  //     foldable subgroups. URL-stable: hrefs/perms unchanged; former group `title` keys reused. ───
   {
-    title: 'nav.group.pm',
+    title: 'nav.group.projects',
     workspace: ['erp'],
-    items: [
-      { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
-      { label: 'nav.pm_action_center', href: '/projects/action-center', icon: BellRing, perms: ['exec', 'planner', 'ar'] },
-      // PPM-A1 (PROJ-20): resource capacity heatmap + skills/role supply-vs-demand.
-      { label: 'nav.pm_resources', href: '/projects/resources', icon: Users, perms: ['exec', 'planner', 'ar'] },
-      { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
-      // Construction/real-estate vertical (docs/35): tender→award, progress billing (งวดงาน), subcontracts.
-      { label: 'nav.pm_tenders', href: '/projects/tenders', icon: FileSignature, perms: ['proj_tender', 'marketing', 'exec'] },
-      { label: 'nav.pm_billing', href: '/projects/billing', icon: ReceiptText, perms: ['proj_billing', 'ar', 'exec'] },
-      { label: 'nav.pm_subcontracts', href: '/projects/subcontracts', icon: Handshake, perms: ['proj_subcon', 'procurement', 'exec'] },
-      // CRM-2: /projects/crm merged into the /crm workspace (redirect kept for deep links); the Win/Loss
-      // analytics dashboard stays here and is also linked from the /crm workspace header.
-      { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
-      { label: 'nav.pm_close', href: '/projects/close', icon: Lock, perms: ['exec'] },
-      { label: 'nav.pm_settings', href: '/projects/settings', icon: SlidersHorizontal, perms: ['exec', 'planner'] },
-    ],
-  },
-  // ─── Real Estate (developer vertical, docs/35 P4). Permission-gated (re_sales) — invisible without it. ───
-  {
-    title: 'nav.group.realestate',
-    workspace: ['erp'],
-    items: [
-      { label: 'nav.re_developments', href: '/realestate', icon: Building2, perms: ['re_sales', 're_contract_approve', 'exec'] },
+    subgroups: [
+      {
+        // Project Management (PPM) — docs/20 C1.
+        title: 'nav.group.pm',
+        workspace: ['erp'],
+        items: [
+          { label: 'nav.pm_portfolio', href: '/projects/portfolio', icon: LayoutDashboard, perms: ['exec', 'planner', 'ar'] },
+          { label: 'nav.pm_action_center', href: '/projects/action-center', icon: BellRing, perms: ['exec', 'planner', 'ar'] },
+          // PPM-A1 (PROJ-20): resource capacity heatmap + skills/role supply-vs-demand.
+          { label: 'nav.pm_resources', href: '/projects/resources', icon: Users, perms: ['exec', 'planner', 'ar'] },
+          { label: 'nav.projects', href: '/projects', icon: FolderKanban, perms: ['exec', 'planner', 'ar'] },
+          // Construction/real-estate vertical (docs/35): tender→award, progress billing (งวดงาน), subcontracts.
+          { label: 'nav.pm_tenders', href: '/projects/tenders', icon: FileSignature, perms: ['proj_tender', 'marketing', 'exec'] },
+          { label: 'nav.pm_billing', href: '/projects/billing', icon: ReceiptText, perms: ['proj_billing', 'ar', 'exec'] },
+          { label: 'nav.pm_subcontracts', href: '/projects/subcontracts', icon: Handshake, perms: ['proj_subcon', 'procurement', 'exec'] },
+          // CRM-2: /projects/crm merged into the /crm workspace (redirect kept for deep links); the Win/Loss
+          // analytics dashboard stays here and is also linked from the /crm workspace header.
+          { label: 'nav.pm_pipeline', href: '/projects/pipeline', icon: Target, perms: ['exec', 'planner', 'ar', 'crm'] },
+          { label: 'nav.pm_close', href: '/projects/close', icon: Lock, perms: ['exec'] },
+          { label: 'nav.pm_settings', href: '/projects/settings', icon: SlidersHorizontal, perms: ['exec', 'planner'] },
+        ],
+      },
+      {
+        // Real Estate (developer vertical, docs/35 P4). Permission-gated (re_sales) — invisible without it.
+        title: 'nav.group.realestate',
+        workspace: ['erp'],
+        items: [
+          { label: 'nav.re_developments', href: '/realestate', icon: Building2, perms: ['re_sales', 're_contract_approve', 'exec'] },
+        ],
+      },
     ],
   },
   {
     title: 'nav.group.planning',
     workspace: ['erp'],
     items: [
+      { label: 'nav.analytics_home', href: '/analytics', icon: Compass, perms: ['exec', 'dashboard', 'planner', 'warehouse', 'marketing'] },
       { label: 'nav.planning', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
       { label: 'nav.budget', href: '/budget', icon: PiggyBank, perms: ['exec', 'planner'] },
       { label: 'nav.demand', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },
       { label: 'nav.profitability', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
+      { label: 'nav.mmm', href: '/mmm', icon: BarChart3, perms: ['marketing', 'exec'] },
       { label: 'nav.insights', href: '/insights', icon: Lightbulb, perms: ['exec', 'dashboard', 'planner', 'warehouse'] },
       { label: 'nav.bi', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
       { label: 'nav.query', href: '/query', icon: BarChart3, perms: ['exec', 'dashboard', 'masterdata'] },
@@ -516,6 +580,7 @@ export const INTERNAL_NAV: NavGroup[] = [
   {
     title: 'nav.group.controls',
     workspace: BOTH, // approvals & SoD apply to both POS managers and back-office
+    advanced: true, // infrequent governance/audit domain — hidden unless "show advanced" is on
     items: [
       { label: 'nav.workflow', href: '/workflow', icon: Workflow, perms: ['exec', 'creditors', 'procurement', 'users'] },
       { label: 'nav.sod', href: '/sod', icon: ShieldAlert, perms: ['exec', 'users'] },
@@ -524,6 +589,9 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.controls', href: '/controls', icon: ShieldAlert, perms: ['exec', 'users', 'creditors'] },
       { label: 'nav.control_console', href: '/controls/rcm', icon: ClipboardCheck, perms: ['exec', 'users'] },
       { label: 'nav.governance', href: '/governance', icon: Landmark, perms: ['exec', 'users'] },
+      // SME-02 (docs/49) — the external accountant's independent-review attestation surface (gated on the
+      // dedicated sme_review duty so a limited reviewer login reaches only this, plus exec/users oversight).
+      { label: 'nav.sme_review', href: '/sme-review', icon: PenLine, perms: ['sme_review', 'exec', 'users'] },
       { label: 'nav.ops', href: '/ops', icon: Activity, perms: ['exec', 'users'] },
     ],
   },
@@ -560,6 +628,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       {
         title: 'nav.sub.customise',
         defaultOpen: false, // advanced configuration — collapsed by default
+        advanced: true,
         items: [
           { label: 'nav.alerts', href: '/alerts', icon: BellRing, perms: ['masterdata', 'users', 'exec', 'dashboard'] },
           { label: 'nav.automation', href: '/automation', icon: Workflow, perms: ['masterdata', 'users', 'exec'] },
@@ -573,6 +642,7 @@ export const INTERNAL_NAV: NavGroup[] = [
       {
         title: 'nav.sub.integrations',
         defaultOpen: false, // integration/developer tooling — collapsed by default
+        advanced: true,
         items: [
           { label: 'nav.connectors', href: '/connectors', icon: Cable, perms: ['users', 'exec'] },
           { label: 'nav.messaging_providers', href: '/settings/messaging', icon: MessageSquare, perms: ['users', 'exec'] },
@@ -644,6 +714,18 @@ export function orderItems(items: NavItem[], order?: string[]): NavItem[] {
 /** Total visible-item count of a group across flat items + subgroups. */
 function groupItemCount(g: NavGroup): number {
   return (g.items?.length ?? 0) + (g.subgroups?.reduce((n, s) => n + s.items.length, 0) ?? 0);
+}
+
+/** Drop `advanced`-flagged groups and sub-sections unless `showAdvanced`. Purely presentational —
+ *  applied to the SIDEBAR only so infrequent/expert areas (Controls, Customise, Integrations,
+ *  Intercompany) stay out of the way; the ⌘K palette keeps everything searchable. Non-mutating; a group
+ *  emptied by dropping all its sub-sections (and having no flat items) is itself dropped. */
+export function filterAdvancedNav(nav: NavGroup[], showAdvanced: boolean): NavGroup[] {
+  if (showAdvanced) return nav;
+  return nav
+    .filter((g) => !g.advanced)
+    .map((g) => ({ ...g, subgroups: g.subgroups?.filter((s) => !s.advanced) }))
+    .filter((g) => groupItemCount(g) > 0);
 }
 
 /** Filter a nav tree to one workspace: keep items whose workspace (item override, else sub-section, else

@@ -11,6 +11,7 @@ import { fxRates } from '../../database/schema/fx';
 import { n, fx } from '../../database/queries';
 import { CASH_ACCOUNTS, CF_CLASSIFY } from '../ledger/ledger-constants';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
@@ -312,7 +313,7 @@ export class ConsolidationService {
   // ── CON-03: maker-checker post — freeze the consolidated TB as the official group result for the period.
   // A DIFFERENT user must post (self-post → SELF_POST). Eliminations are NOT pushed into any operating
   // entity's GL — they live at the group layer (consolidation_run_lines); posting only freezes the run.
-  async postConsolidation(runId: number, dto: { postedBy: string }, user: JwtUser) {
+  async postConsolidation(runId: number, dto: { postedBy: string }, user: JwtUser, selfApprovalReason?: string | null) {
     this.hqOnly(user);
     const db = this.db;
     const [run] = await db.select().from(consolidationRuns).where(eq(consolidationRuns.id, runId)).limit(1);
@@ -321,7 +322,7 @@ export class ConsolidationService {
     if (run.balanced === false) throw new BadRequestException({ code: 'CONSOL_UNBALANCED', message: 'Cannot post an unbalanced consolidation run', messageTh: 'โพสต์งบรวมที่ไม่สมดุลไม่ได้' });
     const postedBy = dto.postedBy;
     if (run.runBy && run.runBy === postedBy) {
-      throw new ForbiddenException({ code: 'SELF_POST', message: 'Maker-checker: you cannot post a consolidation run you produced', messageTh: 'ผู้จัดทำโพสต์งบรวมของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
+      await assertMakerChecker(db, { user, maker: user.username, event: 'gl.consolidation.post', ref: String(runId), reason: selfApprovalReason, code: 'SELF_POST', message: 'Maker-checker: you cannot post a consolidation run you produced', messageTh: 'ผู้จัดทำโพสต์งบรวมของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
     await db.update(consolidationRuns).set({ status: 'Posted', postedBy, postedAt: new Date() }).where(eq(consolidationRuns.id, runId));
     return { run_id: runId, group_id: Number(run.groupId), period: run.period, status: 'Posted', posted_by: postedBy };

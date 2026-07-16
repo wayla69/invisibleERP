@@ -1,6 +1,6 @@
 # 11 · Administration
 
-**Status: DRAFT v0.19 · 2026-07-14** · *v0.19 (2026-07-14): §8.1 — the unused-product cleanup now has a **Platform Console button** (`/platform` → **ดูแลระบบ / Maintenance** tab): **ตรวจสอบ** (dry-run preview) then **ลบ** with a confirm dialog — no need to touch the API or the company switcher. Wires the existing god-only endpoints; no new control.* · *v0.18 (2026-07-14): §8.1 — new **platform-owner** cleanup for leftover products after a company reset: because the product catalogue is shared (no company owner), a factory-reset/purge leaves a company's products in the shared catalogue and they keep showing in every company's `/shop`. Preview `GET /api/admin/item-maintenance/unused-items` then purge `POST /api/admin/item-maintenance/purge-unused-items` (`confirm: PURGE-UNUSED-ITEMS`) removes only products **no company references** any more; god-only (`ITEM_PURGE_HQ_ONLY`), idempotent. FAQ updated. No new numbered control.* · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
+**Status: DRAFT v0.23 · 2026-07-15** · *v0.23 (2026-07-15): §14 — **self-approval registry**: the `/sme-review` screen gains a **ทะเบียน (Registry)** tab — a cross-period, filterable (date range / event / text search) register of every self-approval with a per-month sign-off-status summary and **CSV export** for auditors (docs/49 item 2; read/UI over SME-02, no new control).* · *v0.22 (2026-07-15): §14 — **SME-02 review attestation**: an SME company's monthly self-approvals must be **signed off** by two independent reviewers on the new **ทบทวนการอนุมัติเอง (SME)** screen (`/sme-review`) — the external accountant (`sme_review` duty) + the platform owner (act-as); a month completes only once both legs sign, and the SME-01 report/god inbox flag the outstanding leg (docs/49 item 1, control **SME-02**, migration 0417).* · *v0.21 (2026-07-14): §8.1 — added a **Force purge** danger-zone card (platform-owner only): deletes products even if a company still uses them, wiping their references in every company — preceded by a mandatory **ตรวจผลกระทบ (blast-radius)** report showing which companies would lose reference rows; strong confirm `FORCE-PURGE-ITEMS`. For junk/test products the normal purge keeps; a real company's data would be lost, so factory-reset is preferred where applicable. No new control.* · *v0.20 (2026-07-14): §8.1 — the unused-product **ตรวจสอบ** preview now also shows **which companies still use the products that would be kept** (`kept_by` diagnostic), so you can tell a reset-leftover (the reset company still appears ⇒ data not fully wiped) from a product genuinely used by another company. No new control.* · *v0.19 (2026-07-14): §8.1 — the unused-product cleanup now has a **Platform Console button** (`/platform` → **ดูแลระบบ / Maintenance** tab): **ตรวจสอบ** (dry-run preview) then **ลบ** with a confirm dialog — no need to touch the API or the company switcher. Wires the existing god-only endpoints; no new control.* · *v0.18 (2026-07-14): §8.1 — new **platform-owner** cleanup for leftover products after a company reset: because the product catalogue is shared (no company owner), a factory-reset/purge leaves a company's products in the shared catalogue and they keep showing in every company's `/shop`. Preview `GET /api/admin/item-maintenance/unused-items` then purge `POST /api/admin/item-maintenance/purge-unused-items` (`confirm: PURGE-UNUSED-ITEMS`) removes only products **no company references** any more; god-only (`ITEM_PURGE_HQ_ONLY`), idempotent. FAQ updated. No new numbered control.* · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
 info form (`/setup`); it prints alongside phone in the full tax invoice (ม.86/4) header. Saves immediately
 like phone (not a maker-checker field).* · *v0.16 (2026-07-16): §2 — the "only the platform owner grants Admin" rule now also covers the three side-doors a 2026-07-16 pentest found: **resetting an Admin's password** is platform-owner-only (`ADMIN_GRANT_DENIED`), self-service **SSO** cannot auto-assign Admin/Access-Admin (`BAD_ROLE`/`SSO_ROLE_NOT_ALLOWED`), and an **API key can never act as a platform owner**. Reinforces ITGC-AC-02; no new control.* · *v0.15 (2026-07-06): §13 — documented **where the G15 company-profile approval queue lives in the app**: a **"Financial-profile changes pending approval"** card on the **Company Setup** screen (`/setup`), where a **different** exec/approvals user approves/rejects the staged PromptPay/tax-ID change. UI surfacing of an already-shipped control — no new endpoint, no new numbered control.* · *v0.14 (2026-07-06): §13 — a change to the **PromptPay ID** or **tax ID** on the company profile is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve it before it takes effect (self-approval → `SOD_VIOLATION`); all other company-info fields still save immediately, and a no-op never stages (G15; strengthens SoD R02; no new numbered control).* · *v0.13 (2026-07-05): §8 — a bulk master-data import that **sets** a financially-sensitive field (customer/vendor credit limit, vendor payment term, price-list price, promotion discount) is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve before anything is written (self-approval → `SOD_VIOLATION`); ordinary imports are unaffected (audit gaps G5+G8; strengthens SoD R02/R09/R10/R13).* · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
@@ -147,8 +147,10 @@ the platform.
 
 ### 3.1 Hide menus (**จัดการเมนู — แสดง/ซ่อน**)
 
-A tree that **mirrors your left sidebar** — category (หมวด) → sub-section (หมวดย่อย)
-→ individual menu (เมนู) — with a **Show / Hide** button at every level. Menu names
+A tree that **mirrors your left sidebar** — category/domain (หมวด) → sub-section (หมวดย่อย)
+→ individual menu (เมนู) — with a **Show / Hide** button at every level. The tree reflects
+the current sidebar taxonomy, so the consolidated domains (*ขาย & ลูกค้า*, *ซัพพลายเชน*,
+*การเงิน & บัญชี*, *โครงการ*, …) each list their sub-sections beneath them. Menu names
 match the sidebar exactly. Use the **ทั้งหมด / ERP / POS** filter at the top-right to
 view one surface at a time; **ERP** and **POS** use the same split as the sidebar
 switcher, so the list lines up one-to-one with what staff see on that surface (in
@@ -170,6 +172,11 @@ switcher, so the list lines up one-to-one with what staff see on that surface (i
 5. **Reset the arrangement** with **รีเซ็ตการจัดเมนู** (top-right) to show every menu
    again and restore the default category **and** menu order. This affects **menu
    arrangement only** — it does **not** re-enable any module you turned off in §3.2.
+
+> **Not the same as personal view settings.** Whether a domain is folded open/closed and whether the
+> **"แสดงเมนูขั้นสูง" (Show advanced)** toggle is on are **each user's own** preferences (they sync to that
+> user's account, across their devices). This admin screen sets the **company-wide** visibility and order;
+> it does not force anyone's fold-state or advanced toggle.
 
 > **Hiding a menu is presentation only** — it declutters the sidebar but does **not**
 > change anyone's permissions. To actually *block access* to a capability (including
@@ -450,7 +457,11 @@ stock, on a recipe/BoM, etc. is **kept**).
 → the **ดูแลระบบ (Maintenance)** tab → **ล้างสินค้าที่ไม่มีใครใช้แล้ว**:
 
 1. Click **ตรวจสอบ (ดูจำนวน)** — a dry run that deletes nothing; it shows how many products
-   would be removed and a sample of their codes.
+   would be removed, a sample of their codes, **and which companies still use the products that
+   would be *kept*** (so you can see *why* some products survive). **If a company you just reset
+   appears in that "kept" list, its data was not fully wiped** — factory-reset it completely
+   (§14) and run the cleanup again; the products will then be removed. If the products are kept
+   by *other* companies, they are genuinely in use and the shared catalogue cannot remove them.
 2. Click **ลบ …** → confirm in the dialog. Unused products (and their images) are deleted;
    still-used ones are kept. Running it again is safe — it finds nothing left to clean.
    You do **not** need to change the company switcher — this always runs across all companies.
@@ -469,6 +480,23 @@ stock, on a recipe/BoM, etc. is **kept**).
 > references**, and why it is **restricted to the platform owner** (a normal company Admin
 > is refused with `ITEM_PURGE_HQ_ONLY`). A product that was merged into another as a
 > duplicate is preserved so the merge history stays intact.
+
+#### Force purge — remove products even if a company still uses them (⚠️ dangerous)
+
+If a product is **junk/test data** that must go even though the diagnostic shows a company
+still uses it, use the **ลบแบบบังคับ (danger)** card at the bottom of the Maintenance tab.
+This deletes the products **and wipes their references in every company** (purchase orders,
+stock, recipes, prices, …) — so **if a *real* company uses one, that company loses data.**
+
+1. Click **ตรวจผลกระทบ (blast radius)** — a dry run that lists **which companies would lose
+   how many reference rows.** Read it carefully.
+2. **Only if no real company appears** (every affected company is test/junk you're fine to
+   break), click **ลบแบบบังคับ …** → confirm in the dialog. This cannot be undone.
+
+> This is the escape hatch for the case where products linger because *another* company (not
+> the one you reset) references them and the shared catalogue can't otherwise remove them. If
+> the products belong to a company you meant to reset, prefer a full **factory-reset** of that
+> company (§14) instead — it's safer than force-deleting shared data.
 
 ---
 
@@ -713,6 +741,54 @@ own org (so it's isolated by default), an Admin login, a trial subscription, the
 the industry Chart of Accounts — and the action is recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when).
 Anyone not on the platform-owner list gets **`403 PLATFORM_ADMIN_REQUIRED`**; if the list is empty, nobody
 can (secure default) — set `PLATFORM_ADMIN_USERNAMES` first.
+
+**เลือกเอดิชันตอนสร้างบริษัท — Enterprise หรือ SME (docs/49).** In the Platform Console's create-company
+dialog (แท็บ **บริษัท** → เปิดบริษัทใหม่) the **เอดิชัน** selector picks the company's control profile:
+
+- **Enterprise** (default) — full segregation of duties: the maker and the checker must always be
+  different people, on every approval, with no exception.
+- **SME — คนเดียวทำได้ทุกงาน** — for a company run by a single operator. The operator may approve their
+  **own** items across **every maker-checker step in the system** (journals and reversals, period
+  lock/reopen, AP payments and payment runs, petty cash, master-data changes, quotes, stocktakes and
+  write-offs, projects/BoQ/claims, HR approvals, quality dispositions, tax postings, refunds, treasury,
+  workflow items, and more) **only** by supplying a justification each time (without one the API answers
+  `400 SELF_APPROVAL_REASON_REQUIRED`; the web prompts for the reason automatically). Two exceptions stay
+  blocked even in SME mode: approving an access exception that grants **yourself**, and configured
+  permission-pair (PERM_PAIR) conflicts. Every self-approval is recorded in the `self_approvals`
+  evidence register and reviewed independently via the scheduled **Self-approval review (SME-01)**
+  report — schedule it monthly to the company's external accountant (set the default address in the
+  **ค่าเริ่มต้น SME** tab) and to yourself. Every user of an SME company sees a persistent
+  **"โหมด SME"** banner so the relaxed control environment is never mistaken for the enterprise one.
+
+An SME company can be **upgraded to Enterprise at any time** (บริษัท tab → อัพเกรด, or
+`POST /api/admin/tenants/:id/control-profile`), but the transition is **one-way**: an Enterprise company
+can never be downgraded to SME (`403 PROFILE_DOWNGRADE_FORBIDDEN`). New SME companies are stamped with
+the platform-wide defaults from the **ค่าเริ่มต้น SME** tab (hidden menu groups + the accountant's email)
+at creation — changing the defaults later affects only companies created afterwards.
+
+**Sign off the self-approval review each month — ทบทวนการอนุมัติเอง (SME-02).** A review report only has
+value once someone confirms they read it, so an SME company's self-approvals must be **attested** each
+period by two independent reviewers. On the **ทบทวนการอนุมัติเอง (SME)** screen (`/sme-review`) a reviewer
+picks the month, sees every self-approval in it (who, what, amount, the reason given), and clicks **ลงนาม
+รับรองงวดนี้** to record that they reviewed it. There are two sign-off "legs":
+
+- **นักบัญชี (accountant)** — the company's external accountant, given a limited login that holds only the
+  **ทบทวนการอนุมัติเอง (SME)** duty (`sme_review`) so their review stays independent of the operator. Add
+  this user like any other (§1) and grant them just that permission (§2).
+- **เจ้าของแพลตฟอร์ม (platform owner)** — you (god), by first switching into the company (act-as) and signing
+  the same screen.
+
+A month with self-approvals is marked **complete** only once **both** legs sign; until then the SME-01
+report and the god inbox flag the outstanding leg. Signing again just refreshes the record (one attestation
+per reviewer per month) — who signed, when, and the count reviewed are all kept for the auditor. If a month
+had **no** self-approvals, there is nothing to attest and it is complete by default.
+
+**Browse & export the whole register — the ทะเบียน (Registry) tab.** The second tab on `/sme-review` is a
+cross-period register of **every** self-approval the company has ever recorded, for the owner or an external
+auditor to review. Filter by **date range**, by **event** (e.g. `gl.je.approve`), or **search** any text in
+the reason / reference / user; a **by-month summary** shows each month's count, value and whether it has been
+signed off. **ส่งออก CSV** downloads the filtered rows for offline audit working papers. The register is
+read-only and reachable with the same `sme_review` / `exec` / `users` duty as the sign-off tab.
 
 **Invite a company to sign up themselves (optional).** If you'd rather the new company fill in their own
 details, issue a **single-use invite link** instead: `POST /api/admin/signup-invites` (returns a token +

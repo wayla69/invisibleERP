@@ -81,9 +81,19 @@ export class NotificationsService {
   // user when it targets their tenant AND either is a broadcast (target_role IS NULL)
   // or matches their role. Read state is per-user via notification_reads.
   private visibleTo(user: JwtUser) {
+    // A row is visible when it targets the caller's tenant AND either (a) it is DIRECTED to this exact user
+    // (target_username — CRM-8 @mentions), or (b) it is undirected (target_username IS NULL) and is a
+    // broadcast or matches the caller's role. Backward compatible: every legacy producer leaves
+    // target_username NULL, so branch (b) preserves the prior role/broadcast semantics unchanged.
     return and(
       eq(notifications.targetTenantId, user.tenantId as number),
-      or(isNull(notifications.targetRole), eq(notifications.targetRole, user.role as NonNullable<typeof notifications.$inferSelect.targetRole>)),
+      or(
+        eq(notifications.targetUsername, user.username),
+        and(
+          isNull(notifications.targetUsername),
+          or(isNull(notifications.targetRole), eq(notifications.targetRole, user.role as NonNullable<typeof notifications.$inferSelect.targetRole>)),
+        ),
+      ),
     );
   }
 

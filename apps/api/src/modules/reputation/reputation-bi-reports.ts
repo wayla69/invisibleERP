@@ -6,6 +6,7 @@ import type { BiReportGenerator, BiReportSource } from '../bi/report-registry';
 import type { JwtUser } from '../../common/decorators';
 import { ReputationReviewSyncService } from './reputation-review-sync.service';
 import { ReputationAnalyticsSyncService } from './reputation-analytics-sync.service';
+import { ReputationSlaService } from './reputation-sla.service';
 
 // docs/47 — module-owned BI report generators. Two are idempotent "action" jobs that ride the scheduler
 // (a tenant admin creates a `daily` subscription on /scheduled-reports, same shape as ar_collections_dunning
@@ -17,6 +18,7 @@ export class ReputationBiReports implements BiReportSource {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly reviewSync: ReputationReviewSyncService,
     private readonly analyticsSync: ReputationAnalyticsSyncService,
+    private readonly sla: ReputationSlaService,
   ) {}
 
   biReports(): BiReportGenerator[] {
@@ -40,6 +42,20 @@ export class ReputationBiReports implements BiReportSource {
         generate: async (f, user) => {
           const data = await this.summary(user, f?.days ?? 30);
           return { data, summary: `Reputation: avg rating ${data.avg_rating ?? '–'} (${data.review_count} reviews), ${data.needs_attention} need a reply`, summaryTh: `คะแนนเฉลี่ย ${data.avg_rating ?? '–'} (${data.review_count} รีวิว) ต้องตอบกลับ ${data.needs_attention} รายการ` };
+        },
+      },
+      {
+        // MKT-16 — the review-response SLA breach digest. Idempotent detective read (no writes): surfaces
+        // negative reviews left unanswered past the tenant's SLA so they can be actioned before the window
+        // damages the public rating. Same schedulable shape as ar_collections_dunning.
+        type: 'reputation_response_sla',
+        generate: async (_f, user) => {
+          const data = await this.sla.responseSla(user);
+          return {
+            data,
+            summary: `Review-response SLA: ${data.breach_count} breached (≤${data.settings.sla_rating_threshold}★ unreplied past ${data.settings.sla_hours}h), ${data.open_count} open`,
+            summaryTh: `SLA การตอบรีวิว: เกินกำหนด ${data.breach_count} รายการ (≤${data.settings.sla_rating_threshold}★ ยังไม่ตอบเกิน ${data.settings.sla_hours} ชม.), ค้าง ${data.open_count} รายการ`,
+          };
         },
       },
     ];

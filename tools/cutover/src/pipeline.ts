@@ -44,6 +44,7 @@ async function main() {
   const [hq, t1] = [await tid('HQ'), await tid('T1')];
   await db.insert(s.users).values([
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    { username: 'mgr', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }, // CRM-18: independent HQ approver for the phase-gate maker-checker
     { username: 'sales1', passwordHash: await pw.hash('pw1'), role: 'Sales', tenantId: t1 },
     { username: 'sales2', passwordHash: await pw.hash('pw2'), role: 'Sales', tenantId: t1 }, // CRM-1: distinct actor for the account-merge maker-checker
   ]).onConflictDoNothing();
@@ -65,6 +66,7 @@ async function main() {
   };
   const login = async (u: string, p: string) => (await inj('POST', '/api/login', undefined, { username: u, password: p })).json.token as string;
   const [admin, sales1, sales2] = [await login('admin', 'admin123'), await login('sales1', 'pw1'), await login('sales2', 'pw2')];
+  const mgr = await login('mgr', 'admin123');
 
   // 1. List stages auto-seeds 6 default stages
   const stages = await inj('GET', '/api/pipeline/stages', sales1);
@@ -710,6 +712,280 @@ async function main() {
   await inj('POST', '/api/crm/sequences', admin, { name: 'HQ Only Cadence', steps: [{ channel: 'email', body: 'x' }] });
   const t1seqs = await inj('GET', '/api/crm/sequences', sales1);
   ok('CRM-8 RLS: a T1 user cannot see an HQ tenant\'s sequence', t1seqs.status === 200 && !(t1seqs.json.sequences ?? []).some((x: any) => x.name === 'HQ Only Cadence'), `names=${(t1seqs.json.sequences ?? []).map((x: any) => x.name).join('|')}`);
+
+  // ── CRM-7 kanban depth (control CRM-13, migration 0406) — stage playbooks: required-field exit criteria +
+  //    WIP limits + bulk stage moves ─────────────────────────────────────────────────────────────────────
+  const stageRows = (await inj('GET', '/api/pipeline/stages', sales1)).json as any[];
+  const qualifiedId = stageRows.find((s) => s.name === 'Qualified')?.id;
+
+  // 70. Playbook view lists every stage + live open-count + a field catalog; Qualified starts unconfigured.
+  const pb0 = await inj('GET', '/api/crm/pipeline/playbooks', sales1);
+  const qual0 = (pb0.json.stages ?? []).find((s: any) => s.name === 'Qualified');
+  ok('CRM-7 playbooks: view lists stages + field catalog; Qualified unconfigured (no wip/required)',
+    pb0.status === 200 && qual0 && qual0.wip_limit === null && Array.isArray(qual0.required_fields) && qual0.required_fields.length === 0
+    && Array.isArray(pb0.json.field_catalog) && pb0.json.field_catalog.some((f: any) => f.key === 'amount'),
+    JSON.stringify(qual0));
+  const baseOpen = Number(qual0?.open_count ?? 0);
+
+  // 71. Configure the Qualified playbook (supervisor crm/exec): require an amount + a WIP cap of base+1.
+  const putPb = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, sales1, { required_fields: ['amount'], wip_limit: baseOpen + 1, guidance: 'Qualify only with a sized deal.' });
+  ok('CRM-7 playbook upsert: required_fields=[amount], wip_limit set', putPb.status === 200 && putPb.json.wip_limit === baseOpen + 1 && putPb.json.required_fields?.includes('amount'), JSON.stringify(putPb.json));
+
+  // 72. Reject an unknown required-field key (whitelist-validated).
+  const badPb = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, sales1, { required_fields: ['nonsense_field'] });
+  ok('CRM-7 playbook: unknown required field → 400 BAD_REQUIRED_FIELDS', badPb.status === 400 && badPb.json.error?.code === 'BAD_REQUIRED_FIELDS', `${badPb.status} ${badPb.json.error?.code}`);
+
+  // 73. Required-field exit criteria: a deal with no amount cannot ADVANCE into Qualified.
+  const oppNoAmt = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 no-amount deal' });
+  const moveNoAmt = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppNoAmt.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 required-field: advancing a no-amount deal to Qualified → 400 STAGE_REQUIREMENTS_UNMET (missing amount)',
+    moveNoAmt.status === 400 && moveNoAmt.json.error?.code === 'STAGE_REQUIREMENTS_UNMET' && (moveNoAmt.json.error?.details?.missing ?? []).some((m: any) => m.key === 'amount'),
+    `${moveNoAmt.status} ${moveNoAmt.json.error?.code}`);
+
+  // 74. A sized deal satisfies the exit criteria and moves in (consuming the last WIP slot).
+  const oppA = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 sized deal A', amount: 50000 });
+  const moveA = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppA.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 required-field: a sized deal advances to Qualified → 200', moveA.status === 200 && moveA.json.stage === 'qualification', JSON.stringify(moveA.json));
+
+  // 75. WIP limit: the stage is now at its cap → the next sized deal is refused WIP_LIMIT_EXCEEDED.
+  const oppB = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 sized deal B', amount: 40000 });
+  const moveB = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppB.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 WIP limit: advancing past the Qualified cap → 400 WIP_LIMIT_EXCEEDED',
+    moveB.status === 400 && moveB.json.error?.code === 'WIP_LIMIT_EXCEEDED' && moveB.json.error?.details?.limit === baseOpen + 1,
+    `${moveB.status} ${moveB.json.error?.code} limit=${moveB.json.error?.details?.limit} current=${moveB.json.error?.details?.current}`);
+
+  // 76. The board view reflects the live WIP state (at/over the cap) after the move.
+  const pb1 = await inj('GET', '/api/crm/pipeline/playbooks', sales1);
+  const qual1 = (pb1.json.stages ?? []).find((s: any) => s.name === 'Qualified');
+  ok('CRM-7 playbook view: Qualified open_count reflects the moved deal and at_wip is flagged',
+    qual1 && qual1.open_count === baseOpen + 1 && qual1.at_wip === true && qual1.guidance === 'Qualify only with a sized deal.', JSON.stringify(qual1));
+
+  // 77. Clearing the WIP limit (null) lets the deal in — the cap is config, not hardcoded.
+  await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, sales1, { wip_limit: null });
+  const moveBagain = await inj('PATCH', `/api/crm/pipeline/opportunities/${oppB.json.opp_no}/stage`, sales1, { stage: 'Qualified' });
+  ok('CRM-7 WIP limit: clearing wip_limit (null) admits the deal → 200', moveBagain.status === 200, `${moveBagain.status}`);
+
+  // 78. Bulk stage move: a multi-select advances through the SAME governed path (Proposal has no playbook).
+  const oppC = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 bulk C', amount: 10000 });
+  const oppD = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-7 bulk D', amount: 20000 });
+  const bulk = await inj('POST', '/api/crm/pipeline/opportunities/bulk-stage', sales1, { opp_nos: [oppC.json.opp_no, oppD.json.opp_no], stage: 'Proposal' });
+  ok('CRM-7 bulk-stage: two deals advanced to Proposal → moved 2, failed 0', bulk.status === 200 && bulk.json.moved === 2 && bulk.json.failed === 0, JSON.stringify({ moved: bulk.json.moved, failed: bulk.json.failed }));
+
+  // 79. Bulk partial success: an unknown opp fails per-item without blocking the valid one.
+  const bulkMixed = await inj('POST', '/api/crm/pipeline/opportunities/bulk-stage', sales1, { opp_nos: [oppC.json.opp_no, 'OPP-DOES-NOT-EXIST'], stage: 'Negotiation' });
+  ok('CRM-7 bulk-stage: partial success (1 moved, 1 NOT_FOUND) — per-item, never atomic across deals',
+    bulkMixed.status === 200 && bulkMixed.json.moved === 1 && bulkMixed.json.failed === 1 && bulkMixed.json.results?.some((r: any) => !r.ok && r.error === 'NOT_FOUND'),
+    JSON.stringify(bulkMixed.json.results));
+
+  // 80. HQ (no tenant) cannot configure a tenant stage playbook — the config is tenant-scoped.
+  const hqPut = await inj('PUT', `/api/crm/pipeline/playbooks/${qualifiedId}`, admin, { wip_limit: 5 });
+  ok('CRM-7 tenant-scope: HQ (no tenant) cannot configure a T1 stage playbook → 400', hqPut.status === 400 && ['BAD_STAGE', 'TENANT_REQUIRED'].includes(hqPut.json.error?.code), `${hqPut.status} ${hqPut.json.error?.code}`);
+
+  // ── CRM-8 unified timeline + collaboration feed (control CRM-14, migration 0407) ─────────────────────────
+  // Build a deal with touches from several sources: an activity, two stage transitions, a feed post.
+  const tlOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-8 timeline deal', amount: 30000 });
+  const tlNo = tlOpp.json.opp_no;
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'opportunity', entity_no: tlNo, type: 'call', subject: 'Discovery call' });
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${tlNo}/stage`, sales1, { stage: 'Proposal' }); // creation + move → 2 stage rows
+
+  // 81. Feed post: append an immutable collaboration note (with an @mention of a real teammate).
+  const post = await inj('POST', '/api/crm/feed', sales1, { entity_type: 'opportunity', entity_no: tlNo, body: 'Aligning on scope with @sales2 before we send the quote.' });
+  ok('CRM-8 feed: post an internal note → 201, @mention resolved to a real tenant user',
+    post.status === 201 && post.json.id > 0 && Array.isArray(post.json.mentions) && post.json.mentions.includes('sales2'), JSON.stringify({ status: post.status, mentions: post.json.mentions }));
+
+  // 82. Unknown / other-tenant @handles are dropped (only validated tenant users are mentioned).
+  const post2 = await inj('POST', '/api/crm/feed', sales1, { entity_type: 'opportunity', entity_no: tlNo, body: 'cc @nobody_xyz @sales2' });
+  ok('CRM-8 feed: an unknown @handle is dropped, a valid one kept', post2.status === 201 && post2.json.mentions.length === 1 && post2.json.mentions[0] === 'sales2', JSON.stringify(post2.json.mentions));
+
+  // 83. Unified timeline merges every source, newest-first.
+  const tl = await inj('GET', `/api/crm/timeline?entity_type=opportunity&entity_no=${encodeURIComponent(tlNo)}`, sales1);
+  const kinds = new Set((tl.json.items ?? []).map((i: any) => i.kind));
+  const ats = (tl.json.items ?? []).map((i: any) => new Date(i.at).getTime());
+  const sortedDesc = ats.every((v: number, idx: number) => idx === 0 || ats[idx - 1] >= v);
+  ok('CRM-8 timeline: merges activity + stage + feed into one stream, newest-first',
+    tl.status === 200 && kinds.has('activity') && kinds.has('stage') && kinds.has('feed') && sortedDesc,
+    JSON.stringify({ kinds: [...kinds], count: tl.json.count }));
+
+  // 84. The stage transitions (creation + move) are present in the unified stream.
+  const stageItems = (tl.json.items ?? []).filter((i: any) => i.kind === 'stage');
+  ok('CRM-8 timeline: both stage transitions captured (creation + move to proposal)',
+    stageItems.length >= 2 && stageItems.some((s: any) => s.to_stage === 'proposal'), `stageCount=${stageItems.length}`);
+
+  // 85. Feed list is a dedicated read of just the posts (newest-first).
+  const feed = await inj('GET', `/api/crm/feed?entity_type=opportunity&entity_no=${encodeURIComponent(tlNo)}`, sales1);
+  ok('CRM-8 feed list: returns the posted notes', feed.status === 200 && feed.json.count >= 2 && feed.json.posts[0].author === 'sales1', JSON.stringify({ count: feed.json.count }));
+
+  // 86. @mention routes a DIRECTED notification: the mentioned user sees it, the author does not.
+  const sales2Inbox = await inj('GET', '/api/notifications/inbox', sales2);
+  const sales1Inbox = await inj('GET', '/api/notifications/inbox', sales1);
+  const mentionMsg = (r: any) => (r.json.items ?? []).some((it: any) => (it.message_en ?? '').includes('mentioned you'));
+  ok('CRM-8 @mention: a directed notification reaches the mentioned user only (not the author)',
+    sales2Inbox.status === 200 && mentionMsg(sales2Inbox) && !mentionMsg(sales1Inbox), JSON.stringify({ sales2: mentionMsg(sales2Inbox), sales1: mentionMsg(sales1Inbox) }));
+
+  // 87. BOLA: posting/reading a timeline for a non-existent entity is rejected.
+  const bolaPost = await inj('POST', '/api/crm/feed', sales1, { entity_type: 'opportunity', entity_no: 'OPP-NOPE', body: 'x' });
+  const bolaTl = await inj('GET', '/api/crm/timeline?entity_type=opportunity&entity_no=OPP-NOPE', sales1);
+  ok('CRM-8 BOLA: feed/timeline on an unknown opportunity → 404 NOT_FOUND',
+    bolaPost.status === 404 && bolaPost.json.error?.code === 'NOT_FOUND' && bolaTl.status === 404, `${bolaPost.status}/${bolaTl.status}`);
+
+  // 88. Account timeline rolls up the account's opportunities' touches.
+  const acctForTl = await inj('POST', '/api/crm/accounts', sales1, { name: 'CRM-8 Timeline Co' });
+  const acctNo = acctForTl.json.account_no;
+  const acctOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'CRM-8 acct deal', amount: 5000, account_no: acctNo });
+  await inj('POST', '/api/crm/pipeline/activities', sales1, { entity_type: 'opportunity', entity_no: acctOpp.json.opp_no, type: 'meeting', subject: 'Kickoff' });
+  const acctTl = await inj('GET', `/api/crm/timeline?entity_type=account&entity_no=${encodeURIComponent(acctNo)}`, sales1);
+  ok('CRM-8 timeline: an account rolls up its opportunities\' activities',
+    acctTl.status === 200 && (acctTl.json.items ?? []).some((i: any) => i.kind === 'activity' && i.subject === 'Kickoff'), `count=${acctTl.json.count}`);
+
+  // 89. RLS: a T1 feed post is not visible to another tenant (HQ god excepted). Bad entity type rejected.
+  const badType = await inj('GET', '/api/crm/timeline?entity_type=widget&entity_no=x', sales1);
+  ok('CRM-8 validation: an unknown entity_type → 400 BAD_ENTITY_TYPE', badType.status === 400 && badType.json.error?.code === 'BAD_ENTITY_TYPE', `${badType.status} ${badType.json.error?.code}`);
+
+  // ── CRM-17 CRM data-quality: scoring + duplicate surveillance + merge audit (control CRM-16, migration 0409) ──
+  // 90. A COMPLETE account scores well (all fields present + valid; owner is always set to the creator).
+  const dqGood = await inj('POST', '/api/crm/accounts', sales1, { name: 'DQ Complete Co', tax_id: '0105561999001', email: 'ops@dqcomplete.example', phone: '021234567', industry: 'software', website: 'https://dqcomplete.example', size: 'medium' });
+  const dqGoodView = await inj('GET', `/api/crm/dq/account/${dqGood.json.account_no}`, sales1);
+  ok('CRM-17 DQ: a complete account scores good (tax/email/phone/owner all ok)',
+    dqGoodView.status === 200 && dqGoodView.json.band === 'good' && dqGoodView.json.score >= 80 && dqGoodView.json.breakdown.find((b: any) => b.field === 'tax_id')?.ok === true,
+    JSON.stringify({ score: dqGoodView.json.score, band: dqGoodView.json.band }));
+
+  // 91. A SPARSE account scores poor, listing its missing fields.
+  const dqPoor = await inj('POST', '/api/crm/accounts', sales1, { name: 'DQ Sparse Co', force: true });
+  const dqPoorView = await inj('GET', `/api/crm/dq/account/${dqPoor.json.account_no}`, sales1);
+  ok('CRM-17 DQ: a name-only account scores poor with missing fields listed',
+    dqPoorView.json.band === 'poor' && dqPoorView.json.missing.includes('tax_id') && dqPoorView.json.missing.includes('email'),
+    JSON.stringify({ score: dqPoorView.json.score, missing: dqPoorView.json.missing }));
+
+  // 92. An INVALID field is scored as not-ok (a 5-digit tax id is present but invalid).
+  const dqBad = await inj('POST', '/api/crm/accounts', sales1, { name: 'DQ Invalid Tax Co', tax_id: '12345', email: 'x@bad', force: true });
+  const dqBadView = await inj('GET', `/api/crm/dq/account/${dqBad.json.account_no}`, sales1);
+  ok('CRM-17 DQ validity: an invalid tax_id / email is scored not-ok (present ≠ valid)',
+    dqBadView.json.breakdown.find((b: any) => b.field === 'tax_id')?.ok === false && dqBadView.json.breakdown.find((b: any) => b.field === 'email')?.ok === false,
+    JSON.stringify(dqBadView.json.breakdown.filter((b: any) => ['tax_id', 'email'].includes(b.field))));
+
+  // 93. The worklist ranks worst-first and counts bands.
+  const dqList = await inj('GET', '/api/crm/dq', sales1);
+  const poorIdx = (dqList.json.accounts ?? []).findIndex((a: any) => a.account_no === dqPoor.json.account_no);
+  const goodIdx = (dqList.json.accounts ?? []).findIndex((a: any) => a.account_no === dqGood.json.account_no);
+  ok('CRM-17 worklist: worst-score-first ordering + band counts', dqList.status === 200 && poorIdx >= 0 && goodIdx >= 0 && poorIdx < goodIdx && dqList.json.band_counts.poor >= 1 && dqList.json.band_counts.good >= 1, JSON.stringify(dqList.json.band_counts));
+
+  // 94. Idempotent daily snapshot + trend history.
+  const snap1 = await inj('POST', '/api/crm/dq/snapshot', sales1, {});
+  const snap2 = await inj('POST', '/api/crm/dq/snapshot', sales1, {});
+  const dqHist = await inj('GET', `/api/crm/dq/history/${dqPoor.json.account_no}`, sales1);
+  ok('CRM-17 snapshot: idempotent per account/day + trend history', snap1.status === 200 && snap2.status === 200 && snap1.json.captured === snap2.json.captured && snap1.json.captured >= 3 && dqHist.json.count >= 1, JSON.stringify({ c1: snap1.json.captured, c2: snap2.json.captured }));
+
+  // 95. The DQ scan is a registered BI report type.
+  const rtypesDq = await inj('GET', '/api/bi/report-types', admin);
+  ok('CRM-17 BI: registry exposes the crm_dq_scan report type', (rtypesDq.json.report_types ?? []).some((r: any) => r.key === 'crm_dq_scan'), 'crm_dq_scan');
+
+  // 96. Duplicate surveillance surfaces a likely-duplicate pair (shared phone + near-identical name).
+  const dup1 = await inj('POST', '/api/crm/accounts', sales1, { name: 'Acme Robotics Ltd', phone: '029998888', force: true });
+  const dup2 = await inj('POST', '/api/crm/accounts', sales1, { name: 'Acme Robotics Limited', phone: '029998888', force: true });
+  const dqDups = await inj('GET', '/api/crm/dq/duplicates', sales1);
+  const found = (dqDups.json.candidates ?? []).find((c: any) => [c.a, c.b].includes(dup1.json.account_no) && [c.a, c.b].includes(dup2.json.account_no));
+  ok('CRM-17 dedupe surveillance: a near-duplicate pair surfaces with reasons (phone + name)',
+    dqDups.status === 200 && !!found && found.reasons.includes('phone') && found.reasons.includes('name'), JSON.stringify(found));
+
+  // 97. Merge audit log: the earlier maker-checked account merge (accA survivor) is recorded.
+  const dqLog = await inj('GET', '/api/crm/dq/merge-log', sales1);
+  const logRow = (dqLog.json.merges ?? []).find((m: any) => m.survivor_no === accA.json.account_no);
+  ok('CRM-17 merge audit: the maker-checked merge is logged (survivor + children reassigned)',
+    dqLog.status === 200 && !!logRow && logRow.reassigned_children >= 2 && logRow.merged_by === 'sales2', JSON.stringify(logRow));
+
+  // 98. Tenant isolation: an HQ account is not in a T1 user's DQ worklist.
+  await inj('POST', '/api/crm/accounts', admin, { name: 'HQ Only DQ Co', tax_id: '0105561777001' });
+  const t1List = await inj('GET', '/api/crm/dq', sales1);
+  ok('CRM-17 RLS: an HQ account is absent from a T1 user\'s DQ worklist', !(t1List.json.accounts ?? []).some((a: any) => a.name === 'HQ Only DQ Co'), `names=${(t1List.json.accounts ?? []).map((a: any) => a.name).slice(0, 8).join('|')}`);
+
+  // ── CRM-15 multi-touch campaign attribution (control CRM-17, migration 0413) — distribute a won deal's
+  // revenue across its campaign touchpoints under an attribution model; every model conserves the total. ──
+  const attrAcc = await inj('POST', '/api/crm/accounts', sales1, { name: 'Attribution Co' });
+  const attrOpp = await inj('POST', '/api/crm/pipeline/opportunities', sales1, { name: 'Attribution Deal', amount: 100000, account_no: attrAcc.json.account_no });
+  const attrNo = attrOpp.json.opp_no;
+  await inj('POST', `/api/crm/attribution/opportunity/${attrNo}/touch`, sales1, { campaign_name: 'C-First', touch_type: 'lead_source', touched_at: '2027-01-01' });
+  await inj('POST', `/api/crm/attribution/opportunity/${attrNo}/touch`, sales1, { campaign_name: 'C-Mid', touch_type: 'webinar', touched_at: '2027-02-01' });
+  const attrAdd = await inj('POST', `/api/crm/attribution/opportunity/${attrNo}/touch`, sales1, { campaign_name: 'C-Last', touch_type: 'meeting', touched_at: '2027-03-01' });
+  ok('CRM-15 record campaign touchpoints on an opportunity (chronological)', attrAdd.status < 300 && attrAdd.json.touch_count === 3 && attrAdd.json.touches[0].campaign === 'C-First' && attrAdd.json.touches[2].campaign === 'C-Last', JSON.stringify({ n: attrAdd.json.touch_count }));
+
+  const attrBadOpp = await inj('POST', '/api/crm/attribution/opportunity/OPP-NOPE/touch', sales1, { campaign_name: 'X' });
+  ok('CRM-15 a touchpoint on an unknown opportunity → 404 OPP_NOT_FOUND', attrBadOpp.status === 404 && attrBadOpp.json.error?.code === 'OPP_NOT_FOUND', `${attrBadOpp.status}/${attrBadOpp.json.error?.code}`);
+
+  // Before the deal is Won, its touchpoints attribute nothing.
+  const attrPre = await inj('GET', `/api/crm/attribution/opportunity/${attrNo}`, sales1);
+  ok('CRM-15 an OPEN deal attributes 0 (only won revenue is distributed)', attrPre.status < 300 && attrPre.json.status !== 'Won' && attrPre.json.attributed.linear.every((x: any) => near(x.amount, 0)), JSON.stringify({ st: attrPre.json.status }));
+
+  await inj('PATCH', `/api/crm/pipeline/opportunities/${attrNo}/stage`, sales1, { stage: 'won', win_reason: 'attribution test' });
+  const attrWon = await inj('GET', `/api/crm/attribution/opportunity/${attrNo}`, sales1);
+  const uShaped = attrWon.json.attributed.u_shaped, linear = attrWon.json.attributed.linear, first = attrWon.json.attributed.first_touch, last = attrWon.json.attributed.last_touch;
+  ok('CRM-15 u_shaped attributes 40/20/40 of a won deal (100,000 → 40k/20k/40k)',
+    near(uShaped[0].amount, 40000) && near(uShaped[1].amount, 20000) && near(uShaped[2].amount, 40000), JSON.stringify(uShaped.map((x: any) => x.amount)));
+  ok('CRM-15 first_touch → 100k on the first campaign; last_touch → 100k on the last',
+    near(first[0].amount, 100000) && near(first[2].amount, 0) && near(last[0].amount, 0) && near(last[2].amount, 100000), JSON.stringify({ first: first.map((x: any) => x.amount), last: last.map((x: any) => x.amount) }));
+  ok('CRM-15 linear conserves revenue exactly (33,333.33 + 33,333.33 + 33,333.34 = 100,000)',
+    near(linear[0].amount + linear[1].amount + linear[2].amount, 100000) && near(linear[2].amount, 33333.34), JSON.stringify(linear.map((x: any) => x.amount)));
+
+  const attrRep = await inj('GET', '/api/crm/attribution?model=u_shaped&months=24', sales1);
+  const cFirst = (attrRep.json.campaigns ?? []).find((c: any) => c.campaign === 'C-First');
+  const cMid = (attrRep.json.campaigns ?? []).find((c: any) => c.campaign === 'C-Mid');
+  ok('CRM-15 attribution report: per-campaign attributed revenue + revenue-conservation invariant reconciles',
+    attrRep.status < 300 && near(cFirst?.attributed_revenue, 40000) && near(cMid?.attributed_revenue, 20000) &&
+    near(attrRep.json.totals.total_attributed, 100000) && near(attrRep.json.totals.won_with_touches_revenue, 100000) && attrRep.json.totals.reconciled === true && attrRep.json.totals.deals_with_touches === 1,
+    JSON.stringify({ total: attrRep.json.totals?.total_attributed, recon: attrRep.json.totals?.reconciled }));
+
+  const attrLinRep = await inj('GET', '/api/crm/attribution?model=linear&months=24', sales1);
+  ok('CRM-15 the linear model also reconciles (total attributed == won-with-touches)',
+    near(attrLinRep.json.totals.total_attributed, attrLinRep.json.totals.won_with_touches_revenue) && attrLinRep.json.totals.reconciled === true, JSON.stringify({ t: attrLinRep.json.totals?.total_attributed }));
+
+  const rtypesAttr = await inj('GET', '/api/bi/report-types', sales1);
+  ok('CRM-15 BI: registry exposes the crm_attribution report type', (rtypesAttr.json.report_types ?? []).some((r: any) => r.key === 'crm_attribution'), 'crm_attribution');
+
+  // ── CRM-18 CRM↔PPM back-flow (control CRM-18, migration 0415) — a DELIVERED project (phase gate at 'closed')
+  // raises a renewal opportunity for its account so recurring revenue doesn't silently lapse. Runs on HQ
+  // (admin creates + submits the gate; mgr independently GOes it). ──
+  await inj('POST', '/api/crm/accounts', admin, { name: 'Renewal Customer', customer_no: 'CUST-REN' });
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-REN', name: 'ระบบลูกค้าต่ออายุ', billing_type: 'Fixed', customer_no: 'CUST-REN', contract_amount: 500000 });
+
+  const renEarly = await inj('POST', '/api/crm/project-renewals/PRJ-REN/raise', admin, {});
+  ok('CRM-18 a renewal cannot be raised from a project that is not delivered → PROJECT_NOT_DELIVERED', renEarly.status === 400 && renEarly.json.error?.code === 'PROJECT_NOT_DELIVERED', `${renEarly.status}/${renEarly.json.error?.code}`);
+
+  // Deliver the project: one phase gate straight to 'closed', independently GO-approved (PROJ-26).
+  const gate = await inj('POST', '/api/projects/PRJ-REN/gates', admin, { target_phase: 'closed', gate_key: 'G-DELIVER' });
+  const gateId = gate.json.pending_gate.id;
+  await inj('POST', `/api/projects/gates/${gateId}/decide`, mgr, { decision: 'go', notes: 'delivered' });
+
+  const renList1 = await inj('GET', '/api/crm/project-renewals', admin);
+  const renRow = (renList1.json.delivered ?? []).find((r: any) => r.project_code === 'PRJ-REN');
+  ok('CRM-18 the delivered project surfaces as a renewal GAP (has an account, no renewal yet)',
+    renList1.status < 300 && !!renRow && renRow.is_gap === true && renRow.renewal_raised === false && renRow.account_no != null && renList1.json.counts.gaps >= 1,
+    JSON.stringify({ gap: renRow?.is_gap, acct: renRow?.account_no, gaps: renList1.json.counts?.gaps }));
+
+  const raise = await inj('POST', '/api/crm/project-renewals/PRJ-REN/raise', admin, {});
+  ok('CRM-18 raise renewal → a renewal opportunity is created for the account (deal_type renewal, amount from contract)',
+    raise.status < 300 && /^OPP-/.test(raise.json.opportunity_no) && raise.json.deal_type === 'renewal' && near(raise.json.amount, 500000) && raise.json.account_no != null,
+    JSON.stringify({ opp: raise.json.opportunity_no, dt: raise.json.deal_type }));
+
+  // the created opportunity is a real renewal deal — it appears in the CRM-08 renewal pipeline (deal_type=renewal filter)
+  const backflowPipe = await inj('GET', '/api/crm/account-health/renewals', admin);
+  ok('CRM-18 the raised opportunity is a live renewal deal (appears in the renewal pipeline)',
+    backflowPipe.status < 300 && (backflowPipe.json.renewals ?? []).some((o: any) => o.opp_no === raise.json.opportunity_no && o.deal_type === 'renewal'),
+    JSON.stringify({ found: (backflowPipe.json.renewals ?? []).map((o: any) => o.opp_no) }));
+
+  const renDup = await inj('POST', '/api/crm/project-renewals/PRJ-REN/raise', admin, {});
+  ok('CRM-18 raising a renewal twice is rejected → RENEWAL_EXISTS (idempotent)', renDup.status === 400 && renDup.json.error?.code === 'RENEWAL_EXISTS', `${renDup.status}/${renDup.json.error?.code}`);
+
+  const renList2 = await inj('GET', '/api/crm/project-renewals', admin);
+  const renRow2 = (renList2.json.delivered ?? []).find((r: any) => r.project_code === 'PRJ-REN');
+  ok('CRM-18 after raising, the project is no longer a gap (renewal_raised, gap cleared)',
+    renRow2?.renewal_raised === true && renRow2?.is_gap === false && renList2.json.counts.raised >= 1,
+    JSON.stringify({ raised: renRow2?.renewal_raised, gap: renRow2?.is_gap }));
+
+  // A delivered project whose customer has no CRM account can't raise a renewal.
+  await inj('POST', '/api/projects', admin, { project_code: 'PRJ-REN2', name: 'ไม่มีบัญชี', billing_type: 'Fixed', customer_no: 'CUST-NONE', contract_amount: 10000 });
+  const g2 = await inj('POST', '/api/projects/PRJ-REN2/gates', admin, { target_phase: 'closed', gate_key: 'G2' });
+  await inj('POST', `/api/projects/gates/${g2.json.pending_gate.id}/decide`, mgr, { decision: 'go' });
+  const renNoAcct = await inj('POST', '/api/crm/project-renewals/PRJ-REN2/raise', admin, {});
+  ok('CRM-18 a delivered project with no CRM account → ACCOUNT_NOT_FOUND', renNoAcct.status === 404 && renNoAcct.json.error?.code === 'ACCOUNT_NOT_FOUND', `${renNoAcct.status}/${renNoAcct.json.error?.code}`);
 
   await app.close();
 }
