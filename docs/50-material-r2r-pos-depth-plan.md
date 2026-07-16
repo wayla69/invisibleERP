@@ -286,7 +286,15 @@ qty-break, combo explosion, service-charge auto-rules, satang rounding).
 - Harness: new `pricing` — in-window/out-of-window, BOGO, stacking priority, service charge on 6-top,
   satang rounding, identical result via QR vs register.
 
-### C4 — Offline completeness: loyalty-redeem + fiscal chain replay, blind drawer close · Effort **M**
+### C4 — Offline completeness: loyalty-redeem + fiscal chain replay, blind drawer close · Effort **M** · **✅ DELIVERED (2026-07-16, re-scoped)**
+> **Depth note:** blind drawer close shipped in Wave 1 (C1-rescoped), and the audit found the fiscal-chain
+> half a **false gap** — the cloud already re-appends its own book-of-record chain per replayed sale;
+> splicing hub hashes would FORK it. The genuine residual was loyalty-redeem replay. Delivered: the hub
+> pusher emits `member_id`/`redeem_points` (member sourced from the hub's own Redeem ledger row) instead
+> of skipping; the cloud clamps to ITS balance before checkout ("adjusted at sync" — the revenue sale
+> never fails over points drift), native redeem lock + LYL-22 idempotency bind, re-push never
+> double-deducts; memberless redemptions stay `LOYALTY_REDEEM_NO_MEMBER`. ToE `hub-snapshot` 73→79;
+> PN-24 rev 0.11; docs/41 Phase 2c updated; UAT-O2C-515..516.
 **Goal:** clear docs/41's `skipped_unsupported` queue and the last P1c control.
 - `modules/hub` ingest + `restaurant/offline-sync.service.ts`: replay **loyalty-redemption sales**
   (server-side balance resolution under lock at replay, "adjusted at sync" surfaced) and the **fiscal

@@ -23,7 +23,7 @@
 import { createHmac } from 'node:crypto';
 import { hostname } from 'node:os';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { buffetPackages, custPosSales, dineInOrders, dineInOrderItems, hubPushLog, tenants } from './schema';
+import { buffetPackages, custPosSales, dineInOrders, dineInOrderItems, hubPushLog, tenants, posMemberLedger } from './schema';
 
 // pseudo item_ids the buffet flow writes for the per-pax charge + overtime surcharge lines
 const BUFFET_CHARGE_REF = '__buffet_charge__';
@@ -133,9 +133,21 @@ export async function pushHubSales(
       summary.skipped++;
       await logRow({ hubSaleNo: saleNo, clientUuid, status: 'skipped_unsupported', hubTotal: String(num(s.total).toFixed(2)), skipReason: reason });
     };
-    if (num(s.points_used) > 0) { await skip('LOYALTY_REDEEM — points were redeemed on the hub; reconcile manually'); continue; }
     const [order] = await db.select().from(dineInOrders).where(and(eq(dineInOrders.tenantId, tenantId), eq(dineInOrders.saleNo, saleNo))).limit(1);
     if (!order) { await skip('NO_ORDER_LINK — not a restaurant order→checkout sale (portal/split path)'); continue; }
+    // C4 (docs/50 Wave 4 — closes docs/41 Phase 2c's LOYALTY_REDEEM skip): a redemption sale now replays,
+    // carrying the member + the points the HUB redeemed; the CLOUD clamps to its own balance under the
+    // redeem lock ("adjusted at sync"). A redemption with no member on the order stays a defensive skip.
+    let loyalty: { member_id: number; redeem_points: number } | undefined;
+    if (num(s.points_used) > 0) {
+      // The member is authoritative on the hub's own points ledger (the Redeem row this sale wrote);
+      // the order row only carries member_id on member-attached tables, not quick sales.
+      const [led] = await db.select({ memberId: posMemberLedger.memberId }).from(posMemberLedger)
+        .where(and(eq(posMemberLedger.refDoc, saleNo), eq(posMemberLedger.txnType, 'Redeem'))).limit(1);
+      const memberId = led?.memberId ?? order.memberId;
+      if (memberId == null) { await skip('LOYALTY_REDEEM_NO_MEMBER — points redeemed but no member traceable'); continue; }
+      loyalty = { member_id: Number(memberId), redeem_points: num(s.points_used) };
+    }
     const items: any[] = await db.select().from(dineInOrderItems)
       .where(and(eq(dineInOrderItems.orderId, Number(order.id)), isNull(dineInOrderItems.voidedAt)));
 
@@ -172,6 +184,7 @@ export async function pushHubSales(
       // checkout computes SC as pct × (subtotal − discount); invert that so the cloud re-derives the
       // same amount (± satang rounding — the BRANCH-04 report surfaces any drift vs hub_total).
       ...(sc > 0 && netBase > 0 ? { service_charge_pct: Math.round((sc / netBase) * 1e6) / 1e4 } : {}),
+      ...(loyalty ?? {}),
     };
     ops.push(op);
     bySale.set(clientUuid, s);
