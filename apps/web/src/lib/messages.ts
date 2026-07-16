@@ -334,6 +334,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.group.realestate': { th: 'อสังหาริมทรัพย์', en: 'Real Estate' },
   'nav.re_developments': { th: 'โครงการ & ยูนิต', en: 'Developments & Units' },
   'nav.profitability': { th: 'กำไรตามมิติ', en: 'Profitability by Dimension' },
+  'nav.analytics_home': { th: 'ศูนย์วิเคราะห์ (Analytics Home)', en: 'Analytics Home' },
   'nav.insights': { th: 'ข้อมูลเชิงลึก (Insights)', en: 'Insights' },
   'nav.bi': { th: 'BI Analytics', en: 'BI Analytics' },
   'nav.query': { th: 'เครื่องมือวิเคราะห์ (Studio)', en: 'Analytics Studio' },

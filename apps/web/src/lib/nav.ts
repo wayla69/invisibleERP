@@ -27,6 +27,7 @@ import {
   CheckCheck,
   ChefHat,
   CircleDollarSign,
+  Compass,
   KeyRound,
   ClipboardCheck,
   ListChecks,
@@ -561,6 +562,7 @@ export const INTERNAL_NAV: NavGroup[] = [
     title: 'nav.group.planning',
     workspace: ['erp'],
     items: [
+      { label: 'nav.analytics_home', href: '/analytics', icon: Compass, perms: ['exec', 'dashboard', 'planner', 'warehouse', 'marketing'] },
       { label: 'nav.planning', href: '/planning', icon: Goal, perms: ['exec', 'planner'] },
       { label: 'nav.budget', href: '/budget', icon: PiggyBank, perms: ['exec', 'planner'] },
       { label: 'nav.demand', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse'] },

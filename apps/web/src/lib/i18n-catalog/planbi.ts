@@ -2,6 +2,27 @@ import type { Lang } from '../messages';
 
 // i18n catalog fragment (planbi domain). Merged into MESSAGES in messages.ts. Add `'key': { th, en }` entries.
 export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  // ── Analytics Home (single entry point that unifies the scattered analytics surfaces) ──
+  'ah.title': { th: 'ศูนย์วิเคราะห์', en: 'Analytics' },
+  'ah.subtitle': { th: 'ประตูเดียวสู่ทุกเครื่องมือวิเคราะห์ รายงาน และแดชบอร์ด', en: 'One door to every analytics tool, report, and dashboard.' },
+  'ah.sec_explore': { th: 'สำรวจ & ถามข้อมูล', en: 'Explore & ask' },
+  'ah.sec_monitor': { th: 'ติดตาม & แดชบอร์ด', en: 'Monitor & dashboards' },
+  'ah.sec_deliver': { th: 'ส่งออก & กำหนดเวลา', en: 'Deliver & schedule' },
+  'ah.sec_plan': { th: 'วางแผน & พยากรณ์', en: 'Plan & forecast' },
+  'ah.desc_insights': { th: 'สัญญาณเชิงลึกจาก AI — สต๊อกใกล้หมด ความผิดปกติ และคำแนะนำ', en: 'AI-surfaced signals — stockout risk, anomalies, and recommendations.' },
+  'ah.desc_bi': { th: 'สร้างและรันรายงาน BI จากแคตตาล็อกรายงานมาตรฐาน', en: 'Build and run BI reports from the standard report catalog.' },
+  'ah.desc_query': { th: 'สตูดิโอวิเคราะห์แบบ pivot/ตาราง สำหรับเจาะข้อมูลเอง', en: 'Self-serve pivot & table studio for ad-hoc analysis.' },
+  'ah.desc_nl': { th: 'ถามข้อมูลเป็นภาษาธรรมชาติ แล้วได้คำตอบเป็นตาราง/กราฟ', en: 'Ask in plain language, get tables and charts back.' },
+  'ah.desc_dashboard': { th: 'ภาพรวม KPI ประจำวันของทั้งกิจการ', en: 'The daily company-wide KPI overview.' },
+  'ah.desc_designer': { th: 'ออกแบบแดชบอร์ดของคุณเองแบบลากวาง', en: 'Compose your own dashboards, drag-and-drop.' },
+  'ah.desc_saved': { th: 'มุมมองและตัวกรองที่บันทึกไว้ ใช้ซ้ำได้ทุกอุปกรณ์', en: 'Saved views and filters, reusable across devices.' },
+  'ah.desc_scheduled': { th: 'ตั้งเวลาส่งรายงานอัตโนมัติ (อีเมล/ไลน์)', en: 'Automate report delivery on a schedule (email/LINE).' },
+  'ah.desc_planning': { th: 'วางแผนงบและกำลังการผลิต', en: 'Budget and capacity planning.' },
+  'ah.desc_budget': { th: 'งบประมาณเทียบกับผลจริง (variance)', en: 'Budget vs. actual variance.' },
+  'ah.desc_demand': { th: 'พยากรณ์ดีมานด์และการเติมสินค้า', en: 'Demand forecasting and replenishment.' },
+  'ah.desc_profitability': { th: 'กำไรตามเซกเมนต์/สินค้า/ลูกค้า', en: 'Profit by segment, product, and customer.' },
+  'ah.desc_mmm': { th: 'โมเดลจัดสรรงบการตลาด (Marketing Mix)', en: 'Marketing-mix modeling and budget allocation.' },
+
   // ── Shared (planning/BI) ──────────────────────────────────────────────────
   'pb.saving': { th: 'กำลังบันทึก…', en: 'Saving…' },
   'pb.approve': { th: 'อนุมัติ', en: 'Approve' },
