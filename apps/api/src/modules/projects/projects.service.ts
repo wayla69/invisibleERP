@@ -14,6 +14,7 @@ import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
 import { ProjectsMaterialService } from './projects-material.service';
+import { BoqImportService, type BoqImportInput } from './boq-import.service';
 import { ProjectsPortfolioService } from './projects-portfolio.service';
 import { ProjectsGateService } from './projects-gate.service';
 import { ProgramBenefitsService } from './program-benefits.service';
@@ -71,6 +72,7 @@ export class ProjectsService {
   private readonly wbs: ProjectsWbsService;
   private readonly evmSvc: ProjectsEvmService;
   private readonly materialSvc: ProjectsMaterialService;
+  private readonly boqImportSvc: BoqImportService;
   private readonly portfolio: ProjectsPortfolioService;
   private readonly gates: ProjectsGateService;
   private readonly benefits: ProgramBenefitsService;
@@ -95,6 +97,8 @@ export class ProjectsService {
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
     // A3 (docs/50 Wave 3) — material control tower read models (ctor-body plain class, ratchet pattern).
     this.materialSvc = new ProjectsMaterialService(db, (code) => this.row(code), this.commitments);
+    // A4 (docs/50 Wave 4) — BoQ takeoff import (ctor-body plain class, ratchet pattern).
+    this.boqImportSvc = new BoqImportService(db, (code) => this.row(code), (code) => this.getBoq(code));
     this.portfolio = new ProjectsPortfolioService(db);
     this.gates = new ProjectsGateService(db, (code) => this.row(code));
     this.benefits = new ProgramBenefitsService(db);
@@ -349,6 +353,9 @@ export class ProjectsService {
   // A3 (docs/50 Wave 3) — thin delegators; logic in projects-material.service.ts (ratchet).
   async boqByWbs(code: string) { return this.materialSvc.boqByWbs(code); }
   async materialDrawCurve(code: string) { return this.materialSvc.drawCurve(code); }
+  // A4 (docs/50 Wave 4) — thin delegators; logic in boq-import.service.ts (ratchet).
+  async importBoq(code: string, input: BoqImportInput, user: JwtUser) { return this.boqImportSvc.importBoq(code, input, user); }
+  boqImportTemplate() { return this.boqImportSvc.template(); }
   // PPM-B2 (PROJ-22): manual bottom-up ETC entry + the EAC-scenario comparison (formulaic vs bottom-up).
   async submitEtc(code: string, dto: EtcDto, user: JwtUser) { return this.evmSvc.submitEtc(code, dto, user); }
   async eacScenarios(code: string) { return this.evmSvc.eacScenarios(code); }

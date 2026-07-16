@@ -206,6 +206,18 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const commitments = useQuery<any>({ queryKey: ['proj', code, 'commitments'], queryFn: () => api(`/api/projects/${code}/commitments`) });
   const pmrList = useQuery<any>({ queryKey: ['proj', code, 'pmr'], queryFn: () => api(`/api/pmr/project/${code}`) });
   const reservations = useQuery<any>({ queryKey: ['proj', code, 'reservations'], queryFn: () => api(`/api/reservations/project/${code}`) });
+  // A4 BoQ takeoff import (paste-CSV; fail-closed all-or-nothing server-side)
+  const [impDlg, setImpDlg] = useState(false);
+  const [impCsv, setImpCsv] = useState('');
+  const importBoq = useMutation({
+    mutationFn: () => api(`/api/projects/${code}/boq/import`, { method: 'POST', body: JSON.stringify({ format: 'csv', csv: impCsv }) }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('pj.boq_import_ok', { n: r?.imported ?? 0 }));
+      if ((r?.warnings ?? []).length) notifyError(t('pj.boq_import_warn', { n: r.warnings.length }));
+      setImpDlg(false); setImpCsv(''); refresh();
+    },
+    onError: (err: any) => notifyError(err?.message ?? t('pj.boq_import_failed')),
+  });
   // A3 material control tower reads (WBS rollup + draw curve)
   const byWbsQ = useQuery<any>({ queryKey: ['proj', code, 'by-wbs'], queryFn: () => api(`/api/projects/${code}/boq/by-wbs`) });
   const drawQ = useQuery<any>({ queryKey: ['proj', code, 'material-draw'], queryFn: () => api(`/api/projects/${code}/material-draw`) });
@@ -320,7 +332,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
           <ListTree className="mx-auto size-8 text-muted-foreground" />
           <h3 className="text-base font-semibold">{t('pj.boq_empty_title')}</h3>
           <p className="text-sm text-muted-foreground">{t('pj.boq_empty_desc')}</p>
-          <div><Button onClick={() => setBoqDlg(true)}><Plus className="size-4" /> {t('pj.boq_btn_create')}</Button></div>
+          <div className="flex justify-center gap-2"><Button onClick={() => setBoqDlg(true)}><Plus className="size-4" /> {t('pj.boq_btn_create')}</Button><Button variant="outline" onClick={() => setImpDlg(true)}>{t('pj.boq_btn_import')}</Button></div>
         </Card>
       ) : (
         <>
@@ -360,6 +372,20 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             ]}
             emptyState={{ icon: ListTree, title: t('pj.boq_empty_lines_title'), description: t('pj.boq_empty_lines_desc') }}
           />
+          <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => setImpDlg(true)}>{t('pj.boq_btn_import')}</Button></div>
+          {impDlg && (
+            <div className="space-y-2 rounded-lg border p-3">
+              <p className="text-sm font-medium">{t('pj.boq_import_title')}</p>
+              <p className="text-xs text-muted-foreground">{t('pj.boq_import_hint')}</p>
+              <textarea className="min-h-28 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+                placeholder={'item_no,description,category,uom,budget_qty,rate,wbs_code'}
+                value={impCsv} onChange={(e) => setImpCsv(e.target.value)} />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="outline" onClick={() => { setImpDlg(false); setImpCsv(''); }}>{t('fin.cancel')}</Button>
+                <Button size="sm" disabled={importBoq.isPending || !impCsv.trim()} onClick={() => importBoq.mutate()}>{t('pj.boq_btn_import')}</Button>
+              </div>
+            </div>
+          )}
           {/* A3 material control tower — WBS rollup + planned-vs-actual draw curve (read models) */}
           {(byWbsQ.data?.nodes ?? []).length > 0 && (
             <div className="space-y-2">

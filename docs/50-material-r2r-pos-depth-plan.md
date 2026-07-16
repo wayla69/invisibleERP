@@ -117,7 +117,11 @@ path* (`issueToProject` has no inverse), so returns are done as ad-hoc adjustmen
   action center.
 - Harness: seeded issues across two WBS nodes roll up correctly; curve monotonic; return (A1) reduces it.
 
-### A4 — BoQ Excel/CSV takeoff import · Effort **M** · docs/32 §10 explicit fast-follow
+### A4 — BoQ Excel/CSV takeoff import · Effort **M** · docs/32 §10 explicit fast-follow · **✅ DELIVERED (2026-07-16)**
+> Delivered: `POST /api/projects/:code/boq/import` + template endpoint (NEW `projects/boq-import.service.ts`
+> over the masterdata parse utils; fail-closed all-or-nothing with per-row `details.errors`; described
+> unknown items import with a warning); DRAFT-only — PROJ-12 unchanged; paste-CSV dialog on the BoQ tab.
+> ToE `projects` 357→362; PN-16 rev 0.59; manual 14 rev 2.39; UAT-O2C-512..514.
 **Goal:** estimators build BoQs in Excel; today lines are keyed one-by-one.
 - New `projects/boq-import.service.ts` + `POST /api/projects/:code/boq/import` — reuse the masterdata
   engine's `rowsFromInput` (csv / rows / base64 xlsx) rather than a new parser; validate rows against the

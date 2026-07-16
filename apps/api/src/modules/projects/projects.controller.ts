@@ -18,6 +18,15 @@ const BoqLineBody = z.object({
   rate: z.number().nonnegative().optional(),
   budget_amount: z.number().nonnegative().optional(),
 });
+const BoqImportBody = z.object({
+  format: z.enum(['rows', 'csv', 'xlsx']).optional(),
+  csv: z.string().max(2_000_000).optional(),
+  xlsx: z.string().max(8_000_000).optional(),
+  rows: z.array(z.record(z.any())).max(2000).optional(),
+  boq_no: z.string().max(40).optional(),
+  title: z.string().max(200).optional(),
+});
+type BoqImportBodyT = z.infer<typeof BoqImportBody>;
 const BoqBody = z.object({ title: z.string().optional(), boq_no: z.string().optional(), lines: z.array(BoqLineBody).optional() });
 const RemeasureBody = z.object({ remeasured_qty: z.number().nonnegative() });
 
@@ -367,6 +376,18 @@ export class ProjectsController {
   @Get(':code/material-draw')
   materialDrawCurve(@Param('code') code: string) {
     return this.svc.materialDrawCurve(code);
+  }
+
+  // A4 (docs/50 Wave 4) — BoQ takeoff import: csv / rows / base64 xlsx → DRAFT lines (fail-closed,
+  // all-or-nothing; PROJ-12 approval unchanged). Static 'boq/import-template' never collides with :code.
+  @Get('boq/import-template')
+  boqImportTemplate() {
+    return this.svc.boqImportTemplate();
+  }
+
+  @Post(':code/boq/import')
+  importBoq(@Param('code') code: string, @Body(new ZodValidationPipe(BoqImportBody)) b: BoqImportBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.importBoq(code, b, u);
   }
 
   // Commitment / encumbrance ledger for a project (M1, PROJ-12): open/consumed/released draws vs the BoQ budget.

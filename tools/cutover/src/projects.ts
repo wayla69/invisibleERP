@@ -1671,6 +1671,29 @@ async function main() {
     p4Lines.some((l: any) => l.accountCode === '4210' && Math.abs(Number(l.credit) - 4444) < 0.01) && p4Lines.some((l: any) => l.accountCode === '1100' && Math.abs(Number(l.debit) - 4444) < 0.01),
     `lines=${p4Lines.map((l: any) => l.accountCode).join(',')}`);
 
+  // ── 9j. A4 BoQ takeoff import (docs/50 Wave 4): csv → DRAFT lines, fail-closed all-or-nothing ──
+  const tplA4 = await inj('GET', '/api/projects/boq/import-template', admin);
+  ok('A4: import template exposes the headers + sample', tplA4.status === 200 && (tplA4.json.headers ?? []).includes('budget_qty') && (tplA4.json.sample ?? []).length >= 1, JSON.stringify(tplA4.json.headers));
+  await inj('POST', '/api/projects', admin, { name: 'Import test', project_code: 'PRJ-IMP' });
+  const badCsv = 'item_no,description,category,uom,budget_qty,rate,wbs_code\nNOSUCH,,material,ถุง,10,100,1.1\n,ค่าแรง,badcat,จุด,-1,x,1.2';
+  const impBad = await inj('POST', '/api/projects/PRJ-IMP/boq/import', admin, { format: 'csv', csv: badCsv });
+  ok('A4: invalid rows reject the WHOLE file (IMPORT_INVALID, per-row errors, nothing imported)',
+    impBad.status === 400 && impBad.json.error?.code === 'IMPORT_INVALID' && (impBad.json.error?.details?.errors ?? []).length >= 3
+    && (await inj('GET', '/api/projects/PRJ-IMP/boq', admin)).json.boq === null,
+    JSON.stringify(impBad.json.error?.details?.errors ?? []).slice(0, 140));
+  const okCsv = 'item_no,description,category,uom,budget_qty,rate,wbs_code\nSTEEL,เหล็กเส้น,material,,20,50,2.1\n,ค่าแรงติดตั้ง,labor,จุด,5,300,2.2';
+  const imp1 = await inj('POST', '/api/projects/PRJ-IMP/boq/import', admin, { format: 'csv', csv: okCsv, title: 'takeoff' });
+  ok('A4: valid csv lands DRAFT lines (2 imported, new draft BoQ, budget 2500; unknown-item WARNING kept)',
+    imp1.status < 300 && imp1.json.imported === 2 && imp1.json.created_boq === true && imp1.json.boq?.status === 'draft' && near(imp1.json.budget_total, 2500)
+    && (imp1.json.warnings ?? []).some((w: any) => w.code === 'ITEM_NOT_FOUND'),
+    JSON.stringify({ n: imp1.json.imported, st: imp1.json.boq?.status, b: imp1.json.budget_total, w: imp1.json.warnings }));
+  const imp2 = await inj('POST', '/api/projects/PRJ-IMP/boq/import', admin, { format: 'rows', rows: [{ item_no: 'STEEL', description: 'เหล็กเพิ่ม', category: 'material', budget_qty: 2, rate: 50 }] });
+  ok('A4: re-import APPENDS to the same draft (created_boq=false, 3 lines, budget 2600)',
+    imp2.status < 300 && imp2.json.created_boq === false && imp2.json.count === 3 && near(imp2.json.budget_total, 2600),
+    JSON.stringify({ c: imp2.json.count, b: imp2.json.budget_total }));
+  const impApprove = await inj('POST', `/api/projects/boq/${imp1.json.boq_id}/approve`, mgr);
+  ok('A4: the imported BoQ still flows through PROJ-12 approval (approver ≠ author)', impApprove.status < 300 && (impApprove.json.boq?.status === 'approved' || impApprove.json.status === 'approved'), JSON.stringify(impApprove.json).slice(0, 90));
+
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
