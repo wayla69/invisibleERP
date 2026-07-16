@@ -147,7 +147,14 @@ The R2R spine is deep (see §0) — the residual theme is **orchestration and au
 hardcoded, reval/consolidation are manual runs, accruals don't self-reverse, and detection is preventive
 (gates) rather than detective (analytics).
 
-### B1 — Close Manager: configurable close-task orchestration · Effort **L** · the anchor feature
+### B1 — Close Manager: configurable close-task orchestration · Effort **L** · the anchor feature · **✅ v1 DELIVERED (2026-07-16)**
+> Delivered (v1): migration `0421` `close_task_templates` + step fields (owner_role/due_date/depends_on_key);
+> `startClose` composes standard + tenant templates (none ⇒ byte-identical); dependency gating
+> (`DEPENDENCY_NOT_DONE`), custom REQUIRED tasks gate the lock, GL-16 lock semantics untouched;
+> `GET/PUT /api/ledger/close/task-templates`; owner/due/dependency shown on the period-close screen.
+> ToE `basics` 422→431; PN-04 rev 2.36; manual 06 v0.21; UAT-GL-195..197.
+> **Deferred to a follow-up:** auto-completion from GL-19/closeStatus signals; overdue-task GOV-01
+> provider; a dedicated template-editor screen (templates are API-managed in v1).
 **Goal:** replace the fixed 9-step `CHECKLIST` const (`modules/ledger/close.service.ts:25`) with
 per-tenant close tasks: owner/assignee, due-day offset from period end, predecessor dependencies,
 evidence attachment, SLA/overdue escalation.

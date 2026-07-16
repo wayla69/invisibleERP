@@ -1541,6 +1541,41 @@ async function main() {
   ok('GL-16b: a different user can re-lock the reopened period → Locked',
     reLock.status === 200 && reLock.json?.status === 'Locked', `st=${reLock.status} status=${reLock.json?.status}`);
 
+  // ── B1 Close Manager (docs/50 Wave 3): per-tenant configurable close tasks over the GL-15 checklist ──
+  // A custom REQUIRED task (with owner/due-offset) gates the lock exactly like a standard step; a
+  // dependency gates sign-off ORDER; an override template re-titles a standard step. No templates ⇒
+  // byte-identical (every earlier GL-15/16 check above ran template-free).
+  const tplBad = await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [{ step_key: 'a_task', title: 'x', depends_on_key: 'a_task' }] });
+  ok('B1: self-dependency rejected (SELF_DEPENDENCY)', tplBad.status === 400 && tplBad.json?.error?.code === 'SELF_DEPENDENCY', `st=${tplBad.status} code=${tplBad.json?.error?.code}`);
+  const tplBad2 = await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [{ step_key: 'a_task', title: 'x', depends_on_key: 'no_such_step' }] });
+  ok('B1: unknown dependency rejected (UNKNOWN_DEPENDENCY)', tplBad2.status === 400 && tplBad2.json?.error?.code === 'UNKNOWN_DEPENDENCY', `st=${tplBad2.status} code=${tplBad2.json?.error?.code}`);
+  const tplPut = await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [
+    { step_key: 'insurance_review', title: 'ทบทวนกรมธรรม์ประกันภัยงวด', required: true, owner_role: 'FinancialController', due_day_offset: 3, depends_on_key: 'bank_rec' },
+    { step_key: 'bank_rec', title: 'Bank reconciliation complete (ธนาคารหลัก + PromptPay)', required: true },
+  ] });
+  ok('B1: templates saved (1 custom + 1 standard override)', tplPut.status === 200 && tplPut.json?.count === 2 && (tplPut.json?.standard_steps ?? []).length >= 9, `st=${tplPut.status} n=${tplPut.json?.count}`);
+  const b1Period = '2020-03';
+  const b1Start = await inj('POST', '/api/ledger/close/start', admin, { period: b1Period });
+  const b1RunId = Number(b1Start.json?.id);
+  const b1Steps = b1Start.json?.steps ?? [];
+  const b1Custom = b1Steps.find((st: any) => st.step_key === 'insurance_review');
+  ok('B1: startClose seeds standard + custom task (owner, due = period end + 3d, dependency)',
+    b1Steps.length >= 10 && !!b1Custom && b1Custom.required === true && b1Custom.owner_role === 'FinancialController' && String(b1Custom.due_date).startsWith('2020-04-03') && b1Custom.depends_on_key === 'bank_rec',
+    JSON.stringify(b1Custom));
+  ok('B1: an override template re-titles the standard step (bank_rec)', /PromptPay/.test(b1Steps.find((st: any) => st.step_key === 'bank_rec')?.title ?? ''), b1Steps.find((st: any) => st.step_key === 'bank_rec')?.title);
+  const depBlocked = await inj('POST', '/api/ledger/close/step', admin, { close_run_id: b1RunId, step_key: 'insurance_review' });
+  ok('B1: dependent task blocked before its predecessor (DEPENDENCY_NOT_DONE)', depBlocked.status === 400 && depBlocked.json?.error?.code === 'DEPENDENCY_NOT_DONE', `st=${depBlocked.status} code=${depBlocked.json?.error?.code}`);
+  for (const st of b1Steps.filter((x: any) => x.required && x.step_key !== 'insurance_review')) {
+    await inj('POST', '/api/ledger/close/step', admin, { close_run_id: b1RunId, step_key: st.step_key });
+  }
+  const b1LockEarly = await inj('POST', '/api/ledger/close/lock', mgr, { close_run_id: b1RunId });
+  ok('B1: lock blocked while the custom REQUIRED task is pending (STEPS_INCOMPLETE lists it)', b1LockEarly.status === 400 && b1LockEarly.json?.error?.code === 'STEPS_INCOMPLETE' && /insurance_review/.test(b1LockEarly.json?.error?.message ?? ''), `st=${b1LockEarly.status} msg=${b1LockEarly.json?.error?.message}`);
+  const depOk = await inj('POST', '/api/ledger/close/step', admin, { close_run_id: b1RunId, step_key: 'insurance_review' });
+  ok('B1: predecessor Done → dependent task signs off; run ReadyToLock', depOk.status === 200 && depOk.json?.status === 'ReadyToLock', `st=${depOk.status} status=${depOk.json?.status}`);
+  const b1Lock = await inj('POST', '/api/ledger/close/lock', mgr, { close_run_id: b1RunId });
+  ok('B1: maker-checker lock unchanged (a different user locks)', b1Lock.status === 200 && b1Lock.json?.status === 'Locked', `st=${b1Lock.status} status=${b1Lock.json?.status}`);
+  await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [] }); // restore template-free default
+
   // ───────────────────── C2 — Pluggable tax + e-invoicing (SG/MY/EU) ─────────────────────
   // TC-C2-01: SG GST 9% — provider registered, calc correct.
   const sgTax = (await inj('GET', '/api/tax/calc?country=SG&net=100&currency=SGD', admin)).json;

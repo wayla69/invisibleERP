@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { glPeriodBalances, closeRuns, closeRunSteps, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
+import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
@@ -66,14 +66,37 @@ export class CloseService {
       status: 'InProgress',
       startedBy: dto.startedBy,
     }).returning();
-    await db.insert(closeRunSteps).values(CHECKLIST.map((c, i) => ({
+    // B1 (docs/50 Wave 3) — Close Manager: compose the standard checklist with the tenant's ACTIVE task
+    // templates. A template reusing a standard step_key OVERRIDES that step's title/required/owner/due/
+    // dependency; a new step_key appends a custom task. No templates ⇒ byte-identical to the fixed list.
+    const templates = tenantId != null
+      ? await db.select().from(closeTaskTemplates).where(and(eq(closeTaskTemplates.tenantId, tenantId), eq(closeTaskTemplates.active, true)))
+      : [];
+    const byKey = new Map(templates.map((t: any) => [t.stepKey, t]));
+    const periodEnd = this.periodEndDate(dto.period);
+    const dueFor = (offset: number | null | undefined): string | null => {
+      if (offset == null) return null;
+      const d = new Date(`${periodEnd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + Number(offset));
+      return d.toISOString().slice(0, 10);
+    };
+    const seeded = CHECKLIST.map((c, i) => {
+      const t: any = byKey.get(c.stepKey);
+      return { stepKey: c.stepKey, title: t?.title ?? c.title, required: t?.required ?? c.required, seq: i + 1, ownerRole: t?.ownerRole ?? null, dueDate: dueFor(t?.dueDayOffset), dependsOnKey: t?.dependsOnKey ?? null };
+    });
+    const custom = templates.filter((t: any) => !CHECKLIST.some((c) => c.stepKey === t.stepKey))
+      .sort((a: any, b: any) => Number(a.seq) - Number(b.seq))
+      .map((t: any, i: number) => ({ stepKey: t.stepKey, title: t.title, required: !!t.required, seq: CHECKLIST.length + i + 1, ownerRole: t.ownerRole ?? null, dueDate: dueFor(t.dueDayOffset), dependsOnKey: t.dependsOnKey ?? null }));
+    await db.insert(closeRunSteps).values([...seeded, ...custom].map((c) => ({
       closeRunId: Number(run!.id),
       tenantId: tenantId as number,
       stepKey: c.stepKey,
       title: c.title,
-      seq: i + 1,
+      seq: c.seq,
       required: c.required,
       status: 'Pending',
+      ownerRole: c.ownerRole,
+      dueDate: c.dueDate,
+      dependsOnKey: c.dependsOnKey,
     })));
     return this.shape(run, await this.stepsFor(Number(run!.id)));
   }
@@ -90,6 +113,14 @@ export class CloseService {
     const [step] = await db.select().from(closeRunSteps)
       .where(and(eq(closeRunSteps.closeRunId, dto.closeRunId), eq(closeRunSteps.stepKey, dto.stepKey))).limit(1);
     if (!step) throw new NotFoundException({ code: 'STEP_NOT_FOUND', message: `Step ${dto.stepKey} not found on close run ${dto.closeRunId}`, messageTh: 'ไม่พบขั้นตอนการปิดงวด' });
+    // B1 (docs/50 Wave 3): a task with a predecessor cannot be signed off before that predecessor is Done.
+    if (step.dependsOnKey) {
+      const [dep] = await db.select().from(closeRunSteps)
+        .where(and(eq(closeRunSteps.closeRunId, dto.closeRunId), eq(closeRunSteps.stepKey, String(step.dependsOnKey)))).limit(1);
+      if (dep && dep.status !== 'Done') {
+        throw new BadRequestException({ code: 'DEPENDENCY_NOT_DONE', message: `Step ${dto.stepKey} depends on ${step.dependsOnKey}, which is not Done yet`, messageTh: `ต้องทำขั้นตอน ${step.dependsOnKey} ให้เสร็จก่อน`, depends_on: step.dependsOnKey });
+      }
+    }
 
     await db.update(closeRunSteps).set({
       status: 'Done',
@@ -294,6 +325,36 @@ export class CloseService {
     return run ?? null;
   }
 
+  // ── B1 (docs/50 Wave 3) — Close Manager task templates (per tenant) ──
+  // GET returns the tenant's templates; PUT replaces the set atomically (gl_close/exec at the route). A
+  // template may not depend on itself; a dependency must reference a standard step or another template.
+  async listTaskTemplates() {
+    const tenantId = this.tenantId();
+    const rows = tenantId != null
+      ? await this.db.select().from(closeTaskTemplates).where(eq(closeTaskTemplates.tenantId, tenantId)).orderBy(closeTaskTemplates.seq)
+      : [];
+    return { templates: rows.map((t: any) => ({ id: Number(t.id), step_key: t.stepKey, title: t.title, required: t.required, seq: Number(t.seq), owner_role: t.ownerRole ?? null, due_day_offset: t.dueDayOffset ?? null, depends_on_key: t.dependsOnKey ?? null, active: t.active })), count: rows.length, standard_steps: CHECKLIST.map((c) => ({ step_key: c.stepKey, title: c.title, required: c.required })) };
+  }
+
+  async putTaskTemplates(dto: { templates: { step_key: string; title: string; required?: boolean; seq?: number; owner_role?: string; due_day_offset?: number; depends_on_key?: string; active?: boolean }[] }, user: JwtUser) {
+    const tenantId = this.tenantId();
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'Close task templates are per-tenant', messageTh: 'ต้องอยู่ในบริบทบริษัท' });
+    const keys = new Set([...CHECKLIST.map((c) => c.stepKey), ...dto.templates.map((t) => t.step_key)]);
+    for (const t of dto.templates) {
+      if (t.depends_on_key && t.depends_on_key === t.step_key) throw new BadRequestException({ code: 'SELF_DEPENDENCY', message: `Step ${t.step_key} cannot depend on itself`, messageTh: 'ขั้นตอนพึ่งพาตัวเองไม่ได้' });
+      if (t.depends_on_key && !keys.has(t.depends_on_key)) throw new BadRequestException({ code: 'UNKNOWN_DEPENDENCY', message: `Step ${t.step_key} depends on unknown step ${t.depends_on_key}`, messageTh: 'อ้างถึงขั้นตอนที่ไม่มีอยู่' });
+    }
+    await this.db.delete(closeTaskTemplates).where(eq(closeTaskTemplates.tenantId, tenantId));
+    if (dto.templates.length) {
+      await this.db.insert(closeTaskTemplates).values(dto.templates.map((t, i) => ({
+        tenantId, stepKey: t.step_key, title: t.title, required: t.required ?? true, seq: t.seq ?? 100 + i,
+        ownerRole: t.owner_role ?? null, dueDayOffset: t.due_day_offset ?? null, dependsOnKey: t.depends_on_key ?? null,
+        active: t.active ?? true, updatedBy: user.username, updatedAt: new Date(),
+      })));
+    }
+    return this.listTaskTemplates();
+  }
+
   private async stepsFor(closeRunId: number) {
     const db = this.db;
     const rows = await db.select().from(closeRunSteps)
@@ -306,6 +367,9 @@ export class CloseService {
       seq: s.seq,
       required: s.required,
       status: s.status,
+      owner_role: s.ownerRole ?? null,
+      due_date: s.dueDate ?? null,
+      depends_on_key: s.dependsOnKey ?? null,
       completed_by: s.completedBy ?? null,
       completed_at: s.completedAt ?? null,
       detail: s.detail ?? null,

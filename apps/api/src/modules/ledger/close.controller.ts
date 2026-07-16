@@ -1,9 +1,22 @@
-import { Controller, Get, Post, Body, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Query, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CloseService } from './close.service';
 
+const TaskTemplatesBody = z.object({
+  templates: z.array(z.object({
+    step_key: z.string().min(1).max(60).regex(/^[a-z0-9_]+$/),
+    title: z.string().min(1).max(200),
+    required: z.boolean().optional(),
+    seq: z.number().int().optional(),
+    owner_role: z.string().max(60).optional(),
+    due_day_offset: z.number().int().min(-31).max(60).optional(),
+    depends_on_key: z.string().max(60).optional(),
+    active: z.boolean().optional(),
+  })).max(50),
+});
+type TaskTemplatesBodyT = z.infer<typeof TaskTemplatesBody>;
 const StartBody = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/, 'period must be YYYY-MM') });
 type StartBodyT = z.infer<typeof StartBody>;
 
@@ -44,6 +57,19 @@ export class CloseController {
   @Permissions('gl_close', 'gl_post', 'exec')
   validate(@Query('period') period: string) {
     return this.svc.validate(period);
+  }
+
+  // B1 (docs/50 Wave 3) — Close Manager task templates: read for any close principal; change gl_close/exec.
+  @Get('task-templates')
+  @Permissions('gl_close', 'gl_post', 'exec')
+  taskTemplates() {
+    return this.svc.listTaskTemplates();
+  }
+
+  @Put('task-templates')
+  @Permissions('gl_close', 'exec')
+  putTaskTemplates(@Body(new ZodValidationPipe(TaskTemplatesBody)) b: TaskTemplatesBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.putTaskTemplates({ templates: b.templates }, u);
   }
 
   @Post('start')
