@@ -97,5 +97,15 @@ export class IdentityConfigService {
   }
 }
 
-// Friendly allow-list of assignable default roles for JIT-provisioned SSO users.
-const ROLES: string[] = ['Admin', 'Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner', 'Cashier', 'AccessAdmin', 'ExecutiveViewer'];
+// Roles that self-service SSO/SCIM JIT provisioning may NEVER assign: `Admin` grants the tenant-isolation /
+// HQ bypass and `AccessAdmin` grants user administration (`users`) — either can escalate further. Reserving
+// them mirrors AdminUsersService.assertCanGrantRole ("only the platform owner may grant Admin") for the
+// actor-less JIT path, closing the second Admin-grant side-door (pentest P2).
+export const SSO_JIT_FORBIDDEN_ROLES = ['Admin', 'AccessAdmin'] as const;
+export function isJitForbiddenRole(role: string | null | undefined): boolean {
+  return !!role && (SSO_JIT_FORBIDDEN_ROLES as readonly string[]).includes(role);
+}
+
+// Friendly allow-list of assignable default roles for JIT-provisioned SSO users — privileged roles are
+// deliberately excluded (see SSO_JIT_FORBIDDEN_ROLES).
+const ROLES: string[] = ['Sales', 'Customer', 'Warehouse', 'Procurement', 'Planner', 'Cashier', 'ExecutiveViewer'];

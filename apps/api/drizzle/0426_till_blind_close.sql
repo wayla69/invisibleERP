@@ -1,4 +1,4 @@
--- 0418_till_blind_close — blind drawer close (docs/50 Wave 1, POS roadmap P1c residual; strengthens REV-13).
+-- 0426_till_blind_close — blind drawer close (docs/50 Wave 1, POS roadmap P1c residual; strengthens REV-13).
 -- With blind close ON, the cashier must count the drawer WITHOUT seeing the system-expected cash: the till
 -- read surfaces (X/Z report on an OPEN session) redact the drawer-expectation figures for till-duty callers,
 -- and expected/variance are revealed only AFTER the count is submitted at close. Per-tenant opt-in policy

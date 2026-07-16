@@ -64,7 +64,7 @@ export class PaymentService {
     @Optional() private readonly journal?: JournalService,   // wiring: electronic journal
     @Optional() private readonly qr?: QrService,             // wiring: render the PromptPay QR as an image
   ) {
-    // Blind drawer close (0418, P1c) — ctor-body plain class so the positional ctor stays unchanged
+    // Blind drawer close (0426, P1c) — ctor-body plain class so the positional ctor stays unchanged
     // (service-size ratchet, docs/46 §4; same pattern as the projects facade's sub-services).
     this.tillPolicy = new TillPolicy(this.db);
   }
@@ -270,10 +270,19 @@ export class PaymentService {
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
 
     // REV-16 maker-checker: a STANDALONE refund (no outerTx — a goods-return refund is authorized by the
-    // return) at/above the materiality threshold is parked as a request and moves no money until a DIFFERENT
-    // user approves. opts.force lets approveRefund run the real refund past the gate.
-    if (!outerTx && !opts?.force && n(dto.amount) >= REFUND_APPROVAL_THRESHOLD) {
-      return this.requestRefund(dto, user);
+    // return) whose CUMULATIVE total crosses the materiality threshold is parked as a request and moves no
+    // money until a DIFFERENT user approves. opts.force lets approveRefund run the real refund past the gate.
+    // Security (pentest P6): the threshold is cumulative — settled refunds + already-pending requests + this
+    // amount — NOT per-call. A per-call gate let a large refund be split into sub-threshold parts that each
+    // skipped approval; summing defeats that. This read only routes the approval decision — the money
+    // invariant (over-refund) is still enforced under the FOR UPDATE lock in run()/requestRefund(), and
+    // requestRefund re-checks the running total under its own lock before queuing.
+    if (!outerTx && !opts?.force) {
+      const [prior] = await this.db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
+      const [pending] = await this.db.select({ v: sql<string>`coalesce(sum(${refundRequests.amount}),0)` }).from(refundRequests).where(and(eq(refundRequests.paymentNo, dto.payment_no), eq(refundRequests.status, 'PendingApproval')));
+      if (n(prior?.v) + n(pending?.v) + n(dto.amount) >= REFUND_APPROVAL_THRESHOLD) {
+        return this.requestRefund(dto, user);
+      }
     }
 
     const refundNo = await this.docNo.nextDaily('REF');
@@ -484,7 +493,7 @@ export class PaymentService {
     return { open: t ? { id: t.id, session_no: t.sessionNo } : null };
   }
 
-  // ── Blind drawer close (0418, docs/50 Wave 1 — P1c): logic lives in till-policy.ts (ratchet). ──
+  // ── Blind drawer close (0426, docs/50 Wave 1 — P1c): logic lives in till-policy.ts (ratchet). ──
   getTillSettings(user: JwtUser) { return this.tillPolicy.getSettings(user); }
   putTillSettings(dto: TillSettingsDto, user: JwtUser) { return this.tillPolicy.putSettings(dto, user); }
 

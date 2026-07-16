@@ -90,11 +90,11 @@ export const tillSessions = pgTable('till_sessions', {
   varianceStatus: text('variance_status').notNull().default('NotRequired'),        // NotRequired | PendingApproval | Approved | Rejected
   varianceApprovedBy: text('variance_approved_by'),
   varianceApprovedAt: timestamp('variance_approved_at', { withTimezone: true }),
-  // 0418 (docs/50 Wave 1) — evidence that this session was closed BLIND (counted without seeing expected).
+  // 0426 (docs/50 Wave 1) — evidence that this session was closed BLIND (counted without seeing expected).
   blindClose: boolean('blind_close').notNull().default(false),
 });
 
-// Per-tenant till policy (0418, docs/50 Wave 1 — POS roadmap P1c blind close; strengthens REV-13):
+// Per-tenant till policy (0426, docs/50 Wave 1 — POS roadmap P1c blind close; strengthens REV-13):
 // blind_close ON ⇒ till-duty callers cannot see the system-expected drawer cash on an OPEN session
 // (X/Z redaction in payments.service); expected/variance are revealed only after the count is submitted.
 // One row per tenant (NULL tenant = single-company default), mirroring receiving_settings.

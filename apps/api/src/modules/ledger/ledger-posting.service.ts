@@ -285,9 +285,15 @@ export class LedgerPostingService {
       const [amt] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}), 0)` }).from(journalLines).where(eq(journalLines.entryId, Number(e.id)));
       await assertMakerChecker(db, { user: approver, maker: e.createdBy, event: 'gl.je.approve', ref: entryNo, amount: amt?.v, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a journal entry you prepared', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
-    // Re-check the period is still open at approval time (it may have closed since the draft was prepared).
+    // Re-check the period is still open at approval time (it may have closed — or been hard-locked — since the
+    // draft was prepared). Security (pentest P4): the Draft→Posted transition here bypasses postEntry, so it MUST
+    // repeat postEntry's period gates or a stale Draft could be approved INTO an irreversibly hard-closed period
+    // and silently rewrite its balances. A **Locked** period (hard close, GL-15/16/19) is strictly stronger than
+    // a soft **Closed** period; both block approval. There is no CLOSE carve-out on this path — the year-end
+    // closing entry posts directly via postEntry BEFORE the period is locked, never via Draft+approve.
     const [pp] = e.tenantId == null ? [undefined]
       : await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.code, e.period!), eq(fiscalPeriods.tenantId, e.tenantId))).limit(1);
+    if (pp && pp.status === 'Locked') throw new BadRequestException({ code: 'PERIOD_LOCKED', message: `Period ${e.period} is locked (hard close)`, messageTh: `งวดบัญชี ${e.period} ถูกล็อก (ปิดงวดถาวร)` });
     if (pp && pp.status === 'Closed') throw new BadRequestException({ code: 'PERIOD_CLOSED', message: `Period ${e.period} is closed`, messageTh: `งวดบัญชี ${e.period} ถูกปิดแล้ว` });
     // GL-17: a Draft → Posted transition is the moment of posting; stamp postedAt and log the APPROVE.
     // R1-2: the transition + audit row + period-balance snapshot commit ATOMICALLY.

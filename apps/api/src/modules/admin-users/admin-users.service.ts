@@ -135,7 +135,7 @@ export class AdminUsersService {
 
   async create(dto: CreateUserDto, actor: JwtUser) {
     const db = this.db;
-    if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
+    if (!dto.password || dto.password.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
     this.assertCanGrantRole(dto.role, actor);
@@ -218,12 +218,21 @@ export class AdminUsersService {
     return { req_no: reqNo, status: 'Rejected', rejected_by: actor.username };
   }
 
-  async resetPassword(username: string, newPassword: string) {
-    if (!newPassword || newPassword.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
+  async resetPassword(username: string, newPassword: string, actor: JwtUser) {
+    if (!newPassword || newPassword.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     username = normalizeUsername(username);
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    // Security (pentest P1): a password reset is a privileged-access grant OVER the target account — it must not
+    // be a side-door around the Admin-grant control (assertCanGrantRole). Authorize on the target's CURRENT role:
+    // only the platform owner may reset an Admin (or another platform owner), else a company Admin / AccessAdmin
+    // holding `users` could seize a peer Admin account and inherit its HQ/RLS bypass. Resetting a non-privileged
+    // user is unchanged.
+    if (isPlatformAdmin(u.username) && !isPlatformAdmin(actor?.username)) {
+      throw new ForbiddenException({ code: 'ADMIN_GRANT_DENIED', message: 'Only the platform owner may reset a platform-owner account', messageTh: 'เฉพาะเจ้าของแพลตฟอร์มเท่านั้นที่รีเซ็ตรหัสผ่านบัญชีเจ้าของแพลตฟอร์มได้' });
+    }
+    this.assertCanGrantRole(u.role as string, actor);
     const hash = await this.passwords.hash(newPassword);
     await db.update(users).set({ passwordHash: hash, mustChangePassword: true }).where(eq(users.id, u.id));
     return { username, reset: true };
@@ -383,6 +392,13 @@ export class AdminUsersService {
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    // Security (pentest P9): deletion is a privileged action OVER the target — a denial-of-administration if a
+    // lesser admin can remove a peer Admin. Authorize on the target's CURRENT role, same as reset-password
+    // (P1): only the platform owner may delete an Admin (or another platform owner).
+    if (isPlatformAdmin(u.username) && !isPlatformAdmin(actor?.username)) {
+      throw new ForbiddenException({ code: 'ADMIN_GRANT_DENIED', message: 'Only the platform owner may delete a platform-owner account', messageTh: 'เฉพาะเจ้าของแพลตฟอร์มเท่านั้นที่ลบบัญชีเจ้าของแพลตฟอร์มได้' });
+    }
+    this.assertCanGrantRole(u.role as string, actor);
     await db.delete(userPermissions).where(eq(userPermissions.userId, Number(u.id)));
     await db.delete(users).where(eq(users.id, u.id));
     return { username, deleted: true };

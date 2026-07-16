@@ -3,7 +3,7 @@ import type { DrizzleDb } from '../../database/database.module';
 import { tillSettings } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 
-// Blind drawer close policy (0418, docs/50 Wave 1 — POS roadmap P1c; strengthens REV-13/REV-05).
+// Blind drawer close policy (0426, docs/50 Wave 1 — POS roadmap P1c; strengthens REV-13/REV-05).
 // With blind_close ON the cashier counts the drawer WITHOUT seeing the system-expected cash:
 // the X/Z read surfaces redact the drawer-expectation figures on an OPEN session for till-duty
 // callers (a manager holding 'ar'/'exec' still sees them); closeTill reveals expected/variance

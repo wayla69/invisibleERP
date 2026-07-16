@@ -471,7 +471,7 @@ async function main() {
   const conflictPerms = ['procurement', 'creditors'];
 
   // 1. Assigning a conflicting permission set is BLOCKED (422 SOD_CONFLICT) and nothing is persisted.
-  const blocked = await inj('POST', '/api/admin/users', admin, { username: 'sod_blocked', password: 'pw1234', role: 'Sales', permissions: conflictPerms });
+  const blocked = await inj('POST', '/api/admin/users', admin, { username: 'sod_blocked', password: 'pw123456', role: 'Sales', permissions: conflictPerms });
   const listAfterBlock = await inj('GET', '/api/admin/users', admin);
   const notCreated = !(listAfterBlock.json.users ?? []).some((u: any) => u.username === 'sod_blocked');
   ok('ITGC-AC-09: conflicting permission set blocked → 422 SOD_CONFLICT, user NOT created',
@@ -483,7 +483,7 @@ async function main() {
 
   // 3. Explicit override WITH a reason is STAGED for two-person approval (audit G11) — it is NOT applied by
   //    the grantor. A DIFFERENT admin must approve the exception before the conflicting grant takes effect.
-  const overridden = await inj('POST', '/api/admin/users', admin, { username: 'sod_override', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true, sod_reason: 'small entity, compensating monthly review by CFO' });
+  const overridden = await inj('POST', '/api/admin/users', admin, { username: 'sod_override', password: 'pw123456', role: 'Sales', permissions: conflictPerms, allow_sod_override: true, sod_reason: 'small entity, compensating monthly review by CFO' });
   const excNo = overridden.json.access_exception_req_no;
   const notYet = !((await inj('GET', '/api/admin/users', admin)).json.users ?? []).some((u: any) => u.username === 'sod_override');
   ok('ITGC-AC-09/G11: justified override is STAGED PendingApproval (grantor cannot self-apply — user NOT created)',
@@ -499,7 +499,7 @@ async function main() {
     excAppr.json.status === 'Approved' && excAppr.json.approved_by === 'whchk' && excAppr.json.requested_by === 'admin' && nowCreated, `st=${excAppr.json.status} by=${excAppr.json.approved_by} created=${nowCreated}`);
 
   // 4. Override WITHOUT a reason is still rejected (reason is mandatory for the audit trail).
-  const noReason = await inj('POST', '/api/admin/users', admin, { username: 'sod_noreason', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true });
+  const noReason = await inj('POST', '/api/admin/users', admin, { username: 'sod_noreason', password: 'pw123456', role: 'Sales', permissions: conflictPerms, allow_sod_override: true });
   ok('ITGC-AC-09: override without a reason is still rejected', noReason.status === 422 && noReason.json.error?.code === 'SOD_CONFLICT', `${noReason.status} ${noReason.json.error?.code}`);
 
   // 5. The override's WHO/WHY/WHICH-RULES is persisted as tamper-evident evidence in the hash-chained
@@ -519,7 +519,7 @@ async function main() {
   }
 
   // 6. A clean single-duty set is accepted with no friction.
-  const clean = await inj('POST', '/api/admin/users', admin, { username: 'sod_clean', password: 'pw1234', role: 'Sales', permissions: ['ar'] });
+  const clean = await inj('POST', '/api/admin/users', admin, { username: 'sod_clean', password: 'pw123456', role: 'Sales', permissions: ['ar'] });
   ok('ITGC-AC-09: conflict-free permission set assigned normally', (clean.status === 200 || clean.status === 201), `${clean.status}`);
 
   // 7. The same guard applies on UPDATE, not just create.
@@ -612,8 +612,8 @@ async function main() {
   ok('ITGC-AC-06: privileged user without MFA is flagged must_setup_mfa at login', adminLogin.json.must_setup_mfa === true, JSON.stringify({ setup: adminLogin.json.must_setup_mfa }));
 
   // 2. A non-privileged role (a Cashier — pos_sell only) is NOT required to enrol.
-  await inj('POST', '/api/admin/users', admin, { username: 'cashier1', password: 'pw1234', role: 'Cashier' });
-  const cashierLogin = await inj('POST', '/api/login', undefined, { username: 'cashier1', password: 'pw1234' });
+  await inj('POST', '/api/admin/users', admin, { username: 'cashier1', password: 'pw123456', role: 'Cashier' });
+  const cashierLogin = await inj('POST', '/api/login', undefined, { username: 'cashier1', password: 'pw123456' });
   ok('ITGC-AC-06: non-privileged role not flagged for MFA', cashierLogin.json.must_setup_mfa !== true, JSON.stringify({ setup: cashierLogin.json.must_setup_mfa }));
 
   // 3. Enrol TOTP for fincon: setup → secret; enable with a valid code activates the factor.
@@ -890,9 +890,9 @@ async function main() {
     `sched=${sched.json.status} due1=${due1.json.campaigns_sent} due2=${due2.json.campaigns_sent}`);
 
   // ════════ LYL-13 — CRM SoD split (R14–R16): the granular crm_* permissions are enforced ════════
-  const r14Blocked = await inj('POST', '/api/admin/users', admin, { username: 'crm_conflict', password: 'pw1234', role: 'Sales', permissions: ['crm_reward', 'pos_sell'] });   // R14: config reward + redeem at till
+  const r14Blocked = await inj('POST', '/api/admin/users', admin, { username: 'crm_conflict', password: 'pw123456', role: 'Sales', permissions: ['crm_reward', 'pos_sell'] });   // R14: config reward + redeem at till
   const r14Msg = String(r14Blocked.json.error?.message ?? '');
-  const crmClean = await inj('POST', '/api/admin/users', admin, { username: 'crm_rewardmgr', password: 'pw1234', role: 'Sales', permissions: ['crm_reward'] });   // single-duty → clean
+  const crmClean = await inj('POST', '/api/admin/users', admin, { username: 'crm_rewardmgr', password: 'pw123456', role: 'Sales', permissions: ['crm_reward'] });   // single-duty → clean
   ok('LYL-13: CRM SoD split — crm_reward + pos_sell blocked as R14; a single-duty crm_reward role is clean',
     r14Blocked.status === 422 && r14Blocked.json.error?.code === 'SOD_CONFLICT' && r14Msg.includes('R14') && (crmClean.status === 200 || crmClean.status === 201),
     `r14=${r14Blocked.status}/${r14Blocked.json.error?.code} msg~R14=${r14Msg.includes('R14')} clean=${crmClean.status}`);

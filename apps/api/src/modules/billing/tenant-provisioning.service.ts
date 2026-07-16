@@ -7,6 +7,7 @@ import { reportSubscriptions } from '../../database/schema/bi';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
+import { smeNavProfile } from '@ierp/shared';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
 import { isPlatformAdmin } from '../../common/decorators';
@@ -288,8 +289,15 @@ export class TenantProvisioningService {
     let smePrefs: Record<string, unknown> = {};
     if (controlProfile === 'sme') {
       const [d] = await db.select().from(platformSmeDefaults).where(eq(platformSmeDefaults.id, 1)).limit(1);
+      // B1 (docs/50): fold the new company's sidebar from its INDUSTRY — the god-set platform defaults
+      // stay the base, and the industry profile adds its hidden domains + the default-open group keys.
+      // Stamped once here (like the rest of sme_prefs); later platform-default changes don't rewrite it.
+      const navProfile = smeNavProfile(industry);
+      const baseHidden = Array.isArray(d?.hiddenNavGroups) ? (d!.hiddenNavGroups as string[]) : [];
       smePrefs = {
-        hidden_nav_groups: Array.isArray(d?.hiddenNavGroups) ? d!.hiddenNavGroups : [],
+        hidden_nav_groups: [...new Set([...baseHidden, ...navProfile.hidden])],
+        open_nav_groups: navProfile.open,
+        nav_industry: industry,
         accountant_email: d?.accountantEmail ?? null,
       };
     }

@@ -17,6 +17,7 @@
     "pos-p0": "tsx src/pos-p0.ts",
     "ext": "tsx src/ext.ts",
     "tenant-idx": "tsx src/tenant-idx.ts",
+    "rls-coverage": "tsx src/rls-coverage.ts",
     "migration-parity": "tsx src/migration-parity.ts",
     "tenant-isolation": "tsx src/tenant-isolation.ts",
     "procurement-tenant-isolation": "tsx src/procurement-tenant-isolation.ts",

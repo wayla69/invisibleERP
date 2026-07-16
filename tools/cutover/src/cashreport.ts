@@ -201,7 +201,7 @@ async function main() {
   const zt = await inj('POST', '/api/payments/till/close', sales1, { session_no: tillT.json.session_no, closing_count: 127 });
   ok('Tip: counting the real drawer (127) closes with variance 0 — no phantom "over"', near(zt.json.variance, 0) && zt.json.variance_status === 'NotRequired', JSON.stringify({ v: zt.json.variance, st: zt.json.variance_status }));
 
-  // ── P1c blind drawer close (0418, docs/50 Wave 1) — count FIRST, reveal AFTER ──
+  // ── P1c blind drawer close (0426, docs/50 Wave 1) — count FIRST, reveal AFTER ──
   // PosSupervisor holds pos_till but neither 'ar' nor 'exec' → the redaction target; Sales (ar/exec)
   // is the manager view and the only one who may change the tenant policy.
   await db.insert(s.users).values({ username: 'super1', passwordHash: await pw.hash('ps1'), role: 'PosSupervisor', tenantId: t1 }).onConflictDoNothing();

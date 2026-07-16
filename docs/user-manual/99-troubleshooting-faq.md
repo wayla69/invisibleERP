@@ -216,7 +216,9 @@ your code below.
 | `SOD_SELF_APPROVAL` (cycle count) | You tried to **post the variance on a cycle count you counted yourself**. | A **different** `wh_adjust` (InventoryController) user must post the variance — the counter can't approve their own count (SoD R11 / control **INV-17**/INV-04). See [Warehouse & Inventory](./04-warehouse-inventory.md) §7b. |
 | `NO_ITEMS_DUE` / `TASK_CANCELLED` | You generated a cycle count with no items when nothing is due, or entered a count against a cancelled task. | **Recompute ABC** and wait for the class cadence, or pass explicit items to count; for a cancelled task, generate a new one. See [Warehouse & Inventory](./04-warehouse-inventory.md) §7b (control **INV-17**). |
 | `SOD_VIOLATION` (company profile) | You tried to **approve your own** staged change to the **PromptPay ID** or **tax ID** on the company profile. | A **different** authorised user (with **Exec / Approvals**) must approve it — the person who requested the change can't release it. Until approved the old value stays in force; the request can also be rejected. See [Administration](./11-administration.md) §13. |
-| `ADMIN_GRANT_DENIED` | You tried to create or promote a user to the **Admin** role, but you are not the platform owner. | **Only the platform owner may grant the Admin role** (it carries cross-company visibility). A company Admin can manage every **non-Admin** role. Ask the platform owner if a new Admin is genuinely required. See [Administration](./11-administration.md) §1. |
+| `ADMIN_GRANT_DENIED` | You tried to create or promote a user to the **Admin** role, **or reset an existing Admin's password**, but you are not the platform owner. | **Only the platform owner may grant — or reset — the Admin role** (it carries cross-company visibility), so a company Admin cannot mint or seize a peer Admin. A company Admin can still manage and reset every **non-Admin** role. Ask the platform owner if an Admin change is genuinely required. See [Administration](./11-administration.md) §1. |
+| `SSO_ROLE_NOT_ALLOWED` / `BAD_ROLE` (SSO default role) | You set the **SSO sign-in default role** to a privileged role (**Admin** or **Access-Admin**), or a previously-saved config had one. | Self-service SSO cannot auto-provision a privileged role. Choose a non-privileged default role (e.g. *Sales*); grant Admin/Access-Admin deliberately in **Admin → Users** instead. See [Administration](./11-administration.md) §1. |
+| `PLATFORM_ADMIN_REQUIRED` (API key) | You called a **platform-owner** operation with an **API key**. | API keys are never platform-owner credentials, even one created by the platform owner. Use an interactive platform-owner sign-in for platform operations. |
 | `ITEMS_PENDING` | You tried to **certify an access recertification campaign** while one or more users are still undecided. | Finish the worklist — click **Keep** or **Revoke** for every user — then certify. See [Administration](./11-administration.md) §4.1 (control **ITGC-AC-21**). |
 | `CAMPAIGN_CERTIFIED` | You tried to change a keep/revoke line, or re-certify, on a **campaign that is already certified**. | A certified campaign is frozen audit evidence. Open a **new** campaign for the next period. See [Administration](./11-administration.md) §4.1. |
 | `SIGNUP_DISABLED` / request-access | Someone tried to self-open a company. Public self-service signup is **disabled in production**. | The public page now files a **request access** entry instead of creating a company. The platform owner reviews the queue and **approves** it (or provisions/invites directly). No company exists until the platform owner approves. See [Administration](./11-administration.md) §14. |
@@ -320,9 +322,12 @@ on a PO, in stock, on a recipe/BoM, … is kept). See [Administration](./11-admi
 From each module's report area — see [Reports & Analytics](./09-reports-and-analytics.md).
 
 **I forgot the admin password and no one can log in.**
-There is no "forgot password" email and no default credential (by design). If
-another admin or an Access Admin can still sign in, they reset it from
-**Admin → Users** (the user is forced to set a new password on next login). If
+There is no "forgot password" email and no default credential (by design). For a
+**non-Admin** account, another admin or an Access Admin who can still sign in resets
+it from **Admin → Users** (the user is forced to set a new password on next login).
+Resetting an **Admin** account, however, is reserved to the **platform owner**
+(`ADMIN_GRANT_DENIED` otherwise — a company Admin cannot reset a peer Admin), so if
+the locked-out account is itself an Admin, ask the platform owner. If
 **nobody** can log in, an operator with server/database access runs the recovery
 tool: `NEW_ADMIN_PASSWORD='…' pnpm --filter @ierp/api db:reset-password <username>`
 (defaults to `admin`; the password comes from the env var, never argv or a log;

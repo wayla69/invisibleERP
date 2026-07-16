@@ -8,9 +8,11 @@ import { AccountDeterminationService } from '../ledger/account-determination.ser
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
+import { round4, EPS, isLayered, createLayer, consumeLayers, type CostingMethod, type LayerSlice } from './inventory-cost-layers';
 
-const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
-const EPS = 1e-6;
+// FIFO/FEFO cost-layer mechanics live in inventory-cost-layers.ts; old import sites keep working.
+export type { LayerSlice } from './inventory-cost-layers';
+
 const bad = (code: string, message: string, messageTh: string) =>
   new BadRequestException({ code, message, messageTh });
 
@@ -27,11 +29,6 @@ const ACCT_ADJ = '5810';
 // GL 1200 (the 1255 balance sits outside the inventory set).
 const ACCT_GIT = '1255';
 const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ', 'INV-GIT', 'INV-LC'];
-const COSTING_METHODS = ['moving_avg', 'fifo', 'fefo'] as const;
-type CostingMethod = (typeof COSTING_METHODS)[number];
-const isLayered = (m?: string | null): boolean => m === 'fifo' || m === 'fefo';
-
-export interface LayerSlice { qty: number; unitCost: number; lotNo: string | null; expiry: string | null }
 
 export interface ReceiveDto { item_id: string; item_description?: string; uom?: string; location_id?: string; qty: number; unit_cost: number; ref_type?: string; ref_id?: string; costing_method?: CostingMethod; lot_no?: string; expiry_date?: string }
 export interface IssueDto { item_id: string; location_id?: string; qty: number; ref_type?: string; ref_id?: string }
@@ -157,39 +154,6 @@ export class InventoryLedgerService {
     });
   }
 
-  // ── FIFO/FEFO cost-layer helpers (0131) ───────────────────────────────────────────────────
-  private async createLayer(tenantId: number, itemId: string, loc: string, qty: number, unitCost: number, lotNo: string | null, expiry: string | null, refType: string | null, refId: string | null, by: string) {
-    if (!(qty > EPS)) return;
-    await this.db.insert(invCostLayers).values({
-      tenantId, itemId, locationId: loc, lotNo: lotNo ?? null, expiryDate: expiry ?? null,
-      origQty: String(qty), remainingQty: String(qty), unitCost: String(unitCost),
-      refType: refType ?? null, refId: refId ?? null, createdBy: by,
-    });
-  }
-
-  // Consume `qty` from a fifo/fefo item's open layers in cost order; mutates remaining_qty and returns the
-  // actual cost consumed + the per-layer slices (so a transfer can recreate them at the destination).
-  private async consumeLayers(tenantId: number, itemId: string, loc: string, qty: number, method: CostingMethod): Promise<{ cost: number; slices: LayerSlice[] }> {
-    const order = method === 'fefo'
-      ? [sql`${invCostLayers.expiryDate} asc nulls last`, asc(invCostLayers.id)]
-      : [asc(invCostLayers.id)]; // fifo = oldest receipt first (id is monotonic)
-    const layers = await this.db.select().from(invCostLayers)
-      .where(and(eq(invCostLayers.tenantId, tenantId), eq(invCostLayers.itemId, itemId), eq(invCostLayers.locationId, loc), sql`${invCostLayers.remainingQty} > 0`))
-      .orderBy(...order);
-    let remaining = round4(qty), cost = 0;
-    const slices: LayerSlice[] = [];
-    for (const l of layers) {
-      if (remaining <= EPS) break;
-      const take = Math.min(n(l.remainingQty), remaining);
-      cost = round4(cost + take * n(l.unitCost));
-      slices.push({ qty: round4(take), unitCost: n(l.unitCost), lotNo: l.lotNo ?? null, expiry: l.expiryDate ?? null });
-      await this.db.update(invCostLayers).set({ remainingQty: String(round4(n(l.remainingQty) - take)) }).where(eq(invCostLayers.id, l.id));
-      remaining = round4(remaining - take);
-    }
-    if (remaining > EPS) throw bad('LAYER_SHORT', `Insufficient cost layers for ${itemId} (${remaining} uncosted)`, 'ชั้นต้นทุนไม่พอสำหรับการเบิก');
-    return { cost, slices };
-  }
-
   // ── Goods receipt → valued stock-in + GL (Dr 1200 / Cr 2000) ──────────────────────────────
   async receive(dto: ReceiveDto, user: JwtUser) {
     const tenantId = this.tenant(user);
@@ -229,7 +193,7 @@ export class InventoryLedgerService {
     });
     await this.upsertBalance(tenantId, dto.item_id, dto.item_description, loc, newQty, newAvg, newVal, method);
     // fifo/fefo: this receipt opens a cost layer (lot/expiry carried for FEFO ordering).
-    if (isLayered(method)) await this.createLayer(tenantId, dto.item_id, loc, qty, unitCost, dto.lot_no ?? null, dto.expiry_date ?? null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
+    if (isLayered(method)) await createLayer(this.db, tenantId, dto.item_id, loc, qty, unitCost, dto.lot_no ?? null, dto.expiry_date ?? null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
     return { move_no: moveNo, move_type: 'receipt', item_id: dto.item_id, qty, unit_cost: unitCost, value, balance_qty: newQty, avg_cost: newAvg, costing_method: method, gl_entry_no: je?.entry_no ?? null };
   }
 
@@ -249,7 +213,7 @@ export class InventoryLedgerService {
     // INV-01 — negative-stock guard: cannot issue more than is on hand.
     if (qty > oldQty + EPS) throw bad('NEG_STOCK', `Cannot issue ${qty} of ${dto.item_id}; only ${oldQty} on hand`, 'สต๊อกไม่พอสำหรับการเบิก');
     // COGS = actual consumed layer cost (fifo/fefo) or qty × moving-average.
-    const value = isLayered(method) ? (await this.consumeLayers(tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
+    const value = isLayered(method) ? (await consumeLayers(this.db, tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
     const issueUnit = qty > EPS ? round4(value / qty) : avg;
     const newQty = round4(oldQty - qty);
     const newVal = round4(oldVal - value);
@@ -287,7 +251,7 @@ export class InventoryLedgerService {
     const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue), avg = n(cur?.avgCost);
     const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
     if (qty > oldQty + EPS) throw bad('NEG_STOCK', `Cannot issue ${qty} of ${dto.item_id}; only ${oldQty} on hand`, 'สต๊อกไม่พอสำหรับการเบิก');
-    const value = isLayered(method) ? (await this.consumeLayers(tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
+    const value = isLayered(method) ? (await consumeLayers(this.db, tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
     const issueUnit = qty > EPS ? round4(value / qty) : avg;
     const newQty = round4(oldQty - qty);
     const newVal = round4(oldVal - value);
@@ -344,7 +308,7 @@ export class InventoryLedgerService {
       refType: dto.ref_type, refId: dto.ref_id, glNo: je?.entry_no ?? null, by: user.username,
     });
     await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
-    if (isLayered(method)) await this.createLayer(tenantId, dto.item_id, loc, qty, unitCost, null, null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
+    if (isLayered(method)) await createLayer(this.db, tenantId, dto.item_id, loc, qty, unitCost, null, null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
     return { move_no: moveNo, move_type: 'return_from_project', item_id: dto.item_id, qty, unit_cost: unitCost, value, balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
   }
 
@@ -423,10 +387,10 @@ export class InventoryLedgerService {
     let moveVal: number;
     if (isLayered(method)) {
       if (delta < 0) {
-        moveVal = (await this.consumeLayers(tenantId, dto.item_id, loc, Math.abs(delta), method)).cost;
+        moveVal = (await consumeLayers(this.db, tenantId, dto.item_id, loc, Math.abs(delta), method)).cost;
       } else {
         moveVal = round4(delta * avg);
-        await this.createLayer(tenantId, dto.item_id, loc, delta, avg, null, null, 'ADJ', moveNo, user.username);
+        await createLayer(this.db, tenantId, dto.item_id, loc, delta, avg, null, null, 'ADJ', moveNo, user.username);
       }
     } else {
       moveVal = round4(Math.abs(delta) * avg);
@@ -547,9 +511,9 @@ export class InventoryLedgerService {
     // moving-average: move value at the from-location's average. Value-neutral overall — no GL.
     let moveVal: number;
     if (isLayered(method)) {
-      const consumed = await this.consumeLayers(tenantId, p.item_id, p.from_location, qty, method);
+      const consumed = await consumeLayers(this.db, tenantId, p.item_id, p.from_location, qty, method);
       moveVal = consumed.cost;
-      for (const sl of consumed.slices) await this.createLayer(tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TRF', moveNo, user.username);
+      for (const sl of consumed.slices) await createLayer(this.db, tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TRF', moveNo, user.username);
     } else {
       moveVal = round4(qty * avg);
     }
@@ -580,7 +544,7 @@ export class InventoryLedgerService {
     const method: CostingMethod = (from.costingMethod as CostingMethod) ?? 'moving_avg';
     const moveNo = this.mkNo('INV-GIT');
     let moveVal: number; let slices: LayerSlice[] = [];
-    if (isLayered(method)) { const c = await this.consumeLayers(tenantId, p.item_id, p.from_location, qty, method); moveVal = c.cost; slices = c.slices; }
+    if (isLayered(method)) { const c = await consumeLayers(this.db, tenantId, p.item_id, p.from_location, qty, method); moveVal = c.cost; slices = c.slices; }
     else moveVal = round4(qty * avg);
     const unit = qty > EPS ? round4(moveVal / qty) : avg;
     const fromQty = round4(fromOld - qty), fromVal = round4(n(from.totalValue) - moveVal);
@@ -613,7 +577,7 @@ export class InventoryLedgerService {
     const toQty = round4(toOldQty + qty), toVal = round4(toOldVal + value);
     const toAvg = toQty > EPS ? round4(toVal / toQty) : round4(p.unit_cost ?? 0);
     await this.upsertBalance(tenantId, p.item_id, p.item_description ?? to?.itemDescription, p.to_location, toQty, toAvg, toVal, method);
-    if (isLayered(method) && p.slices?.length) for (const sl of p.slices) await this.createLayer(tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TO', p.ref_id ?? null, user.username);
+    if (isLayered(method) && p.slices?.length) for (const sl of p.slices) await createLayer(this.db, tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TO', p.ref_id ?? null, user.username);
     const acc = await this.invAccounts(tenantId, p.item_id, p.to_location);
     const je = value > EPS ? await this.ledger.postEntry({
       date: ymd(), source: 'INV-GIT', sourceRef: p.ref_type && p.ref_id ? `${p.ref_type}:${p.ref_id}:RECV` : `${p.item_id}:RECV`,

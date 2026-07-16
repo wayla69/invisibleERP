@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.10** _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-201..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.10** _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/

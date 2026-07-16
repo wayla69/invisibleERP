@@ -88,7 +88,7 @@ export class MarketingController {
   listPriceList() { return this.svc.listPriceList(); }
 
   @Post('price-list') @Permissions('marketing')
-  createPriceList(@Body(new ZodValidationPipe(PriceListBody)) b: CreatePriceListDto) { return this.svc.createPriceList(b); }
+  createPriceList(@Body(new ZodValidationPipe(PriceListBody)) b: CreatePriceListDto, @CurrentUser() u: JwtUser) { return this.svc.createPriceList(b, u); }
 
   // ── SURVEYS ──
   @Get('surveys') @Permissions('marketing')
@@ -98,7 +98,7 @@ export class MarketingController {
   createSurvey(@Body(new ZodValidationPipe(SurveyBody)) b: CreateSurveyDto) { return this.svc.createSurvey(b); }
 
   @Post('surveys/:id/responses') @Permissions('marketing')
-  createSurveyResponse(@Param('id') id: string, @Body(new ZodValidationPipe(SurveyResponseBody)) b: SurveyResponseDto) { return this.svc.createSurveyResponse(id, b); }
+  createSurveyResponse(@Param('id') id: string, @Body(new ZodValidationPipe(SurveyResponseBody)) b: SurveyResponseDto, @CurrentUser() u: JwtUser) { return this.svc.createSurveyResponse(id, b, u); }
 
   // ── Customer-facing survey (portal): list + submit, gated by the customer 'survey' perm ──
   @Get('portal/surveys') @Permissions('survey')
@@ -106,6 +106,6 @@ export class MarketingController {
 
   @Post('portal/surveys/:id/responses') @Permissions('survey')
   portalSurveyResponse(@Param('id') id: string, @Body(new ZodValidationPipe(SurveyResponseBody)) b: SurveyResponseDto, @CurrentUser() u: JwtUser) {
-    return this.svc.createSurveyResponse(id, { ...b, tenant_id: b.tenant_id ?? u.tenantId ?? null });
+    return this.svc.createSurveyResponse(id, b, u);
   }
 }

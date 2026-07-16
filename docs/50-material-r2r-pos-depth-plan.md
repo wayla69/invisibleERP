@@ -169,7 +169,7 @@ hardcoded, reval/consolidation are manual runs, accruals don't self-reverse, and
 > `startClose` composes standard + tenant templates (none ⇒ byte-identical); dependency gating
 > (`DEPENDENCY_NOT_DONE`), custom REQUIRED tasks gate the lock, GL-16 lock semantics untouched;
 > `GET/PUT /api/ledger/close/task-templates`; owner/due/dependency shown on the period-close screen.
-> ToE `basics` 422→431; PN-04 rev 2.36; manual 06 v0.21; UAT-GL-195..197.
+> ToE `basics` 422→431; PN-04 rev 2.37; manual 06 v0.21; UAT-GL-196..197.
 > **Deferred to a follow-up:** auto-completion from GL-19/closeStatus signals; overdue-task GOV-01
 > provider; a dedicated template-editor screen (templates are API-managed in v1).
 **Goal:** replace the fixed 9-step `CHECKLIST` const (`modules/ledger/close.service.ts:25`) with
@@ -191,7 +191,7 @@ evidence attachment, SLA/overdue escalation.
 > Delivered: migration `0419` `recurring_journals.auto_reverse` (monthly-only, `AUTO_REVERSE_MONTHLY_ONLY`);
 > the sweep's first run in the next business month posts the flipped Draft reversal (GL-05, idempotent
 > `REC-<id>-<lastRun>-REV`, response `reversals`); `/gl-schedules` checkbox + badge. ToE `basics` 414→422;
-> PN-04 §7(11) rev 2.34; manual 06 v0.19; UAT-GL-189..192.
+> PN-04 §7(11) rev 2.35; manual 06 v0.19; UAT-GL-190..192.
 **Goal:** month-end accruals must reverse on day 1 of the next period; today reversal is manual (GL-17).
 - `ledger-recurring.service.ts`: `auto_reverse` flag on recurring templates; the period-open path (or the
   `gl_recurring_journals` job on its first run in the new period) posts the reversal **Draft** through
@@ -204,7 +204,7 @@ evidence attachment, SLA/overdue escalation.
 > consolidation-bi-reports.ts provider); filters `{period?}` default just-ended month; idempotent,
 > fault-isolated per group, graceful on ALREADY_POSTED/IC_RECON_NOT_APPROVED; auto-Draft only —
 > GL-18/CON-03 posting maker-checker unchanged. ToE `fxreval` 15→22, `consolidation` 42→47;
-> PN-04 §7(10) rev 2.35; PN-11 rev 0.9; manual 06 v0.20; UAT-GL-193..194.
+> PN-04 §7(10) rev 2.36; PN-11 rev 0.9; manual 06 v0.20; UAT-GL-194..194.
 **Goal:** reval and consolidation are the only close steps still hand-cranked
 (`fx-reval.service.ts` / `consolidation.service.ts` expose run+post but no scheduler).
 - Register `gl_fx_reval_run` and `consolidation_run` as idempotent action jobs on the BI scheduler
@@ -219,8 +219,8 @@ evidence attachment, SLA/overdue escalation.
 > roll-forward (GL-tied by construction) + risk rating + auto_certified to `recon_periods`; aging on the
 > summary; `PUT …/:id/risk`; `POST /api/recon/periods/auto-certify` (safe class only — LOW risk + zero
 > roll-forward; '(auto)'-attributed; REC-01 untouched); GL-19 advisory `recon_completeness` (cockpit
-> consumes it via the validate leg). ToE `recon-profitability` 13→24; PN-04 rev 2.37; manual 06 v0.22;
-> UAT-GL-198..200. Deferred: reviewer-routing assignments; per-risk frequency policies.
+> consumes it via the validate leg). ToE `recon-profitability` 13→24; PN-04 rev 2.38; manual 06 v0.22;
+> UAT-GL-199..200. Deferred: reviewer-routing assignments; per-risk frequency policies.
 **Goal:** lift `modules/reconciliation` from item-matching to full balance-sheet certification
 (BlackLine-style) — the audit-readiness feature auditors ask for first.
 - Per-account roll-forward (opening → activity → closing vs GL), aging of reconciling items, per-account
@@ -240,8 +240,8 @@ evidence attachment, SLA/overdue escalation.
 > HIGH) into the idempotent `je_exceptions` register (unique per tenant × rule × entry); dismissal =
 > mandatory reason + `gl_audit_log` `EXCEPTION_DISMISSED` evidence; Close-Cockpit pillar (red = HIGH open,
 > inline scan/dismiss) + schedulable `je_exceptions` BI sweep. "Near-threshold approvals" consciously N/A —
-> GL-05 maker-checker has no amount threshold to skirt. ToE `basics` 431→446 (15 checks); PN-04 rev 2.38,
-> manual 06 v0.23 + 09 v0.10, UAT-GL-201..204; census 297 (294/3/0), xlsx regenerated.
+> GL-05 maker-checker has no amount threshold to skirt. ToE `basics` 431→446 (15 checks); PN-04 rev 2.39,
+> manual 06 v0.23 + 09 v0.10, UAT-GL-202..204; census 297 (294/3/0), xlsx regenerated.
 **Goal:** SOX-style detective monitoring over `journal_lines`/`gl_audit_log`: duplicate JEs, round-amount,
 backdated, after-hours, unusual account pairs, near-threshold approvals.
 - New rule-based analytics sub-service in `modules/finance` (own file — service-size ratchet), surfaced as
@@ -268,7 +268,7 @@ reconciliation account with a live over-distribute guard) and `GIFTCARD.*` roles
 a **REC-04 permanent** control account that is never widened (docs/43 §8 Q3). Wiring them would contradict
 a documented architecture decision. Replacement quick win, pulled forward from C4:
 - **Blind drawer close** (roadmap P1c residual): per-tenant `till_settings.blind_close` policy
-  (migration 0418; `GET/PUT /api/payments/till/settings`, change manager-only `ar`/`exec`); open-session
+  (migration 0426; `GET/PUT /api/payments/till/settings`, change manager-only `ar`/`exec`); open-session
   X/Z redact expected cash + derivable figures server-side for till-duty callers; the new `/pos/till`
   close dialog submits the count first, variance revealed after; `blind_close` evidence stamp on the
   session. Strengthens REV-13/REV-05 (no new control id).

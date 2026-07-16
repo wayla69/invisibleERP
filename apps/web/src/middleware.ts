@@ -58,7 +58,11 @@ export function middleware(req: NextRequest): NextResponse {
   const nonce = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
   const csp = buildCsp(nonce);
-  const headerName = process.env.CSP_REPORT_ONLY === '1' ? 'content-security-policy-report-only' : 'content-security-policy';
+  // Security (pentest P13): report-only is an observe-mode escape hatch for non-prod only. In production a
+  // stray CSP_REPORT_ONLY=1 must NOT silently disable the strict nonce CSP — fail closed and always enforce,
+  // matching the fail-closed tenancy boot checks.
+  const reportOnly = process.env.CSP_REPORT_ONLY === '1' && process.env.NODE_ENV !== 'production';
+  const headerName = reportOnly ? 'content-security-policy-report-only' : 'content-security-policy';
 
   // Set the CSP on the REQUEST headers so Next's app-render can read the nonce and stamp it onto its own
   // <script> tags, and expose the raw nonce to server components via `x-nonce` (the root layout forwards it
