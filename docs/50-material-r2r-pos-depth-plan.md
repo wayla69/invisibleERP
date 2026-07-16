@@ -1,6 +1,6 @@
 # 50 — Project Material Control · Record-to-Report · POS Sale — Further Development Phase
 
-> **Date:** 2026-07-16 · **Status:** v0.6 — **Waves 1–4 DELIVERED** (12 phases); Wave 5 planned (B5 · A5 · C5-external) · **Owner:** ERP / Product
+> **Date:** 2026-07-16 · **Status:** v0.7 — **ALL 5 WAVES DELIVERED** (15 of 15 phases resolved: 11 built as planned, 4 audit-first re-scoped — C1/C3/C4/C5; the only externally-gated residual is C5's second Thai acquirer, awaiting merchant sandbox credentials) · **Owner:** ERP / Product
 > **Scope:** the next development phase across three cycles the business runs on daily:
 > **(A) Project material control** (docs/32 + docs/35 spine), **(B) Record-to-report** (PN-04 GL close
 > spine, docs/17/18/35), **(C) POS sale** (`docs/pos-worldclass-roadmap.md` + docs/41 hub spine).
@@ -130,7 +130,20 @@ path* (`issueToProject` has no inverse), so returns are done as ad-hoc adjustmen
 - Web: import dialog on the BoQ tab with a per-row validation report (mirror `master-io.tsx`).
 - Harness: valid file → draft lines; unknown item / bad UoM rejected row-level; re-import doesn't dupe.
 
-### A5 — Material EVM breakdown + project-tagged wastage · Effort **M**
+### A5 — Material EVM breakdown + project-tagged wastage · Effort **M** · **✅ DELIVERED (2026-07-16)**
+
+> **Delivery note (migration `0423`, extends INV-10/INV-15 — no new control):** both halves were genuine
+> gaps. Project-tagged waste (`project_id`/`project_code` + `boq_line_id` on `POST /api/inventory/waste`)
+> posts **Dr 5810 / Cr 1260 (`project_id`)** with NO stock movement, fail-closed (`COST_REQUIRED`,
+> `WASTE_EXCEEDS_WIP` capped at net drawn − prior scrap at project AND line scope, `BOQ_LINE_MISMATCH`,
+> BOLA project checks) and writes NO commitment row (the RES issue already consumed the budget — a WASTE
+> row would double-count). The category split landed in `projects-material.service.ts` (not projects-evm —
+> the material service already owned the BoQ-line + commitment aggregation): `GET
+> /api/projects/:code/evm/by-category` (budget/committed/actual/wasted/EV + CPI per category, headline
+> `material_cpi`, EV prorated by the project earned % — `ev_basis` honest about the proxy), plus a
+> `wasted` column per WBS node and the `material` block in the single-project governance pack. ToE
+> `projects` 362→379 (17 checks); PN-16 rev 0.60 (step 27c), PN-03 rev 1.6, manual 14 rev 2.40,
+> UAT-O2C-517..521.
 **Goal:** isolate *material* cost performance inside EVM, and stop project scrap vanishing into a
 project-agnostic waste bucket.
 - `projects-evm.service.ts`: split EV/AC/committed by BoQ `category` (material / labor / subcon / other)
@@ -217,7 +230,18 @@ evidence attachment, SLA/overdue escalation.
 - Harness: auto-cert only fires on the safe class; high-risk requires preparer + certifier; roll-forward
   ties to TB.
 
-### B5 — JE anomaly & control-exception analytics (detective layer) · Effort **M**
+### B5 — JE anomaly & control-exception analytics (detective layer) · Effort **M** · **✅ DELIVERED (2026-07-16)**
+
+> **Delivery note (NEW control **GL-28**, migration `0424`, RCM 296→297):** placed in **`modules/ledger`**
+> (`ledger-je-anomaly.service.ts`), not modules/finance as planned — the import-boundary ratchet gates
+> journal-table reads outside the ledger module, and the ledger placement keeps the grandfathered set
+> flat. Five deterministic rules (duplicate_je HIGH w/ peers · round_amount Manual ≥ ฿10,000 whole-฿1,000 ·
+> backdated > 7 days · after_hours outside 06:00–22:00 **Asia/Bangkok** · unusual_pair Manual cash↔revenue
+> HIGH) into the idempotent `je_exceptions` register (unique per tenant × rule × entry); dismissal =
+> mandatory reason + `gl_audit_log` `EXCEPTION_DISMISSED` evidence; Close-Cockpit pillar (red = HIGH open,
+> inline scan/dismiss) + schedulable `je_exceptions` BI sweep. "Near-threshold approvals" consciously N/A —
+> GL-05 maker-checker has no amount threshold to skirt. ToE `basics` 431→446 (15 checks); PN-04 rev 2.38,
+> manual 06 v0.23 + 09 v0.10, UAT-GL-201..204; census 297 (294/3/0), xlsx regenerated.
 **Goal:** SOX-style detective monitoring over `journal_lines`/`gl_audit_log`: duplicate JEs, round-amount,
 backdated, after-hours, unusual account pairs, near-threshold approvals.
 - New rule-based analytics sub-service in `modules/finance` (own file — service-size ratchet), surfaced as
@@ -310,7 +334,22 @@ qty-break, combo explosion, service-charge auto-rules, satang rounding).
 - Harness: extend `hub-snapshot` + `cashreport` — redeem offline → replay once (idempotent, points never
   negative); chain splice verifies; blind close hides expected until submit.
 
-### C5 — Real PSP card terminal (pre-auth / capture / settlement) · Effort **L** · external dependency
+### C5 — Real PSP card terminal (pre-auth / capture / settlement) · Effort **L** · external dependency · **✅ RE-SCOPED + residual DELIVERED (2026-07-16)**
+
+> **Re-scope (the FOURTH audit-first false gap, after C1/C3/C4):** the terminal was ~80% built — the
+> provider framework, a **real Omise acquirer** (charges/pre-auth+capture/void/refund over the Omise API),
+> the HMAC + replay-window PSP webhook, and settlement batching all pre-existed (`pos/terminal/*`; the
+> plan's own §0 inventory called it a "framework", predating the Omise implementation). The genuine
+> residual shipped (migration `0425`, extends REV-09/REV-11 — no new control): **PSP event-id
+> idempotency** (`psp_webhook_events` — a redelivered event acks `duplicate_event`, never flaps an
+> intent), **real settlement reconciliation** (acquirer-report import matched per intent → matched /
+> amount_mismatch / missing_intent / unreported_intent in `settlement_lines`; auto-`Reconciled` only at
+> zero discrepancies), **tip-on-terminal** (charge-time tip + bar-tab capture-above-auth gratuity;
+> `OVER_CAPTURE` still guards the base), `OMISE_SECRET_KEY` documented, and the **signed-webhook path
+> harness-exercised end-to-end** (previously only the dev/test bypass ran in CI). ToE `pos-p0` 23→39;
+> PN-07 rev 2.1, roadmap P0b closed, manual 01 v0.59, UAT-O2C-522..525. **Still externally gated:** the
+> second Thai acquirer (2C2P/GB Prime) — a ~1-class addition on the `TerminalProvider` shape once merchant
+> sandbox credentials exist.
 **Goal:** the one "is this a real POS" gap left — the `pos/terminal` provider framework has no live
 acquirer behind it.
 - Implement one Thai acquirer (Opn/Omise, 2C2P, or GB Prime — pick per merchant account) in
@@ -335,7 +374,7 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 | **2 — control gaps ✅ DELIVERED 2026-07-16** | **A1** material returns · **C2** full tax invoice · **B3** period-end automation | the physical-loop and fiscal gaps auditors/users hit monthly |
 | **3 — anchor features ✅ DELIVERED 2026-07-16** | **B1** Close Manager (v1) · **C3 (re-scoped)** register rule application · **A3** material control tower | the big UX/orchestration lifts |
 | **4 — depth ✅ DELIVERED 2026-07-16** | **B4** recon workspace · **A4** BoQ import · **C4 (re-scoped)** loyalty-redeem replay | audit-readiness + estimator/store-ops depth |
-| **5 — detective + external** | **B5** JE analytics · **A5** material EVM/wastage · **C5** PSP terminal | C5 lands whenever the merchant sandbox arrives — start procurement in Wave 1 |
+| **5 — detective + external ✅ DELIVERED 2026-07-16** | **B5** JE analytics (GL-28) · **A5** material EVM/wastage · **C5 (re-scoped)** PSP terminal depth | the terminal core pre-existed (4th false gap); only the 2nd acquirer stays credential-gated |
 
 - **Parallelizable:** tracks A/B/C touch disjoint modules — one PR per phase, any track can run ahead.
   Within a track the listed order is dependency-real (A1 before A3's "returned" column; B1 before B3's
@@ -351,6 +390,7 @@ offline-safe), kitchen-printer routing per station, coursing timers (KDS polish)
 
 | Version | Date | Change |
 |---|---|---|
+| v0.7 | 2026-07-16 | **Wave 5 DELIVERED — the plan is COMPLETE (15/15 phases resolved).** A5 (project-tagged wastage Dr 5810/Cr 1260 + EVM-by-category with material_cpi, migration 0423, ToE projects 379 — both halves genuinely greenfield), B5 (JE anomaly analytics, NEW control **GL-28**, migration 0424, RCM 297, ToE basics 446 — placed in modules/ledger for the boundary ratchet), C5 re-scoped (the FOURTH false gap: Omise acquirer + lifecycle + HMAC webhook + batching pre-existed; delivered event-id idempotency, per-intent settlement matching, tip-on-terminal, signed-webhook ToE, migration 0425, pos-p0 39; 2nd acquirer stays credential-gated). Wave sweep: golden 534 unchanged; basics 446, compliance 179, projects 379, e2e 23, ext 306, worldclass 59, taxdocs 136, restaurant 186, cashreport 45, recon-profitability 24, fxreval 22, consolidation 47, hub-snapshot 79, finance-kpi 55, pos-p0 39, pos-wiring 20, waste 19, tenant-idx, writeflow 36, analytics 17, unit 53; typecheck/builds/4 ratchets/migrations-journaled/census green. Scorecard: 11 built + 4 audit-first re-scopes (C1/C3/C4/C5) — the audit-before-build discipline prevented four rebuild-what-exists efforts |
 | v0.1 | 2026-07-16 | Initial plan: codebase audit of the three cycles + 15 phases in 5 waves |
 | v0.2 | 2026-07-16 | Wave 1 build: C1 re-scoped (original was a docs/43-decided non-gap — TIP/GIFTCARD events are visibility-only by design) to **blind drawer close**, DELIVERED |
 | v0.3 | 2026-07-16 | **Wave 1 DELIVERED** — A2 (reservation sweep, ToE projects 336), B2 (auto-reversing accruals, ToE basics 422, golden re-pinned 531→534 for the 3 additive response fields), C1-rescoped (blind close, ToE cashreport 45). Verified: typecheck, api+web build, 4 ratchets, compliance 179, writeflow 36, analytics 17, worldclass 59, pos-p1 19, giftcards 33, taxdocs 131, input-vat 6 |
