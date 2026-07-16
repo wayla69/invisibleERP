@@ -130,6 +130,35 @@ async function main() {
   // A non-platform Admin also cannot PROMOTE an existing user to Admin.
   const promoteDenied = await inj('PATCH', '/api/admin/users/platco_sales', platLogin.json.token, { role: 'Admin' });
   ok('Company Admin cannot promote a user to Admin either (403 ADMIN_GRANT_DENIED)', promoteDenied.status === 403 && promoteDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${promoteDenied.status} ${promoteDenied.json.error?.code}`);
+
+  // ── 3b3. Pentest remediation (2026-07-16) — the "only the platform owner may grant Admin" control
+  //         (assertCanGrantRole) must have NO side doors. Three paths previously reached Admin/god authority
+  //         without passing through it; each is now closed. ──
+  // P1 — a password reset is a privileged-access grant over the TARGET account. A non-platform Admin cannot
+  //      reset another Admin's password (would seize a peer Admin account + inherit its bypass); only the
+  //      platform owner can. Resetting a non-privileged user is unchanged.
+  const resetAdminDenied = await inj('POST', '/api/admin/users/god_made_admin/reset-password', platLogin.json.token, { password: 'hijacked12345' });
+  ok('P1: a non-platform Admin cannot reset an Admin account password (403 ADMIN_GRANT_DENIED)', resetAdminDenied.status === 403 && resetAdminDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${resetAdminDenied.status} ${resetAdminDenied.json.error?.code}`);
+  const resetSalesOk = await inj('POST', '/api/admin/users/platco_sales/reset-password', platLogin.json.token, { password: 'admin123' });
+  ok('P1: a company Admin CAN still reset a non-Admin user password (granularity preserved)', (resetSalesOk.status === 200 || resetSalesOk.status === 201) && resetSalesOk.json.reset === true, `${resetSalesOk.status} ${JSON.stringify(resetSalesOk.json)}`);
+  const resetAdminByGod = await inj('POST', '/api/admin/users/god_made_admin/reset-password', owner, { password: 'admin123' });
+  ok('P1: the platform owner CAN reset an Admin account (2xx)', (resetAdminByGod.status === 200 || resetAdminByGod.status === 201) && resetAdminByGod.json.reset === true, `${resetAdminByGod.status}`);
+
+  // P2 — the SSO JIT default_role allow-list excludes privileged roles, so an AccessAdmin/Admin cannot
+  //      configure SSO to auto-provision itself an Admin (a second bypass of the Admin-grant control).
+  const ssoAdminDenied = await inj('PUT', '/api/platform/identity', platLogin.json.token, { default_role: 'Admin' });
+  ok('P2: SSO default_role cannot be set to Admin (400 BAD_ROLE)', ssoAdminDenied.status === 400 && ssoAdminDenied.json.error?.code === 'BAD_ROLE', `${ssoAdminDenied.status} ${ssoAdminDenied.json.error?.code}`);
+  const ssoAccessAdminDenied = await inj('PUT', '/api/platform/identity', platLogin.json.token, { default_role: 'AccessAdmin' });
+  ok('P2: SSO default_role cannot be set to AccessAdmin either (400 BAD_ROLE)', ssoAccessAdminDenied.status === 400 && ssoAccessAdminDenied.json.error?.code === 'BAD_ROLE', `${ssoAccessAdminDenied.status} ${ssoAccessAdminDenied.json.error?.code}`);
+  const ssoSalesOk = await inj('PUT', '/api/platform/identity', platLogin.json.token, { default_role: 'Sales' });
+  ok('P2: SSO default_role CAN still be a non-privileged role (Sales, 200)', ssoSalesOk.status === 200 && ssoSalesOk.json.default_role === 'Sales', `${ssoSalesOk.status} ${JSON.stringify(ssoSalesOk.json?.error ?? ssoSalesOk.json?.default_role ?? '')}`);
+
+  // P3 — an API key ADOPTS its minting human's identity (security review H-2). A key minted by the platform
+  //      owner must NOT thereby become an MFA-free "god" credential: PlatformAdminGuard rejects machine
+  //      principals outright, even when created_by is a platform owner.
+  const godKey = (await inj('POST', '/api/platform/api-keys', owner, { name: 'god-key', scopes: ['exec'] })).json.key;
+  const keyHitsPlatform = await inj('GET', '/api/admin/tenants', godKey);
+  ok('P3: a platform-owner-minted API key is NOT a platform-admin credential (403 PLATFORM_ADMIN_REQUIRED)', keyHitsPlatform.status === 403 && keyHitsPlatform.json.error?.code === 'PLATFORM_ADMIN_REQUIRED', `${keyHitsPlatform.status} ${keyHitsPlatform.json.error?.code}`);
   // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
   // status/plan/user-count; a non-platform-admin is blocked at the guard.
   const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner

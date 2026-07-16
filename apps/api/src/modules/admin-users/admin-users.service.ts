@@ -218,12 +218,21 @@ export class AdminUsersService {
     return { req_no: reqNo, status: 'Rejected', rejected_by: actor.username };
   }
 
-  async resetPassword(username: string, newPassword: string) {
+  async resetPassword(username: string, newPassword: string, actor: JwtUser) {
     if (!newPassword || newPassword.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
     username = normalizeUsername(username);
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
+    // Security (pentest P1): a password reset is a privileged-access grant OVER the target account — it must not
+    // be a side-door around the Admin-grant control (assertCanGrantRole). Authorize on the target's CURRENT role:
+    // only the platform owner may reset an Admin (or another platform owner), else a company Admin / AccessAdmin
+    // holding `users` could seize a peer Admin account and inherit its HQ/RLS bypass. Resetting a non-privileged
+    // user is unchanged.
+    if (isPlatformAdmin(u.username) && !isPlatformAdmin(actor?.username)) {
+      throw new ForbiddenException({ code: 'ADMIN_GRANT_DENIED', message: 'Only the platform owner may reset a platform-owner account', messageTh: 'เฉพาะเจ้าของแพลตฟอร์มเท่านั้นที่รีเซ็ตรหัสผ่านบัญชีเจ้าของแพลตฟอร์มได้' });
+    }
+    this.assertCanGrantRole(u.role as string, actor);
     const hash = await this.passwords.hash(newPassword);
     await db.update(users).set({ passwordHash: hash, mustChangePassword: true }).where(eq(users.id, u.id));
     return { username, reset: true };
