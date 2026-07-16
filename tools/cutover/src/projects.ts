@@ -374,6 +374,18 @@ async function main() {
   const tbRet2 = await inj('GET', '/api/ledger/trial-balance', admin);
   ok('A1: trial balance balanced after both returns (WIP net −1500 vs pre-return)', tbRet2.json.totals?.balanced === true && near(wipRet0 - Number(bal(tbRet2, '1260')?.balance ?? 0), 1500), JSON.stringify({ dWip: wipRet0 - Number(bal(tbRet2, '1260')?.balance ?? 0) }));
 
+  // ── 9f-quater. A3 material control tower (docs/50 Wave 3): WBS rollup + planned-vs-actual draw curve —
+  //    read models over the commitment ledger (RES issues net of MRET returns); no new writes ──
+  const byWbs = await inj('GET', '/api/projects/PRJ-A/boq/by-wbs', admin);
+  ok('A3: by-WBS rollup returns nodes with budget/committed/issued/returned/remaining', byWbs.status === 200 && (byWbs.json.nodes ?? []).length >= 1 && byWbs.json.nodes.every((x: any) => ['budget', 'committed', 'issued', 'returned', 'remaining'].every((k) => typeof x[k] === 'number')), JSON.stringify(byWbs.json.nodes?.slice(0, 2)));
+  ok('A3: rollup issued reflects the physical RES draws and returned the MRET reversals (both 1500 after A1)', near(byWbs.json.totals?.issued, 1500 + 500) || near(byWbs.json.totals?.issued, 1500), JSON.stringify(byWbs.json.totals));
+  ok('A3: node totals reconcile to the BoQ read model (committed_total)', near(byWbs.json.totals?.committed, (await inj('GET', '/api/projects/PRJ-A/boq', admin)).json.committed_total), JSON.stringify(byWbs.json.totals));
+  const draw = await inj('GET', '/api/projects/PRJ-A/material-draw', admin);
+  ok('A3: draw curve returns monthly points with cumulative actual vs linear plan', draw.status === 200 && (draw.json.points ?? []).length >= 1 && draw.json.points.every((pt: any) => typeof pt.actual_cum === 'number' && typeof pt.planned_cum === 'number'), JSON.stringify(draw.json.points?.slice(0, 2)));
+  const lastPt = (draw.json.points ?? [])[draw.json.points.length - 1];
+  ok('A3: final cumulative actual = Σ RES − Σ MRET (physical net draw)', near(lastPt?.actual_cum, byWbs.json.totals.issued - byWbs.json.totals.returned), JSON.stringify({ last: lastPt, iss: byWbs.json.totals.issued, ret: byWbs.json.totals.returned }));
+  ok('A3: final planned_cum = the full material budget (linear spread ends at 100%)', near(lastPt?.planned_cum, draw.json.budget_total), JSON.stringify({ p: lastPt?.planned_cum, b: draw.json.budget_total }));
+
   // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
   const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
   ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));

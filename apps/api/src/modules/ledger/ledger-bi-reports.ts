@@ -53,9 +53,9 @@ export class LedgerBiReports implements BiReportSource {
           const period = typeof f?.period === 'string' && /^\d{4}-\d{2}$/.test(f.period) ? f.period : prevBizMonth();
           try {
             const r = await this.fxReval.runReval({ period, runBy: `${user?.username ?? 'system'} (scheduled)`, tenantId: user.tenantId ?? null });
-            return { data: r, summary: `FX revaluation ${period}: staged run #${(r as any).id ?? '?'} (Open — awaiting maker-checker post)`, summaryTh: `ปรับปรุงอัตราแลกเปลี่ยนงวด ${period}: เตรียมรายการแล้ว (รอผู้อนุมัติโพสต์)` };
+            return { data: r, summary: `FX revaluation ${period}: staged run #${(r as { id?: number }).id ?? '?'} (Open — awaiting maker-checker post)`, summaryTh: `ปรับปรุงอัตราแลกเปลี่ยนงวด ${period}: เตรียมรายการแล้ว (รอผู้อนุมัติโพสต์)` };
           } catch (e: any) {
-            const code = e?.response?.code ?? (typeof e?.getResponse === 'function' ? (e.getResponse() as any)?.code : undefined);
+            const code = e?.response?.code ?? (typeof e?.getResponse === 'function' ? (e.getResponse() as { code?: string })?.code : undefined);
             if (code === 'ALREADY_POSTED') return { data: { period, outcome: 'already_posted' }, summary: `FX revaluation ${period}: already posted — no-op`, summaryTh: `งวด ${period} โพสต์แล้ว — ไม่มีการเปลี่ยนแปลง` };
             throw e;
           }

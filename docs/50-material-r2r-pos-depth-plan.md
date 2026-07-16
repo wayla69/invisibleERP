@@ -102,7 +102,11 @@ path* (`issueToProject` has no inverse), so returns are done as ad-hoc adjustmen
   PROJ-11 bus) so planners see aging holds *before* the sweep releases them.
 - Harness: seed an old hold → sweep releases + action-center row; fresh hold untouched; re-run = no-op.
 
-### A3 — Material control tower: WBS rollup + planned-vs-actual draw curve · Effort **M**
+### A3 — Material control tower: WBS rollup + planned-vs-actual draw curve · Effort **M** · **✅ DELIVERED (2026-07-16)**
+> Delivered: `GET /api/projects/:code/boq/by-wbs` + `GET /api/projects/:code/material-draw` (NEW
+> `projects-material.service.ts` read models over the commitment ledger — issued=RES, returned=MRET);
+> WBS rollup + draw tables on the BoQ tab. ToE `projects` 351→357; PN-16 rev 0.58; manual 14 rev 2.38;
+> UAT-O2C-508..510.
 **Goal:** answer "are we drawing material faster than the plan?" per WBS node — the data exists
 (`project_boq_lines.task_id`/`wbs_code`, commitments, reservations) but nothing aggregates it.
 - `GET /api/projects/:code/boq/by-wbs` (extend `projects.service.ts` `getBoq`): budget / committed /

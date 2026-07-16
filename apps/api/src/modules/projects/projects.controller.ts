@@ -358,6 +358,17 @@ export class ProjectsController {
     return this.svc.getBoq(code);
   }
 
+  // A3 (docs/50 Wave 3) — material control tower reads: WBS rollup + planned-vs-actual draw curve.
+  @Get(':code/boq/by-wbs')
+  boqByWbs(@Param('code') code: string) {
+    return this.svc.boqByWbs(code);
+  }
+
+  @Get(':code/material-draw')
+  materialDrawCurve(@Param('code') code: string) {
+    return this.svc.materialDrawCurve(code);
+  }
+
   // Commitment / encumbrance ledger for a project (M1, PROJ-12): open/consumed/released draws vs the BoQ budget.
   @Get(':code/commitments')
   commitments(@Param('code') code: string) {

@@ -28,7 +28,7 @@ export class ConsolidationBiReports implements BiReportSource {
               const r: any = await this.consolidation.runConsolidation(Number(g.id), { period }, user);
               results.push({ group_id: g.id, name: g.name, outcome: 'staged', run_id: r.run_id, status: r.status, balanced: r.balanced });
             } catch (e: any) {
-              const code = e?.response?.code ?? (typeof e?.getResponse === 'function' ? (e.getResponse() as any)?.code : undefined) ?? 'ERROR';
+              const code = e?.response?.code ?? (typeof e?.getResponse === 'function' ? (e.getResponse() as { code?: string })?.code : undefined) ?? 'ERROR';
               results.push({ group_id: g.id, name: g.name, outcome: code });
             }
           }

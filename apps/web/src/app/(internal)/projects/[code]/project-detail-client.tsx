@@ -206,6 +206,9 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
   const commitments = useQuery<any>({ queryKey: ['proj', code, 'commitments'], queryFn: () => api(`/api/projects/${code}/commitments`) });
   const pmrList = useQuery<any>({ queryKey: ['proj', code, 'pmr'], queryFn: () => api(`/api/pmr/project/${code}`) });
   const reservations = useQuery<any>({ queryKey: ['proj', code, 'reservations'], queryFn: () => api(`/api/reservations/project/${code}`) });
+  // A3 material control tower reads (WBS rollup + draw curve)
+  const byWbsQ = useQuery<any>({ queryKey: ['proj', code, 'by-wbs'], queryFn: () => api(`/api/projects/${code}/boq/by-wbs`) });
+  const drawQ = useQuery<any>({ queryKey: ['proj', code, 'material-draw'], queryFn: () => api(`/api/projects/${code}/material-draw`) });
   const siteCash = useQuery<any>({ queryKey: ['proj', code, 'sitecash'], queryFn: () => api(`/api/projects/${code}/site-cash`) });
   const bq = boq.data;
   const boqId: number | undefined = bq?.boq?.id;
@@ -357,6 +360,40 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
             ]}
             emptyState={{ icon: ListTree, title: t('pj.boq_empty_lines_title'), description: t('pj.boq_empty_lines_desc') }}
           />
+          {/* A3 material control tower — WBS rollup + planned-vs-actual draw curve (read models) */}
+          {(byWbsQ.data?.nodes ?? []).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.mct_wbs_title')}</h3>
+              <DataTable
+                rows={byWbsQ.data.nodes}
+                rowKey={(r: any) => r.wbs_code}
+                columns={[
+                  { key: 'wbs_code', label: t('pj.mct_col_wbs') },
+                  { key: 'budget', label: t('pj.boq_col_budget'), align: 'right', render: (r: any) => baht(r.budget) },
+                  { key: 'committed', label: t('pj.pmr_stat_committed'), align: 'right', render: (r: any) => baht(r.committed) },
+                  { key: 'issued', label: t('pj.mct_col_issued'), align: 'right', render: (r: any) => baht(r.issued) },
+                  { key: 'returned', label: t('pj.mct_col_returned'), align: 'right', render: (r: any) => baht(r.returned) },
+                  { key: 'remaining', label: t('pj.boq_col_remaining'), align: 'right', render: (r: any) => <span className={r.remaining < 0 ? 'font-medium text-destructive' : 'tabular'}>{baht(r.remaining)}</span> },
+                ]}
+              />
+            </div>
+          )}
+          {(drawQ.data?.points ?? []).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-muted-foreground">{t('pj.mct_draw_title')}</h3>
+              <DataTable
+                rows={drawQ.data.points}
+                rowKey={(r: any) => r.month}
+                columns={[
+                  { key: 'month', label: t('pj.mct_col_month') },
+                  { key: 'actual', label: t('pj.mct_col_actual'), align: 'right', render: (r: any) => baht(r.actual) },
+                  { key: 'actual_cum', label: t('pj.mct_col_actual_cum'), align: 'right', render: (r: any) => baht(r.actual_cum) },
+                  { key: 'planned_cum', label: t('pj.mct_col_planned_cum'), align: 'right', render: (r: any) => baht(r.planned_cum) },
+                  { key: 'over_plan', label: '', render: (r: any) => r.over_plan ? <Badge variant="destructive">{t('pj.mct_over_plan')}</Badge> : null },
+                ]}
+              />
+            </div>
+          )}
         </>
       )}
     </div>
