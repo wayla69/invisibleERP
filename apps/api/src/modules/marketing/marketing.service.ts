@@ -261,19 +261,24 @@ export class MarketingService {
     return { price_list: out, count: out.length };
   }
 
-  async createPriceList(dto: CreatePriceListDto) {
+  async createPriceList(dto: CreatePriceListDto, user: JwtUser) {
     const db = this.db;
     const base = n(dto.base_price); const special = n(dto.special_price); const disc = n(dto.discount_pct);
     const effective = special > 0 ? special : round2(base * (1 - disc / 100));
+    // Security (pentest P7): the tenant is server-derived from the caller — NEVER dto.tenant_id. Trusting the
+    // body let a marketing user attribute a price list to another tenant, or write a global (NULL) "All
+    // Customers" list. RLS WITH CHECK blocks a foreign write for ordinary sessions, but an Admin under
+    // single-company (global bypass) would slip through — so the override is closed at the source.
+    const tenantId = user?.tenantId ?? null;
     const [h] = await db.insert(priceList).values({
-      listName: dto.list_name ?? 'Standard', tenantId: dto.tenant_id ?? null,
+      listName: dto.list_name ?? 'Standard', tenantId,
       itemId: dto.item_id, itemDescription: dto.item_description ?? null,
       basePrice: String(base), specialPrice: dto.special_price != null ? String(special) : null,
       discountPct: dto.discount_pct != null ? String(disc) : null,
       minQty: dto.min_qty != null ? String(dto.min_qty) : '1',
       validFrom: dto.valid_from ?? null, validTo: dto.valid_to ?? null, active: true,
     }).returning({ id: priceList.id });
-    return { id: Number(h!.id), item_id: dto.item_id, effective_price: effective, tenant: dto.tenant_id ?? 'All Customers' };
+    return { id: Number(h!.id), item_id: dto.item_id, effective_price: effective, tenant: tenantId ?? 'All Customers' };
   }
 
   // ───────────────────────── SURVEYS ─────────────────────────
@@ -294,14 +299,16 @@ export class MarketingService {
   }
 
   // POST /api/surveys/:id/responses — NPS + Q1-3 -> surveyAnswers (EAV)
-  async createSurveyResponse(surveyId: string, dto: SurveyResponseDto) {
+  async createSurveyResponse(surveyId: string, dto: SurveyResponseDto, user: JwtUser) {
     const db = this.db;
     const [svy] = await db.select().from(surveys).where(eq(surveys.surveyId, surveyId)).limit(1);
     if (!svy) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Survey not found', messageTh: 'ไม่พบแบบสำรวจ' });
+    // Security (pentest P7): tenant is server-derived from the caller, never dto.tenant_id (mass-assignment).
+    const tenantId = user?.tenantId ?? null;
     let responseId = 0;
     await db.transaction(async (tx: any) => {
       const [r] = await tx.insert(surveyResponses).values({
-        surveyId, tenantId: dto.tenant_id ?? null, orderNo: dto.order_no ?? null,
+        surveyId, tenantId, orderNo: dto.order_no ?? null,
         responseDate: ymd(), npsScore: dto.nps_score ?? null, comments: dto.comments ?? null,
       }).returning({ id: surveyResponses.id });
       responseId = Number(r.id);
