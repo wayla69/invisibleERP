@@ -4,9 +4,10 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
   projectBoqLines, projectCommitments, projects,
   budgets, budgetControlSettings, budgetCommitments,
-  journalEntries, journalLines, items, itemCategories,
+  items, itemCategories,
   purchaseRequests, prItems, purchaseOrders, poItems,
 } from '../../database/schema';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -36,7 +37,13 @@ export interface ReserveDto {
 // depend on it without a module cycle.
 @Injectable()
 export class CommitmentsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL actuals read rides the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // The project's over-budget tolerance % (FU1). Defaults to 0 (strict) when the project is missing.
   private async tolerancePct(runner: any, projectId: number): Promise<number> {
@@ -230,12 +237,8 @@ export class CommitmentsService {
     // Actuals: Posted journal lines, entry_date within [year start, end of the period month].
     const y = Number(period.slice(0, 4)), m = Number(period.slice(5, 7));
     const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    const actConds = [eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode),
-      gte(journalEntries.entryDate, `${fiscalYear}-01-01`), lt(journalEntries.entryDate, nextMonth)];
-    if (costCenter) actConds.push(eq(journalLines.costCenterCode, costCenter));
-    const [act] = await this.db.select({ d: sql<string>`coalesce(sum(${journalLines.debit}),0)`, c: sql<string>`coalesce(sum(${journalLines.credit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...actConds));
-    const actual = r2(n(act?.d) - n(act?.c)); // expense natural balance
+    const g = await this.ledgerRead.accountGross([accountCode], { from: `${fiscalYear}-01-01`, toExcl: nextMonth, costCenter: costCenter || undefined });
+    const actual = r2(g.net); // expense natural balance
 
     const commitConds = [eq(budgetCommitments.fiscalYear, fiscalYear), eq(budgetCommitments.accountCode, accountCode),
       eq(budgetCommitments.status, 'open'), lte(budgetCommitments.period, period),

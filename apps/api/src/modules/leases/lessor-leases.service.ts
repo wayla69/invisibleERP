@@ -2,9 +2,9 @@ import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenEx
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { lessorLeases } from '../../database/schema';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
@@ -56,11 +56,17 @@ export interface LessorClassification {
 // rental income + continued depreciation. Classification + commencement is maker-checker (creator ≠ approver).
 @Injectable()
 export class LessorLeasesService {
+  // GL tie-out reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     @Optional() private readonly ledger?: LedgerService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // IFRS 16 lessor classification: a lease is a FINANCE lease if it transfers substantially all the risks and
   // rewards incidental to ownership — evidenced by ANY of: transfer of ownership by the end of the term, a
@@ -237,13 +243,8 @@ export class LessorLeasesService {
     const rows = await db.select().from(lessorLeases).where(where).orderBy(desc(lessorLeases.id));
     const scheduleReceivable = round2(rows.filter((l) => l.classification === 'finance').reduce((s: number, l) => s + n(l.receivableBalance), 0));
 
-    const glConds = [eq(journalLines.accountCode, '1610'), eq(journalEntries.status, 'Posted')];
-    if (tenantId != null) glConds.push(eq(journalEntries.tenantId, tenantId));
-    const [g] = await db.select({
-      debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-      credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
-    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...glConds));
-    const glReceivable = round2(n(g?.debit ?? 0) - n(g?.credit ?? 0));
+    const g = await this.ledgerRead.accountGross(['1610'], { tenantId });
+    const glReceivable = round2(g.net);
     const difference = round2(glReceivable - scheduleReceivable);
     return {
       gl_account: '1610', gl_receivable: glReceivable, schedule_receivable: scheduleReceivable,

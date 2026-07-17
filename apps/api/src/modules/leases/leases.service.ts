@@ -2,9 +2,9 @@ import { Inject, Injectable, NotFoundException, BadRequestException, Optional } 
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { leases } from '../../database/schema';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { currentTenantStore } from '../../common/tenant-context';
 import { ymd, n } from '../../database/queries';
@@ -42,11 +42,17 @@ function presentValue(pmt: number, periods: number, r: number): number {
 // Lease accounting (IFRS 16 / TFRS 16) — control LSE-01.
 @Injectable()
 export class LeasesService {
+  // GL tie-out reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     @Optional() private readonly ledger?: LedgerService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // At commencement: recognise the right-of-use asset + lease liability at the PV of the lease payments
   // (Dr 1600 / Cr 2600, non-cash).
@@ -79,13 +85,8 @@ export class LeasesService {
     const rows = await db.select().from(leases).where(where).orderBy(desc(leases.id));
     const scheduleLiability = round2(rows.reduce((s: number, l: any) => s + n(l.liabilityBalance), 0));
 
-    const glConds = [eq(journalLines.accountCode, '2600'), eq(journalEntries.status, 'Posted')];
-    if (tenantId != null) glConds.push(eq(journalEntries.tenantId, tenantId));
-    const [g] = await db.select({
-      credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
-      debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...glConds));
-    const glLiability = round2(n(g?.credit ?? 0) - n(g?.debit ?? 0));
+    const g = await this.ledgerRead.accountGross(['2600'], { tenantId });
+    const glLiability = round2(g.credit - g.debit);
     const difference = round2(glLiability - scheduleLiability);
 
     return {

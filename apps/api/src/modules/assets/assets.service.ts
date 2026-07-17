@@ -1,9 +1,10 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, asc, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetRevaluations, journalEntries } from '../../database/schema';
+import { assetCategories, fixedAssets, depreciationRuns, depreciationLines, assetRevaluations } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { postingDefault } from '../ledger/posting-events';
 import { QrService } from '../qr/qr.service';
@@ -24,6 +25,7 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 // delegators for everything moved.
 @Injectable()
 export class AssetsService {
+  private readonly ledgerRead: LedgerReadService;
   private readonly registration: AssetsRegistrationService;
   private readonly cip: AssetsCipService;
   private readonly custody: AssetsCustodyService;
@@ -35,6 +37,7 @@ export class AssetsService {
     private readonly qr: QrService,
     private readonly determination: AccountDeterminationService,
   ) {
+    this.ledgerRead = new LedgerReadService(db);
     // Loop-back port: approved registrations / CIP settlements book through the canonical acquire() path.
     const acquirePort: AcquirePort = (dto, user, opts) => this.acquire(dto, user, opts);
     this.registration = new AssetsRegistrationService(this.db, this.docNo, acquirePort);
@@ -309,11 +312,9 @@ export class AssetsService {
   }
 
   private async pendingDisposalJe(assetNo: string) {
-    const db = this.db;
-    const [je] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries)
-      .where(and(eq(journalEntries.source, 'DISP'), eq(journalEntries.sourceRef, assetNo), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
-    if (!je) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No draft disposal entry for ${assetNo}`, messageTh: 'ไม่พบรายการบัญชีจำหน่ายที่รออนุมัติ' });
-    return je;
+    const entryNo = await this.ledgerRead.entryRefNo('DISP', assetNo, { status: 'Draft' });
+    if (!entryNo) throw new BadRequestException({ code: 'NO_PENDING_DISPOSAL', message: `No draft disposal entry for ${assetNo}`, messageTh: 'ไม่พบรายการบัญชีจำหน่ายที่รออนุมัติ' });
+    return { entryNo };
   }
 
   // Revaluation / impairment (FA-07): adjust an asset's carrying amount to a new value. Upward → credit
