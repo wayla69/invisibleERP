@@ -2808,6 +2808,13 @@
       "when": 2023820000366,
       "tag": "0427_free_issue_custody",
       "breakpoints": true
+    },
+    {
+      "idx": 402,
+      "version": "7",
+      "when": 2023820000367,
+      "tag": "0428_scrub_legacy_sha256_password_hashes",
+      "breakpoints": true
     }
   ]
 }
