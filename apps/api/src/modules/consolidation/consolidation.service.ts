@@ -2,8 +2,8 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { consolidationGroups, consolidationEntities, consolidationRuns, consolidationRunLines, consolEliminationRules, segmentDefinitions } from '../../database/schema/consolidation';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { accounts } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { icTransactions } from '../../database/schema/intercompany';
 import { icLoans, icLoanAccruals } from '../../database/schema/treasury-pool';
 import { icReconPeriods } from '../../database/schema/ic-recon';
@@ -23,7 +23,13 @@ const isPnl = (code: string) => code.startsWith('4') || code.startsWith('5');
 
 @Injectable()
 export class ConsolidationService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   private hqOnly(user: JwtUser) {
     if (user.role !== 'Admin') throw new ForbiddenException({ code: 'CONSOL_HQ_ONLY', message: 'Consolidation is HQ-only', messageTh: 'การรวมงบการเงินทำได้เฉพาะสำนักงานใหญ่' });
@@ -127,14 +133,7 @@ export class ConsolidationService {
     const runLineValues: any[] = [];
 
     // Batch ALL entities' GL nets in one grouped query (was one aggregate per entity → N+1).
-    const glAll = await db.select({
-      tenantId: journalEntries.tenantId,
-      accountCode: journalLines.accountCode,
-      net: sql<string>`sum(${journalLines.debit}) - sum(${journalLines.credit})`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(inArray(journalEntries.tenantId, entityTenantIds), eq(journalEntries.period, period), eq(journalEntries.status, 'Posted')))
-      .groupBy(journalEntries.tenantId, journalLines.accountCode);
+    const glAll = await this.ledgerRead.accountNetPerTenantAccount({ tenantIds: entityTenantIds, period });
     const glByTenant = new Map<number, { accountCode: string; net: string }[]>();
     for (const r of glAll) { const k = Number(r.tenantId); const a = glByTenant.get(k) ?? []; a.push({ accountCode: r.accountCode, net: r.net }); glByTenant.set(k, a); }
     // ── FIN-5: dual-rate translation (IAS 21 / TAS 21) ──
@@ -464,19 +463,9 @@ export class ConsolidationService {
     const db = this.db;
     const dimension = dto.dimension ?? 'branch';
     const period = dto.period; // 'YYYY-MM'
-    const dimCol = dimension === 'project' ? journalLines.projectId
-      : dimension === 'department' ? journalLines.departmentId
-      : journalLines.branchId;
-
-    const rows = await db.select({
-      dim: dimCol,
-      type: accounts.type,
-      net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(eq(journalEntries.status, 'Posted'), eq(journalEntries.period, period), inArray(accounts.type, ['Revenue', 'Expense'])))
-      .groupBy(dimCol, accounts.type);
+    // Finer (dim × account × type) rows from the shared read; the segment rollup below sums them, so the
+    // aggregate output is identical to the old (dim × type) grouping.
+    const rows = await this.ledgerRead.netByDimension(dimension === 'project' ? 'project' : dimension === 'department' ? 'department' : 'branch', { period, accountTypes: ['Revenue', 'Expense'] });
 
     // Build dimension-value → segment mapping from segment_definitions for this dimension.
     const defs = await db.select().from(segmentDefinitions).where(and(eq(segmentDefinitions.dimension, dimension), eq(segmentDefinitions.active, true)));

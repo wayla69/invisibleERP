@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { eq, and, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { profitSegments, allocationRules, allocationWeights, allocationRuns, allocationLines } from '../../database/schema/reconciliation';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -10,7 +10,13 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
 @Injectable()
 export class ProfitabilityService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // ── Segments ──
 
@@ -77,16 +83,7 @@ export class ProfitabilityService {
 
     for (const rule of rules) {
       // Get GL net for fromAccountCode this period
-      const [glRow] = await db.select({
-        net: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}), 0)`,
-      }).from(journalLines)
-        .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-        .where(and(
-          eq(journalEntries.tenantId, tenantId),
-          eq(journalEntries.period, period),
-          eq(journalEntries.status, 'Posted'),
-          eq(journalLines.accountCode, rule.fromAccountCode),
-        ));
+      const [glRow] = await this.ledgerRead.accountNetPerAccount({ tenantId, period, accounts: [rule.fromAccountCode] });
 
       const totalAmount = n(glRow?.net ?? 0);
       if (Math.abs(totalAmount) < 1e-6) continue;
@@ -148,18 +145,7 @@ export class ProfitabilityService {
     }
 
     // Direct GL P&L — net by account for this period
-    const glPnl = await db.select({
-      accountCode: journalLines.accountCode,
-      net: sql<string>`sum(${journalLines.debit}) - sum(${journalLines.credit})`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, tenantId),
-        eq(journalEntries.period, period),
-        eq(journalEntries.status, 'Posted'),
-        sql`(${journalLines.accountCode} LIKE '4%' OR ${journalLines.accountCode} LIKE '5%')`,
-      ))
-      .groupBy(journalLines.accountCode);
+    const glPnl = await this.ledgerRead.accountNetPerAccount({ tenantId, period, accountPrefixes: ['4%', '5%'] });
 
     // netIncome at entity level: -(sum of all P&L nets) because revenue is negative and expense is positive
     const plNetSum = glPnl.reduce((s: number, r: any) => s + n(r.net), 0);
