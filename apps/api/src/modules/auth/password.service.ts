@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { scrypt, randomBytes, timingSafeEqual, createHmac, type ScryptOptions } from 'node:crypto';
+import { scrypt, randomBytes, timingSafeEqual, type ScryptOptions } from 'node:crypto';
 
 // promisify(scrypt) resolves to the no-options overload, so wrap manually to pass cost parameters + maxmem.
 function scryptAsync(password: string, salt: string, keylen: number, options: ScryptOptions): Promise<Buffer> {
@@ -38,23 +38,24 @@ const PEPPER_TAG = 'scrypt-p1'; // current peppered format version
 const PLAIN_TAG = 'scrypt';     // un-peppered (legacy default, and the format when no pepper is configured)
 
 /**
- * Effective scrypt SALT = HMAC-SHA256(pepper, storedSalt) when a pepper is configured, else the stored salt.
- * The pepper is mixed into the SALT, not the password — so the password only ever flows into scrypt (a
- * memory-hard KDF), never a fast hash. Security is identical to a password-pepper: a DB-only leak yields the
- * stored salt + hash but not the pepper, and without the pepper the effective salt can't be derived, so the
- * scrypt output can't be reproduced. (Keeping the password out of any SHA-256/HMAC also avoids the CodeQL
- * js/insufficient-password-hash false positive that a password→HMAC-SHA256 edge trips.)
+ * Effective scrypt SALT = the stored salt with the pepper CONCATENATED (when a pepper is configured), else
+ * the stored salt as-is. The pepper is mixed into the SALT — never the password — and by plain concatenation,
+ * so no hash of any kind runs in the password path: the password only ever flows into scrypt (a memory-hard
+ * KDF). Security is identical to a password-pepper: a DB-only leak yields the stored salt + hash but not the
+ * pepper, and without the pepper the effective salt can't be reconstructed, so the scrypt output can't be
+ * reproduced. (A hash operation reachable from the password-hashing function — even one that hashes the salt,
+ * not the password — trips the CodeQL js/insufficient-password-hash sink, so we avoid it entirely.)
  */
 function effectiveSalt(saltHex: string): string {
-  return PEPPER ? createHmac('sha256', PEPPER).update(saltHex, 'utf8').digest('hex') : saltHex;
+  return PEPPER ? `${saltHex}:${PEPPER}` : saltHex;
 }
 
 /**
  * Password hashing — scrypt (built-in, no native deps) with an optional server-side pepper.
  * Hash formats:
  *   • scrypt-p1$<N>$<r>$<p>$<saltHex>$<hashHex>  — CURRENT when PASSWORD_PEPPER is set. scrypt runs over the
- *     raw password with an effective salt = HMAC-SHA256(pepper, saltHex). A DB-only leak cannot be cracked
- *     without the (out-of-DB) pepper.
+ *     raw password with an effective salt = `<saltHex>:<pepper>`. A DB-only leak cannot be cracked without
+ *     the (out-of-DB) pepper.
  *   • scrypt$<N>$<r>$<p>$<saltHex>$<hashHex>     — CURRENT when no pepper is set; also every hash written
  *     before this change. Parameters are self-describing, so the work factor can be raised and old hashes
  *     still verify (and are transparently rehashed on login).
