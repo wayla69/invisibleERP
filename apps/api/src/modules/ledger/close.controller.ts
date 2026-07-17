@@ -28,6 +28,8 @@ const StepBody = z.object({
 type StepBodyT = z.infer<typeof StepBody>;
 
 const LockBody = z.object({ close_run_id: z.number().int().positive(), self_approval_reason: z.string().max(500).optional() });
+const AutoCompleteBody = z.object({ close_run_id: z.number().int().positive() });
+type AutoCompleteBodyT = z.infer<typeof AutoCompleteBody>;
 type LockBodyT = z.infer<typeof LockBody>;
 
 const ReopenBody = z.object({ close_run_id: z.number().int().positive(), reason: z.string().optional(), self_approval_reason: z.string().max(500).optional() });
@@ -84,6 +86,15 @@ export class CloseController {
   @Permissions('gl_close')
   step(@Body(new ZodValidationPipe(StepBody)) b: StepBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.completeStep({ closeRunId: b.close_run_id, stepKey: b.step_key, completedBy: u.username, detail: b.detail });
+  }
+
+  // Close Manager v2 (docs/50 follow-up) — evidence-driven auto-complete: only system-verifiable steps
+  // (recurring/fx_reval/deferred_tax/depreciation) flip Done, attributed "(auto)" with the evidence pinned.
+  @Post('auto-complete')
+  @HttpCode(200)
+  @Permissions('gl_close')
+  autoComplete(@Body(new ZodValidationPipe(AutoCompleteBody)) b: AutoCompleteBodyT, @CurrentUser() u: JwtUser) {
+    return this.svc.autoComplete(b.close_run_id, u);
   }
 
   @Post('lock')

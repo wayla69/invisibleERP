@@ -120,6 +120,17 @@ export default function PeriodClosePage() {
     onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_reopen')),
   });
 
+  // Close Manager v2 — evidence-driven auto-complete: system-verifiable steps flip Done "(auto)".
+  const autoComplete = useMutation<any, Error, void>({
+    mutationFn: () => api('/api/ledger/close/auto-complete', { method: 'POST', body: JSON.stringify({ close_run_id: run!.id }) }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('fnx.close.toast_auto', { done: (r.completed ?? []).length }));
+      setSelectedRun(r.run);
+      refresh();
+    },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_step')),
+  });
+
   // GL-19: programmatic pre-lock validation (read-only) — advisory readiness blockers before the lock.
   const [validation, setValidation] = useState<any>(null);
   const validate = useMutation<any, Error, void>({
@@ -270,6 +281,7 @@ export default function PeriodClosePage() {
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm text-muted-foreground">{t('fnx.close.prelock_desc')}</p>
                       <Button size="sm" variant="outline" disabled={validate.isPending} onClick={() => validate.mutate()}>{t('fnx.close.validate')}</Button>
+                      <Button size="sm" variant="outline" disabled={autoComplete.isPending} onClick={() => autoComplete.mutate()}>{t('fnx.close.auto_complete')}</Button>
                     </div>
                     {validation && validation.period === run.period && (
                       <div className="space-y-2 text-sm">
