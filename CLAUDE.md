@@ -259,6 +259,36 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     inline duplicate + its dispatch line; never leave both. And remember mantra #9's hidden second collision:
     the auto-merge can silently DROP main's added dispatch line in a region your branch edited — grep the
     merged file for every key main added, not just the conflict hunks.
+14. **A control/validation TIGHTENING breaks test FIXTURES, not just product behaviour — run the `apps/api`
+    vitest suite too, and sweep EVERY harness + test for inputs that now violate the new rule.** Two CI
+    breakages in the 2026-07-16 pentest work, both from tightening a rule (not changing an endpoint's shape):
+    (a) adding `.for('update')` to the in-tx over-receipt read (P5) threw `TypeError:
+    tx.select(...).where(...).for is not a function` in `apps/api/test/procurement-grn.test.ts` — its
+    hand-rolled `tx` query-builder stub (`{from,where,limit,orderBy,then}`) didn't implement `.for`; the
+    PGlite-backed cutover harnesses DID, so they passed and hid it. The `build` gate runs `pnpm --filter
+    @ierp/api test:coverage` (`vitest run --coverage`), so **run the `apps/api` vitest suite locally, not only
+    the cutover harnesses** — a mock missing a newly-called builder method (or a service ctor gaining a param)
+    only fails there. Fix the mock to model the real builder (`for: () => p`), never the product. (b) raising the
+    admin/portal password minimum 6→8 rejected EVERY harness that creates a user via `POST /api/admin/users` /
+    `/api/portal/my/users` with a <8-char password — `gaps.ts` (`'secret1'`) **and** `compliance.ts` (7×
+    `'pw1234'`); a spot-fix of the first let the second fail the NEXT CI cycle. When you tighten a validation
+    (min length, amount cap, required field, real-reference gate), `grep -rn` EVERY `tools/cutover/src/*.ts` +
+    `apps/api/test` for inputs that now violate it and fix them in ONE pass — mantra #11's "grep every harness"
+    applies to fixture INPUTS + mocks, not just endpoint names.
+15. **Before remediating a reported finding (pentest / audit / review), VERIFY ITS PREMISE against the live
+    system — a static audit can miss a later migration that already fixed it, and "fixing" a non-defect can
+    BREAK something.** Pentest P8 claimed four metering tables (`ai_token_usage`, `usage_events`, the two
+    `*_overage_billing_runs`) "never ENABLE ROW LEVEL SECURITY" — but the auditor read only each table's own
+    CREATE-TABLE migration and missed the **canonical generic RLS loop** (`FOR r IN SELECT table_name … WHERE
+    column_name='tenant_id' LOOP … CREATE POLICY tenant_isolation`) that runs in later migrations and sweeps in
+    every pre-existing `tenant_id` table. Proven empirically (mantra #3: instrument, don't theorise) by booting
+    the full migration set over PGlite and querying `pg_class.relrowsecurity` + `pg_policy` — all four were
+    already covered. Enabling RLS "again" would have BROKEN the autocommit operator writers (they run OUTSIDE
+    the request tx and never set `app.tenant_id`, so the canonical `WITH CHECK` rejects them). The durable win
+    was a CI gate (`cutover:rls-coverage`, in the `platform-a` shard) that locks the invariant, not a code
+    change. NB a new `cutover:<name>` added INSIDE an existing shard job needs NO branch-protection change — the
+    shard's check name (`harnesses (platform-a)`) already gates it; only a brand-new top-level JOB introduces a
+    new required-check name.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
