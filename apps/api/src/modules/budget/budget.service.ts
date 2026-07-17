@@ -1,7 +1,8 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { eq, and, isNull, sql, desc } from 'drizzle-orm';
+import { eq, and, isNull, sql, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { budgets, budgetReviews, journalLines, journalEntries, accounts } from '../../database/schema';
+import { budgets, budgetReviews, accounts } from '../../database/schema';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
@@ -26,7 +27,13 @@ export interface UpsertBudgetDto { fiscal_year: number; account_code: string; co
 
 @Injectable()
 export class BudgetService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // BUD-01 maker-checker: an upserted budget lands as PendingApproval and is EXCLUDED from budget-vs-actual until
   // a DIFFERENT user approves it (a wrong budget can no longer silently drive the variance/performance report).
@@ -91,14 +98,13 @@ export class BudgetService {
   // budget vs actual: actuals read from the GL (Posted journal lines), budgets summed; variance + favorability
   async budgetVsActual(q: { fiscal_year: number; period?: string; cost_center?: string }) {
     const db = this.db;
-    const periodCond = q.period
-      ? sql`${journalEntries.period} = ${q.period}`
-      : and(sql`${journalEntries.entryDate} >= ${`${q.fiscal_year}-01-01`}`, sql`${journalEntries.entryDate} <= ${`${q.fiscal_year}-12-31`}`);
-    const actConds = [eq(journalEntries.status, 'Posted'), periodCond];
-    if (q.cost_center) actConds.push(eq(journalLines.costCenterCode, q.cost_center));
-    const actualRows = await db.select({ account_code: journalLines.accountCode, account_name: accounts.name, account_type: accounts.type, debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`, credit: sql<string>`coalesce(sum(${journalLines.credit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(...actConds)).groupBy(journalLines.accountCode, accounts.name, accounts.type);
+    const grossRows = await this.ledgerRead.accountGrossByAccount(
+      q.period ? { period: q.period, costCenter: q.cost_center } : { from: `${q.fiscal_year}-01-01`, to: `${q.fiscal_year}-12-31`, costCenter: q.cost_center },
+    );
+    // Account display meta (name/type) joined separately — the accounts master is not boundary-gated.
+    const metaRows = grossRows.length ? await db.select({ code: accounts.code, name: accounts.name, type: accounts.type }).from(accounts).where(inArray(accounts.code, grossRows.map((g) => g.accountCode))) : [];
+    const metaBy = new Map<string, { name: string | null; type: string | null }>(metaRows.map((m: any) => [m.code, { name: m.name, type: m.type }]));
+    const actualRows = grossRows.map((g) => ({ account_code: g.accountCode, account_name: metaBy.get(g.accountCode)?.name ?? null, account_type: metaBy.get(g.accountCode)?.type ?? null, debit: g.debit, credit: g.credit }));
 
     // BUD-01: only APPROVED budgets count toward the variance report (PendingApproval/Rejected excluded).
     const budConds = [eq(budgets.fiscalYear, q.fiscal_year), eq(budgets.status, 'Approved')];

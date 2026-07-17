@@ -1,26 +1,13 @@
 {
-  "_note": "docs/46 Phase 3 (2026-07-12): ledger import-boundary ratchet. Files outside modules/ledger that reference the journalEntries/journalLines Drizzle tables are grandfathered here; the set may only SHRINK. New GL reads go through LedgerReadService (accountNet/cashPosition/entryRefNo) — or add an equally narrow method there — and postings via LedgerService.postEntry. Some grandfathered reads are by design and expected to stay (finance reconcileControls REC-04 reads both sides of the reconciliation independently; consolidation's group eliminations); the rest are Phase 3+ migration candidates. Drop a file here in the same PR that removes its direct reads (--update regenerates).",
+  "_note": "docs/46 Phase 3 (2026-07-12): ledger import-boundary ratchet. Files outside modules/ledger that reference the journalEntries/journalLines Drizzle tables are grandfathered here; the set may only SHRINK. New GL reads go through LedgerReadService (accountNet/cashPosition/entryRefNo) \u2014 or add an equally narrow method there \u2014 and postings via LedgerService.postEntry. Some grandfathered reads are by design and expected to stay (finance reconcileControls REC-04 reads both sides of the reconciliation independently; consolidation's group eliminations); the rest are Phase 3+ migration candidates. Drop a file here in the same PR that removes its direct reads (--update regenerates). Round 6b (2026-07-17): six tie-out consumers migrated to the narrow LedgerReadService (accountGross gross-debit/credit read + entryRefNo status option added) \u2014 assets (FA-09 draft-disposal lookup), leases + lessor-leases (2600/1610 GL-vs-schedule recon), payroll (PAY-02 liability schedule), inventory-ledger (sub-ledger vs GL control tie), commitments (budget actuals). 21 -> 15. Round 7 (2026-07-17): four more consumers migrated \u2014 ic-recon (Due-From/Due-To snapshot -> accountNet), rev-disclosure (TFRS-15 rollforward -> new accountActivity line read), budget (budget-vs-actual actuals -> new accountGrossByAccount grouped read; account name/type meta joined separately), finance.listWriteOffs (AR-WRITEOFF register -> new sourceRegister read). 15 -> 11. Round 8 (2026-07-17): three more \u2014 intercompany (per-tenant 1150/2150 elimination picture -> new accountNetByTenant), finance-metrics (segment profitability -> new netByDimension, accounts-type filter stays ledger-side), controls (GL-05 weekend manual-JE scan -> new weekendManualEntries audit read). 11 -> 8.",
   "files": [
     "apps/api/src/database/seed-demo-finance.ts",
-    "apps/api/src/modules/assets/assets.service.ts",
     "apps/api/src/modules/bank/bank.service.ts",
     "apps/api/src/modules/bi/bi.service.ts",
-    "apps/api/src/modules/budget/budget.service.ts",
-    "apps/api/src/modules/commitments/commitments.service.ts",
     "apps/api/src/modules/consolidation/consolidation.service.ts",
-    "apps/api/src/modules/controls/controls.service.ts",
-    "apps/api/src/modules/finance/finance-metrics.service.ts",
-    "apps/api/src/modules/finance/finance.service.ts",
-    "apps/api/src/modules/ic-reconciliation/ic-recon.service.ts",
-    "apps/api/src/modules/intercompany/intercompany.service.ts",
-    "apps/api/src/modules/inventory/inventory-ledger.service.ts",
-    "apps/api/src/modules/leases/leases.service.ts",
-    "apps/api/src/modules/leases/lessor-leases.service.ts",
-    "apps/api/src/modules/payroll/payroll.service.ts",
     "apps/api/src/modules/planning/planning.service.ts",
     "apps/api/src/modules/profitability/profitability.service.ts",
     "apps/api/src/modules/reconciliation/reconciliation.service.ts",
-    "apps/api/src/modules/revrec-disclosure/rev-disclosure.service.ts",
     "apps/api/src/modules/tax/reports/tax-reports.service.ts"
   ]
 }

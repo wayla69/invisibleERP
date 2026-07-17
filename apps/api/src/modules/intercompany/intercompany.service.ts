@@ -1,9 +1,10 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { icTransactions, icSettlements, journalLines, journalEntries } from '../../database/schema';
+import { icTransactions, icSettlements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -25,11 +26,17 @@ const MAP: Record<string, { creditorCr: string; debtorDr: string }> = {
 
 @Injectable()
 export class IntercompanyService {
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   private hqOnly(user: JwtUser) {
     if (user.role !== 'Admin') throw new ForbiddenException({ code: 'IC_HQ_ONLY', message: 'Intercompany posting is HQ-only', messageTh: 'รายการระหว่างกิจการทำได้เฉพาะสำนักงานใหญ่' });
@@ -111,8 +118,9 @@ export class IntercompanyService {
   // elimination report — reads the GL (1150 due-from / 2150 due-to) + ic_transactions for pair detail
   async reconciliation(_user: JwtUser) {
     const db = this.db;
-    const dueFrom = await db.select({ tenant: journalEntries.tenantId, bal: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(sql`${journalLines.accountCode} = '1150' AND ${journalEntries.status} = 'Posted'`).groupBy(journalEntries.tenantId);
-    const dueTo = await db.select({ tenant: journalEntries.tenantId, bal: sql<string>`coalesce(sum(${journalLines.credit} - ${journalLines.debit}),0)` }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(sql`${journalLines.accountCode} = '2150' AND ${journalEntries.status} = 'Posted'`).groupBy(journalEntries.tenantId);
+    // Due-From is debit-normal (net as-is); Due-To is credit-normal (negate the debit−credit net).
+    const dueFrom = (await this.ledgerRead.accountNetByTenant(['1150'])).map((r) => ({ tenant: r.tenantId, bal: r.net }));
+    const dueTo = (await this.ledgerRead.accountNetByTenant(['2150'])).map((r) => ({ tenant: r.tenantId, bal: -r.net }));
     const totalDueFrom = round4(dueFrom.reduce((a: number, r: any) => a + n(r.bal), 0));
     const totalDueTo = round4(dueTo.reduce((a: number, r: any) => a + n(r.bal), 0));
     const byTenantMap = new Map<number, any>();

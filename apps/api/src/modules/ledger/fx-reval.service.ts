@@ -141,7 +141,7 @@ export class FxRevalService {
     if (run.runBy && run.runBy === dto.postedBy) {
       await assertMakerChecker(db, { user, maker: user.username, event: 'gl.fxreval.post', ref: String(dto.id), reason: selfApprovalReason, code: 'SELF_POST', message: 'Maker-checker: you cannot post an FX revaluation you ran', messageTh: 'ผู้คำนวณโพสต์การปรับปรุงของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
     }
-    const detail: any[] = (run.detail as any[]) ?? [];
+    const detail = (run.detail ?? []) as { scope?: string; delta?: number | string }[];
     const arDelta = round4(detail.filter((d) => d.scope === 'AR').reduce((a, d) => a + n(d.delta), 0));
     const apDelta = round4(detail.filter((d) => d.scope === 'AP').reduce((a, d) => a + n(d.delta), 0));
     const net = round4(arDelta - apDelta);

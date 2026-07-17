@@ -91,7 +91,7 @@ async function main() {
       const v = VENDORS.find((vv) => vv.prefixes.some((p) => p !== 'PKG' && code.startsWith(p)));
       const vendor = v ? vendorByCode.get(v.code) : undefined;
       return vendor ? { tenantId: T, itemId: c.itemId, vendorId: vendor.id, unitPrice: c.unitPrice ?? '1', leadTimeDays: v!.lead, preferred: true } : null;
-    }).filter(Boolean) as any[];
+    }).filter((x): x is NonNullable<typeof x> => x != null);
     for (let i = 0; i < isRows.length; i += 500) await tx.insert(schema.itemSupplier).values(isRows.slice(i, i + 500));
 
     // pool of catalogue items per vendor (by code prefix)

@@ -66,7 +66,7 @@ export class LedgerPostingService {
   // stock + GL atomically). When present, the header/lines insert on that tx and roll back with it;
   // otherwise postEntry owns its own transaction as before.
   async postEntry(dto: PostEntryDto, outerTx?: any) {
-    const db = (outerTx ?? this.db) as any;
+    const db = outerTx ?? this.db;
     const lines = dto.lines ?? [];
     if (!lines.length) throw new BadRequestException({ code: 'UNBALANCED', message: 'No journal lines', messageTh: 'ไม่มีรายการบัญชี' });
 

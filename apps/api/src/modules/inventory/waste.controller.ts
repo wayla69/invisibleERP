@@ -36,8 +36,11 @@ const VoidFireBody = z.object({
 // W1 / POS-5a — Waste / spoilage ledger (kitchen + warehouse), control INV-10/INV-15. Logging reduces the
 // ingredient stock and, when costed, books Dr 5810 / Cr 1200. A reason + disposition taxonomy, void-fired-item
 // capture (recipe explosion) and a theoretical-vs-actual usage-variance report are the food-cost levers.
+// PE-10 — a waste entry reduces stock and books an inventory write-off (Dr 5810 / Cr 1200), so it is gated
+// to the stock-ADJUSTMENT duty (`wh_adjust`, which the coarse `warehouse` role implies) or `exec`, not the
+// SALES duties (`pos`/`order_mgt`). Perpetual sub-ledger items stay hard-blocked to the INV-07 maker-checker.
 @Controller('api/inventory/waste')
-@Permissions('warehouse', 'pos', 'order_mgt')
+@Permissions('wh_adjust', 'exec')
 export class WasteController {
   constructor(private readonly svc: WasteService) {}
 

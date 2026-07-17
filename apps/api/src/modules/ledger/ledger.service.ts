@@ -286,7 +286,7 @@ export class LedgerService implements OnModuleInit {
   // has a GL entry already been posted for this source+ref? (used by AR/AP hooks + closeYear)
   // tenantId scopes the check so two tenants can share a ref (e.g. 'FY2026') without colliding.
   async alreadyPosted(source: string, sourceRef: string, tenantId?: number | null, outerTx?: any): Promise<boolean> {
-    const db = (outerTx ?? this.db) as any;
+    const db = outerTx ?? this.db;
     const conds = [eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef)];
     if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
     const [r] = await db.select({ id: journalEntries.id }).from(journalEntries).where(and(...conds)).limit(1);

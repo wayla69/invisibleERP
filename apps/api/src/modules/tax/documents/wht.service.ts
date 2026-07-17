@@ -82,7 +82,7 @@ export class WhtService {
 
   async list(user: JwtUser, pndType?: string, limit = 50) {
     const db = this.db;
-    const where = pndType ? eq(whtCertificates.pndType, pndType as any) : undefined;
+    const where = pndType ? eq(whtCertificates.pndType, pndType as (typeof whtCertificates.$inferSelect)['pndType']) : undefined;
     const rows = await db.select().from(whtCertificates).where(where).orderBy(desc(whtCertificates.id)).limit(limit);
     return { certificates: rows.map(shape), count: rows.length };
   }

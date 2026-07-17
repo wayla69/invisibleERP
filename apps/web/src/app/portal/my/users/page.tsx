@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
@@ -15,6 +16,7 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 
 export default function MyUsersPage() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const list = useQuery<any>({ queryKey: ['my-users'], queryFn: () => api('/api/portal/my/users') });
   const [f, setF] = useState({ username: '', password: '' });
@@ -22,7 +24,7 @@ export default function MyUsersPage() {
 
   const create = useMutation({
     mutationFn: () => api('/api/portal/my/users', { method: 'POST', body: JSON.stringify({ username: f.username, password: f.password }) }),
-    onSuccess: () => { setMsg(`✅ สร้างพนักงาน ${f.username}`); setF({ username: '', password: '' }); qc.invalidateQueries({ queryKey: ['my-users'] }); },
+    onSuccess: () => { setMsg(t('pt.us.created', { u: f.username })); setF({ username: '', password: '' }); qc.invalidateQueries({ queryKey: ['my-users'] }); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
   const del = useMutation({
@@ -33,13 +35,13 @@ export default function MyUsersPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="พนักงานของฉัน (My Users)" description="สร้างบัญชีให้พนักงานในร้านของคุณ" />
+      <PageHeader title={t('pt.us.title')} description={t('pt.us.desc')} />
       <Card className="gap-3 p-5">
-        <h3 className="text-base font-semibold">เพิ่มพนักงาน</h3>
+        <h3 className="text-base font-semibold">{t('pt.us.add_title')}</h3>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="grid gap-1.5"><Label>Username</Label><Input value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
           <div className="grid gap-1.5"><Label>Password</Label><PasswordInput value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
-          <div className="flex items-end"><Button disabled={!f.username || f.password.length < 6 || create.isPending} onClick={() => create.mutate()}><UserPlus className="size-4" /> สร้างบัญชี</Button></div>
+          <div className="flex items-end"><Button disabled={!f.username || f.password.length < 6 || create.isPending} onClick={() => create.mutate()}><UserPlus className="size-4" /> {t('pt.us.create')}</Button></div>
         </div>
         <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
       </Card>
@@ -50,9 +52,9 @@ export default function MyUsersPage() {
             columns={[
               { key: 'username', label: 'Username' },
               { key: 'role', label: 'Role' },
-              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>ลบ</Button> },
+              { key: 'del', label: '', render: (r: any) => <Button size="sm" variant="destructive" disabled={del.isPending} onClick={() => del.mutate(r.username)}>{t('pt.delete')}</Button> },
             ]}
-            emptyText="ยังไม่มีพนักงาน"
+            emptyText={t('pt.us.empty')}
           />
         )}
       </StateView>

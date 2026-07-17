@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.5** _(2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
+**Status: DRAFT v0.8** _(2026-07-17: FAQ — sign-in + public customer pages (diner QR, tracking, NPS, member app) now follow the selected language (EN coverage round 2); 2026-07-17: FAQ — Customer Portal + system error messages now follow the selected language (EN coverage extension); 2026-07-17: FAQ — language choice no longer reverts to TH on page change (persists on-device when server-side saving is unavailable, e.g. read-only company view); 2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -243,7 +243,19 @@ your code below.
 **The screen is in Thai — can I change it to English?**
 Yes. Use the language switcher in the top bar / settings. Page addresses and steps
 are the same in either language. This manual lists English wording with the Thai
-label in brackets.
+label in brackets. The Customer Portal, system error messages, the sign-in
+pages, and the public customer pages (diner QR ordering, order tracking, NPS,
+loyalty member app) all follow the selected language (2026-07-17); the customer
+pole display, scanned-QR resolver and privacy policy stay bilingual by design.
+
+**I switched to EN but the screen went back to TH when I opened another page.**
+This was a defect and is fixed (2026-07-17): your language choice now sticks
+across pages and reloads on the device where you picked it, even when the system
+cannot save preferences to the server at that moment (e.g. a platform owner
+browsing a company in **read-only view**, or a brief loss of connection). The
+choice is saved to your account automatically as soon as saving is possible
+again. If you still see it revert, refresh the page once to load the latest
+version of the app.
 
 **Why can't I see a menu item that a colleague has?**
 Menus show only what your role / permissions allow. Ask an administrator to grant

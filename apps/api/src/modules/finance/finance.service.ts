@@ -1,10 +1,11 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { sql, eq, ne, and, gte, lt, asc, desc, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, tenants, invBalances, giftCards, revRecLines, journalEntries, journalLines, nettingSettlements } from '../../database/schema';
+import { custPosSales, apTransactions, apPayments, arInvoices, arReceipts, arReceiptApplications, tenants, invBalances, giftCards, revRecLines, nettingSettlements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { TaxService } from '../tax/tax.service';
@@ -29,6 +30,7 @@ export interface SettleAdvanceDto { settled_expense: number; returned_cash?: num
 
 @Injectable()
 export class FinanceService {
+  private readonly ledgerRead: LedgerReadService;
   private readonly documents: FinanceDocumentsService;
   private readonly advances: FinanceAdvancesService;
   private readonly apSvc: FinanceApService;
@@ -52,6 +54,7 @@ export class FinanceService {
     @Optional() private readonly docEmail?: DocEmailService,
     @Optional() private readonly finDocsPdf?: FinanceDocsPdfService, // statement + AR receipt voucher renderers
   ) {
+    this.ledgerRead = new LedgerReadService(db);
     this.documents = new FinanceDocumentsService(db, arInvoicePdf, docEmail, finDocsPdf);
     this.advances = new FinanceAdvancesService(db, docNo, ledger, commitments);
     this.apSvc = new FinanceApService(db, docNo, statusLog, (g) => this.vatSplit(g), (t, c, a, s, o) => this.vatLegFromCode(t, c, a, s, o), ledger, matchSvc, determination);
@@ -222,23 +225,16 @@ export class FinanceService {
   listAdvances(tenantId?: number, status?: string) { return this.advances.listAdvances(tenantId, status); }
 
   // ── AR bad-debt write-off — REV-14 (docs/46 Phase 4a cut 4) ──
-  // writeOffAr lives in FinanceArService; the REGISTER (listWriteOffs, below) stays here because it reads
-  // the journal tables, which the ledger import-boundary ratchet grandfathers on this file.
+  // writeOffAr lives in FinanceArService; the REGISTER (listWriteOffs, below) reads the journal register
+  // through the narrow LedgerReadService.sourceRegister (docs/46 Phase 3).
   writeOffAr(dto: { tenant_id?: number | null; customer_name?: string; amount: number; reason: string }, user: JwtUser) { return this.arSvc.writeOffAr(dto, user); }
 
   // The write-off register: every AR-WRITEOFF entry — Draft (pending approval), Posted (approved/effective),
   // or Voided (rejected) — with its amount (the expense debit), so the controller can review bad-debt activity.
   async listWriteOffs(tenantId?: number) {
-    const db = this.db;
     // Each write-off has exactly one DEBIT line (the bad-debt expense leg — 5720 or its tenant posting-rule
-    // override), so joining on debit > 0 yields one row per write-off regardless of which account it hit.
-    const conds: SQL[] = [eq(journalEntries.source, 'AR-WRITEOFF'), sql`${journalLines.debit} > 0`];
-    if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
-    const rows = await db.select({
-      entryNo: journalEntries.entryNo, status: journalEntries.status, memo: journalEntries.memo,
-      createdBy: journalEntries.createdBy, date: journalEntries.entryDate, debit: journalLines.debit,
-    }).from(journalEntries).innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
-      .where(and(...conds)).orderBy(desc(journalEntries.id)).limit(200);
+    // override), so the positive-debit register yields one row per write-off regardless of which account it hit.
+    const rows = await this.ledgerRead.sourceRegister('AR-WRITEOFF', { tenantId });
     const list = rows.map((r: any) => ({ entry_no: r.entryNo, status: r.status, memo: r.memo, created_by: r.createdBy, date: r.date, amount: n(r.debit), state: r.status === 'Draft' ? 'pending' : r.status === 'Posted' ? 'approved' : 'rejected' }));
     return {
       write_offs: list, count: list.length,

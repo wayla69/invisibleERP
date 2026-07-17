@@ -47,7 +47,8 @@ export class PortalMyErpService {
     const db = this.db;
     const [row] = await db.select().from(myCustomers).where(and(eq(myCustomers.id, id), eq(myCustomers.tenantId, t.id))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Customer not found', messageTh: 'ไม่พบลูกค้า' });
-    await db.delete(myCustomers).where(eq(myCustomers.id, id));
+    // PE-8 — carry the tenant predicate on the DELETE itself (defense-in-depth, CLAUDE.md §9), not only the SELECT.
+    await db.delete(myCustomers).where(and(eq(myCustomers.id, id), eq(myCustomers.tenantId, t.id)));
     return { id, deleted: true };
   }
 
@@ -76,7 +77,8 @@ export class PortalMyErpService {
     const db = this.db;
     const [row] = await db.select().from(mySuppliers).where(and(eq(mySuppliers.id, id), eq(mySuppliers.tenantId, t.id))).limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Supplier not found', messageTh: 'ไม่พบซัพพลายเออร์' });
-    await db.delete(mySuppliers).where(eq(mySuppliers.id, id));
+    // PE-8 — tenant predicate on the DELETE (defense-in-depth, CLAUDE.md §9).
+    await db.delete(mySuppliers).where(and(eq(mySuppliers.id, id), eq(mySuppliers.tenantId, t.id)));
     return { id, deleted: true };
   }
 
@@ -123,9 +125,11 @@ export class PortalMyErpService {
     const db = this.db;
     const [h] = await db.select().from(myPurchaseOrders).where(and(eq(myPurchaseOrders.poNo, poNo), eq(myPurchaseOrders.tenantId, t.id))).limit(1);
     if (!h) throw new NotFoundException({ code: 'NOT_FOUND', message: 'PO not found', messageTh: 'ไม่พบใบสั่งซื้อ' });
+    // PE-8 — tenant predicate on the header DELETE (defense-in-depth, CLAUDE.md §9); lines cascade off the
+    // tenant-verified header id.
     await db.transaction(async (tx: any) => {
       await tx.delete(myPoItems).where(eq(myPoItems.myPoId, Number(h.id)));
-      await tx.delete(myPurchaseOrders).where(eq(myPurchaseOrders.id, Number(h.id)));
+      await tx.delete(myPurchaseOrders).where(and(eq(myPurchaseOrders.id, Number(h.id)), eq(myPurchaseOrders.tenantId, t.id)));
     });
     return { po_no: poNo, deleted: true };
   }

@@ -3,6 +3,7 @@ import { eq, sql, and, desc } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, aiTokenUsage, aiOverageBillingRuns, usageEvents, usageOverageBillingRuns } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { rowsOf } from '../../common/db-rows';
 import { StripeBilling } from './stripe-gateway';
 
 // docs/46 Phase 4c cut 4 — the USAGE METERING side of billing (AI-token ceiling+overage economics and the
@@ -120,7 +121,7 @@ export class BillingMeteringService {
     let billingMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : '';
     if (!billingMonth) {
       const res: any = await db.execute(sql`SELECT to_char((now() AT TIME ZONE 'Asia/Bangkok')::date - INTERVAL '1 month', 'YYYY-MM') AS m`);
-      const rows = (res.rows ?? res) as any[];
+      const rows = rowsOf<{ m?: string }>(res);
       billingMonth = String(rows[0]?.m ?? new Date().toISOString().slice(0, 7));
     }
     const subs = await db.select({ tenantId: subscriptions.tenantId, cust: subscriptions.stripeCustomerId, createdAt: subscriptions.createdAt })

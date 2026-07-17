@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { publicApi } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // IdP redirect_uri target. Forwards the assertion (state + code/id_token) to the backend SSO callback,
 // stores the minted session, and lands the user on their dashboard.
 export default function SsoCallbackPage() {
+  const { t } = useLang();
   const router = useRouter();
   const [error, setError] = useState('');
 
@@ -24,7 +26,8 @@ export default function SsoCallbackPage() {
         // The callback response set the session cookies — no client storage.
         router.replace(res.role === 'Customer' ? '/portal/dashboard' : '/dashboard');
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'เข้าสู่ระบบด้วย SSO ไม่สำเร็จ'));
+      .catch((err) => setError(err instanceof Error ? err.message : t('auth.sso_failed')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   return (
@@ -33,7 +36,7 @@ export default function SsoCallbackPage() {
         {!error ? (
           <div className="flex flex-col items-center gap-3 text-muted-foreground">
             <Loader2 className="size-6 animate-spin" />
-            <p className="text-sm">กำลังตรวจสอบ SSO…</p>
+            <p className="text-sm">{t('auth.sso_verifying')}</p>
           </div>
         ) : (
           <div className="grid gap-4">
@@ -41,7 +44,7 @@ export default function SsoCallbackPage() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
             <Link href="/login" className="text-sm font-medium text-primary hover:underline">
-              กลับไปหน้าเข้าสู่ระบบ
+              {t('auth.back_to_login')}
             </Link>
           </div>
         )}

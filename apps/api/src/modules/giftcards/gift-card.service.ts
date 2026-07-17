@@ -111,7 +111,7 @@ export class GiftCardService {
   // Draw `amount` off a card as a tender against a sale. Locks the row, validates Active + sufficient
   // balance, decrements, writes a Redeem GCT. NO GL here — the sale's buildSale posts the Dr 2200 leg.
   async redeemForSale(cardNo: string, amount: number, saleNo: string, tenantId: number | null, user: JwtUser, tx?: any): Promise<{ applied: number; balance_after: number }> {
-    const db = (tx ?? this.db) as any;
+    const db = tx ?? this.db;
     const want = roundCurrency(amount, 'THB');
     if (want <= 0) return { applied: 0, balance_after: 0 };
     const [c] = await db.select().from(giftCards).where(eq(giftCards.cardNo, cardNo)).for('update').limit(1);
@@ -127,7 +127,7 @@ export class GiftCardService {
   // Add store credit onto a card (used by returns store-credit refund). If cardNo omitted, mint a NEW
   // card. Writes a Refund GCT. NO GL here — the return posts the Cr 2200 leg.
   async creditFromReturn(amount: number, tenantId: number | null, refDoc: string, user: JwtUser, cardNo?: string, tx?: any): Promise<{ card_no: string; balance_after: number }> {
-    const db = (tx ?? this.db) as any;
+    const db = tx ?? this.db;
     const credit = roundCurrency(amount, 'THB');
     if (credit <= 0) throw new BadRequestException({ code: 'BAD_AMOUNT', message: 'amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
     if (cardNo) {

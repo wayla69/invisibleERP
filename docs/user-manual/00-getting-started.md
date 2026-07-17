@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.3 · 2026-07-16** · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
+**Status: DRAFT v0.6 · 2026-07-17** · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -244,6 +244,22 @@ appear in **both** workspaces.
 The interface defaults to **Thai**. English text exists for most labels. Use the
 language switcher in the top bar / settings to change the display language. Page
 addresses and the steps in this manual stay the same in either language.
+
+Your choice is **remembered**: it is saved to your account (so it follows you to
+other devices) and kept on the device you chose it on — moving to another screen
+or reloading the page does **not** change it back. Even in situations where the
+system cannot save preferences to the server (for example a platform owner
+browsing a company in **read-only view**, or a brief loss of connection), the
+language you picked stays in effect on that device and is saved to your account
+automatically as soon as saving is possible again.
+
+The back office, the **Customer Portal**, the **sign-in pages**, the public
+customer pages (**diner QR ordering, order tracking, NPS, the loyalty member
+app**), and system messages (connection errors, form validation, action toasts)
+all follow your selected language — on public pages your device remembers the
+last language you picked, and the sign-in page and diner pages have their own
+language pickers. A few shared screens stay bilingual by design (the customer
+pole display, the scanned-QR resolver, and the privacy policy).
 
 > **Note:** This manual shows English wording first with the Thai label in
 > brackets so you can match it on screen regardless of the current language.

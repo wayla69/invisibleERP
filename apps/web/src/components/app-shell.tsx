@@ -354,6 +354,7 @@ export function AppShell({
    *  non-serializable Lucide icon component refs — never crosses the RSC boundary; the layout can then
    *  stay a server component and pass only serializable props. */
   variant: 'internal' | 'portal';
+  /** Brand heading — a literal string, or a message-catalog key (resolved via t(); unknown keys pass through). */
   brand: string;
   filterPerms?: boolean;
   /** Show the ERP/POS workspace switcher and filter the sidebar to the active workspace. */
@@ -782,7 +783,7 @@ export function AppShell({
               IE
             </div>
             <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="truncate text-sm font-semibold">{brand}</span>
+              <span className="truncate text-sm font-semibold">{t(brand)}</span>
               <span className="truncate text-xs text-muted-foreground">Enterprise ERP</span>
             </div>
           </div>
@@ -935,7 +936,7 @@ export function AppShell({
         <header className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center gap-2 border-b bg-background/95 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] safe-pt backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 h-5" />
-          <h2 className="text-sm font-medium">{activeItemLabel ? t(activeItemLabel) : brand}</h2>
+          <h2 className="text-sm font-medium">{activeItemLabel ? t(activeItemLabel) : t(brand)}</h2>
 
           <div className="ml-auto flex items-center gap-1.5">
             <Button

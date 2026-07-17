@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gift, Star } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { num, baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -17,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export default function PortalLoyalty() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const me = useQuery<any>({ queryKey: ['loyalty-me'], queryFn: () => api('/api/loyalty/me') });
   const [points, setPoints] = useState(100);
@@ -27,36 +29,36 @@ export default function PortalLoyalty() {
   const d = me.data;
   return (
     <div>
-      <PageHeader title="แต้มสะสม" description="ยอดแต้มและการแลกส่วนลด" />
+      <PageHeader title={t('pt.loy.title')} description={t('pt.loy.desc')} />
       <StateView q={me}>
         {d && (
           <div className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
-              <StatCard label="แต้มคงเหลือ" value={num(d.balance)} icon={Star} tone="primary" />
-              <StatCard label="แต้มสะสมตลอดชีพ" value={num(d.lifetime)} icon={Gift} />
+              <StatCard label={t('pt.loy.balance')} value={num(d.balance)} icon={Star} tone="primary" />
+              <StatCard label={t('pt.loy.lifetime')} value={num(d.lifetime)} icon={Gift} />
             </div>
             <Card className="max-w-md gap-4 p-5">
               <CardContent className="space-y-3 px-0">
-                <h3 className="text-base font-semibold">แลกแต้มเป็นส่วนลด</h3>
+                <h3 className="text-base font-semibold">{t('pt.loy.redeem_title')}</h3>
                 <div className="grid gap-2">
-                  <Label htmlFor="points">จำนวนแต้ม</Label>
+                  <Label htmlFor="points">{t('pt.loy.points_qty')}</Label>
                   <Input id="points" type="number" value={points} onChange={(e) => setPoints(+e.target.value)} />
                 </div>
                 <Button disabled={redeem.isPending} onClick={() => redeem.mutate()}>
-                  <Gift className="size-4" /> แลกแต้ม
+                  <Gift className="size-4" /> {t('pt.loy.redeem')}
                 </Button>
                 {redeem.error && <Msg>{(redeem.error as Error).message}</Msg>}
-                {redeem.data && <Msg ok>✅ แลกสำเร็จ — ได้ส่วนลด {baht(redeem.data.redeem_val)} (เหลือ {num(redeem.data.balance)} แต้ม)</Msg>}
+                {redeem.data && <Msg ok>{t('pt.loy.redeem_ok', { value: baht(redeem.data.redeem_val), balance: num(redeem.data.balance) })}</Msg>}
               </CardContent>
             </Card>
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">ประวัติแต้ม</h3>
+              <h3 className="mb-3 text-sm font-semibold text-muted-foreground">{t('pt.loy.history')}</h3>
               <DataTable rows={d.recent_txn} columns={[
-                { key: 'txn_date', label: 'วันที่', render: (r) => thaiDate(r.txn_date) },
-                { key: 'txn_type', label: 'ประเภท' },
-                { key: 'points', label: 'แต้ม', align: 'right', render: (r) => <span className={cn('tabular', Number(r.points) < 0 ? 'text-destructive' : 'text-success')}>{Number(r.points) > 0 ? '+' : ''}{num(r.points)}</span> },
-                { key: 'balance_after', label: 'คงเหลือ', align: 'right', render: (r) => num(r.balance_after) },
-                { key: 'ref_doc', label: 'อ้างอิง' },
+                { key: 'txn_date', label: t('pt.col_date'), render: (r) => thaiDate(r.txn_date) },
+                { key: 'txn_type', label: t('pt.loy.col_type') },
+                { key: 'points', label: t('pt.col_points'), align: 'right', render: (r) => <span className={cn('tabular', Number(r.points) < 0 ? 'text-destructive' : 'text-success')}>{Number(r.points) > 0 ? '+' : ''}{num(r.points)}</span> },
+                { key: 'balance_after', label: t('pt.loy.col_after'), align: 'right', render: (r) => num(r.balance_after) },
+                { key: 'ref_doc', label: t('pt.loy.col_ref') },
               ]} />
             </div>
           </div>

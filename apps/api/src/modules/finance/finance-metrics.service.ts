@@ -2,10 +2,11 @@ import { Injectable, Optional, Inject, BadRequestException } from '@nestjs/commo
 import { sql, and, ne, eq, gte, lte, inArray } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { arInvoices, apTransactions, bankAccounts, journalLines, journalEntries, accounts, branches, costCenters, projects } from '../../database/schema';
+import { arInvoices, apTransactions, bankAccounts, accounts, branches, costCenters, projects } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import { TtlCache } from '../../common/ttl-cache';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { LedgerJeAnomalyService } from '../ledger/ledger-je-anomaly.service';
 import { FinanceService } from './finance.service';
 import { BudgetService } from '../budget/budget.service';
@@ -65,7 +66,13 @@ export class FinanceMetricsService {
     @Optional() private readonly budget?: BudgetService,
     @Optional() private readonly close?: CloseService,
     @Optional() private readonly jeAnomaly?: LedgerJeAnomalyService, // B5 (GL-28) cockpit pillar
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
+
+  // GL segment-profitability read rides the narrow LedgerReadService (docs/46 Phase 3); ctor-body
+  // construction keeps hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
 
   private readonly cache = new TtlCache();
   private get ttl(): number { return Number(process.env.BI_CACHE_TTL_MS ?? 30000); }
@@ -465,15 +472,7 @@ export class FinanceMetricsService {
   }
 
   private async profitabilityUncached(by: string, from: string, to: string) {
-    const dimCol = by === 'branch' ? journalLines.branchId : by === 'cost_center' ? journalLines.costCenterCode : journalLines.projectId;
-    const rows = await this.db.select({
-      dim: dimCol, account_code: journalLines.accountCode, type: accounts.type,
-      net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to), inArray(accounts.type, ['Revenue', 'Expense'])))
-      .groupBy(dimCol, journalLines.accountCode, accounts.type);
+    const rows = await this.ledgerRead.netByDimension(by === 'branch' ? 'branch' : by === 'cost_center' ? 'cost_center' : 'project', { from, to, accountTypes: ['Revenue', 'Expense'] });
 
     const seg = new Map<string, { revenue: number; cogs: number; expense: number }>();
     for (const r of rows) {
@@ -481,7 +480,7 @@ export class FinanceMetricsService {
       const e = seg.get(k) ?? { revenue: 0, cogs: 0, expense: 0 };
       const net = num(r.net); // debit − credit
       if (r.type === 'Revenue') e.revenue += -net; // revenue is credit-normal
-      else { e.expense += net; if (inSet(String(r.account_code), COGS_ACCOUNTS)) e.cogs += net; }
+      else { e.expense += net; if (inSet(String(r.accountCode), COGS_ACCOUNTS)) e.cogs += net; }
       seg.set(k, e);
     }
 

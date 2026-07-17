@@ -79,7 +79,7 @@ export class InvestmentController {
     return this.svc.createInvestment({
       instrument: b.instrument, instrumentType: b.instrument_type, symbol: b.symbol, classification: b.classification,
       currency: b.currency, quantity: b.quantity, cost: b.cost, eirPct: b.eir_pct, tradeDate: b.trade_date,
-      maturityDate: b.maturity_date, tenantId: b.tenant_id ?? null,
+      maturityDate: b.maturity_date, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null,
     }, u);
   }
 
@@ -87,7 +87,7 @@ export class InvestmentController {
   @HttpCode(200)
   @Permissions('treasury', 'exec')
   postPrice(@Body(new ZodValidationPipe(PriceBody)) b: PriceBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.postPrice({ symbol: b.symbol, priceDate: b.price_date, price: b.price, source: b.source, tenantId: b.tenant_id ?? null }, u);
+    return this.svc.postPrice({ symbol: b.symbol, priceDate: b.price_date, price: b.price, source: b.source, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null }, u);
   }
 
   // ── Checker (treasury_approve) ──
@@ -105,7 +105,7 @@ export class InvestmentController {
   @HttpCode(200)
   @Permissions('treasury_approve', 'exec')
   approvePrice(@Body(new ZodValidationPipe(PriceApproveBody)) b: PriceApproveBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.approvePrice(b.symbol, b.price_date, b.tenant_id ?? null, u, b.self_approval_reason);
+    return this.svc.approvePrice(b.symbol, b.price_date, u.role === 'Admin' ? (b.tenant_id ?? null) : null, u, b.self_approval_reason);
   }
 
   @Post('prices/reject')

@@ -1,4 +1,5 @@
 import { toast } from 'sonner';
+import { ts } from './i18n-static';
 
 /**
  * Standard action-feedback toasts. Sonner's `<Toaster richColors position="top-right" />` is already
@@ -15,5 +16,5 @@ export const notifyError = (message: string, description?: string) => toast.erro
 export const notifyInfo = (message: string, description?: string) => toast(message, { description });
 
 /** Bridge a thrown Error (our API wraps as `{ error: { message } }`) to an error toast. */
-export const notifyFromError = (e: unknown, fallback = 'เกิดข้อผิดพลาด') =>
-  notifyError((e as Error)?.message || fallback);
+export const notifyFromError = (e: unknown, fallback?: string) =>
+  notifyError((e as Error)?.message || fallback || ts('err.generic'));

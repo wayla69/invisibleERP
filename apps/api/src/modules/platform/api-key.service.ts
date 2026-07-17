@@ -1,10 +1,12 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apiKeys, users } from '../../database/schema';
 import { safeEqualHex } from '../../common/crypto';
-import type { JwtUser } from '../../common/decorators';
+import { scopesToPermissions } from '../../common/api-scopes';
+import { PERMISSIONS } from '@ierp/shared';
+import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 
 export interface IssueKeyDto { name: string; scopes?: string[]; ttl_days?: number }
 
@@ -24,6 +26,32 @@ export class ApiKeyService {
   // ออกคีย์ใหม่ — คืน "คีย์เต็ม" เพียงครั้งเดียว (เก็บแค่ sha256)
   async issue(dto: IssueKeyDto, user: JwtUser) {
     const db = this.db;
+    // PE-1 — bind the key to the MINTER's own authority. A key is a machine principal acting AS its minting
+    // human (H-2: guard adopts created_by for maker-checker), so it must never carry a permission the minter
+    // does not hold — otherwise a `users`-only AccessAdmin could mint a key with `gl_post`/`creditors`/…
+    // scopes and transact with capabilities it lacks (and launder an SoD-conflicting combination the
+    // user-grant path would block). Expand the requested scopes to their effective permissions the SAME way
+    // the guard does at auth time, and reject anything outside the minter's resolved permission set. Admins
+    // (all permissions) are unaffected; the god/platform surface uses @PlatformAdmin, not scopes.
+    // The platform owner (god) is exempt — a trusted fleet operator, and a god-minted key is already barred
+    // from @PlatformAdmin (pentest P3), so it can never be an MFA-free god credential.
+    if (!isPlatformAdmin(user.username)) {
+      // Bound only scopes that resolve to a REAL internal permission (∈ PERMISSIONS) — a literal permission-key
+      // scope (e.g. `gl_post`), or the `*`/`admin`/`read`/`write` aliases that expand into internal permissions
+      // (`*` → the Sales role's set, which via `exec` includes gl_post/gl_close). Public-API-ONLY scopes
+      // (e.g. `catalog:read`) grant nothing on the internal `@Permissions` surface, so they are not an
+      // escalation and any `users`-holder may provision such an integration key.
+      const internal = new Set<string>(PERMISSIONS as readonly string[]);
+      const held = new Set(user.permissions ?? []);
+      const excess = [...new Set(scopesToPermissions(dto.scopes ?? []))].filter((p) => internal.has(p) && !held.has(p));
+      if (excess.length) {
+        throw new ForbiddenException({
+          code: 'KEY_SCOPE_EXCEEDS_GRANTOR',
+          message: `API key scopes exceed your own permissions: ${excess.join(', ')}`,
+          messageTh: 'สิทธิ์ (scope) ของคีย์เกินสิทธิ์ที่คุณมี — ไม่สามารถออกคีย์ที่มีสิทธิ์เกินตัวได้',
+        });
+      }
+    }
     const tenantId = await this.tenantOf(user);
     const rawKey = 'ierp_' + randomBytes(16).toString('hex'); // 'ierp_' + 32 hex chars
     const prefix = rawKey.slice(0, 12);

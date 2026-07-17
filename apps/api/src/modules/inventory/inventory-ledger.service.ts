@@ -1,8 +1,9 @@
 import { Inject, Injectable, Optional, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, locations, journalEntries, journalLines } from '../../database/schema';
+import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, locations } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { n, ymd } from '../../database/queries';
@@ -48,12 +49,17 @@ export interface AdjustDto { item_id: string; location_id?: string; qty_delta: n
  */
 @Injectable()
 export class InventoryLedgerService {
+  // GL tie-out read rides the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
     // Optional so a partially-constructed harness still builds; absent ⇒ determination off (literal parity).
     @Optional() private readonly determination?: AccountDeterminationService,
   ) {
+    this.ledgerRead = new LedgerReadService(db);
     // Ctor-body plain class (god-service ratchet pattern) — the INV-07 write-off maker-checker register.
     this.writeoffs = new InventoryWriteoffService(db, {
       tenantOf: (u) => this.tenant(u),
@@ -418,17 +424,8 @@ export class InventoryLedgerService {
     // GL inventory attributable to the sub-ledger's own postings, for this tenant. Sums the whole inventory
     // account SET (control 1200 + any item/category overrides) so determination routing can't break the tie.
     const invAccts = await this.inventoryAccountSet(tenantId);
-    const [g] = await this.db.select({
-      d: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-      c: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
-    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        inArray(journalLines.accountCode, invAccts),
-        eq(journalLines.tenantId, tenantId),
-        eq(journalEntries.status, 'Posted'),
-        inArray(journalEntries.source, INV_SOURCES),
-      ));
-    const glInventory = round4(n(g?.d) - n(g?.c));
+    const g = await this.ledgerRead.accountGross(invAccts, { tenantId, tenantOn: 'line', sources: [...INV_SOURCES] });
+    const glInventory = round4(g.net);
     const difference = round4(subLedger - glInventory);
     return { sub_ledger_value: subLedger, gl_inventory: glInventory, difference, reconciled: Math.abs(difference) < 0.01 };
   }

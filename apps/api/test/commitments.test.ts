@@ -199,12 +199,12 @@ describe('CommitmentsService — glResolveAccounts', () => {
 
 describe('CommitmentsService — glAvailability (budget − actual − open commitments)', () => {
   it('a budgeted account: available = ytd budget − (debit−credit) − open commitments; no cost centre; tenant-scoped', async () => {
-    const { svc } = comEnv([[{ v: '1000', c: '2' }], [{ v: '600' }], [{ d: '400', c: '50' }], [{ v: '100' }]]);
+    const { svc } = comEnv([[{ v: '1000', c: '2' }], [{ v: '600' }], [{ debit: '400', credit: '50' }], [{ v: '100' }]]);
     const a = await svc.glAvailability(1, '6000', null, '2026-06');
     expect(a).toMatchObject({ fiscal_year: 2026, period: '2026-06', account_code: '6000', cost_center: null, has_budget: true, budget_year: 1000, budget_ytd: 600, actual_ytd: 350, open_commitments: 100, available: 150 });
   });
   it('no approved budget line → has_budget false; a cost centre + null tenant take their branches', async () => {
-    const { svc } = comEnv([[{ v: '0', c: '0' }], [{ v: '0' }], [{ d: '0', c: '0' }], [{ v: '0' }]]);
+    const { svc } = comEnv([[{ v: '0', c: '0' }], [{ v: '0' }], [{ debit: '0', credit: '0' }], [{ v: '0' }]]);
     const a = await svc.glAvailability(null, '6000', 'CC1', '2026-06');
     expect(a).toMatchObject({ has_budget: false, cost_center: 'CC1', available: 0 });
   });

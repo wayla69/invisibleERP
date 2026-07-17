@@ -259,7 +259,37 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     inline duplicate + its dispatch line; never leave both. And remember mantra #9's hidden second collision:
     the auto-merge can silently DROP main's added dispatch line in a region your branch edited — grep the
     merged file for every key main added, not just the conflict hunks.
-14. **A scripted bump of the stacked `**Status: DRAFT vN**` doc headers DUPLICATES the old version marker —
+14. **A control/validation TIGHTENING breaks test FIXTURES, not just product behaviour — run the `apps/api`
+    vitest suite too, and sweep EVERY harness + test for inputs that now violate the new rule.** Two CI
+    breakages in the 2026-07-16 pentest work, both from tightening a rule (not changing an endpoint's shape):
+    (a) adding `.for('update')` to the in-tx over-receipt read (P5) threw `TypeError:
+    tx.select(...).where(...).for is not a function` in `apps/api/test/procurement-grn.test.ts` — its
+    hand-rolled `tx` query-builder stub (`{from,where,limit,orderBy,then}`) didn't implement `.for`; the
+    PGlite-backed cutover harnesses DID, so they passed and hid it. The `build` gate runs `pnpm --filter
+    @ierp/api test:coverage` (`vitest run --coverage`), so **run the `apps/api` vitest suite locally, not only
+    the cutover harnesses** — a mock missing a newly-called builder method (or a service ctor gaining a param)
+    only fails there. Fix the mock to model the real builder (`for: () => p`), never the product. (b) raising the
+    admin/portal password minimum 6→8 rejected EVERY harness that creates a user via `POST /api/admin/users` /
+    `/api/portal/my/users` with a <8-char password — `gaps.ts` (`'secret1'`) **and** `compliance.ts` (7×
+    `'pw1234'`); a spot-fix of the first let the second fail the NEXT CI cycle. When you tighten a validation
+    (min length, amount cap, required field, real-reference gate), `grep -rn` EVERY `tools/cutover/src/*.ts` +
+    `apps/api/test` for inputs that now violate it and fix them in ONE pass — mantra #11's "grep every harness"
+    applies to fixture INPUTS + mocks, not just endpoint names.
+15. **Before remediating a reported finding (pentest / audit / review), VERIFY ITS PREMISE against the live
+    system — a static audit can miss a later migration that already fixed it, and "fixing" a non-defect can
+    BREAK something.** Pentest P8 claimed four metering tables (`ai_token_usage`, `usage_events`, the two
+    `*_overage_billing_runs`) "never ENABLE ROW LEVEL SECURITY" — but the auditor read only each table's own
+    CREATE-TABLE migration and missed the **canonical generic RLS loop** (`FOR r IN SELECT table_name … WHERE
+    column_name='tenant_id' LOOP … CREATE POLICY tenant_isolation`) that runs in later migrations and sweeps in
+    every pre-existing `tenant_id` table. Proven empirically (mantra #3: instrument, don't theorise) by booting
+    the full migration set over PGlite and querying `pg_class.relrowsecurity` + `pg_policy` — all four were
+    already covered. Enabling RLS "again" would have BROKEN the autocommit operator writers (they run OUTSIDE
+    the request tx and never set `app.tenant_id`, so the canonical `WITH CHECK` rejects them). The durable win
+    was a CI gate (`cutover:rls-coverage`, in the `platform-a` shard) that locks the invariant, not a code
+    change. NB a new `cutover:<name>` added INSIDE an existing shard job needs NO branch-protection change — the
+    shard's check name (`harnesses (platform-a)`) already gates it; only a brand-new top-level JOB introduces a
+    new required-check name.
+16. **A scripted bump of the stacked `**Status: DRAFT vN**` doc headers DUPLICATES the old version marker —
     make the replacement CONSUME it, assert uniqueness, and grep for the double.** The UAT/traceability
     headers are ONE long line of stacked `*vN: …*` notes; replacing the prefix `"**Status: DRAFT v0.90 · "`
     with a new prefix that itself ends `… · *v0.90: ` leaves the remainder still starting `*v0.90:` →
@@ -267,7 +297,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     write the new prefix so the OLD marker text is not re-emitted (or explicitly strip it), and afterwards
     grep the file for `vN: \*vN:` to prove no doubling. Same one-line-header care applies to PN rev tables
     (multi-line, safe) vs the UAT Status lines (single line, fragile).
-15. **Two branches burning down the same down-only baseline conflict at merge — resolve as the UNION of
+17. **Two branches burning down the same down-only baseline conflict at merge — resolve as the UNION of
     both sides' removals; never plain ours/theirs and never a blind `--update`.** When G4 extracted
     procurement while main's #809 extracted ap-payment-run/inventory-ledger/dine-in, both edited
     `service-size-baseline.json` (files map AND the `_note` lineage). Resolution: take **theirs** (main's),
@@ -276,7 +306,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     on the merged tree gets the counts right but regenerates the note text (and unicode-escapes it); the
     hand-applied delta preserves the note lineage. Same family as the RCM-xlsx/census rule (mantra: shared
     aggregation artifacts merge by union + regenerate/verify, not by picking a side).
-16. **Babysitting PR CI: the `harnesses (finance)` shard is the long pole (~25–30 min; fast gates ~5 min,
+18. **Babysitting PR CI: the `harnesses (finance)` shard is the long pole (~25–30 min; fast gates ~5 min,
     other shards 10–20) — pace polls to it, and a DISJOINT docs-only main advance needs no re-cycle.** Poll
     once at ~5 min (build/web-e2e/pg gates + any early failure), then not again until ~25 min. When main
     advances under a green PR but the new commit touches only files your branch never modified (e.g. a
@@ -370,7 +400,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
   adding the directive needlessly is what trips it. (3) `tools/ci/check-service-size.mjs` (docs/46 Phase 0 —
   god-service accretion): a grandfathered `apps/api/src/modules` file (in
-  `service-size-baseline.json`; 14 at Phase 0, **5** after the 2026-07-17 burn-downs (#809 + G4 — procurement/ap-payment-run/inventory-ledger/dine-in all extracted off) — the list may only shrink) may not GROW — in lines **or** constructor params — and no NEW module file may
+  `service-size-baseline.json`; 14 at Phase 0, **0 (EMPTY)** after the 2026-07-17 burn-down rounds 2–5 (#809 + G4 + #810/#812/#813 — every god-service extracted off; the list may only shrink, so it must STAY empty: any module file crossing 600 LOC now fails outright) may not GROW — in lines **or** constructor params — and no NEW module file may
   pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
   after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
