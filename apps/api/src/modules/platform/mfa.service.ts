@@ -23,6 +23,13 @@ export class MfaService {
   async setup(user: JwtUser) {
     const db = this.db;
     const u = await this.userRow(user);
+    // PE-6 — do NOT silently overwrite the secret / flip mfaEnabled→false for an already-enrolled account.
+    // That let a live/hijacked session downgrade MFA (or rebind the secret) with no step-up. Match the auth
+    // surface (auth.service.mfaSetup): re-enrolment requires disabling first, which needs password + current
+    // TOTP (auth.service.mfaDisable). Enrolling for the first time is unchanged.
+    if (u.mfaEnabled) {
+      throw new BadRequestException({ code: 'MFA_ALREADY_ENABLED', message: 'MFA already enabled — disable it first to re-enrol', messageTh: 'เปิดใช้ MFA อยู่แล้ว — ต้องปิดใช้งานก่อน (ยืนยันด้วยรหัสผ่าน + รหัส MFA) จึงจะลงทะเบียนใหม่ได้' });
+    }
     const secret = authenticator.generateSecret();
     const otpauth_url = authenticator.keyuri(u.username, ISSUER, secret);
     // store ciphertext; return plaintext (caller needs it to enroll an authenticator app)

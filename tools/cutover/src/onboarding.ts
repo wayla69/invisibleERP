@@ -5,6 +5,7 @@
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover onboarding
  */
 import 'reflect-metadata';
+import { authenticator } from 'otplib';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'onb-secret';
 process.env.NODE_ENV = 'test';
 
@@ -178,6 +179,12 @@ async function main() {
   ok('PE-1: AccessAdmin cannot mint an API key with scopes beyond its perms (403 KEY_SCOPE_EXCEEDS_GRANTOR)', escKey.status === 403 && escKey.json.error?.code === 'KEY_SCOPE_EXCEEDS_GRANTOR', `${escKey.status} ${escKey.json.error?.code}`);
   const okKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-key', scopes: ['users'] });
   ok('PE-1: AccessAdmin CAN mint a key within its own permissions (users scope)', !!okKey.json?.key, `${okKey.status}`);
+  // PE-6 — the platform MFA surface must NOT silently re-enrol/downgrade an already-enrolled account (no
+  // step-up). Enrol once (setup → verify), then a second setup is refused (must disable first, needs password+TOTP).
+  const pmSetup = await inj('POST', '/api/platform/mfa/setup', iam);
+  await inj('POST', '/api/platform/mfa/verify', iam, { token: authenticator.generate(pmSetup.json.secret) });
+  const pmReenrol = await inj('POST', '/api/platform/mfa/setup', iam);
+  ok('PE-6: platform mfa/setup refuses to re-enrol an MFA-enabled account (400 MFA_ALREADY_ENABLED)', pmReenrol.status === 400 && pmReenrol.json.error?.code === 'MFA_ALREADY_ENABLED', `${pmReenrol.status} ${pmReenrol.json.error?.code}`);
   // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
   // status/plan/user-count; a non-platform-admin is blocked at the guard.
   const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner
