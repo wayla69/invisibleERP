@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { schedulerHeartbeats } from '../../database/schema';
 import { captureOpsAlert } from '../../observability/instrumentation';
 
@@ -33,7 +33,12 @@ export class SchedulerHeartbeatService {
     const ms = staleMs ?? Number(process.env.SCHEDULER_STALE_HOURS ?? DEFAULT_STALE_HOURS) * 3600_000;
     let row: typeof schedulerHeartbeats.$inferSelect | undefined;
     try {
-      [row] = await this.db.select().from(schedulerHeartbeats).where(eq(schedulerHeartbeats.name, name)).limit(1);
+      // Called from the job worker's reap loop (base pool, no request context). schedulerHeartbeats is a
+      // GLOBAL table (keyed by scheduler name, no tenant_id), so declare the read global — otherwise under
+      // STRICT_TENANT_PROXY=1 the proxy throws TENANT_CONTEXT_MISSING, the catch below swallows it as
+      // 'never', and this R1-5 detective control goes silently inert in prod.
+      [row] = await runGlobalDb('scheduler-heartbeat:check-stale', () =>
+        this.db.select().from(schedulerHeartbeats).where(eq(schedulerHeartbeats.name, name)).limit(1));
     } catch { return { status: 'never' }; } // table unreadable ⇒ don't page on infra noise; reap logs it
     if (!row) return { status: 'never' };
     const last = new Date(row.lastRunAt as unknown as string | Date).getTime();

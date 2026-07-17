@@ -20,7 +20,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy, runGlobalDb } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
@@ -69,6 +69,9 @@ async function main() {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   const ledger = app.get(LedgerService);
+  // Harness pokes these tenant-scoped in-tx service methods directly (no HTTP request → no interceptor tx);
+  // declare the base-pool access so STRICT_TENANT_PROXY=1 permits it (each call passes tenantId explicitly).
+  const g = <T>(fn: () => Promise<T>): Promise<T> => runGlobalDb('tax-provision:direct', fn);
   await ledger.seedChartOfAccounts();
 
   const inj = async (method: string, url: string, token?: string, payload?: any) => {
@@ -92,14 +95,14 @@ async function main() {
   ok('logins', !!accountant && !!controller && !!admin2);
 
   // ── Seed book income for FY2026 (revenue 1,000,000 − opex 400,000 = pretax 600,000), posted to tenant HQ.
-  await ledger.postEntry({ date: '2026-06-30', source: 'SEED', tenantId: hq, currency: 'THB', memo: 'sales', createdBy: 'accountant', lines: [{ account_code: '1000', debit: 1000000 }, { account_code: '4000', credit: 1000000 }] });
-  await ledger.postEntry({ date: '2026-06-30', source: 'SEED', tenantId: hq, currency: 'THB', memo: 'opex', createdBy: 'accountant', lines: [{ account_code: '5100', debit: 400000 }, { account_code: '1000', credit: 400000 }] });
+  await g(() => ledger.postEntry({ date: '2026-06-30', source: 'SEED', tenantId: hq, currency: 'THB', memo: 'sales', createdBy: 'accountant', lines: [{ account_code: '1000', debit: 1000000 }, { account_code: '4000', credit: 1000000 }] }));
+  await g(() => ledger.postEntry({ date: '2026-06-30', source: 'SEED', tenantId: hq, currency: 'THB', memo: 'opex', createdBy: 'accountant', lines: [{ account_code: '5100', debit: 400000 }, { account_code: '1000', credit: 400000 }] }));
 
   // ── Deferred tax (TAX-06) for the period → provides the temporary book-to-tax adjustment we REUSE.
   const dtSvc = app.get(DeferredTaxService);
-  const dtRun = await dtSvc.runDeferredTax({ period: '2026-12', taxRate: 0.20, runBy: 'accountant', tenantId: hq });
+  const dtRun = await g(() => dtSvc.runDeferredTax({ period: '2026-12', taxRate: 0.20, runBy: 'accountant', tenantId: hq }));
   ok('deferred-tax run: DTL 20,000, net −20,000, delta −20,000', near(dtRun.dtl, 20000) && near(dtRun.net_deferred, -20000) && near(dtRun.delta_posted, -20000), JSON.stringify({ dtl: dtRun.dtl, net: dtRun.net_deferred, delta: dtRun.delta_posted }));
-  await dtSvc.postDeferredTax({ id: dtRun.id, postedBy: 'controller' }, { username: 'controller' } as any);
+  await g(() => dtSvc.postDeferredTax({ id: dtRun.id, postedBy: 'controller' }, { username: 'controller' } as any));
 
   // ── Run the current provision. permanent add-back 50,000 (non-deductible); temp adj = delta/rate = −100,000.
   const run = await inj('POST', '/api/tax/provision/run', accountant, { period: '2026-12', from: '2026-01-01', to: '2026-12-31', fiscal_year: 2026, statutory_rate: 0.20, permanent_diffs: [{ name: 'Non-deductible entertainment', amount: 50000 }] });

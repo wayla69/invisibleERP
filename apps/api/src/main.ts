@@ -14,7 +14,7 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { registerEdge } from './common/edge';
 import { assertTenancyBootSafe, assertRlsBackstop, allowSingleCompanyMultiTenant, allowRlsBypassBaseRole } from './common/tenancy-boot-check';
-import { DRIZZLE, PG_CLIENT, type DrizzleDb, type PgClient } from './database/database.module';
+import { DRIZZLE, PG_CLIENT, runGlobalDb, type DrizzleDb, type PgClient } from './database/database.module';
 import { tenants } from './database/schema';
 import { count } from 'drizzle-orm';
 import { LedgerService } from './modules/ledger/ledger.service';
@@ -67,7 +67,10 @@ async function bootstrap() {
       isProd: process.env.NODE_ENV === 'production',
       mode: process.env.TENANCY_MODE ?? 'single-company',
       allowOptOut: allowSingleCompanyMultiTenant(),
-      countTenants: async () => { const r = await db.select({ n: count() }).from(tenants); return Number(r[0]?.n ?? 0); },
+      // Global boot read (no tenant context yet) — declare it so STRICT_TENANT_PROXY=1 permits the base-pool
+      // count instead of throwing TENANT_CONTEXT_MISSING (which the catch below would swallow, silently
+      // skipping this H-4 check).
+      countTenants: () => runGlobalDb('boot:count-tenants', async () => { const r = await db.select({ n: count() }).from(tenants); return Number(r[0]?.n ?? 0); }),
       logger: new Logger('TenancyBoot'),
     });
   } catch (e) {

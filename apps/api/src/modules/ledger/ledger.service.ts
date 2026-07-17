@@ -212,9 +212,14 @@ export class LedgerService implements OnModuleInit {
   // ───────────────────── Ledgers (multi-GAAP) ─────────────────────
   // idempotent seed of the parallel ledgers (TFRS leading + TAX + IFRS).
   async seedLedgers() {
-    const db = this.db;
-    await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
-    return { seeded: LEDGERS.length };
+    // Boot seed of the GLOBAL parallel-ledgers catalogue (`ledgers` has no tenant_id). Runs at startup
+    // (main.ts) with no request/tenant context, so it's declared global for STRICT_TENANT_PROXY (mirrors
+    // seedChartOfAccounts).
+    return runGlobalDb('ledger:seed-ledgers', async () => {
+      const db = this.db;
+      await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
+      return { seeded: LEDGERS.length };
+    });
   }
 
   async listLedgers() {
