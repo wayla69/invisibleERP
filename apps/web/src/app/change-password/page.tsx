@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { api, hasSession, logout } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function ChangePasswordPage() {
+  const { t } = useLang();
   const router = useRouter();
   const qc = useQueryClient();
   const [current, setCurrent] = useState('');
@@ -27,8 +29,8 @@ export default function ChangePasswordPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (next.length < 8) return setError('รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร');
-    if (next !== confirm) return setError('รหัสผ่านใหม่และการยืนยันไม่ตรงกัน');
+    if (next.length < 8) return setError(t('auth.cp_min'));
+    if (next !== confirm) return setError(t('auth.cp_mismatch'));
     setLoading(true);
     try {
       await api('/api/auth/change-password', {
@@ -38,7 +40,7 @@ export default function ChangePasswordPage() {
       await qc.invalidateQueries({ queryKey: ['me'] });
       router.replace('/dashboard');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'เปลี่ยนรหัสผ่านไม่สำเร็จ');
+      setError(err instanceof Error ? err.message : t('auth.cp_failed'));
     } finally {
       setLoading(false);
     }
@@ -52,20 +54,20 @@ export default function ChangePasswordPage() {
           <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <KeyRound className="size-6" />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">ตั้งรหัสผ่านใหม่</h1>
-          <p className="mt-1 text-sm text-muted-foreground">เพื่อความปลอดภัย กรุณาเปลี่ยนรหัสผ่านเริ่มต้นก่อนใช้งาน</p>
+          <h1 className="text-xl font-semibold tracking-tight">{t('auth.cp_title')}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t('auth.cp_subtitle')}</p>
         </div>
         <form onSubmit={onSubmit} className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="current">รหัสผ่านปัจจุบัน</Label>
+            <Label htmlFor="current">{t('auth.cp_current')}</Label>
             <PasswordInput id="current" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="next">รหัสผ่านใหม่</Label>
+            <Label htmlFor="next">{t('auth.cp_new')}</Label>
             <PasswordInput id="next" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={8} required />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="confirm">ยืนยันรหัสผ่านใหม่</Label>
+            <Label htmlFor="confirm">{t('auth.cp_confirm')}</Label>
             <PasswordInput id="confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" minLength={8} required />
           </div>
           {error && (
@@ -75,7 +77,7 @@ export default function ChangePasswordPage() {
           )}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-            {loading ? 'กำลังบันทึก…' : 'บันทึกรหัสผ่านใหม่'}
+            {loading ? t('auth.cp_saving') : t('auth.cp_save')}
           </Button>
         </form>
         <button
@@ -83,7 +85,7 @@ export default function ChangePasswordPage() {
           onClick={() => { void logout().finally(() => router.replace('/login')); }}
           className="mt-4 text-center text-xs text-muted-foreground hover:text-foreground"
         >
-          ออกจากระบบ
+          {t('auth.cp_logout')}
         </button>
       </Card>
     </main>

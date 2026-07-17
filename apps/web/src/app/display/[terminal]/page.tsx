@@ -43,9 +43,9 @@ export default function CustomerDisplayPage({ params }: { params: Promise<{ term
         )}
       </div>
       <div className="space-y-2 bg-slate-900 px-10 py-8">
-        {s.subtotal != null && <Row label="ยอดรวม" value={baht(s.subtotal)} muted />}
+        {s.subtotal != null && <Row label="ยอดรวม Subtotal" value={baht(s.subtotal)} muted />}
         <Row label="รวมสุทธิ Total" value={baht(s.total ?? 0)} big />
-        {s.amount_due != null && <Row label="รับเงิน" value={baht(s.amount_due)} muted />}
+        {s.amount_due != null && <Row label="รับเงิน Received" value={baht(s.amount_due)} muted />}
         {s.change != null && <Row label="เงินทอน Change" value={baht(s.change)} big accent />}
       </div>
     </div>
