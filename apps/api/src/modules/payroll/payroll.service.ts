@@ -264,7 +264,7 @@ export class PayrollService implements OnModuleInit {
     }).from(payslips).innerJoin(payruns, eq(payslips.payrunId, payruns.id))
       .where(and(eq(payruns.tenantId, tenantId), eq(payruns.status, 'Posted')));
     const expected: Record<string, number | null> = { '2350': r2(n(pr?.sso ?? 0)), '2360': r2(n(pr?.wht ?? 0)), '2370': r2(n(pf?.pf ?? 0)) };
-    const lines = [] as any[];
+    const lines: { outstanding: number; reconciled: boolean; [k: string]: unknown }[] = [];
     for (const L of this.LIAB) {
       // PR-7: the schedule reads the widened set — the canonical account plus any approved override.
       const set = await this.ledger.postingAccountSet(L.event, L.role, tenantId);

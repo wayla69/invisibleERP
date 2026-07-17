@@ -13,7 +13,7 @@ import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
 import { verifyTableToken, type TableClaim } from './qr-token.util';
 import { rateLimit } from './rate-limit.util';
-import type { PublicOrderDto } from './dto';
+import type { PublicOrderDto, CreateOrderDto, AddItemsDto } from './dto';
 
 const LIVE: NonNullable<typeof tableSessions.$inferSelect.status>[] = ['open', 'bill_requested', 'paying'];
 const diner = (tenantId: number): JwtUser => ({ username: 'diner:qr', role: 'Sales', customerName: null, tenantId, permissions: [] });
@@ -130,10 +130,10 @@ export class QrService {
       const existing = await this.openOrderForSession(claim.sessionId);
       let orderNo: string;
       if (existing) {
-        await this.dineIn.addItems(existing.orderNo, { items: dto.items as any }, u, { buffet, buffetPackageId });
+        await this.dineIn.addItems(existing.orderNo, { items: dto.items as AddItemsDto['items'] }, u, { buffet, buffetPackageId });
         orderNo = existing.orderNo;
       } else {
-        const created = await this.dineIn.createOrder({ table_id: claim.tableId, session_id: claim.sessionId, items: dto.items as any }, u, { buffet, buffetPackageId });
+        const created = await this.dineIn.createOrder({ table_id: claim.tableId, session_id: claim.sessionId, items: dto.items as CreateOrderDto['items'] }, u, { buffet, buffetPackageId });
         orderNo = created.order_no;
       }
       await this.dineIn.fire(orderNo, u); // diner orders fire straight to the kitchen
@@ -176,7 +176,7 @@ export class QrService {
       const total = n(fresh?.total) > 0 ? n(fresh!.total) : (await this.dineIn.requestBill(o.orderNo, diner(claim.tenantId))).total;
       if (!(total > 0)) throw new BadRequestException({ code: 'EMPTY_BILL', message: 'Bill is zero', messageTh: 'ยอดบิลเป็นศูนย์' });
       const u = diner(claim.tenantId);
-      const saleNo = await (this.dineIn as any).mintSaleNo(claim.tenantId);
+      const saleNo = await this.dineIn.mintSaleNo(claim.tenantId);
       const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: claim.tenantId, method: 'PromptPay', amount: total, currency: 'THB', gateway: 'promptpay' }, u);
       await dbx.update(tableSessions).set({ status: 'paying', saleNo }).where(eq(tableSessions.id, claim.sessionId));
       await dbx.update(diningTables).set({ status: 'paying', updatedAt: new Date() }).where(eq(diningTables.id, claim.tableId));

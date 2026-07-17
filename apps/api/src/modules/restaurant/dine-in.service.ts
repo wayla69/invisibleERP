@@ -80,7 +80,7 @@ export class DineInService {
   private async insertItems(orderId: number, tenantId: number | null, items: AddItemsDto['items'], user: JwtUser, opts?: { buffet?: boolean; buffetPackageId?: number }) {
     const db = this.db;
     const buffet = !!opts?.buffet;
-    const rows = [] as any[];
+    const rows: (typeof dineInOrderItems.$inferInsert)[] = [];
     for (const it of items) {
       // menu-driven line → resolve name/price/station/modifiers from the catalog (enforces 86 + modifier rules);
       // freeform line → use the provided name/unit_price as before.
@@ -97,7 +97,7 @@ export class DineInService {
       const st = await this.resolveStation(tenantId, stationCode);
       const amount = roundCurrency(n(it.qty) * effUnit, 'THB');
       rows.push({
-        tenantId, orderId, stationId: Number(st!.id), itemId: itemRef, name,
+        tenantId, orderId, stationId: Number(st!.id), itemId: itemRef, name: name!,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
         buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as { course?: number }).course ?? 1,
@@ -281,7 +281,7 @@ export class DineInService {
       // dineInOrderItems.itemId holds the menu SKU (menu-driven lines) or a freeform ref. Resolve the
       // category from the catalog by SKU so category-scope rules apply.
       const skus = Array.from(new Set(items.map((i: any) => String(i.itemId ?? '')).filter((x: string) => x.length)));
-      const menus = skus.length ? await db.select().from(menuItems).where(inArray(menuItems.sku as any, skus)) : [];
+      const menus = skus.length ? await db.select().from(menuItems).where(inArray(menuItems.sku, skus)) : [];
       const bySku = new Map<string, any>(menus.map((m: any) => [String(m.sku), m] as [string, any]));
       const rlines = items.map((l: any) => {
         const sku = String(l.itemId ?? l.name);

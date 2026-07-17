@@ -144,7 +144,7 @@ export class WebhookService {
     const hooks = await db.select().from(webhooks).where(and(...conds));
     let delivered = 0;
     for (const h of hooks) {
-      const [d] = await db.insert(webhookDeliveries).values({ webhookId: Number(h.id), event, payload: payload as any, status: 'pending', attempts: 0 }).returning();
+      const [d] = await db.insert(webhookDeliveries).values({ webhookId: Number(h.id), event, payload: payload as (typeof webhookDeliveries.$inferInsert)['payload'], status: 'pending', attempts: 0 }).returning();
       if (await this.sendOnce(h, d)) delivered++;
     }
     return { matched: hooks.length, delivered };
@@ -156,7 +156,7 @@ export class WebhookService {
       const tenantId = await this.tenantOf(user);
       const res = await this.deliver(event, payload, tenantId);
       // Same event drives the no-code automation engine (Phase 13 — A4); it must never break webhook emit.
-      try { await this.automation.runEvent(event, payload as any, user); } catch { /* best-effort */ }
+      try { await this.automation.runEvent(event, payload, user); } catch { /* best-effort */ }
       return res;
     } catch (err) {
       this.logger.warn(`webhook emit('${event}') failed: ${(err as Error).message}`);

@@ -5,6 +5,7 @@ import { rmas, rmaLines, bins } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { WmsService } from './wms.service';
 import { ReturnsService } from '../returns/returns.service';
+import type { CreateReturnDto } from '../returns/dto';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -65,7 +66,7 @@ export class RmaService {
       restockedBins.push({ item_id: l.itemId, bin_code: b.binCode, qty: n(l.qty), disposition: l.disposition });
     }
     // money: refund + GL reversal + COGS reversal, all idempotent inside ReturnsService
-    const ret = await this.returns.createReturn({ sale_no: r.saleNo, refund_method: dto.refund_method, reason: r.reason ?? 'RMA', items: lines.map((l: any) => ({ sale_item_id: l.saleItemId ?? undefined, item_id: l.itemId, qty: n(l.qty) })) } as any, user);
+    const ret = await this.returns.createReturn({ sale_no: r.saleNo, refund_method: dto.refund_method, reason: r.reason ?? 'RMA', items: lines.map((l: any) => ({ sale_item_id: l.saleItemId ?? undefined, item_id: l.itemId, qty: n(l.qty) })) } as CreateReturnDto, user);
     await db.update(rmas).set({ status: 'Credited', returnNo: ret.return_no }).where(eq(rmas.id, r.id));
     return { rma_no: rmaNo, return_no: ret.return_no, restocked_bins: restockedBins, status: 'Credited' };
   }

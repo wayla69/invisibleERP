@@ -1,5 +1,5 @@
 import { Module, Logger } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
 import { AuthController } from './auth.controller';
@@ -38,7 +38,7 @@ import { LoginAttemptStore } from './login-attempt.store';
           // ('1h' / a seconds count) — cast to satisfy the stricter type without changing behaviour.
           // Short-lived access token (default 1h) — the refresh-token rotation flow (POST /api/auth/refresh,
           // httpOnly refresh cookie) silently renews it, so a stolen access token is only useful for ~1h.
-          signOptions: { algorithm: 'HS256', expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '1h') as any },
+          signOptions: { algorithm: 'HS256', expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '1h') as NonNullable<JwtModuleOptions['signOptions']>['expiresIn'] },
           // Pin the accepted algorithm so verification can never be coerced into `alg:none` or an
           // asymmetric-key confusion attack if an RS/ES public key is ever introduced to this module.
           verifyOptions: { algorithms: ['HS256'] },
