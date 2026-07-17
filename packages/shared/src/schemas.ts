@@ -50,6 +50,9 @@ export const AuthUser = z.object({
   role: z.enum(ROLES),
   customer_name: z.string().nullable(),
   permissions: z.array(z.string()),
+  // Display name of the active company (tenants.name) — customer_name above is only the tenant CODE.
+  // The web sidebar header shows it so users always know which company they're signed into.
+  company_name: z.string().nullable().optional(),
   must_change_password: z.boolean().optional(),
   // True when this account is a configured platform owner ("god", PLATFORM_ADMIN_USERNAMES) — the web uses
   // it to show the cross-company switcher. Server-derived from env; never a client-settable claim.

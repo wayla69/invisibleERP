@@ -6,7 +6,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { ymd } from '../../database/queries';
 import { biDailySnapshots, reportSubscriptions } from '../../database/schema/bi';
 import { custPosSales, custPosItems } from '../../database/schema/sales';
-import { journalEntries, journalLines, accounts } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { arInvoices } from '../../database/schema/finance';
 import { apTransactions } from '../../database/schema/finance';
 // CRM-1 unification (0293): the pipeline KPIs read the unified spine (crm_opportunities — status/amount/
@@ -61,6 +61,8 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
 @Injectable()
 export class BiService implements OnModuleInit {
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly messaging: MessagingService,
@@ -126,7 +128,11 @@ export class BiService implements OnModuleInit {
     @Optional() private readonly reputationBi?: ReputationBiReports,
     // docs/48 (param 33, APPENDED) — mmm_summary live dashboard read (Marketing Mix channel ROI).
     @Optional() private readonly mmmModel?: MmmModelService,
-  ) {}
+  ) {
+    // GL finance-trend read rides the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction
+    // keeps the goldenmaster's positional construction unchanged.
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // Register the background handler that runs one due subscription (report or heavy action job) off the
   // request path. The worker claims jobs with FOR UPDATE SKIP LOCKED + retry/backoff; runInTenantContext
@@ -288,36 +294,13 @@ export class BiService implements OnModuleInit {
     return this.cache.wrap(this.cacheKey('financeTrend', user.tenantId!, dto), this.cacheTtlMs, () => this.financeTrendUncached(dto, user));
   }
   private async financeTrendUncached(dto: { months?: number; ledger_code?: string }, user: JwtUser) {
-    const db = this.db;
     const tid = user.tenantId!;
     const months = dto.months ?? 6;
     const today = ymd();
     const start = this.monthsAgo(today, months);
-    const ledgerFilter = dto.ledger_code
-      ? sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${dto.ledger_code})`
-      : sql`${journalEntries.ledgerCode} IS NULL`;
-
-    // Revenue/expense per period in ONE grouped query: JOIN accounts (typed) + CASE-WHEN SUM, instead of a
-    // correlated `(SELECT type FROM accounts WHERE code = …)` subquery fired per GROUP BY bucket plus an
-    // in-memory roll-up loop (the old N+1 re-scanned `accounts` for every period × account-type bucket and
-    // marshalled all rows to the app). Revenue = Σ(credit − debit) on Revenue accounts; expense =
-    // Σ(debit − credit) on Expense accounts — identical to the previous net-then-negate maths. The INNER
-    // JOIN drops lines whose account isn't in the COA, exactly as the old NULL account_type did.
-    const rows = await db.select({
-      period: journalEntries.period,
-      revenue: sql<string>`coalesce(sum(case when ${accounts.type} = 'Revenue' then ${journalLines.credit} - ${journalLines.debit} else 0 end),0)`,
-      expense: sql<string>`coalesce(sum(case when ${accounts.type} = 'Expense' then ${journalLines.debit} - ${journalLines.credit} else 0 end),0)`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .innerJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(
-        eq(journalEntries.tenantId, tid),
-        eq(journalEntries.status, 'Posted'),
-        gte(journalEntries.entryDate, start),
-        ledgerFilter,
-      ))
-      .groupBy(journalEntries.period)
-      .orderBy(journalEntries.period);
+    // Revenue/expense per period in ONE grouped query via the narrow ledger read (identical CASE-WHEN
+    // maths; the ledger_code filter keeps the primary-ledger-only vs NULL-or-code semantics).
+    const rows = await this.ledgerRead.revenueExpenseByPeriod({ tenantId: tid, fromDate: start, ledgerCode: dto.ledger_code });
 
     const trend = rows.map((r: any) => {
       const revenue = round2(n(r.revenue));

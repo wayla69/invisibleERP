@@ -11,9 +11,10 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
 @Injectable()
 export class ReconciliationService {
-  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3, round 10); ctor-body construction
-  // keeps the DI surface unchanged (the read service only needs db).
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
   private readonly ledgerRead: LedgerReadService;
+
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
     this.ledgerRead = new LedgerReadService(db);
   }
@@ -24,8 +25,8 @@ export class ReconciliationService {
     const db = this.db;
     const tenantId = user.tenantId!;
 
-    // Period activity for the account (posted GL only) — via the narrow ledger read.
-    const [glRow] = await this.ledgerRead.accountNetPerAccountPeriod({ tenantId, periods: [dto.period], accounts: [dto.account_code] });
+    // Period activity for the account (posted GL only).
+    const [glRow] = await this.ledgerRead.accountNetPerAccount({ tenantId, period: dto.period, accounts: [dto.account_code] });
     const glBalance = n(glRow?.net ?? 0);
     // B4 (docs/50 Wave 4) — roll-forward: opening = Σ posted GL BEFORE the period; activity = the period's
     // net; closing = opening + activity. Computed from the same posted ledger the TB reads, so the
@@ -82,19 +83,19 @@ export class ReconciliationService {
     const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
-    const glLines = await this.ledgerRead.postedLinesForAccount(rp.accountCode, { tenantId: rp.tenantId!, period: rp.period });
+    const glLines = await this.ledgerRead.accountLineRefs({ tenantId: rp.tenantId!, period: rp.period, account: rp.accountCode });
 
     if (!glLines.length) return { imported: 0 };
 
     await db.insert(reconItems).values(
       glLines.map((l) => ({
-        reconPeriodId, source: 'GL', refDoc: l.entryNo, refLineId: Number(l.id),
-        amount: fx(n(l.debit) - n(l.credit), 4), isMatched: false,
+        reconPeriodId, source: 'GL', refDoc: l.refDoc, refLineId: Number(l.id),
+        amount: fx(n(l.amount), 4), isMatched: false,
       }))
     ).onConflictDoNothing();
 
     // Update GL balance
-    const glBalance = round4(glLines.reduce((s: number, l) => s + (n(l.debit) - n(l.credit)), 0));
+    const glBalance = round4(glLines.reduce((s: number, l) => s + n(l.amount), 0));
     await db.update(reconPeriods).set({ glBalance: fx(glBalance, 4), preparedBy: user.username, preparedAt: new Date() }).where(eq(reconPeriods.id, reconPeriodId));
 
     return { imported: glLines.length, gl_balance: glBalance };
