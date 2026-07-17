@@ -315,6 +315,29 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     coarse roles (Sales/`pos`/`warehouse`) carry GRANDFATHERED SoD conflicts, so the user-grant path SoD-checks
     only the per-user OVERRIDE, never role defaults. `grep -rln "api-keys\|scopes:" tools/ apps/api/test` before
     pushing an api-key change — the harness that mints a broad key *as a convenience* is where it breaks.
+18. **A scripted bump of the stacked `**Status: DRAFT vN**` doc headers DUPLICATES the old version marker —
+    make the replacement CONSUME it, assert uniqueness, and grep for the double.** The UAT/traceability
+    headers are ONE long line of stacked `*vN: …*` notes; replacing the prefix `"**Status: DRAFT v0.90 · "`
+    with a new prefix that itself ends `… · *v0.90: ` leaves the remainder still starting `*v0.90:` →
+    `· *v0.90: *v0.90: …` (bit the F2 UAT-02 bump). Recipe: `assert s.count(old) == 1` before replacing,
+    write the new prefix so the OLD marker text is not re-emitted (or explicitly strip it), and afterwards
+    grep the file for `vN: \*vN:` to prove no doubling. Same one-line-header care applies to PN rev tables
+    (multi-line, safe) vs the UAT Status lines (single line, fragile).
+19. **Two branches burning down the same down-only baseline conflict at merge — resolve as the UNION of
+    both sides' removals; never plain ours/theirs and never a blind `--update`.** When G4 extracted
+    procurement while main's #809 extracted ap-payment-run/inventory-ledger/dine-in, both edited
+    `service-size-baseline.json` (files map AND the `_note` lineage). Resolution: take **theirs** (main's),
+    then re-apply your delta by hand — delete the entry for the file YOUR branch shrank and append your
+    justification to main's `_note` — and prove it with `node tools/ci/check-service-size.mjs`. `--update`
+    on the merged tree gets the counts right but regenerates the note text (and unicode-escapes it); the
+    hand-applied delta preserves the note lineage. Same family as the RCM-xlsx/census rule (mantra: shared
+    aggregation artifacts merge by union + regenerate/verify, not by picking a side).
+20. **Babysitting PR CI: the `harnesses (finance)` shard is the long pole (~25–30 min; fast gates ~5 min,
+    other shards 10–20) — pace polls to it, and a DISJOINT docs-only main advance needs no re-cycle.** Poll
+    once at ~5 min (build/web-e2e/pg gates + any early failure), then not again until ~25 min. When main
+    advances under a green PR but the new commit touches only files your branch never modified (e.g. a
+    docs-only PR), attempt the squash merge directly — it succeeds without re-merging or another CI run;
+    only a 405 sends you into mantra #10's fetch-remerge-renumber loop.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -444,7 +467,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
   adding the directive needlessly is what trips it. (3) `tools/ci/check-service-size.mjs` (docs/46 Phase 0 —
   god-service accretion): a grandfathered `apps/api/src/modules` file (in
-  `service-size-baseline.json`; 14 at Phase 0, **8** after docs/46 Phase 4 — the list may only shrink) may not GROW — in lines **or** constructor params — and no NEW module file may
+  `service-size-baseline.json`; 14 at Phase 0, **0 (EMPTY)** after the 2026-07-17 burn-down rounds 2–5 (#809 + G4 + #810/#812/#813 — every god-service extracted off; the list may only shrink, so it must STAY empty: any module file crossing 600 LOC now fails outright) may not GROW — in lines **or** constructor params — and no NEW module file may
   pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
   after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
@@ -495,6 +518,29 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   PO/PR/GR/GRC). Settings: `GET/PUT /api/procurement/receiving-settings` (change = `procurement`/`exec` only,
   mirrors EXP-04). ToE: 8 EXP-12 checks in `cutover/compliance.ts` (user `whrecv` = wh_receive-only fixture);
   the `gaps` harness seeds a real `GR-1`. Narrative PN-02 §7(5) rev 3.29; UAT-P2P-120..124.
+- **The procurement facade is FULLY extracted (docs/46 G4, 2026-07-17) — new procurement logic goes in a
+  sub-service, never back on the facade.** `procurement.service.ts` is ~160 LOC of ctor wiring + thin
+  delegators over FIVE ctor-body plain classes: `procurement-pr/-po/-grn` (docs/38) plus
+  `procurement-vendor.service.ts` (supplier screening Phase 16, party model, the 0270 bank-detail
+  maker-checker, scorecards, T2-D price lists, match-merge/DQM) and `procurement-catalog.service.ts`
+  (item/vendor search, the pr_raise shop catalog, sourcing suggestion + preferred vendor, spend insights,
+  low-stock, item images). Cross-sub-service needs are wired as facade-ctor closures (e.g. catalog gets
+  `assertSupplierAllowed` from vendor; pr gets `lowStock`/`setPreferredVendor` from catalog). The facade's
+  POSITIONAL ctor `(db, docNo, statusLog)` is a goldenmaster/writeflow contract — sub-services are built in
+  the ctor BODY, never DI'd. Extraction recipe that proved safe: move method blocks VERBATIM (python
+  line-range script), keep names/behavior byte-identical, then let `golden` (534 paths) + `writeflow` +
+  compliance/match/ext prove the move.
+- **Subcontractor free-issue custody (PROJ-28, migration 0427) — extend it, don't re-derive.**
+  `reservations.service.ts`: reserve with `subcontract_no` (fail-closed `SUBCONTRACT_NOT_FOUND`/
+  `SUBCONTRACT_PROJECT_MISMATCH`/`SUBCONTRACT_NOT_ACTIVE`) stamps `stock_reservations.subcontract_id` — the
+  ordinary INV-13 issue IS the free-issue event (GL/stock byte-identical); `custodyStatement`
+  (`GET /api/reservations/custody?subcontract_no=`; issued − Posted MRET returns − acked = in_custody) and
+  `ackCustody` (`POST …/:id/custody-ack`; `NOT_FREE_ISSUE`/`RESERVATION_NOT_CONSUMED`/`OVER_ACK` cap,
+  by/at trail). The teeth live in `subcontracts.service.ts` `certifyValuation`: a FINAL certificate (reaching
+  contract value) with open custody → `FREE_ISSUE_CUSTODY_OPEN` + `details.open`; interim certificates
+  unaffected. Web: reserve-dialog field + รับรู้การใช้ action (project จองสต๊อก tab) + the ฝากวัสดุ statement
+  panel on `/projects/subcontracts`. ToE: `projects` §9h-bis (12 checks — NB the free-issue fixture drops
+  `boq_line_id`, else the RES commitment double-books the Depth-2 budget line). PN-16 §27d.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
@@ -528,7 +574,9 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
   appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
   `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
-  Sequence is at `0121` / idx 126 as of the gap-pack work.
+  Sequence is at `0427_free_issue_custody` / idx 401 / when 2023820000366 as of the F2 wave (2026-07-17) —
+  the next free is 0428 / idx 402 / when …367, but ALWAYS re-derive from the live journal tail after a
+  main merge (mantra #10: concurrent PRs steal numbers).
 - **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
@@ -746,6 +794,18 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   - Asset revaluation/impairment + disposal recycling (**FA-07**): `modules/assets/assets.service.ts`
     (`revalue`, `dispose` recycles surplus 3200→3100). EAM work orders/PM/reliability (**FA-06**): `modules/eam/`.
   - Collections/dunning + credit-hold workflow (**REV-08/REV-12**): `modules/finance/collections.service.ts`.
+  - **Close Manager v2/v2b (extends GL-15/GL-19; `modules/ledger/close.service.ts` `autoComplete`):**
+    `POST /api/ledger/close/auto-complete` ticks a checklist step ONLY on system evidence — recurring ←
+    nothing left due (recurring templates + prepaid schedules ≤ period end); fx_reval / deferred_tax ← a
+    Posted run for the period; depreciation ← ≥1 Posted `DEP` JE; **bank_rec / subledger_tieout ← every
+    REC-01 recon workspace OPENED for the period on the step's account set is CERTIFIED** (bank_rec: the
+    canonical `CASH_ACCOUNTS` from `ledger-constants`; tie-out: `TIEOUT_ACCOUNTS` 1100/2000/1200/1500) —
+    fail-closed both ways (zero workspaces = no evidence; one un-certified blocks), certifiers pinned in
+    `detail.evidence.certifications`. The REC-01 certification is the human act; the tick reflects it.
+    Register-less judgments (TB review, flux, disclosure) + custom tasks NEVER auto-complete. Attribution
+    `"<user> (auto)"` (B4 precedent). Overdue close tasks (past `due_date`, run not Locked) surface in
+    GOV-01 via the `close_task_overdue` provider in `ledger-approval-queues.ts`. ToE: `basics` F1+G3 blocks
+    (isolated period 2028-02).
   - Scheduled "action" jobs ride the BI report scheduler: `ar_collections_dunning`, `eam_pm_generate`,
     `gl_recurring_journals`, `gl_prepaid_amortize`, `lease_periodic_run` — each idempotent. Since docs/46
     Phase 1 the GENERATOR lives in the owning module's `*-bi-reports.ts` provider (implements
