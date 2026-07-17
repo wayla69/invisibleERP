@@ -57,7 +57,9 @@ test('diner browses the menu, adds an item, and submits an order', async ({ page
   await cartBar.click();
   await page.getByRole('button', { name: 'ส่งออเดอร์เข้าครัว' }).click();
 
-  // the order now shows on the status tab with its kitchen state
-  await expect(page.getByText('ผัดไทยกุ้งสด')).toBeVisible();
+  // the order now shows on the status tab with its kitchen state. The dish name also exists in the
+  // (now-hidden or overlaid) menu list and cart, so an unscoped getByText intermittently trips a
+  // strict-mode violation (bit PR #777) — assert on the VISIBLE occurrence only.
+  await expect(page.getByText('ผัดไทยกุ้งสด').filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText('รอคิว')).toBeVisible();
 });
