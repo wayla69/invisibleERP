@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar, stockReservations } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectChangeOrders, projectHealthSnapshots, projectBoq, projectMaterialRequisitions, crmOpportunities, customerMaster, timesheets, projectResources, resourceCalendar, stockReservations } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -9,7 +9,6 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { assertMakerChecker } from '../../common/control-profile';
 import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
@@ -18,8 +17,12 @@ import { BoqImportService, type BoqImportInput } from './boq-import.service';
 import { ProjectsPortfolioService } from './projects-portfolio.service';
 import { ProjectsGateService } from './projects-gate.service';
 import { ProgramBenefitsService } from './program-benefits.service';
-import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, depsCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
-import { shapeTemplateItem, shapeRisk, shapeChangeOrder, shapeBoqLine } from './projects.shapes';
+import { ProjectsBoqService } from './projects-boq.service';
+import { ProjectsTemplatesService } from './projects-templates.service';
+import { ProjectsRiskService } from './projects-risk.service';
+import { ProjectsCloseService } from './projects-close.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
+import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, csvToList, addDays } from './projects.helpers';
 
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number; budget_tolerance_pct?: number }
@@ -76,6 +79,10 @@ export class ProjectsService {
   private readonly portfolio: ProjectsPortfolioService;
   private readonly gates: ProjectsGateService;
   private readonly benefits: ProgramBenefitsService;
+  private readonly boq: ProjectsBoqService;
+  private readonly templates: ProjectsTemplatesService;
+  private readonly risks: ProjectsRiskService;
+  private readonly closeReview: ProjectsCloseService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -103,6 +110,14 @@ export class ProjectsService {
     this.portfolio = new ProjectsPortfolioService(db);
     this.gates = new ProjectsGateService(db, (code) => this.row(code));
     this.benefits = new ProgramBenefitsService(db);
+    // docs/46 Phase-4 projects round: four more ctor-body sub-services. CO approval re-baselines through the
+    // facade's captureBaseline delegator (→ evmSvc); template apply returns via the WBS listTasks delegator;
+    // the close review reads GL 1260/2390 through a locally-constructed LedgerReadService (kept out of DI so
+    // the goldenmaster's positional (db, ledger) construction stays valid).
+    this.boq = new ProjectsBoqService(db, (code) => this.row(code), (c, d, u) => this.captureBaseline(c, d, u), this.commitments);
+    this.templates = new ProjectsTemplatesService(db, (code) => this.row(code), (code) => this.listTasks(code));
+    this.risks = new ProjectsRiskService(db, (code) => this.row(code), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
+    this.closeReview = new ProjectsCloseService(db, new LedgerReadService(db));
   }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -837,395 +852,31 @@ export class ProjectsService {
 
 
 
-  // ── Change orders / contract variations (PROJ-10) ────────────────────────
-  // Request a change order — a governed amendment to the contract value / budget / EAC. Posts/applies NOTHING;
-  // it stays `pending` until a DIFFERENT user approves it (maker-checker), so a project can't move its
-  // contract goalposts unilaterally.
-  // ── Bill of Quantities (BoQ) — M0, docs/32 ────────────────────────────────
-  // The project's measured-works requirement & budget baseline. A draft BoQ is authored with rate-built
-  // lines (budget_amount = budget_qty × rate); an independent approver signs it off (maker-checker) — on
-  // approval the project's budget_amount is synced to the sum of line budgets (the enforceable baseline that
-  // M1's commitment ledger draws against). A locked BoQ is frozen. Line amount computed server-side.
-  private boqLineAmount(dto: BoqLineDto) {
-    return dto.budget_amount != null ? r2(dto.budget_amount) : r2(n(dto.budget_qty) * n(dto.rate));
-  }
+  // ── BoQ / change orders / site cash (docs/32 M0–M4, PROJ-10/12/14) — ProjectsBoqService ──
+  async createBoq(code: string, dto: BoqDto, user: JwtUser) { return this.boq.createBoq(code, dto, user); }
+  async getBoq(code: string) { return this.boq.getBoq(code); }
+  async siteCash(code: string) { return this.boq.siteCash(code); }
+  async listCommitments(code: string) { return this.boq.listCommitments(code); }
+  async addBoqLine(boqId: number, dto: BoqLineDto, user: JwtUser) { return this.boq.addBoqLine(boqId, dto, user); }
+  async approveBoq(boqId: number, user: JwtUser, selfApprovalReason?: string | null) { return this.boq.approveBoq(boqId, user, selfApprovalReason); }
+  async lockBoq(boqId: number, user: JwtUser) { return this.boq.lockBoq(boqId, user); }
+  async remeasureBoqLine(lineId: number, dto: RemeasureDto, user: JwtUser) { return this.boq.remeasureBoqLine(lineId, dto, user); }
+  async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) { return this.boq.createChangeOrder(code, dto, user); }
+  async approveChangeOrder(coId: number, user: JwtUser, selfApprovalReason?: string | null) { return this.boq.approveChangeOrder(coId, user, selfApprovalReason); }
+  async rejectChangeOrder(coId: number, user: JwtUser) { return this.boq.rejectChangeOrder(coId, user); }
+  async listChangeOrders(code: string) { return this.boq.listChangeOrders(code); }
 
-  async createBoq(code: string, dto: BoqDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const boqNo = dto.boq_no?.trim() || `BOQ${String(Date.now()).slice(-8)}`;
-    const [h] = await db.insert(projectBoq).values({
-      projectId: Number(p.id), tenantId, boqNo, title: dto.title ?? null, status: 'draft', createdBy: user.username,
-    }).returning({ id: projectBoq.id });
-    const lines = dto.lines ?? [];
-    for (let i = 0; i < lines.length; i++) {
-      const it = lines[i]!;
-      await db.insert(projectBoqLines).values({
-        boqId: Number(h!.id), projectId: Number(p.id), tenantId, lineNo: i + 1,
-        category: it.category ?? 'material', itemNo: it.item_no ?? null, taskId: it.task_id ?? null, wbsCode: it.wbs_code ?? null,
-        description: it.description ?? null, uom: it.uom ?? null,
-        budgetQty: fx(it.budget_qty ?? 0, 4), rate: fx(it.rate ?? 0, 2), budgetAmount: fx(this.boqLineAmount(it), 2),
-      });
-    }
-    return this.getBoq(code);
-  }
+  // ── Project templates (B2) — ProjectsTemplatesService ───────────────────
+  async createTemplate(dto: TemplateDto, user: JwtUser) { return this.templates.createTemplate(dto, user); }
+  async listTemplates(user: JwtUser) { return this.templates.listTemplates(user); }
+  async getTemplate(code: string) { return this.templates.getTemplate(code); }
+  async applyTemplate(code: string, tplCode: string, dto: ApplyTemplateDto, user: JwtUser) { return this.templates.applyTemplate(code, tplCode, dto, user); }
 
-  // Latest BoQ for a project + its lines + budget rollup (total, by category, count).
-  async getBoq(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const [boq] = await db.select().from(projectBoq).where(eq(projectBoq.projectId, Number(p.id))).orderBy(desc(projectBoq.id)).limit(1);
-    if (!boq) return { project_code: code, boq: null, lines: [], count: 0, budget_total: 0, by_category: {} };
-    const lines = await db.select().from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boq.id))).orderBy(projectBoqLines.lineNo);
-    const budgetTotal = r2(lines.reduce((s: number, l: any) => s + n(l.budgetAmount), 0));
-    const byCategory: Record<string, number> = {};
-    for (const l of lines) byCategory[l.category] = r2((byCategory[l.category] ?? 0) + n(l.budgetAmount));
-    // M1 (PROJ-12) — per-line committed (open+consumed encumbrance) and remaining = budget − committed.
-    const committedByLine = this.commitments ? await this.commitments.committedByLine(lines.map((l: any) => Number(l.id))) : new Map<number, number>();
-    const shaped = lines.map((l: any) => {
-      const committed = committedByLine.get(Number(l.id)) ?? 0;
-      return { ...shapeBoqLine(l), committed, remaining: r2(n(l.budgetAmount) - committed) };
-    });
-    const committedTotal = r2(shaped.reduce((s: number, l: any) => s + n(l.committed), 0));
-    return {
-      project_code: code,
-      boq: { id: Number(boq.id), boq_no: boq.boqNo, version: boq.version, title: boq.title, status: boq.status, budget_total: n(boq.budgetTotal), approved_by: boq.approvedBy, approved_at: boq.approvedAt, created_by: boq.createdBy },
-      lines: shaped, count: lines.length, budget_total: budgetTotal,
-      committed_total: committedTotal, remaining_total: r2(budgetTotal - committedTotal),
-      by_category: byCategory,
-    };
-  }
-
-  // Project site-cash (M4, docs/32, PROJ-14) — the advances, expense-reimbursement claims and petty-cash
-  // requests raised AGAINST this project, so site cash is managed on the project. Read-only rollup.
-  async siteCash(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const pid = Number(p.id);
-    const advances = await db.select().from(employeeAdvances).where(eq(employeeAdvances.projectId, pid)).orderBy(desc(employeeAdvances.id));
-    const claims = await db.select().from(expenseClaims).where(eq(expenseClaims.projectId, pid)).orderBy(desc(expenseClaims.id));
-    const petty = await db.select().from(expenseRequests).where(eq(expenseRequests.projectId, pid)).orderBy(desc(expenseRequests.id));
-    const sum = (rows: any[]) => r2(rows.reduce((s: number, r: any) => s + n(r.amount), 0));
-    const advTotal = sum(advances), claimTotal = sum(claims), pettyTotal = sum(petty);
-    return {
-      project_code: code,
-      advances: advances.map((a: any) => ({ advance_no: a.advanceNo, payee: a.payee, amount: n(a.amount), status: a.status, settled_expense: n(a.settledExpense), issued_date: a.issuedDate })),
-      reimbursements: claims.map((c: any) => ({ id: Number(c.id), category: c.category, amount: n(c.amount), status: c.status, entry_no: c.entryNo, ap_txn_no: c.apTxnNo, claim_date: c.claimDate })),
-      petty_cash: petty.map((r: any) => ({ req_no: r.reqNo, kind: r.kind, payee: r.payee, amount: n(r.amount), status: r.status, gl_ref: r.glRef })),
-      totals: { advances: advTotal, reimbursements: claimTotal, petty_cash: pettyTotal, total: r2(advTotal + claimTotal + pettyTotal) },
-      count: advances.length + claims.length + petty.length,
-    };
-  }
-
-  // Project commitments read model (M1, PROJ-12) — the encumbrance ledger for a project + a status summary.
-  async listCommitments(code: string) {
-    const p = await this.row(code);
-    if (!this.commitments) return { project_code: code, commitments: [], count: 0, summary: { open: 0, consumed: 0, released: 0, committed: 0 } };
-    return { project_code: code, ...(await this.commitments.listForProject(Number(p.id))) };
-  }
-
-  private async boqRow(boqId: number) {
-    const [boq] = await this.db.select().from(projectBoq).where(eq(projectBoq.id, Number(boqId))).limit(1);
-    if (!boq) throw new NotFoundException({ code: 'BOQ_NOT_FOUND', message: `BoQ ${boqId} not found`, messageTh: 'ไม่พบ BoQ' });
-    return boq;
-  }
-
-  // Append a line to a DRAFT BoQ (an approved/locked BoQ is frozen — change it via a change order in M1+).
-  async addBoqLine(boqId: number, dto: BoqLineDto, user: JwtUser) {
-    const db = this.db;
-    const boq = await this.boqRow(boqId);
-    if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is ${boq.status}; only a draft BoQ accepts new lines`, messageTh: 'เพิ่มรายการได้เฉพาะ BoQ สถานะร่าง' });
-    const [mx] = await db.select({ m: sql<string>`coalesce(max(${projectBoqLines.lineNo}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
-    await db.insert(projectBoqLines).values({
-      boqId: Number(boqId), projectId: Number(boq.projectId), tenantId: boq.tenantId ?? user.tenantId ?? null, lineNo: Number(mx?.m ?? 0) + 1,
-      category: dto.category ?? 'material', itemNo: dto.item_no ?? null, taskId: dto.task_id ?? null, wbsCode: dto.wbs_code ?? null,
-      description: dto.description ?? null, uom: dto.uom ?? null,
-      budgetQty: fx(dto.budget_qty ?? 0, 4), rate: fx(dto.rate ?? 0, 2), budgetAmount: fx(this.boqLineAmount(dto), 2),
-    });
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
-    return this.getBoq(proj!.c);
-  }
-
-  // Approve a BoQ (maker-checker: approver ≠ author, SOD_SELF_APPROVAL). On approval the sum of line budgets
-  // is snapshotted onto the BoQ and synced to the project's budget_amount — the enforceable material budget
-  // baseline (M1's commitment ledger draws remaining = budget − actual − commitments against it).
-  async approveBoq(boqId: number, user: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const boq = await this.boqRow(boqId);
-    if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is already ${boq.status}`, messageTh: 'BoQ ถูกดำเนินการแล้ว' });
-    await assertMakerChecker(db, { user, maker: boq.createdBy, event: 'proj.boq.approve', ref: String(boqId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
-    const [tot] = await db.select({ v: sql<string>`coalesce(sum(${projectBoqLines.budgetAmount}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
-    const budgetTotal = r2(n(tot?.v));
-    await db.update(projectBoq).set({ status: 'approved', budgetTotal: fx(budgetTotal, 2), approvedBy: user.username, approvedAt: new Date() }).where(eq(projectBoq.id, Number(boqId)));
-    // Sync the project's budget baseline to the approved BoQ total (the material/works budget).
-    await db.update(projects).set({ budgetAmount: fx(budgetTotal, 2) }).where(eq(projects.id, Number(boq.projectId)));
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
-    return { ...(await this.getBoq(proj!.c)), budget_synced: budgetTotal };
-  }
-
-  // Lock an approved BoQ — freeze it (no further re-measurement edits; the definitive baseline of record).
-  async lockBoq(boqId: number, user: JwtUser) {
-    const db = this.db;
-    const boq = await this.boqRow(boqId);
-    if (boq.status !== 'approved') throw new BadRequestException({ code: 'BOQ_NOT_APPROVED', message: `Only an approved BoQ can be locked (is ${boq.status})`, messageTh: 'ล็อกได้เฉพาะ BoQ ที่อนุมัติแล้ว' });
-    await db.update(projectBoq).set({ status: 'locked' }).where(eq(projectBoq.id, Number(boqId)));
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
-    return this.getBoq(proj!.c);
-  }
-
-  // Record the actual measured quantity for a line (re-measurement). Allowed while the BoQ is approved (not
-  // yet locked); records remeasured_qty vs the budgeted qty — the basis for re-measurement variance.
-  async remeasureBoqLine(lineId: number, dto: RemeasureDto, user: JwtUser) {
-    const db = this.db;
-    const [line] = await db.select().from(projectBoqLines).where(eq(projectBoqLines.id, Number(lineId))).limit(1);
-    if (!line) throw new NotFoundException({ code: 'BOQ_LINE_NOT_FOUND', message: `BoQ line ${lineId} not found`, messageTh: 'ไม่พบรายการ BoQ' });
-    const boq = await this.boqRow(Number(line.boqId));
-    if (boq.status === 'draft') throw new BadRequestException({ code: 'BOQ_NOT_APPROVED', message: 'Re-measure an approved BoQ, not a draft', messageTh: 're-measure ได้เมื่อ BoQ อนุมัติแล้ว' });
-    if (boq.status === 'locked') throw new BadRequestException({ code: 'BOQ_LOCKED', message: 'BoQ is locked — re-measurement is frozen', messageTh: 'BoQ ถูกล็อก แก้ไขไม่ได้' });
-    await db.update(projectBoqLines).set({ remeasuredQty: fx(dto.remeasured_qty, 4) }).where(eq(projectBoqLines.id, Number(lineId)));
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(line.projectId))).limit(1);
-    return this.getBoq(proj!.c);
-  }
-
-  async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const contractDelta = r2(dto.contract_delta ?? 0), budgetDelta = r2(dto.budget_delta ?? 0), estDelta = r2(dto.estimated_cost_delta ?? 0);
-    if (contractDelta === 0 && budgetDelta === 0 && estDelta === 0) throw new BadRequestException({ code: 'EMPTY_CHANGE_ORDER', message: 'A change order must change the contract, budget, or estimated cost', messageTh: 'ใบเปลี่ยนแปลงต้องเปลี่ยนมูลค่าสัญญา งบประมาณ หรือประมาณการต้นทุน' });
-    const coNo = `CO${String(Date.now()).slice(-8)}`;
-    await db.insert(projectChangeOrders).values({
-      projectId: Number(p.id), tenantId: p.tenantId ?? user.tenantId ?? null, coNo, description: dto.description ?? null,
-      contractDelta: fx(contractDelta, 2), budgetDelta: fx(budgetDelta, 2), estimatedCostDelta: fx(estDelta, 2),
-      reason: dto.reason ?? null, status: 'pending', requestedBy: user.username,
-    });
-    return this.listChangeOrders(code);
-  }
-
-  // Approve a change order (maker-checker): the approver MUST differ from the requester (SOD_SELF_APPROVAL).
-  // On approval the contract/budget/EAC deltas are applied to the project AND a new baseline is auto-captured
-  // (reason = the CO), so the scope/contract change is authorised, segregated, and re-baselined (ties to PROJ-07).
-  async approveChangeOrder(coId: number, user: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
-    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
-    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
-    await assertMakerChecker(db, { user, maker: co.requestedBy, event: 'proj.change-order.approve', ref: String(coId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
-    const newContract = r2(Math.max(0, n(proj!.contractAmount) + n(co.contractDelta)));
-    const newBudget = r2(Math.max(0, n(proj!.budgetAmount) + n(co.budgetDelta)));
-    const newEst = r2(Math.max(0, n(proj!.estimatedCost) + n(co.estimatedCostDelta)));
-    await db.update(projects).set({ contractAmount: fx(newContract, 2), budgetAmount: fx(newBudget, 2), estimatedCost: fx(newEst, 2) }).where(eq(projects.id, Number(proj!.id)));
-    await db.update(projectChangeOrders).set({ status: 'approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
-    // Re-baseline so the variance trail records the authorised change (PROJ-07). Best-effort.
-    let baseline: any = null;
-    try { baseline = await this.captureBaseline(proj!.projectCode, { label: `Change order ${co.coNo}`, reason: `Change order ${co.coNo}` }, user); } catch { /* baseline optional */ }
-    return { change_order: co.coNo, project_code: proj!.projectCode, status: 'approved', contract_amount: newContract, budget_amount: newBudget, estimated_cost: newEst, baseline: baseline?.baseline ?? null };
-  }
-
-  async rejectChangeOrder(coId: number, user: JwtUser) {
-    const db = this.db;
-    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
-    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
-    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
-    await db.update(projectChangeOrders).set({ status: 'rejected', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
-    return this.listChangeOrders(proj!.projectCode);
-  }
-
-  async listChangeOrders(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.projectId, Number(p.id))).orderBy(desc(projectChangeOrders.id));
-    const approved = rows.filter((r: any) => r.status === 'approved');
-    return {
-      project_code: code, change_orders: rows.map(shapeChangeOrder), count: rows.length,
-      summary: {
-        pending: rows.filter((r: any) => r.status === 'pending').length,
-        approved: approved.length,
-        approved_contract_delta: r2(approved.reduce((s: number, r: any) => s + n(r.contractDelta), 0)),
-      },
-    };
-  }
-
-  // ── Project templates (B2) ───────────────────────────────────────────────
-  // Create a reusable WBS/milestone scaffold. Items default their seq to declaration order (1-based) so a
-  // template can omit explicit seqs; parent_seq / depends_on_seq reference those ordinals.
-  async createTemplate(dto: TemplateDto, user: JwtUser) {
-    const db = this.db;
-    const code = dto.code?.trim() || `TPL${String(Date.now()).slice(-6)}`;
-    const [existing] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, code)).limit(1);
-    if (existing) throw new BadRequestException({ code: 'TEMPLATE_EXISTS', message: `Template ${code} already exists`, messageTh: 'รหัสแม่แบบซ้ำ' });
-    const tenantId = user.tenantId ?? null;
-    const [tpl] = await db.insert(projectTemplates).values({
-      tenantId, code, name: dto.name, description: dto.description ?? null, status: 'active', createdBy: user.username,
-    }).returning({ id: projectTemplates.id });
-    const items = dto.items ?? [];
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      await db.insert(projectTemplateItems).values({
-        templateId: Number(tpl!.id), tenantId, itemType: it!.item_type ?? 'task', seq: it!.seq ?? i + 1, name: it!.name,
-        parentSeq: it!.parent_seq ?? null, wbsCode: it!.wbs_code ?? null,
-        plannedHours: fx(it!.planned_hours ?? 0, 2), plannedCost: fx(it!.planned_cost ?? 0, 2),
-        offsetStartDays: Math.round(n(it!.offset_start_days)), offsetEndDays: Math.round(n(it!.offset_end_days)),
-        dependsOnSeq: depsCsv(it!.depends_on_seq),
-        billingPercent: it!.billing_percent != null ? fx(it!.billing_percent, 2) : null,
-        owner: it!.owner ?? null, assignee: it!.assignee ?? null,
-      });
-    }
-    return this.getTemplate(code);
-  }
-
-  async listTemplates(_user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(projectTemplates).orderBy(desc(projectTemplates.id)).limit(200);
-    const counts = await db.select({ tid: projectTemplateItems.templateId, c: sql<string>`count(*)` }).from(projectTemplateItems).groupBy(projectTemplateItems.templateId);
-    const cBy = new Map<number, number>(counts.map((x: any) => [Number(x.tid), Number(x.c)]));
-    return { templates: rows.map((t: any) => ({ id: Number(t.id), code: t.code, name: t.name, description: t.description, status: t.status, item_count: cBy.get(Number(t.id)) ?? 0, created_at: t.createdAt })), count: rows.length };
-  }
-
-  async getTemplate(code: string) {
-    const db = this.db;
-    const [tpl] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, code)).limit(1);
-    if (!tpl) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: `Template ${code} not found`, messageTh: 'ไม่พบแม่แบบ' });
-    const items = await db.select().from(projectTemplateItems).where(eq(projectTemplateItems.templateId, Number(tpl.id))).orderBy(projectTemplateItems.seq);
-    return {
-      id: Number(tpl.id), code: tpl.code, name: tpl.name, description: tpl.description, status: tpl.status, created_at: tpl.createdAt,
-      items: items.map(shapeTemplateItem), count: items.length,
-    };
-  }
-
-  // Apply a template to a project: scaffold its task + milestone items in one step, dated relative to the
-  // project start (the project's start_date, an explicit start_date override, or today). Tasks are created
-  // first to map seq→id, then a second pass wires parent_id and depends_on; milestones are dated off the same
-  // start. Idempotent-ish guard: refuses if the project already has tasks (so re-apply can't duplicate a WBS).
-  async applyTemplate(code: string, tplCode: string, dto: ApplyTemplateDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const [tpl] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, tplCode)).limit(1);
-    if (!tpl) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: `Template ${tplCode} not found`, messageTh: 'ไม่พบแม่แบบ' });
-    const existing = await db.select({ id: projectTasks.id }).from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).limit(1);
-    if (existing.length) throw new BadRequestException({ code: 'PROJECT_HAS_TASKS', message: 'Apply a template only to a project with no tasks yet', messageTh: 'ใช้แม่แบบได้เฉพาะโครงการที่ยังไม่มีงาน' });
-    const items = await db.select().from(projectTemplateItems).where(eq(projectTemplateItems.templateId, Number(tpl.id))).orderBy(projectTemplateItems.seq);
-    const start = dto.start_date ?? p.startDate ?? ymd();
-
-    const taskItems = items.filter((it: any) => (it.itemType ?? 'task') !== 'milestone');
-    const seqToId = new Map<number, number>();
-    // Pass 1 — insert tasks, capturing seq→new id.
-    for (const it of taskItems) {
-      const [t] = await db.insert(projectTasks).values({
-        projectId: Number(p.id), tenantId, parentId: null, wbsCode: it.wbsCode ?? null, name: it.name, status: 'open',
-        plannedStart: addDays(start, n(it.offsetStartDays)), plannedEnd: addDays(start, n(it.offsetEndDays)),
-        plannedHours: fx(n(it.plannedHours), 2), plannedCost: fx(n(it.plannedCost), 2), pctComplete: fx(0, 2),
-        dependsOn: null, assignee: it.assignee ?? null, createdBy: user.username,
-      }).returning({ id: projectTasks.id });
-      seqToId.set(Number(it.seq), Number(t!.id));
-    }
-    // Pass 2 — wire parent_id + depends_on now that every seq has a real id.
-    for (const it of taskItems) {
-      const id = seqToId.get(Number(it.seq));
-      if (id == null) continue;
-      const set: any = {};
-      if (it.parentSeq != null && seqToId.has(Number(it.parentSeq))) set.parentId = seqToId.get(Number(it.parentSeq));
-      const deps = (it.dependsOnSeq ? String(it.dependsOnSeq).split(',') : [])
-        .map((s: string) => seqToId.get(Number(s))).filter((x: any) => x != null);
-      if (deps.length) set.dependsOn = deps.join(',');
-      if (Object.keys(set).length) await db.update(projectTasks).set(set).where(eq(projectTasks.id, id));
-    }
-    // Milestones — dated off the same start (offset_end_days = due offset).
-    const msItems = items.filter((it: any) => (it.itemType ?? 'task') === 'milestone');
-    for (const it of msItems) {
-      await db.insert(projectMilestones).values({
-        projectId: Number(p.id), tenantId, name: it.name, dueDate: addDays(start, n(it.offsetEndDays)), owner: it.owner ?? null,
-        status: 'pending', billingPercent: it.billingPercent != null ? fx(n(it.billingPercent), 2) : null, createdBy: user.username,
-      });
-    }
-    return { ...(await this.listTasks(code)), template: tplCode, tasks_created: taskItems.length, milestones_created: msItems.length, start_date: start };
-  }
-
-  // ── Risk & issue register (B4, PROJ-08) ──────────────────────────────────
-  // Log a risk (future threat) or issue (materialised problem). Score = prob×impact (risk) / 5×impact (issue);
-  // RAG is derived from the score band. A HIGH (red) risk with no mitigation is the governance signal.
-  async addRisk(code: string, dto: RiskDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const kind = dto.kind === 'issue' ? 'issue' : 'risk';
-    const impact = clamp15(dto.impact ?? 1);
-    const probability = kind === 'issue' ? null : clamp15(dto.probability ?? 1);
-    const score = riskScore(kind, probability, impact);
-    await db.insert(projectRisks).values({
-      projectId: Number(p.id), tenantId, kind, title: dto.title, status: 'open',
-      probability, impact, score, rag: ragFor(score), owner: dto.owner ?? null,
-      mitigation: dto.mitigation ?? null, dueDate: dto.due_date ?? null, createdBy: user.username,
-    });
-    // PMO-1: an open HIGH risk with no mitigation plan (PROJ-08 exposure) pushes to the action center.
-    if (ragFor(score) === 'red' && !dto.mitigation) this.emitAction(tenantId, 'risk_unmitigated_high', 'high', code, { title: dto.title, score });
-    return this.listRisks(code);
-  }
-
-  async listRisks(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = (await db.select().from(projectRisks).where(eq(projectRisks.projectId, Number(p.id))).orderBy(desc(projectRisks.score), desc(projectRisks.id))).map(shapeRisk);
-    const open = rows.filter((r: any) => r.status !== 'closed');
-    const high_open = open.filter((r: any) => r.rag === 'red');
-    return {
-      project_code: code, risks: rows, count: rows.length,
-      summary: {
-        open: open.length, closed: rows.length - open.length,
-        risks: rows.filter((r: any) => r.kind === 'risk').length, issues: rows.filter((r: any) => r.kind === 'issue').length,
-        high_open: high_open.length,
-        // PROJ-08: open HIGH items with no mitigation plan — the unmitigated exposure that must be surfaced.
-        unmitigated_high: high_open.filter((r: any) => !r.mitigation).length,
-      },
-    };
-  }
-
-  // Update a risk/issue: status (closing stamps closed_at), mitigation, owner, due, or a re-score (prob/impact →
-  // score + rag recomputed). Returns the refreshed register.
-  async patchRisk(riskId: number, dto: RiskPatchDto, user: JwtUser) {
-    const db = this.db;
-    const [r] = await db.select().from(projectRisks).where(eq(projectRisks.id, Number(riskId))).limit(1);
-    if (!r) throw new NotFoundException({ code: 'RISK_NOT_FOUND', message: `Risk ${riskId} not found`, messageTh: 'ไม่พบความเสี่ยง' });
-    const set: any = {};
-    if (dto.title != null) set.title = dto.title;
-    if (dto.owner != null) set.owner = dto.owner;
-    if (dto.mitigation != null) set.mitigation = dto.mitigation;
-    if (dto.due_date != null) set.dueDate = dto.due_date;
-    if (dto.status != null) {
-      set.status = dto.status;
-      set.closedAt = dto.status === 'closed' ? new Date() : null;
-    }
-    if (dto.probability != null || dto.impact != null) {
-      const impact = clamp15(dto.impact ?? r.impact);
-      const probability = r.kind === 'issue' ? null : clamp15(dto.probability ?? r.probability ?? 1);
-      const score = riskScore(r.kind, probability, impact);
-      set.impact = impact; set.probability = probability; set.score = score; set.rag = ragFor(score);
-    }
-    await db.update(projectRisks).set(set).where(eq(projectRisks.id, Number(riskId)));
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(r.projectId))).limit(1);
-    return this.listRisks(proj!.projectCode);
-  }
-
-  // Portfolio top-risks roll-up (Track A tie-in): every open risk/issue across the caller's projects, ranked by
-  // score; `high` are the red (HIGH) ones and `unmitigated_high` the subset with no mitigation plan (PROJ-08).
-  async topRisks(user: JwtUser) {
-    const db = this.db;
-    const rows = (await db.select().from(projectRisks).where(sql`${projectRisks.status} <> 'closed'`)).map(shapeRisk);
-    const projRows = await db.select().from(projects);
-    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
-    const enriched = rows
-      .map((r: any) => ({ ...r, project_code: pById.get(r.project_id)?.projectCode ?? null, project_name: pById.get(r.project_id)?.name ?? null }))
-      .sort((a: any, b: any) => b.score - a.score);
-    const high = enriched.filter((r: any) => r.rag === 'red');
-    return {
-      as_of: ymd(), open_count: enriched.length, high_count: high.length,
-      unmitigated_high_count: high.filter((r: any) => !r.mitigation).length,
-      top: enriched.slice(0, 20),
-    };
-  }
+  // ── Risk & issue register (B4, PROJ-08) — ProjectsRiskService ────────────
+  async addRisk(code: string, dto: RiskDto, user: JwtUser) { return this.risks.addRisk(code, dto, user); }
+  async listRisks(code: string) { return this.risks.listRisks(code); }
+  async patchRisk(riskId: number, dto: RiskPatchDto, user: JwtUser) { return this.risks.patchRisk(riskId, dto, user); }
+  async topRisks(user: JwtUser) { return this.risks.topRisks(user); }
 
 
 
@@ -1273,75 +924,11 @@ export class ProjectsService {
   }
 
   // ───────────────── PROJ-03 — period-end project-close WIP/clearing review + sign-off ─────────────────
-  // Snapshot unbilled-WIP (GL 1260) + the applied-costs clearing balance (GL 2390) + open-project count.
-  private async closeSnapshot() {
-    const db = this.db;
-    const [wip] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '1260'), eq(journalEntries.status, 'Posted')));
-    const [clr] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2390'), eq(journalEntries.status, 'Posted')));
-    const [op] = await db.select({ c: sql<string>`count(*)` }).from(projects).where(sql`${projects.status} not in ('Closed','Completed','Cancelled')`);
-    return { wipTotal: r2(n(wip?.v)), clearingBalance: r2(n(clr?.v)), openProjects: Number(op?.c ?? 0) };
-  }
-
-  // Preparer: snapshot + sign the period's WIP/clearing review (upsert per tenant/period; a prior
-  // Rejected/Prepared is refreshed). A control account that gets reviewed at close (PROJ-03, detective).
-  async prepareCloseReview(period: string, user: JwtUser) {
-    if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
-    const db = this.db;
-    const snap = await this.closeSnapshot();
-    const [existing] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (existing?.status === 'Approved') throw new BadRequestException({ code: 'ALREADY_APPROVED', message: `Project close review for ${period} is already approved`, messageTh: 'งวดนี้อนุมัติแล้ว' });
-    const values: any = {
-      tenantId: user.tenantId ?? null, period, status: 'Prepared',
-      wipTotal: String(snap.wipTotal), clearingBalance: String(snap.clearingBalance), openProjects: snap.openProjects,
-      preparedBy: user.username, preparedAt: new Date(), approvedBy: null, approvedAt: null, rejectionReason: null,
-    };
-    if (existing) await db.update(projectCloseReviews).set(values).where(eq(projectCloseReviews.id, existing.id));
-    else await db.insert(projectCloseReviews).values(values);
-    return this.getCloseReview(period, user);
-  }
-
-  // Checker: sign off (SoD — approver ≠ preparer). Detective review, so no hard numeric gate; the independent
-  // sign-off IS the control.
-  async approveCloseReview(period: string, user: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
-    if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    await assertMakerChecker(db, { user, maker: rp.preparedBy, event: 'proj.close-review.approve', ref: period, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
-    await db.update(projectCloseReviews).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectCloseReviews.id, rp.id));
-    return this.getCloseReview(period, user);
-  }
-
-  async rejectCloseReview(period: string, reason: string, user: JwtUser) {
-    const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: 'Project close review has not been prepared', messageTh: 'ยังไม่ได้จัดทำ' });
-    if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    await db.update(projectCloseReviews).set({ status: 'Rejected', rejectionReason: reason ?? null }).where(eq(projectCloseReviews.id, rp.id));
-    return this.getCloseReview(period, user);
-  }
-
-  async getCloseReview(period: string, user: JwtUser) {
-    const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (!rp) return { period, status: 'None' };
-    return this.shapeCloseReview(rp);
-  }
-
-  async listCloseReviews(user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(projectCloseReviews).where(user.tenantId != null ? eq(projectCloseReviews.tenantId, user.tenantId) : undefined).orderBy(desc(projectCloseReviews.period)).limit(60);
-    return { reviews: rows.map((r: any) => this.shapeCloseReview(r)), count: rows.length };
-  }
-
-  private shapeCloseReview(r: any) {
-    return {
-      period: r.period, status: r.status, wip_total: n(r.wipTotal), clearing_balance: n(r.clearingBalance), open_projects: Number(r.openProjects ?? 0),
-      prepared_by: r.preparedBy, prepared_at: r.preparedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, rejection_reason: r.rejectionReason,
-    };
-  }
+  // Extracted to ProjectsCloseService (docs/46 Phase-4 projects round); GL 1260/2390 snapshots go through
+  // LedgerReadService there, so this facade no longer touches the journal tables.
+  async prepareCloseReview(period: string, user: JwtUser) { return this.closeReview.prepareCloseReview(period, user); }
+  async approveCloseReview(period: string, user: JwtUser, selfApprovalReason?: string | null) { return this.closeReview.approveCloseReview(period, user, selfApprovalReason); }
+  async rejectCloseReview(period: string, reason: string, user: JwtUser) { return this.closeReview.rejectCloseReview(period, reason, user); }
+  async getCloseReview(period: string, user: JwtUser) { return this.closeReview.getCloseReview(period, user); }
+  async listCloseReviews(user: JwtUser) { return this.closeReview.listCloseReviews(user); }
 }
