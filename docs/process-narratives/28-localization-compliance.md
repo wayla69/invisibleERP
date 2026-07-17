@@ -7,7 +7,7 @@
 | Process ID | PN-28-LOC |
 | Process owner | `<<Platform Admin / Localization Lead>>` |
 | Approver | `<<CFO / Head of IT>>` |
-| Version | **0.4 DRAFT · 2026-06-28** |
+| Version | **0.6 DRAFT · 2026-07-17** |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | No new RCM control (UI-locale + pack config are operational). C3 e-invoicing reinforces tax-submission integrity (operational; live adapters are external). |
 | Related narratives | `27-platform-customization.md` (Studio), tax-docs / `pos-fiscal` (TH e-Tax), roadmap `13-pillars-cde-architecture-spec.md` §3 |
@@ -38,8 +38,15 @@ legal sign-off + authority credentials).
    (universal — self-prefs, no permission gate), `PUT /api/i18n/tenant-default` (perm `users`/`exec`). Storage:
    additive `users.locale` column (migration `0093`); the tenant default reuses the existing
    `tenants.default_language`. No GL; per-user writes are self-scoped; tenant default is RLS self-scoped. Web:
-   the header **language picker**. *Verified by the `ext` harness (catalog / set-self / bad-locale / per-user
-   isolation); the foundation country packs (C2) + e-invoicing (C3) build on.*
+   the header **language picker**. **Client persistence contract (2026-07-17):** the picker caches the choice
+   in `localStorage` and persists it best-effort via `PUT /api/i18n/me`; when the persist cannot succeed
+   (offline, or a read-only company view where mutations are rejected `403 READONLY_IMPERSONATION`) the choice
+   is marked *pending* on-device and stays **authoritative across page loads** (with a persist retry on each
+   mount) — the server-resolved locale must never revert an explicit user selection. Once a persist succeeds,
+   the server value is authoritative again (cross-device sync). *Verified by the `ext` harness (catalog /
+   set-self / bad-locale / per-user isolation) + the web e2e `apps/web/e2e/lang-persistence.spec.ts`
+   (read-only-view persistence + server-authority restore); the foundation country packs (C2) + e-invoicing
+   (C3) build on.*
 2. **Country localization packs — Phase 21 (C2).** The **Odoo *l10n*** model: a pack (declared in code) bundles
    a **CoA preview + tax codes + statutory reports + e-invoicing provider + locale** for a country. **TH** is
    the **certified** reference; **MY** ships as a **draft** skeleton — proving the framework generalizes.
@@ -91,4 +98,5 @@ invoice), `BAD_PROVIDER` (unknown provider). Unauthorized → `403`/`401`; cross
 | 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 21 — country localization packs (C2)**: the Odoo l10n model — a pack (CoA preview / tax codes / statutory reports / e-invoice provider / locale) per country; TH certified + MY draft skeleton. Applying sets tenant tax country + locale + records the active pack (live CoA seeding is a guarded follow-up). Table `tenant_localization` (migration `0099`). RLS-scoped, no GL; new §4.2, control-matrix row, `BAD_COUNTRY`; `ext` +4 checks. |
 | 0.3 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 22 — pluggable e-invoicing engine (C3)**: a provider interface (stub default; TH/MY/SG adapters) submitting a canonical invoice, logged idempotently by doc_ref. Tables `einvoice_config` + `einvoice_submissions` (migration `0100`). RLS-scoped, no GL; new §4.3, control-matrix row, `BAD_DOC`/`BAD_PROVIDER`; `ext` +4 checks. Live authority credentials per country are external. |
 | 0.5 DRAFT | 2026-07-10 | Platform | **E-invoicing submit made honest — fail-closed transport (data-integrity fix; no migration, no new control).** `EInvoiceService.submit` previously returned `status:'accepted'` with a fabricated `https://einvoice.example/…` QR for **every** provider, so a screen implied real filings were made when nothing was transmitted. Submit now **prepares + hashes** the country document (real work) then **delivers via a per-provider transport**: an **external** provider (RD/MyInvois/Peppol) with no live transport wired records **`pending`** (prepared, not transmitted, `qr:null`) — never a false `accepted`; only the sandbox **`stub`** returns `accepted` and is flagged **`sandbox:true`**. New pluggable `EInvoiceTransport` interface (real authority adapters swap in behind it). §4.3 gains the honesty-contract note; web `/einvoice` shows a status pill (pending/accepted-sandbox) + a "prepares, not transmitted" note. ToE: `basics` 326 (MY & SG → `pending` + no QR; stub → `accepted` + `sandbox`), `ext` 295 (stub submit/idempotent/bad-doc). Manual `07-tax.md` note. |
+| 0.6 DRAFT | 2026-07-17 | Platform | **Language choice no longer reverts on navigation (bug fix; no migration, no new control).** The web `LanguageProvider` re-resolved the locale from `GET /api/i18n/me` on every mount and let it clobber the on-device choice while the persisting `PUT /api/i18n/me` was fire-and-forget — so whenever the PUT couldn't succeed (a god in **read-only company view**, every mutation → `403 READONLY_IMPERSONATION`; or offline) each full page load snapped the UI back to TH. Fix: a failed persist marks the choice *pending* in `localStorage` (`ierp_lang_pending`); while pending, the local choice is authoritative (with a persist retry on mount) and the server read is skipped; a successful persist clears it and the server-resolved value is authoritative again (cross-device sync intact). §4.1 gains the client-persistence contract. No API/DB/permission changes; no GL. ToE: web e2e `apps/web/e2e/lang-persistence.spec.ts`; UAT-ADM-171. |
 | 0.4 DRAFT | 2026-06-28 | Platform | **Roadmap C3 — nav i18n wiring**: all `INTERNAL_NAV` and `PORTAL_NAV` `title`/`label` strings replaced with `messages.ts` i18n keys (~170 new entries covering 18 group titles, 9 subgroup titles, and all nav item labels in th+en). `AppShell` and `CommandPalette` now call `t()` for all rendered nav text and sidebar chrome (favourites, recent, search, logout). `portal/layout.tsx` wrapped in `LanguageProvider`. No API, DB, or permission changes; no GL. The UI now switches language correctly when a user selects a non-Thai locale. |
