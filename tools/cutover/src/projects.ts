@@ -1523,7 +1523,46 @@ async function main() {
     near(scList.json.subcontract_value, 40000) && near(scList.json.certified_to_date, 32000) && near(scList.json.retention_payable, 3200),
     JSON.stringify({ v: scList.json.subcontract_value, ctd: scList.json.certified_to_date, rp: scList.json.retention_payable }));
   const scRet2 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
+  // (F2 free-issue custody checks run right after this retention read — see §9h-bis below.)
   ok('PROJ-17 → P0: retention payable outstanding 3200 after two certified valuations (2000 + 1200)', near(scRet2.json.payable?.outstanding, 3200), JSON.stringify({ pay: scRet2.json.payable?.outstanding }));
+
+  // ── 9h-bis. F2 subcontractor FREE-ISSUE custody (docs/50 Track A parked item, unblocked by A1; NEW
+  //    control PROJ-28, migration 0427): company material issued FOR a subcontractor is tracked in their
+  //    custody until returned (MRET) or acknowledged consumed; the FINAL valuation is gated on clearance ──
+  const fiBad = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-SUB', item_id: 'STEEL', qty: 1, subcontract_no: 'SC-NOPE' });
+  ok('F2: unknown subcontract → 404 SUBCONTRACT_NOT_FOUND', fiBad.status === 404 && fiBad.json.error?.code === 'SUBCONTRACT_NOT_FOUND', `${fiBad.status} ${fiBad.json.error?.code}`);
+  const fiMis = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 1, subcontract_no: sc1No });
+  ok("F2: another project's subcontract → 400 SUBCONTRACT_PROJECT_MISMATCH", fiMis.status === 400 && fiMis.json.error?.code === 'SUBCONTRACT_PROJECT_MISMATCH', `${fiMis.status} ${fiMis.json.error?.code}`);
+  // (no boq_line_id — scL1's budget headroom is consumed to the last baht by the Depth-2 fixture below;
+  //  custody tracking is independent of the budget line)
+  const fiRes = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-SUB', item_id: 'STEEL', qty: 6, subcontract_no: sc1No });
+  ok('F2: free-issue reservation stamped with the subcontract', fiRes.status < 300 && fiRes.json.subcontract_no === sc1No, JSON.stringify({ s: fiRes.status, sc: fiRes.json.subcontract_no }));
+  const fiIss = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/issue`, admin);
+  ok('F2: issue rides the INV-13 path (Dr 1260 / Cr 1200, value 300)', fiIss.status < 300 && near(fiIss.json.value, 300), JSON.stringify({ s: fiIss.status, v: fiIss.json.value }));
+  const cust0 = await inj('GET', `/api/reservations/custody?subcontract_no=${sc1No}`, admin);
+  ok('F2: custody statement shows the material with the subcontractor (issued 6, in custody 6)',
+    cust0.status === 200 && near(cust0.json.totals?.issued, 6) && near(cust0.json.totals?.in_custody, 6) && cust0.json.lines?.[0]?.item_id === 'STEEL',
+    JSON.stringify(cust0.json.totals));
+  const fiRet = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/return`, admin, { qty: 2, reason: 'เหลือจากหน้างานผู้รับเหมาช่วง' });
+  ok('F2: a governed A1 return (sub-threshold, posts) reduces custody', fiRet.status < 300 && fiRet.json.status === 'Posted', JSON.stringify({ s: fiRet.status, st: fiRet.json.status }));
+  const fiAck = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/custody-ack`, admin, { qty: 3 });
+  ok('F2: consumption acknowledgment clears custody (returned 2 + acked 3 → in custody 1)', fiAck.status < 300 && near(fiAck.json.in_custody, 1), JSON.stringify(fiAck.json));
+  const fiOver = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/custody-ack`, admin, { qty: 2 });
+  ok('F2: acknowledging beyond what is in custody → 400 OVER_ACK', fiOver.status === 400 && fiOver.json.error?.code === 'OVER_ACK', `${fiOver.status} ${fiOver.json.error?.code}`);
+  const fiNotFi = await inj('POST', `/api/reservations/${res1.json.reservation_id}/custody-ack`, admin, { qty: 1 });
+  ok('F2: acknowledging a non-free-issue reservation → 400 NOT_FREE_ISSUE', fiNotFi.status === 400 && fiNotFi.json.error?.code === 'NOT_FREE_ISSUE', `${fiNotFi.status} ${fiNotFi.json.error?.code}`);
+  // The FINAL valuation (→ full contract value 40000) is blocked while 1 unit is still unaccounted.
+  const svFin = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-09', pct_complete: 100 });
+  const svFinNo = svFin.json.valuation_no;
+  const finBlocked = await inj('POST', `/api/subcontracts/valuations/${svFinNo}/certify`, mgr);
+  ok('F2: final certification blocked while custody is open (FREE_ISSUE_CUSTODY_OPEN, names the reservation)',
+    finBlocked.status === 400 && finBlocked.json.error?.code === 'FREE_ISSUE_CUSTODY_OPEN' && (finBlocked.json.error?.details?.open ?? []).some((x: any) => x.reservation_id === Number(fiRes.json.reservation_id)),
+    `${finBlocked.status} ${finBlocked.json.error?.code}`);
+  await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/custody-ack`, admin, { qty: 1 });
+  const finOk = await inj('POST', `/api/subcontracts/valuations/${svFinNo}/certify`, mgr);
+  ok('F2: with custody cleared the final valuation certifies (certified_to_date reaches 40000)', finOk.status < 300 && finOk.json.status === 'certified', JSON.stringify({ s: finOk.status, st: finOk.json.status }));
+  const cust1 = await inj('GET', `/api/reservations/custody?subcontract_no=${sc1No}`, admin);
+  ok('F2: custody statement fully cleared (in custody 0; who acknowledged is stamped)', near(cust1.json.totals?.in_custody, 0) && cust1.json.lines?.[0]?.acked_by === 'admin', JSON.stringify(cust1.json.totals));
 
   // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-16) ──
   // A construction contract billed in periodic progress claims: value work by BoQ line (cumulative), withhold

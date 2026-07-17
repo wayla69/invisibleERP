@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, invBalances, stockReservations, invMoves, projectCommitments, projectMaterialReturns } from '../../database/schema';
+import { projects, invBalances, stockReservations, invMoves, projectCommitments, projectMaterialReturns, projectSubcontracts } from '../../database/schema';
 import { InventoryLedgerService } from '../inventory/inventory-ledger.service';
 import { CommitmentsService } from '../commitments/commitments.service';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -21,7 +21,7 @@ export const MATERIAL_RETURN_APPROVAL_THRESHOLD = ((): number => {
   return Number.isFinite(v) && v > 0 ? v : 1000;
 })();
 
-export interface ReserveDto { project_code: string; item_id: string; location_id?: string; qty: number; boq_line_id?: number; unit_cost?: number }
+export interface ReserveDto { project_code: string; item_id: string; location_id?: string; qty: number; boq_line_id?: number; unit_cost?: number; subcontract_no?: string }
 export interface ReturnDto { qty?: number; reason?: string }
 
 // Stock reservation (M3, docs/32, INV-13). Soft-allocates on-hand stock to a project so it can't be double-
@@ -74,6 +74,18 @@ export class ReservationsService {
     const loc = dto.location_id ?? 'WH-MAIN';
     const qty = r4(dto.qty);
     if (!(qty > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: 'qty must be > 0', messageTh: 'จำนวนต้องมากกว่าศูนย์' });
+    // PROJ-28 — FREE-ISSUE for a subcontractor: the reservation is stamped with the subcontract so the
+    // issued material is tracked in the subcontractor's custody. The subcontract must exist, belong to the
+    // SAME project, and be active. (A plain filtered read of the subcontract header — the commitments-
+    // service precedent — so no module cycle: subcontracts must never import reservations.)
+    let subcontractId: number | null = null;
+    if (dto.subcontract_no) {
+      const [sc] = await this.db.select().from(projectSubcontracts).where(eq(projectSubcontracts.subcontractNo, dto.subcontract_no)).limit(1);
+      if (!sc) throw new NotFoundException({ code: 'SUBCONTRACT_NOT_FOUND', message: `Subcontract ${dto.subcontract_no} not found`, messageTh: 'ไม่พบสัญญาผู้รับเหมาช่วง' });
+      if (Number(sc.projectId) !== Number(p.id)) throw new BadRequestException({ code: 'SUBCONTRACT_PROJECT_MISMATCH', message: `Subcontract ${dto.subcontract_no} belongs to another project`, messageTh: 'สัญญาผู้รับเหมาช่วงไม่อยู่ในโครงการนี้' });
+      if (sc.status !== 'active') throw new BadRequestException({ code: 'SUBCONTRACT_NOT_ACTIVE', message: `Subcontract ${dto.subcontract_no} is ${sc.status}`, messageTh: 'สัญญาผู้รับเหมาช่วงไม่อยู่ในสถานะใช้งาน' });
+      subcontractId = Number(sc.id);
+    }
     return this.db.transaction(async (tx: any) => {
       // Serialise concurrent reservations of the same item+location by locking its held rows.
       await tx.select({ id: stockReservations.id }).from(stockReservations)
@@ -84,10 +96,67 @@ export class ReservationsService {
       if (qty > available + EPS) throw new BadRequestException({ code: 'INSUFFICIENT_STOCK', message: `Cannot reserve ${qty} of ${dto.item_id}; only ${available} available (on hand ${onHand}, held ${held})`, messageTh: `สต๊อกไม่พอสำหรับการจอง: ขอ ${qty} แต่ว่างเพียง ${available}`, available, on_hand: onHand, held });
       const [ins] = await tx.insert(stockReservations).values({
         tenantId, itemId: dto.item_id, locationId: loc, projectId: Number(p.id), boqLineId: dto.boq_line_id ?? null,
-        sourceDocType: 'RES', qtyReserved: String(qty), status: 'held', createdBy: user.username,
+        sourceDocType: 'RES', qtyReserved: String(qty), status: 'held', createdBy: user.username, subcontractId,
       }).returning({ id: stockReservations.id });
-      return { reservation_id: Number(ins!.id), project_code: dto.project_code, item_id: dto.item_id, location_id: loc, qty, status: 'held', available_after: r4(available - qty) };
+      return { reservation_id: Number(ins!.id), project_code: dto.project_code, item_id: dto.item_id, location_id: loc, qty, status: 'held', available_after: r4(available - qty), ...(dto.subcontract_no ? { subcontract_no: dto.subcontract_no } : {}) };
     });
+  }
+
+  // ── PROJ-28: free-issue custody (docs/50 Track A parked item, unblocked by A1) ──
+  // Non-rejected returned qty per reservation (Posted + PendingApproval both count against what may still
+  // be returned — mirrors A1's OVER_RETURN aggregate; for the CUSTODY picture only POSTED returns have
+  // physically come back, so the statement uses Posted).
+  private async postedReturnedQty(reservationIds: number[]): Promise<Map<number, number>> {
+    const out = new Map<number, number>();
+    if (!reservationIds.length) return out;
+    const rows = await this.db.select({ rid: projectMaterialReturns.reservationId, v: sql<string>`coalesce(sum(${projectMaterialReturns.qty}),0)` })
+      .from(projectMaterialReturns)
+      .where(and(inArray(projectMaterialReturns.reservationId, reservationIds), eq(projectMaterialReturns.status, 'Posted')))
+      .groupBy(projectMaterialReturns.reservationId);
+    for (const r of rows) out.set(Number(r.rid), r4(n(r.v)));
+    return out;
+  }
+
+  // The subcontractor's material custody statement: every ISSUED free-issue reservation for the
+  // subcontract, with what came back (Posted MRET returns) and what the site acknowledged as consumed —
+  // net = still sitting in the subcontractor's custody, unaccounted. The PROJ-28 evidence register.
+  async custodyStatement(subcontractNo: string, _user: JwtUser) {
+    const [sc] = await this.db.select().from(projectSubcontracts).where(eq(projectSubcontracts.subcontractNo, subcontractNo)).limit(1);
+    if (!sc) throw new NotFoundException({ code: 'SUBCONTRACT_NOT_FOUND', message: `Subcontract ${subcontractNo} not found`, messageTh: 'ไม่พบสัญญาผู้รับเหมาช่วง' });
+    const rows = await this.db.select().from(stockReservations)
+      .where(and(eq(stockReservations.subcontractId, Number(sc.id)), eq(stockReservations.status, 'consumed')));
+    const returned = await this.postedReturnedQty(rows.map((r: any) => Number(r.id)));
+    const lines = rows.map((r: any) => {
+      const issued = r4(n(r.qtyReserved));
+      const ret = returned.get(Number(r.id)) ?? 0;
+      const acked = r4(n(r.custodyAckQty));
+      return { reservation_id: Number(r.id), item_id: r.itemId, location_id: r.locationId, issue_no: r.issueNo, issued_qty: issued, returned_qty: ret, acked_qty: acked, in_custody_qty: r4(issued - ret - acked), acked_by: r.custodyAckBy ?? null };
+    });
+    const tot = (k: 'issued_qty' | 'returned_qty' | 'acked_qty' | 'in_custody_qty') => r4(lines.reduce((s, l) => s + l[k], 0));
+    return {
+      subcontract_no: subcontractNo, vendor_name: sc.vendorName, project_id: Number(sc.projectId), status: sc.status,
+      lines, count: lines.length,
+      totals: { issued: tot('issued_qty'), returned: tot('returned_qty'), acked: tot('acked_qty'), in_custody: tot('in_custody_qty') },
+    };
+  }
+
+  // The site acknowledges the subcontractor CONSUMED free-issued material in the works (the material is
+  // gone into the job — it will not come back). Capped so acknowledged + posted returns can never exceed
+  // what was issued (OVER_ACK). Detective register write: the cost already sits in project WIP from the
+  // issue — acknowledgment moves nothing in the GL, it clears the custody exposure.
+  async ackCustody(reservationId: number, dto: { qty: number }, user: JwtUser) {
+    const qty = r4(dto.qty);
+    if (!(qty > 0)) throw new BadRequestException({ code: 'BAD_QTY', message: 'qty must be > 0', messageTh: 'จำนวนต้องมากกว่าศูนย์' });
+    const r = await this.row(reservationId);
+    if (r.subcontractId == null) throw new BadRequestException({ code: 'NOT_FREE_ISSUE', message: `Reservation ${reservationId} is not a subcontractor free-issue`, messageTh: 'การจองนี้ไม่ใช่วัสดุฝากผู้รับเหมาช่วง' });
+    if (r.status !== 'consumed') throw new BadRequestException({ code: 'RESERVATION_NOT_CONSUMED', message: `Reservation is ${r.status}, not issued`, messageTh: 'การจองยังไม่ได้เบิกออก' });
+    const returned = (await this.postedReturnedQty([Number(r.id)])).get(Number(r.id)) ?? 0;
+    const inCustody = r4(n(r.qtyReserved) - returned - n(r.custodyAckQty));
+    if (qty > inCustody + EPS) throw new BadRequestException({ code: 'OVER_ACK', message: `Cannot acknowledge ${qty}; only ${inCustody} still in custody (issued ${n(r.qtyReserved)}, returned ${returned}, acknowledged ${n(r.custodyAckQty)})`, messageTh: `รับรู้การใช้เกินยอดที่ฝากอยู่ (คงเหลือ ${inCustody})`, in_custody: inCustody });
+    await this.db.update(stockReservations)
+      .set({ custodyAckQty: String(r4(n(r.custodyAckQty) + qty)), custodyAckBy: user.username, custodyAckAt: new Date(), updatedAt: new Date() })
+      .where(eq(stockReservations.id, Number(r.id)));
+    return { reservation_id: Number(r.id), acked: qty, acked_total: r4(n(r.custodyAckQty) + qty), in_custody: r4(inCustody - qty) };
   }
 
   private async row(reservationId: number) {
@@ -240,7 +309,7 @@ export class ReservationsService {
     const sum = (st: string) => r4(rows.filter((r: any) => r.status === st).reduce((s: number, r: any) => s + n(r.qtyReserved), 0));
     return {
       project_code: code,
-      reservations: rows.map((r: any) => ({ id: Number(r.id), item_id: r.itemId, location_id: r.locationId, boq_line_id: r.boqLineId != null ? Number(r.boqLineId) : null, qty: n(r.qtyReserved), status: r.status, issue_no: r.issueNo, created_by: r.createdBy, created_at: r.createdAt })),
+      reservations: rows.map((r: any) => ({ id: Number(r.id), item_id: r.itemId, location_id: r.locationId, boq_line_id: r.boqLineId != null ? Number(r.boqLineId) : null, qty: n(r.qtyReserved), status: r.status, issue_no: r.issueNo, subcontract_id: r.subcontractId != null ? Number(r.subcontractId) : null, custody_ack_qty: n(r.custodyAckQty), created_by: r.createdBy, created_at: r.createdAt })),
       count: rows.length, summary: { held: sum('held'), consumed: sum('consumed'), released: sum('released') },
     };
   }

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine, CartesianGrid, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Clock, Receipt, Flag, Users, GanttChartSquare, Activity, CheckCircle2, TrendingUp, FileText, ListTree, ClipboardList, Boxes, Wallet, Lock, Check, X, ShoppingCart, Trash2, Handshake } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -271,12 +271,18 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
 
   // Reservations — reserve on-hand stock to the project, issue-to-project (→ WIP) / release.
   const [resvDlg, setResvDlg] = useState(false);
-  const [zf, setZf] = useState({ item_id: '', location_id: 'WH-MAIN', qty: '', boq_line_id: '' });
+  const [zf, setZf] = useState({ item_id: '', location_id: 'WH-MAIN', qty: '', boq_line_id: '', subcontract_no: '' });
   const availItem = zf.item_id.trim();
   const avail = useQuery<any>({ queryKey: ['proj', code, 'resv-avail', availItem, zf.location_id], queryFn: () => api(`/api/reservations/available?item_id=${encodeURIComponent(availItem)}&location_id=${encodeURIComponent(zf.location_id || 'WH-MAIN')}`), enabled: resvDlg && !!availItem });
   const reserve = useMutation({
-    mutationFn: () => api(`/api/reservations`, { method: 'POST', body: JSON.stringify({ project_code: code, item_id: zf.item_id, location_id: zf.location_id || undefined, qty: Number(zf.qty) || 0, boq_line_id: zf.boq_line_id ? Number(zf.boq_line_id) : undefined }) }),
-    onSuccess: () => { notifySuccess(t('pj.resv_toast_reserved')); setResvDlg(false); setZf({ item_id: '', location_id: 'WH-MAIN', qty: '', boq_line_id: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+    mutationFn: () => api(`/api/reservations`, { method: 'POST', body: JSON.stringify({ project_code: code, item_id: zf.item_id, location_id: zf.location_id || undefined, qty: Number(zf.qty) || 0, boq_line_id: zf.boq_line_id ? Number(zf.boq_line_id) : undefined, subcontract_no: zf.subcontract_no.trim() || undefined }) }),
+    onSuccess: () => { notifySuccess(t('pj.resv_toast_reserved')); setResvDlg(false); setZf({ item_id: '', location_id: 'WH-MAIN', qty: '', boq_line_id: '', subcontract_no: '' }); refresh(); }, onError: (err: any) => notifyError(err.message),
+  });
+  // F2 (PROJ-28): acknowledge the subcontractor consumed free-issued material (clears the custody exposure).
+  const ackCustody = useMutation({
+    mutationFn: (v: { id: number; qty: number }) => api(`/api/reservations/${v.id}/custody-ack`, { method: 'POST', body: JSON.stringify({ qty: v.qty }) }),
+    onSuccess: (r: any) => { notifySuccess(t('pj.resv_ack_done', { left: r.in_custody })); refresh(); },
+    onError: (err: any) => notifyError(err.message),
   });
   const issueResv = useMutation({
     mutationFn: (id: number) => api(`/api/reservations/${id}/issue`, { method: 'POST', body: '{}' }),
@@ -324,6 +330,12 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
     if (costStr == null) return;
     if (!(Number(costStr) > 0)) { notifyError(t('pj.resv_scrap_cost_required')); return; }
     logScrap.mutate({ item_id: r.item_id, qty: Number(qtyStr), unit_cost: Number(costStr), boq_line_id: r.boq_line_id ?? undefined });
+  };
+  const promptAck = (r: any) => {
+    const left = Math.max(0, Number(r.qty) - Number(r.custody_ack_qty ?? 0));
+    const qtyStr = window.prompt(t('pj.resv_ack_qty_prompt', { qty: num(left) }), String(left));
+    if (qtyStr == null || !(Number(qtyStr) > 0)) return;
+    ackCustody.mutate({ id: r.id, qty: Number(qtyStr) });
   };
 
   // Site cash — raise an advance or a petty-cash request against this project straight from the site-cash tab.
@@ -538,6 +550,7 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
               <span className="flex gap-1">
                 <Button variant="ghost" size="sm" title={t('pj.resv_return_tip')} onClick={() => promptReturn(r)}><ArrowLeft className="size-4" /></Button>
                 <Button variant="ghost" size="sm" title={t('pj.resv_scrap_tip')} onClick={() => promptScrap(r)}><Trash2 className="size-4" /></Button>
+                {r.subcontract_id != null && <Button variant="ghost" size="sm" title={t('pj.resv_ack_tip')} onClick={() => promptAck(r)}><Handshake className="size-4" /></Button>}
               </span>
             ) : null },
           ]}
@@ -1456,6 +1469,9 @@ export default function ProjectDetailWorkspace({ code, initialDetail, initialEvm
                   {boqLines.map((l: any) => <option key={l.id} value={l.id}>#{l.line_no} {l.description ?? l.item_no ?? l.category}</option>)}
                 </Select>
               </div>
+            </div>
+            <div className="grid gap-1.5"><Label>{t('pj.resv_f_subcontract')}</Label>
+              <Input value={zf.subcontract_no} onChange={(ev) => setZf({ ...zf, subcontract_no: ev.target.value })} placeholder={t('pj.resv_subcontract_ph')} />
             </div>
             {availItem && <p className="text-xs text-muted-foreground">{t('pj.resv_available_label')} <span className="tabular font-medium text-foreground">{avail.isLoading ? '…' : num(avail.data?.available ?? 0)}</span></p>}
           </div>

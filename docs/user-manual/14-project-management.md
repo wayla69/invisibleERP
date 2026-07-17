@@ -160,6 +160,18 @@ deck assembled for you. (It can also be scheduled portfolio-wide via the `projec
 - **จองสต๊อก (Stock reservations, INV-13)** — reserve on-hand stock to the project (the dialog shows
   **available-to-issue** = on-hand − held for the item/warehouse), then **issue-to-project** (moves value into
   project WIP) or **release** a held reservation.
+  - **ฝากวัสดุให้ผู้รับเหมาช่วง (free issue, PROJ-28)** — when the material is handed to a subcontractor to
+    build in, fill the **สัญญาผู้รับเหมาช่วง** field on the reserve dialog with the subcontract number
+    (must be an **active** subcontract of **this** project — a wrong/inactive/foreign number is rejected:
+    `SUBCONTRACT_NOT_FOUND` / `SUBCONTRACT_PROJECT_MISMATCH` / `SUBCONTRACT_NOT_ACTIVE`). The issue works
+    exactly as usual, but the system now tracks **custody**: what was issued, what came back (ใบคืนวัสดุ),
+    what the subcontractor confirmed as used, and what is **still in their hands (คงฝาก)**. Record the
+    subcontractor's usage confirmation with the **รับรู้การใช้** (🤝) action on the consumed row — capped at
+    what is actually in custody (`OVER_ACK`). The custody statement per subcontract is
+    `GET /api/reservations/custody?subcontract_no=…`. **Why it matters:** the subcontract's **final**
+    valuation certificate (the one that reaches the contract value) is **blocked** while any free-issued
+    material is unaccounted for (`FREE_ISSUE_CUSTODY_OPEN`) — return the residue to stock or record the
+    usage acknowledgment first. Interim certificates are unaffected.
 - **เงินสดหน้างาน (Site cash, PROJ-14)** — the **advances**, **expense reimbursements** and **petty cash**
   raised against this project, with the site-cash total — so project cash is managed on the project. You can
   **raise cash straight from this tab**: *ออกเงินทดรอง* issues a project-tagged **advance**, and *ขอเงินสดย่อย*
@@ -507,6 +519,7 @@ Cash spent at site can be booked **against the project** so it shows up in the p
 ## Revision history
 | Version | Date | Notes |
 |---|---|---|
+| 2.41 | 2026-07-17 | **F2 — subcontractor free-issue material custody (new control PROJ-28).** The จองสต๊อก reserve dialog gains a **สัญญาผู้รับเหมาช่วง — ฝากวัสดุ** field: reserving with a subcontract number tracks custody of company material handed to that subcontractor (active subcontract of this project only). Consumed free-issue rows gain a **รับรู้การใช้** (🤝) action to record the subcontractor's usage confirmation, capped at what is in custody (`OVER_ACK`); custody statement at `GET /api/reservations/custody?subcontract_no=…`. The subcontract's **final** valuation certificate is blocked while custody is open (`FREE_ISSUE_CUSTODY_OPEN`) — return the residue (ใบคืนวัสดุ) or acknowledge usage first. UAT-O2C-526..531. |
 | 2.40 | 2026-07-16 | **A5 — project-tagged site scrap + EVM by BoQ category (docs/50 Wave 5, extends INV-10/INV-15).** The จองสต๊อก guide gains **บันทึกของเสียหน้างาน** on issued rows (qty + the issue unit cost — required; scrap beyond what the project drew is rejected `WASTE_EXCEEDS_WIP`; posts Dr 5810 / Cr งานระหว่างทำ 1260, no stock movement). The BoQ & งบวัสดุ tab gains a **ของเสียหน้างาน** column per WBS node and the **EVM แยกตามหมวด BoQ** table (budget/committed/actual/wasted/EV + CPI per หมวด, headline **CPI วัสดุ**), also in the governance pack. UAT-O2C-517..521. |
 | 2.39 | 2026-07-16 | **A4 — BoQ takeoff import (docs/50 Wave 4).** The BoQ tab gains **นำเข้าจากไฟล์ (CSV)**: paste the estimator's takeoff (headers: item_no, description, category, uom, budget_qty, rate, wbs_code). Any invalid row rejects the whole file with a per-row report; unknown item codes import with a warning when a description identifies the line. Imports always land as a **draft** — the normal BoQ approval still applies. UAT-O2C-512..514. |
 | 2.38 | 2026-07-16 | **A3 — material control tower (docs/50 Wave 3).** The **BoQ & งบวัสดุ** tab gains two read-only tables: **งบวัสดุตามโหนด WBS** (budget / committed / issued / returned / remaining per WBS node — over-drawn nodes show red) and **กราฟเบิกวัสดุ แผน vs จริง** (monthly cumulative actual draw vs a linear plan; months ahead of plan flagged **เร็วกว่าแผน**). UAT-O2C-508..510. |

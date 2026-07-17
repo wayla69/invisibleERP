@@ -13,7 +13,10 @@ const ReserveBody = z.object({
   location_id: z.string().optional(),
   qty: z.number().positive(),
   boq_line_id: z.number().int().positive().optional(),
+  // PROJ-28 — free-issue for a subcontractor: stamps the reservation so custody is tracked.
+  subcontract_no: z.string().max(40).optional(),
 });
+const AckBody = z.object({ qty: z.number().positive() });
 
 // Stock reservation → issue-to-project (M3, docs/32, INV-13). Staff request on-hand stock to be allocated to a
 // project (reserve), then issue it (moving inventory value into project WIP). wh_custody/warehouse handle
@@ -34,6 +37,21 @@ export class ReservationsController {
   @Permissions('wh_custody', 'warehouse', 'procurement', 'planner')
   requestReturn(@Param('id') id: string, @Body(new ZodValidationPipe(ReturnBody)) b: ReturnDto, @CurrentUser() u: JwtUser) {
     return this.svc.requestReturn(Number(id), b, u);
+  }
+
+  // ── PROJ-28: subcontractor free-issue custody (static segments BEFORE the :id routes) ──
+  // The custody statement: issued / returned (Posted MRET) / acknowledged-consumed / still in custody.
+  @Get('custody')
+  @Permissions('wh_custody', 'warehouse', 'procurement', 'planner', 'proj_subcon', 'exec')
+  custody(@Query('subcontract_no') subcontractNo: string, @CurrentUser() u: JwtUser) {
+    return this.svc.custodyStatement(subcontractNo ?? '', u);
+  }
+
+  // Acknowledge the subcontractor consumed free-issued material in the works (caps at what is in custody).
+  @Post(':id/custody-ack')
+  @Permissions('wh_custody', 'warehouse', 'planner', 'exec')
+  ackCustody(@Param('id') id: string, @Body(new ZodValidationPipe(AckBody)) b: { qty: number }, @CurrentUser() u: JwtUser) {
+    return this.svc.ackCustody(Number(id), b, u);
   }
 
   // Returns register: pending + history (static segment BEFORE the :id routes).
