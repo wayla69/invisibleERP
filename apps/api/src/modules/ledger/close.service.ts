@@ -5,6 +5,7 @@ import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalP
 import { currentTenantStore } from '../../common/tenant-context';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
+import { CASH_ACCOUNTS } from './ledger-constants';
 
 // GL-16/GL-16b SoD gates historically reply HTTP 400 (SELF_LOCK/SELF_REOPEN — the basics harness asserts the
 // status), while assertMakerChecker's enterprise block is a 403. Remap, keeping the body byte-identical.
@@ -15,6 +16,10 @@ const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 // Suspense / clearing accounts whose balance should normally be ~zero at close (advisory): the WIP "applied"
 // contra accounts (2380 mfg labor+OH, 2390 project applied) and conventional suspense codes.
 const SUSPENSE_ACCOUNTS = ['2380', '2390', '1999', '9999'];
+// The sub-ledger tie-out control accounts (AR / AP / inventory / fixed assets) — the account set whose
+// REC-01 certifications evidence the subledger_tieout close step (v2b). Cash uses the canonical
+// CASH_ACCOUNTS from ledger-constants.
+const TIEOUT_ACCOUNTS = ['1100', '2000', '1200', '1500'];
 
 // WS2.1 (GL-15/GL-16) — Hard period close + close checklist.
 // Lifecycle: Open → InProgress (startClose seeds the checklist) → ReadyToLock (all required steps Done)
@@ -146,8 +151,15 @@ export class CloseService {
   //   fx_reval      ← a POSTED GL-18 revaluation run exists for the period
   //   deferred_tax  ← a POSTED deferred-tax run exists for the period
   //   depreciation  ← ≥1 POSTED depreciation JE (source 'DEP') dated in the period
-  // Human sign-offs (trial_balance_review, flux_review, disclosure_review, bank_rec, subledger_tieout —
-  // REC-04/CLS-01/CLS-02 judgments) and custom tenant tasks NEVER auto-complete. Attribution mirrors B4's
+  //   bank_rec / subledger_tieout (v2b) ← every recon workspace the tenant OPENED for the period on the
+  //                   step's account set (bank_rec: the canonical CASH_ACCOUNTS; tie-out: the AR/AP/INV/FA
+  //                   control accounts) is CERTIFIED in the REC-01 register. The human act is the
+  //                   certification itself (preparer ≠ certifier, or B4's provably-safe auto-certify) —
+  //                   the tick only REFLECTS that recorded sign-off. Fail-closed both ways: zero
+  //                   workspaces on the set = no evidence (absence never ticks), and one un-certified
+  //                   workspace blocks.
+  // Human judgments with no system register (trial_balance_review, flux_review, disclosure_review —
+  // REC-04/CLS-01/CLS-02) and custom tenant tasks NEVER auto-complete. Attribution mirrors B4's
   // auto-certify: completedBy "<user> (auto)", detail { auto: true, evidence } — so the GL-15 sign-off
   // trail always shows which steps a human asserted vs the system proved. Dependencies still gate
   // (a step whose predecessor is not Done is skipped, never forced). Idempotent: Done steps skip.
@@ -187,6 +199,8 @@ export class CloseService {
             gte(journalEntries.entryDate, `${period}-01`), lte(journalEntries.entryDate, end), ...tconds(journalEntries.tenantId)));
         return { ok: num(row?.c) > 0, evidence: { posted_dep_entries: num(row?.c) } };
       },
+      bank_rec: () => this.certifiedReconEvidence([...CASH_ACCOUNTS], period, tenantId),
+      subledger_tieout: () => this.certifiedReconEvidence(TIEOUT_ACCOUNTS, period, tenantId),
     };
 
     const steps = await this.stepsFor(closeRunId);
@@ -412,6 +426,28 @@ export class CloseService {
     const [run] = await db.select().from(closeRuns).where(eq(closeRuns.id, id)).limit(1);
     if (!run) throw new NotFoundException({ code: 'CLOSE_RUN_NOT_FOUND', message: `Close run ${id} not found`, messageTh: 'ไม่พบการปิดงวด' });
     return run;
+  }
+
+  // v2b evidence: the REC-01 register for this period over an account set. Fail-closed both ways —
+  // zero workspaces opened on the set is NO evidence (absence never ticks), and any workspace not yet
+  // Certified blocks. The evidence pins each account's status + certifier so the sign-off trail shows
+  // exactly which human certifications the tick rests on.
+  private async certifiedReconEvidence(accounts: string[], period: string, tenantId: number | null) {
+    const conds = [eq(reconPeriods.period, period), inArray(reconPeriods.accountCode, accounts)];
+    if (tenantId != null) conds.push(eq(reconPeriods.tenantId, tenantId));
+    const rows = await this.db.select({
+      code: reconPeriods.accountCode, status: reconPeriods.status, by: reconPeriods.certifiedBy,
+    }).from(reconPeriods).where(and(...conds));
+    const uncertified = rows.filter((r) => r.status !== 'Certified');
+    return {
+      ok: rows.length > 0 && uncertified.length === 0,
+      evidence: {
+        recon_workspaces: rows.length,
+        certified: rows.length - uncertified.length,
+        uncertified: uncertified.map((r) => r.code),
+        certifications: rows.filter((r) => r.status === 'Certified').map((r) => ({ account: r.code, certified_by: r.by })),
+      },
+    };
   }
 
   private async findRunByPeriod(period: string, tenantId: number | null) {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, FilePlus2, CheckCircle2, Printer } from 'lucide-react';
+import { Plus, Search, FilePlus2, CheckCircle2, Printer, Boxes, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -37,6 +37,14 @@ export default function SubcontractsPage() {
   const [f, setF] = useState({ vendor_name: '', boq_line_id: '', amount: '', retention_pct: '10', wht_pct: '3' });
   const [vals, setVals] = useState<Record<string, string>>({}); // subcontract_no → draft valuation_no
   const [pctFor, setPctFor] = useState<string | null>(null); // subcontract_no pending a valuation %
+  // PROJ-28: free-issue custody statement — shown BEFORE certifying so the certifier sees what would
+  // block the final certificate (FREE_ISSUE_CUSTODY_OPEN) instead of discovering it at certify time.
+  const [custodyFor, setCustodyFor] = useState<string | null>(null);
+  const custody = useQuery<any>({
+    queryKey: ['subcon-custody', custodyFor],
+    queryFn: () => api(`/api/reservations/custody?subcontract_no=${encodeURIComponent(custodyFor!)}`),
+    enabled: !!custodyFor,
+  });
   const refresh = () => qc.invalidateQueries({ queryKey: ['subcon', active] });
 
   const create = useMutation({
@@ -101,6 +109,7 @@ export default function SubcontractsPage() {
                 { key: 'status', label: t('cx.col_status'), render: (r: any) => <Badge variant={r.status === 'active' ? 'default' : 'secondary'}>{r.status}</Badge> },
                 { key: 'actions', label: '', align: 'right', render: (r: any) => (
                   <div className="flex justify-end gap-1.5">
+                    <Button size="sm" variant="outline" onClick={() => setCustodyFor(custodyFor === r.subcontract_no ? null : r.subcontract_no)}><Boxes className="size-3.5" /> {t('cx.s_btn_custody')}</Button>
                     <Button size="sm" variant="outline" onClick={() => setPctFor(r.subcontract_no)}><FilePlus2 className="size-3.5" /> {t('cx.s_btn_raiseval')}</Button>
                     {vals[r.subcontract_no] && <Button size="sm" onClick={() => certifyVal.mutate(vals[r.subcontract_no]!)}><CheckCircle2 className="size-3.5" /> {t('cx.s_btn_certifyval', { no: vals[r.subcontract_no] })}</Button>}
                     {vals[r.subcontract_no] && <Button variant="ghost" size="sm" asChild title={t('doc.print_pdf')}><a href={`${BASE}/api/subcontracts/valuations/${encodeURIComponent(vals[r.subcontract_no]!)}/pdf`} target="_blank" rel="noopener noreferrer"><Printer className="size-3.5" /></a></Button>}
@@ -109,6 +118,44 @@ export default function SubcontractsPage() {
               ]}
             />
           )}</StateView>
+
+          {custodyFor && (
+            <Card className="mt-5 gap-3 p-5">
+              <h3 className="text-base font-semibold">{t('cx.s_custody_title', { no: custodyFor })}</h3>
+              <StateView q={custody}>{custody.data && (
+                custody.data.count === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t('cx.s_custody_none')}</p>
+                ) : (
+                  <>
+                    {custody.data.totals.in_custody > 0 ? (
+                      <p className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                        <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+                        {t('cx.s_custody_open_warn', { qty: custody.data.totals.in_custody })}
+                      </p>
+                    ) : (
+                      <p className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm">
+                        <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                        {t('cx.s_custody_clear')}
+                      </p>
+                    )}
+                    <DataTable
+                      rows={custody.data.lines ?? []}
+                      rowKey={(l: any) => l.reservation_id}
+                      columns={[
+                        { key: 'item_id', label: t('cx.s_custody_col_item') },
+                        { key: 'issue_no', label: 'Issue', render: (l: any) => l.issue_no ?? '—' },
+                        { key: 'issued_qty', label: t('cx.s_custody_col_issued'), align: 'right', render: (l: any) => <span className="tabular">{l.issued_qty}</span> },
+                        { key: 'returned_qty', label: t('cx.s_custody_col_returned'), align: 'right', render: (l: any) => <span className="tabular">{l.returned_qty}</span> },
+                        { key: 'acked_qty', label: t('cx.s_custody_col_acked'), align: 'right', render: (l: any) => <span className="tabular">{l.acked_qty}</span> },
+                        { key: 'in_custody_qty', label: t('cx.s_custody_col_incustody'), align: 'right', render: (l: any) => <span className={`tabular ${l.in_custody_qty > 0 ? 'font-semibold text-amber-600 dark:text-amber-400' : ''}`}>{l.in_custody_qty}</span> },
+                        { key: 'acked_by', label: t('cx.s_custody_col_ackedby'), render: (l: any) => l.acked_by ?? '—' },
+                      ]}
+                    />
+                  </>
+                )
+              )}</StateView>
+            </Card>
+          )}
         </>
       )}
 
