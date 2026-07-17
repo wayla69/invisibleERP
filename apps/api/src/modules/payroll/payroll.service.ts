@@ -2,8 +2,8 @@ import { Inject, Injectable, Optional, BadRequestException, NotFoundException, t
 import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { employees, payruns, payslips, timesheets, leaveRequests, tenants } from '../../database/schema';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { JobWorkerService } from '../jobs/job-worker.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -26,6 +26,10 @@ export interface EmployeeDto {
 
 @Injectable()
 export class PayrollService implements OnModuleInit {
+  // GL tie-out reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
@@ -38,7 +42,9 @@ export class PayrollService implements OnModuleInit {
     // Resolve the tenant's active no-code payslip template at print time (presentation only). @Optional so
     // partial harnesses still construct; absent ⇒ the built-in default layout.
     @Optional() private readonly docTemplates?: DocumentTemplatesService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // Register the worker handler for an async payroll run. The worker has already established the job's tenant
   // transaction (runInTenantContext), so runPayroll's DRIZZLE queries are RLS-scoped exactly as in a request.
@@ -238,14 +244,9 @@ export class PayrollService implements OnModuleInit {
   // GL debit/credit totals across an account SET (Posted entries only — Draft JEs are excluded from
   // balances). PR-7: the PAY-02 schedule sums the widened set so an overridden payable still ties.
   private async glAcct(accountCodes: string | string[], tenantId: number) {
-    const db = this.db;
     const codes = Array.isArray(accountCodes) ? accountCodes : [accountCodes];
-    const [r] = await db.select({
-      debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-      credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
-    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalEntries.tenantId, tenantId), eq(journalEntries.status, 'Posted'), inArray(journalLines.accountCode, codes)));
-    return { debit: n(r?.debit ?? 0), credit: n(r?.credit ?? 0) };
+    const g = await this.ledgerRead.accountGross(codes, { tenantId });
+    return { debit: g.debit, credit: g.credit };
   }
 
   async liabilities(user: JwtUser, explicitTenantId?: number | null) {
