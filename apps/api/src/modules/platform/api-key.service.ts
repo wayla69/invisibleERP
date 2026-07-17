@@ -5,6 +5,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apiKeys, users } from '../../database/schema';
 import { safeEqualHex } from '../../common/crypto';
 import { scopesToPermissions } from '../../common/api-scopes';
+import { PERMISSIONS } from '@ierp/shared';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 
 export interface IssueKeyDto { name: string; scopes?: string[]; ttl_days?: number }
@@ -35,9 +36,14 @@ export class ApiKeyService {
     // The platform owner (god) is exempt — a trusted fleet operator, and a god-minted key is already barred
     // from @PlatformAdmin (pentest P3), so it can never be an MFA-free god credential.
     if (!isPlatformAdmin(user.username)) {
-      const effective = new Set(scopesToPermissions(dto.scopes ?? []));
+      // Bound only scopes that resolve to a REAL internal permission (∈ PERMISSIONS) — a literal permission-key
+      // scope (e.g. `gl_post`), or the `*`/`admin`/`read`/`write` aliases that expand into internal permissions
+      // (`*` → the Sales role's set, which via `exec` includes gl_post/gl_close). Public-API-ONLY scopes
+      // (e.g. `catalog:read`) grant nothing on the internal `@Permissions` surface, so they are not an
+      // escalation and any `users`-holder may provision such an integration key.
+      const internal = new Set<string>(PERMISSIONS as readonly string[]);
       const held = new Set(user.permissions ?? []);
-      const excess = [...effective].filter((p) => !held.has(p));
+      const excess = [...new Set(scopesToPermissions(dto.scopes ?? []))].filter((p) => internal.has(p) && !held.has(p));
       if (excess.length) {
         throw new ForbiddenException({
           code: 'KEY_SCOPE_EXCEEDS_GRANTOR',

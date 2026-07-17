@@ -179,6 +179,10 @@ async function main() {
   ok('PE-1: AccessAdmin cannot mint an API key with scopes beyond its perms (403 KEY_SCOPE_EXCEEDS_GRANTOR)', escKey.status === 403 && escKey.json.error?.code === 'KEY_SCOPE_EXCEEDS_GRANTOR', `${escKey.status} ${escKey.json.error?.code}`);
   const okKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-key', scopes: ['users'] });
   ok('PE-1: AccessAdmin CAN mint a key within its own permissions (users scope)', !!okKey.json?.key, `${okKey.status}`);
+  // PE-1 (refinement) — a public-API-ONLY scope (`catalog:read`, not an internal permission) is not an
+  // escalation and may be minted by any `users`-holder for integration.
+  const pubKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-pub', scopes: ['catalog:read'] });
+  ok('PE-1: AccessAdmin CAN mint a public-API-only scope key (catalog:read — not an internal permission)', !!pubKey.json?.key, `${pubKey.status}`);
   // PE-6 — the platform MFA surface must NOT silently re-enrol/downgrade an already-enrolled account (no
   // step-up). Enrol once (setup → verify), then a second setup is refused (must disable first, needs password+TOTP).
   const pmSetup = await inj('POST', '/api/platform/mfa/setup', iam);
