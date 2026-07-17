@@ -784,7 +784,10 @@ export function AppShell({
             </div>
             <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
               <span className="truncate text-sm font-semibold">{t(brand)}</span>
-              <span className="truncate text-xs text-muted-foreground">Enterprise ERP</span>
+              {/* Active company name so users always know which company they're signed into (tenant code as fallback). */}
+              <span className="truncate text-xs text-muted-foreground" title={me.data?.company_name ?? undefined}>
+                {me.data?.company_name || me.data?.customer_name || 'Enterprise ERP'}
+              </span>
             </div>
           </div>
           {enableWorkspaces && (
@@ -924,7 +927,7 @@ export function AppShell({
                 <span className="truncate text-sm font-medium">{me.data.username}</span>
                 <span className="truncate text-xs text-muted-foreground">
                   {me.data.role}
-                  {me.data.customer_name ? ` · ${me.data.customer_name}` : ''}
+                  {me.data.company_name || me.data.customer_name ? ` · ${me.data.company_name || me.data.customer_name}` : ''}
                 </span>
               </div>
             </div>
@@ -973,7 +976,7 @@ export function AppShell({
                     <span className="truncate font-medium">{me.data?.username ?? '—'}</span>
                     <span className="truncate text-xs font-normal text-muted-foreground">
                       {me.data?.role}
-                      {me.data?.customer_name ? ` · ${me.data.customer_name}` : ''}
+                      {me.data?.company_name || me.data?.customer_name ? ` · ${me.data?.company_name || me.data?.customer_name}` : ''}
                     </span>
                   </div>
                 </DropdownMenuLabel>
