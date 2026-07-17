@@ -74,6 +74,18 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'cx.s_col_certified': { th: 'รับรองแล้ว', en: 'Certified' },
   'cx.s_btn_raiseval': { th: 'สร้างงวด', en: 'Raise valuation' },
   'cx.s_btn_certifyval': { th: 'รับรอง {no}', en: 'Certify {no}' },
+  // PROJ-28: free-issue custody statement per subcontract
+  'cx.s_btn_custody': { th: 'ฝากวัสดุ', en: 'Custody' },
+  'cx.s_custody_title': { th: 'วัสดุฝากผู้รับเหมาช่วง — {no}', en: 'Free-issue custody — {no}' },
+  'cx.s_custody_none': { th: 'ไม่มีวัสดุฝากในสัญญานี้', en: 'No free-issued material on this subcontract' },
+  'cx.s_custody_open_warn': { th: 'มีวัสดุฝากค้าง {qty} หน่วย — ใบรับรองงวดสุดท้ายจะถูกบล็อก (FREE_ISSUE_CUSTODY_OPEN) จนกว่าจะคืนวัสดุหรือรับรู้การใช้', en: '{qty} unit(s) still in custody — the FINAL certificate will be blocked (FREE_ISSUE_CUSTODY_OPEN) until returned or acknowledged' },
+  'cx.s_custody_clear': { th: 'บัญชีฝากวัสดุเคลียร์ครบแล้ว — รับรองงวดสุดท้ายได้', en: 'Custody fully accounted — final certificate is clear' },
+  'cx.s_custody_col_item': { th: 'สินค้า', en: 'Item' },
+  'cx.s_custody_col_issued': { th: 'ฝากออก', en: 'Issued' },
+  'cx.s_custody_col_returned': { th: 'คืนแล้ว', en: 'Returned' },
+  'cx.s_custody_col_acked': { th: 'รับรู้การใช้', en: 'Acknowledged' },
+  'cx.s_custody_col_incustody': { th: 'คงฝาก', en: 'In custody' },
+  'cx.s_custody_col_ackedby': { th: 'รับรู้โดย', en: 'Acked by' },
 
   // ── Real estate ──
   'cx.re_title': { th: 'อสังหาริมทรัพย์ (Developer)', en: 'Real Estate (Developer)' },
