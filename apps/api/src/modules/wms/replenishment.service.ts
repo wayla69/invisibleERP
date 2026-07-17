@@ -3,7 +3,7 @@ import { eq, and, asc, gte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerInventory, branchStock, replenishmentSuggestions, branches, itemSupplier, vendors, custStockLog, stockMovements } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { ProcurementService } from '../procurement/procurement.service';
+import { ProcurementService, type CreatePrDto } from '../procurement/procurement.service';
 import { DemandForecastService } from '../demand-ml/demand-forecast.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -178,7 +178,7 @@ export class ReplenishmentService {
     const buyRows = rows.filter((r: any) => (r.route ?? 'buy') !== 'transfer');
     const picked = (dto.item_ids?.length ? buyRows.filter((r: any) => dto.item_ids!.includes(r.itemId)) : buyRows).filter((r: any) => n(r.buyQty ?? r.suggestedQty) > 0);
     if (!picked.length) return { pr_no: null, lines: 0 };
-    const pr = await this.procurement.createPr({ items: picked.map((r: any) => ({ item_id: r.itemId, request_qty: n(r.buyQty ?? r.suggestedQty), reason: 'Auto-replenishment' })) } as any, user);
+    const pr = await this.procurement.createPr({ items: picked.map((r: any) => ({ item_id: r.itemId, request_qty: n(r.buyQty ?? r.suggestedQty), reason: 'Auto-replenishment' })) } as CreatePrDto, user);
     await db.update(replenishmentSuggestions).set({ status: 'PR_Created', prNo: pr.pr_no }).where(inArray(replenishmentSuggestions.id, picked.map((r: any) => Number(r.id))));
     return { pr_no: pr.pr_no, lines: picked.length };
   }

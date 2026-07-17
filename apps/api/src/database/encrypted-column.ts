@@ -17,10 +17,10 @@ export const encryptedText = customType<{ data: string; driverData: string }>({
   dataType() { return 'text'; },
   toDriver(value: string): string {
     // null/undefined are passed through by Drizzle without calling this; guard defensively anyway.
-    return value == null ? (value as any) : encrypt(String(value));
+    return value == null ? value : encrypt(String(value));
   },
   fromDriver(value: string): string {
-    return value == null ? (value as any) : decrypt(String(value));
+    return value == null ? value : decrypt(String(value));
   },
 });
 

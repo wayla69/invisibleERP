@@ -3,7 +3,7 @@ import { eq, and, desc, inArray, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { resolveMessageGateway } from '../messaging/gateways';
+import { resolveMessageGateway, type MessageChannel } from '../messaging/gateways';
 import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 import { bucketPct } from '../marketing/marketing-automation.service';
 import type { JwtUser } from '../../common/decorators';
@@ -116,7 +116,7 @@ export class CampaignsService {
     const due = await db.select({ id: loyaltyCampaigns.id }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.tenantId, tenantId), eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
     let ran = 0;
     for (const d of due) {
-      try { await this.sendCampaign({ tenantId, username: createdBy } as any, Number(d.id)); ran++; } catch { /* keep going */ }
+      try { await this.sendCampaign({ tenantId, username: createdBy } as JwtUser, Number(d.id)); ran++; } catch { /* keep going */ }
     }
     return ran;
   }
@@ -157,7 +157,7 @@ export class CampaignsService {
       await tx.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel, recipient: null, body, campaign: campaignCode, status: 'failed', provider: null, error: 'no contact', createdBy });
       return 'failed';
     }
-    const gw = resolveMessageGateway(channel as any);
+    const gw = resolveMessageGateway(channel as MessageChannel);
     const res = await gw.send(recipient, body);
     await tx.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel, recipient, body, campaign: campaignCode, status: res.status, provider: res.provider, error: res.error ?? null, createdBy });
     return res.status === 'sent' ? 'sent' : 'failed';

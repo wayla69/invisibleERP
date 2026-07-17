@@ -105,7 +105,7 @@ export class SplitBillService {
       for (let k = 1; k <= ways; k++) {
         const share = k < ways ? base : roundCurrency(gross - base * (ways - 1), 'THB');
         const inc = this.tax.calcInclusive({ gross: share, country: 'TH' });
-        slices.push({ check: k, subtotal: inc.net, vat: inc.tax, total: roundCurrency(share, 'THB'), grossOverride: roundCurrency(share, 'THB'), lines: [] as any[], discount: 0 });
+        slices.push({ check: k, subtotal: inc.net, vat: inc.tax, total: roundCurrency(share, 'THB'), grossOverride: roundCurrency(share, 'THB') as number | undefined, lines: [] as { id?: number }[], discount: 0 });
       }
       return slices;
     }
@@ -128,7 +128,7 @@ export class SplitBillService {
       const lines = byCheck.get(c)!;
       const grossNet = roundCurrency(lines.reduce((a, l) => a + n(l.amount), 0), 'THB');
       const t = this.tax.calcTax({ net: grossNet, country: 'TH' });
-      slices.push({ check: c, subtotal: grossNet, vat: t.tax, total: roundCurrency(grossNet + t.tax, 'THB'), grossOverride: undefined as any, lines, discount: 0 });
+      slices.push({ check: c, subtotal: grossNet, vat: t.tax, total: roundCurrency(grossNet + t.tax, 'THB'), grossOverride: undefined as number | undefined, lines, discount: 0 });
     }
     return slices;
   }

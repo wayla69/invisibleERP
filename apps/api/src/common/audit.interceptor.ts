@@ -38,7 +38,7 @@ export class AuditInterceptor implements NestInterceptor {
     if (ctx.getType() !== 'http') return next.handle();
 
     // Fields set upstream by TenantTxInterceptor (RLS scope of this request) are declared here so the audit
-    // trail can read them without an `as any` cast.
+    // trail can read them without an as-any cast.
     const req = ctx.switchToHttp().getRequest<FastifyRequest & {
       user?: JwtUser;
       __auditMeta?: Record<string, unknown>;

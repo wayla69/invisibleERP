@@ -373,7 +373,7 @@ export class AgentService {
       switch (name) {
         case 'get_sales_summary': return await this.pos.summary(input.start_date, input.end_date);
         case 'get_recent_orders': return await this.pos.orders(input.limit ?? 10, 0);
-        case 'get_stock_levels': return await this.inv.getStock({ search: input.search, low_only: !!input.below_reorder_only, limit: input.limit ?? 50 } as any);
+        case 'get_stock_levels': return await this.inv.getStock({ search: input.search, low_only: !!input.below_reorder_only, limit: input.limit ?? 50 });
         case 'get_stock_item': return await this.inv.getStockDetail(input.item_id);
         case 'get_pl_summary': return await this.fin.pl(input.month, input.year);
         case 'get_kpi_dashboard': return await this.fin.kpi();
