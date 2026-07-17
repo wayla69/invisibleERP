@@ -6,7 +6,7 @@ import { LanguageProvider } from '@/lib/i18n';
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
     <LanguageProvider>
-      <AppShell variant="portal" brand="ร้านค้าของฉัน">
+      <AppShell variant="portal" brand="pt.brand">
         {children}
       </AppShell>
     </LanguageProvider>

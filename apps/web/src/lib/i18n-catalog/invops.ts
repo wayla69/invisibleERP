@@ -1073,4 +1073,20 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'iv.to_aging_open': { th: 'ใบโอนที่ยังไม่รับ', en: 'Open in-transit orders' },
   'iv.to_aging_value': { th: 'มูลค่าสินค้าระหว่างทางรวม', en: 'Total in-transit value' },
   'iv.to_aging_empty': { th: 'ไม่มีสินค้าค้างระหว่างทาง', en: 'No inventory in transit' },
+
+  // Email-to-Capture card (docs/34 Phase 4, /capture)
+  'iv.capmail_title': { th: 'รับบิลทางอีเมล (ส่งต่อบิลเข้าอีเมล)', en: 'Receive bills by email (forward-in)' },
+  'iv.capmail_sent': { th: 'ส่งรหัสยืนยันไปที่ {email} แล้ว', en: 'Verification code sent to {email}' },
+  'iv.capmail_saved_fail': { th: 'บันทึกอีเมล {email} แล้ว (ส่งรหัสไม่สำเร็จ ลองขอใหม่ได้)', en: 'Email {email} saved (sending the code failed — you can request again)' },
+  'iv.capmail_verified_toast': { th: 'ยืนยันอีเมล {email} แล้ว', en: 'Email {email} verified' },
+  'iv.capmail_forward_pre': { th: 'ส่งต่อ (forward) บิล/ใบแจ้งหนี้ไปที่:', en: 'Forward bills/invoices to:' },
+  'iv.capmail_forward_post': { th: 'แล้วระบบจะอ่านไฟล์แนบและส่งให้ฝ่ายบัญชีให้อัตโนมัติ', en: 'and attachments are read and routed to Accounting automatically' },
+  'iv.capmail_verified_pre': { th: 'อีเมลของคุณ', en: 'Your email' },
+  'iv.capmail_verified_post': { th: 'ยืนยันแล้ว — ส่งบิลจากอีเมลนี้ได้เลย', en: 'is verified — you can send bills from it now' },
+  'iv.capmail_why': { th: 'ยืนยันอีเมลที่คุณจะใช้ "ส่งบิล" ก่อน เพื่อให้ระบบรู้ว่าบิลที่ส่งมาเป็นของคุณ (จะมีรหัสยืนยันส่งไปที่อีเมลนั้น)', en: 'First verify the email you will send bills from, so the system knows incoming bills are yours (a verification code is emailed to it)' },
+  'iv.capmail_your_email': { th: 'อีเมลของคุณ', en: 'Your email' },
+  'iv.capmail_request_code': { th: 'ขอรหัสยืนยัน', en: 'Request code' },
+  'iv.capmail_code_label': { th: 'รหัสยืนยัน (ส่งไปที่ {email})', en: 'Verification code (sent to {email})' },
+  'iv.capmail_code_ph': { th: 'รหัส 6 หลัก', en: '6-digit code' },
+  'iv.capmail_verify': { th: 'ยืนยัน', en: 'Verify' },
 };

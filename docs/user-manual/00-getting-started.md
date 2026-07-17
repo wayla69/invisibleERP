@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.4 · 2026-07-17** · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
+**Status: DRAFT v0.5 · 2026-07-17** · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -252,6 +252,11 @@ system cannot save preferences to the server (for example a platform owner
 browsing a company in **read-only view**, or a brief loss of connection), the
 language you picked stays in effect on that device and is saved to your account
 automatically as soon as saving is possible again.
+
+The back office, the **Customer Portal**, and system messages (connection errors,
+form validation, action toasts) all follow your selected language. A few
+public-facing pages aimed at Thai end-customers (the sign-in page, diner QR
+ordering, order tracking) are intentionally shown in Thai or bilingual.
 
 > **Note:** This manual shows English wording first with the Thai label in
 > brackets so you can match it on screen regardless of the current language.

@@ -1,6 +1,7 @@
 // No 'use client' directive needed: this hook is imported only by client components
 // (assistant-widget, /assistant page), so it already lives in their client subgraph.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ts } from '@/lib/i18n-static';
 
 // Shared AI-assistant chat state + SSE streaming, used by both the full `/assistant` page and the global
 // floating widget. Auth is the httpOnly cookie (credentials:'include'); backend is
@@ -103,12 +104,12 @@ export function useAssistantChat() {
         if (buf.trim()) handleEvent(buf);
       } catch (e: any) {
         if (e?.name !== 'AbortError') {
-          setError(e?.message ?? 'การเชื่อมต่อ AI ล้มเหลว');
+          setError(e?.message ?? ts('err.ai_connection'));
           setMessages((prev) => {
             const copy = [...prev];
             const last = copy[copy.length - 1];
             if (last?.role === 'assistant' && !last.content) {
-              copy[copy.length - 1] = { role: 'assistant', content: `⚠️ ${e?.message ?? 'เกิดข้อผิดพลาด'}` };
+              copy[copy.length - 1] = { role: 'assistant', content: `⚠️ ${e?.message ?? ts('err.generic')}` };
             }
             return copy;
           });
