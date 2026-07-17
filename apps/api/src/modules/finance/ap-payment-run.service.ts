@@ -6,6 +6,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { apTransactions, apPayments, apPaymentRuns, apPaymentRunLines, apDiscountTerms, bankAccounts, vendors, tenants } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
+import { ApDiscountTermsService } from './ap-discount-terms.service';
 import { FinanceService } from './finance.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
@@ -70,7 +71,11 @@ export class ApPaymentRunService {
     @Optional() private readonly determination?: AccountDeterminationService,
     @Optional() private readonly taxJobs?: TaxJobsService,
     @Optional() private readonly ledger?: LedgerService, // posts the FIN-9 discount-income adjustment JE
-  ) {}
+  ) {
+    // Ctor-body plain class (god-service ratchet pattern) — the FIN-9/EXP-14 discount-policy register.
+    this.discountTerms = new ApDiscountTermsService(db, statusLog);
+  }
+  private readonly discountTerms: ApDiscountTermsService;
 
   // ── Resolve + validate a WHT tax code exactly like a manual payment request (TAX-03 / docs/33 PR7) ──
   private async resolveWht(tenantId: number | null, taxCode: string | null | undefined, rate?: number | null, incomeType?: string | null):
@@ -437,77 +442,14 @@ export class ApPaymentRunService {
   }
 
   // ══════════════════ FIN-9 (EXP-14) — early-payment discount policy (maker-checker change control) ══════════════════
-  // A sliding-scale prompt-payment discount schedule, per-vendor or global (vendor_id NULL). Created Draft by a
-  // 'creditors' maker; activated by a DIFFERENT approvals/gl_close checker (self-approval → SOD_VIOLATION).
-  // Only an Active policy is applied by a payment run; approving one supersedes the prior Active policy for the
-  // same vendor scope so at most one Active policy governs a vendor at a time.
-  async createDiscountTerm(dto: DiscountTermDto, user: JwtUser) {
-    const tenantId = user.tenantId ?? null;
-    const pct = round4(dto.discount_pct);
-    if (!(pct > 0 && pct <= 0.30)) throw new BadRequestException({ code: 'INVALID_DISCOUNT_PCT', message: 'discount_pct must be between 0 and 0.30', messageTh: 'อัตราส่วนลดต้องอยู่ระหว่าง 0 ถึง 0.30' });
-    const minDays = Math.max(1, Math.floor(Number(dto.min_days_early ?? 1)));
-    const fullDays = Math.max(minDays, Math.floor(Number(dto.full_discount_days ?? 20)));
-    if (dto.vendor_id != null) {
-      const [v] = await this.db.select({ id: vendors.id }).from(vendors).where(eq(vendors.id, Number(dto.vendor_id))).limit(1);
-      if (!v) throw new NotFoundException({ code: 'VENDOR_NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
-    }
-    const [row] = await this.db.insert(apDiscountTerms).values({
-      tenantId, vendorId: dto.vendor_id != null ? Number(dto.vendor_id) : null, name: dto.name,
-      discountPct: String(pct), minDaysEarly: minDays, fullDiscountDays: fullDays,
-      prorate: dto.prorate ?? true, discountAccount: dto.discount_account ?? '4600',
-      activeFrom: dto.active_from ?? null, activeTo: dto.active_to ?? null, status: 'Draft', createdBy: user.username,
-    }).returning({ id: apDiscountTerms.id });
-    await this.statusLog.log('APDISC', String(row!.id), '', 'Draft', user.username, `Discount policy '${dto.name}' ${pct * 100}%`);
-    return this.getDiscountTerm(Number(row!.id));
-  }
-
-  async approveDiscountTerm(id: number, approver: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const [t] = await db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
-    await assertMakerChecker(db, { user: approver, maker: t.createdBy, event: 'ap.discount-term.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a discount policy you created', messageTh: 'ผู้จัดทำนโยบายส่วนลดอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    // Supersede the prior Active policy for the SAME vendor scope so only one Active policy governs a vendor.
-    const scope = t.vendorId != null ? eq(apDiscountTerms.vendorId, Number(t.vendorId)) : isNull(apDiscountTerms.vendorId);
-    const scopeConds: SQL[] = [eq(apDiscountTerms.status, 'Active'), scope, ne(apDiscountTerms.id, Number(id))];
-    if (t.tenantId != null) scopeConds.push(eq(apDiscountTerms.tenantId, Number(t.tenantId)));
-    await db.update(apDiscountTerms).set({ status: 'Inactive' }).where(and(...scopeConds));
-    await db.update(apDiscountTerms).set({ status: 'Active', approvedBy: approver.username, approvedAt: new Date() }).where(eq(apDiscountTerms.id, Number(id)));
-    await this.statusLog.log('APDISC', String(id), 'Draft', 'Active', approver.username);
-    return this.getDiscountTerm(Number(id));
-  }
-
-  async rejectDiscountTerm(id: number, approver: JwtUser, reason?: string) {
-    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
-    await this.db.update(apDiscountTerms).set({ status: 'Rejected', approvedBy: approver.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(apDiscountTerms.id, Number(id)));
-    await this.statusLog.log('APDISC', String(id), 'Draft', 'Rejected', approver.username, reason);
-    return this.getDiscountTerm(Number(id));
-  }
-
-  async deactivateDiscountTerm(id: number, user: JwtUser) {
-    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    if (t.status !== 'Active') throw new BadRequestException({ code: 'NOT_ACTIVE', message: `Policy ${id} is ${t.status}, not active`, messageTh: 'นโยบายนี้ไม่ได้เปิดใช้งานอยู่' });
-    await this.db.update(apDiscountTerms).set({ status: 'Inactive' }).where(eq(apDiscountTerms.id, Number(id)));
-    await this.statusLog.log('APDISC', String(id), 'Active', 'Inactive', user.username);
-    return this.getDiscountTerm(Number(id));
-  }
-
-  async getDiscountTerm(id: number) {
-    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    return shapeDiscountTerm(t);
-  }
-
-  async listDiscountTerms(user: JwtUser, status?: string) {
-    const conds: SQL[] = [];
-    if (user.tenantId != null) conds.push(eq(apDiscountTerms.tenantId, user.tenantId));
-    if (status) conds.push(eq(apDiscountTerms.status, status));
-    const rows = await this.db.select().from(apDiscountTerms).where(conds.length ? and(...conds) : undefined).orderBy(desc(apDiscountTerms.id)).limit(200);
-    return { terms: rows.map(shapeDiscountTerm), count: rows.length };
-  }
+  // FIN-9 / EXP-14 discount-policy register — extracted to ApDiscountTermsService (god-service ratchet
+  // round; ctor-body plain class). Policy RESOLUTION (resolveDiscountPolicy/computeDiscount) stays here.
+  async createDiscountTerm(dto: DiscountTermDto, user: JwtUser) { return this.discountTerms.createDiscountTerm(dto, user); }
+  async approveDiscountTerm(id: number, approver: JwtUser, selfApprovalReason?: string | null) { return this.discountTerms.approveDiscountTerm(id, approver, selfApprovalReason); }
+  async rejectDiscountTerm(id: number, approver: JwtUser, reason?: string) { return this.discountTerms.rejectDiscountTerm(id, approver, reason); }
+  async deactivateDiscountTerm(id: number, user: JwtUser) { return this.discountTerms.deactivateDiscountTerm(id, user); }
+  async getDiscountTerm(id: number) { return this.discountTerms.getDiscountTerm(id); }
+  async listDiscountTerms(user: JwtUser, status?: string) { return this.discountTerms.listDiscountTerms(user, status); }
 
   // ── Thai bank bulk-transfer file (generic CSV + named presets) / minimal ISO 20022 pain.001 XML.
   // The layouts are DOCUMENTED, CONFIGURABLE presets (see PN-02 §7(8b)) — column orders for scb/kbank/bbl
@@ -583,14 +525,6 @@ function shapeRun(r: typeof apPaymentRuns.$inferSelect) {
   };
 }
 
-function shapeDiscountTerm(t: typeof apDiscountTerms.$inferSelect) {
-  return {
-    id: Number(t.id), vendor_id: t.vendorId != null ? Number(t.vendorId) : null, name: t.name,
-    discount_pct: n(t.discountPct), min_days_early: Number(t.minDaysEarly ?? 1), full_discount_days: Number(t.fullDiscountDays ?? 20),
-    prorate: !!t.prorate, discount_account: t.discountAccount, active_from: t.activeFrom, active_to: t.activeTo,
-    status: t.status, created_by: t.createdBy, created_at: t.createdAt, approved_by: t.approvedBy, approved_at: t.approvedAt, reject_reason: t.rejectReason,
-  };
-}
 
 interface FileDetail { seq: number; beneficiary_bank: string; beneficiary_account: string; beneficiary_name: string; amount: number; ref: string; wht: number }
 interface FileCtx { runNo: string; payDate: string; debitAcct: string; debitBank?: string; debitName: string; details: FileDetail[]; total: number }

@@ -146,7 +146,12 @@ test('pos-home — summary stats + open tills + recent bills fit the phone viewp
     '/api/pos/orders': { orders: [{ Sale_No: 'S-1023', Sale_Date: '2026-07-09', Total: 362.6, Status: 'Paid', Payment_Method: 'Cash', Cashier: 'cashier01' }] },
   });
   await page.goto('/pos-home');
-  await expect(page.getByText('S-1023').first()).toBeVisible();
+  // pos-home is the heaviest page in this sweep (recharts bundle + three parallel queries) and this is
+  // the FIRST paint of it in the run — under late-job CI load, hydration alone can blow the default 7s
+  // expect window (this exact wait flaked four merge cycles: #791, #794, #805 ×2; always the first
+  // assertion, mocks provably installed). Give only the first paint a generous window; everything after
+  // it is hot and stays on the default timeout. The spec's purpose is the overflow assertion, not latency.
+  await expect(page.getByText('S-1023').first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('cashier01').first()).toBeVisible();
   await expectNoOverflow(page, 'pos home dashboard');
 });
