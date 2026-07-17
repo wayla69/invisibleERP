@@ -88,14 +88,14 @@ export class ReconciliationService {
     if (!glLines.length) return { imported: 0 };
 
     await db.insert(reconItems).values(
-      glLines.map((l: any) => ({
+      glLines.map((l) => ({
         reconPeriodId, source: 'GL', refDoc: l.refDoc, refLineId: Number(l.id),
         amount: fx(n(l.amount), 4), isMatched: false,
       }))
     ).onConflictDoNothing();
 
     // Update GL balance
-    const glBalance = round4(glLines.reduce((s: number, l: any) => s + n(l.amount), 0));
+    const glBalance = round4(glLines.reduce((s: number, l) => s + n(l.amount), 0));
     await db.update(reconPeriods).set({ glBalance: fx(glBalance, 4), preparedBy: user.username, preparedAt: new Date() }).where(eq(reconPeriods.id, reconPeriodId));
 
     return { imported: glLines.length, gl_balance: glBalance };
