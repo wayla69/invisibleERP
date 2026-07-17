@@ -4,6 +4,7 @@ import { BiLiveModule } from '../bi/bi-live.module';
 import { CommitmentsModule } from '../commitments/commitments.module';
 import { RetentionModule } from '../retention/retention.module';
 import { ProjectsController } from './projects.controller';
+import { ProjectsPortfolioController } from './projects-portfolio.controller';
 import { ProjectsService } from './projects.service';
 import { ProjectsBiReports } from './projects-bi-reports';
 
@@ -14,7 +15,10 @@ import { ProjectsBiReports } from './projects-bi-reports';
 // budget/committed/remaining per line and expose the project commitments read model.
 @Module({
   imports: [LedgerModule, BiLiveModule, CommitmentsModule, RetentionModule],
-  controllers: [ProjectsController],
+  // docs/46 round 5: the portfolio/PMO/governance/resourcing route surface lives in its own controller —
+  // same `api/projects` prefix + class gates, identical paths (Fastify static-vs-param precedence is
+  // structural, not registration-order dependent), so the API contract is unchanged.
+  controllers: [ProjectsController, ProjectsPortfolioController],
   providers: [ProjectsBiReports, ProjectsService],
   exports: [ProjectsService],
 })
