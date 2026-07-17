@@ -130,10 +130,12 @@ export class LedgerReadService {
   // Net Posted movement (Σ debit − Σ credit) per ACCOUNT for one fiscal period (or unbounded when period is
   // omitted), optionally filtered to an account set or code prefixes (e.g. the 4%/5% P&L bands). The
   // planning/allocation actuals read; `net` stays the raw numeric string.
-  async accountNetPerAccount(opts: { tenantId?: number | null; period?: string; accounts?: string[]; accountPrefixes?: string[] }): Promise<{ accountCode: string; net: string }[]> {
+  async accountNetPerAccount(opts: { tenantId?: number | null; period?: string; periodBefore?: string; accounts?: string[]; accountPrefixes?: string[] }): Promise<{ accountCode: string; net: string }[]> {
     const conds = [eq(journalEntries.status, 'Posted')];
     if (opts.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
     if (opts.period) conds.push(eq(journalEntries.period, opts.period));
+    // Roll-forward opening: everything posted in periods STRICTLY BEFORE the given one (recon B4).
+    if (opts.periodBefore) conds.push(sql`${journalEntries.period} < ${opts.periodBefore}`);
     if (opts.accounts?.length) conds.push(inArray(journalLines.accountCode, opts.accounts));
     if (opts.accountPrefixes?.length) conds.push(sql`(${sql.join(opts.accountPrefixes.map((p) => sql`${journalLines.accountCode} LIKE ${p}`), sql` OR `)})`);
     return this.db.select({
@@ -179,6 +181,49 @@ export class LedgerReadService {
       .from(journalEntries).leftJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
       .where(and(eq(journalEntries.source, 'Manual'), sql`extract(dow from ${journalEntries.entryDate}) in (0,6)`))
       .groupBy(journalEntries.entryNo, journalEntries.entryDate, journalEntries.memo);
+  }
+
+  // Revenue/expense per fiscal period off the typed chart of accounts, in one grouped query — the BI
+  // finance-trend read. Revenue = Σ(credit − debit) on Revenue accounts; expense = Σ(debit − credit) on
+  // Expense accounts. `ledgerCode` selects the sub-ledger dimension exactly as the consumer always did:
+  // omitted → primary-ledger rows only (ledger_code IS NULL); given → NULL OR that code.
+  async revenueExpenseByPeriod(opts: { tenantId: number; fromDate: string; ledgerCode?: string | null }): Promise<{ period: string | null; revenue: string; expense: string }[]> {
+    const ledgerFilter = opts.ledgerCode
+      ? sql`(${journalEntries.ledgerCode} IS NULL OR ${journalEntries.ledgerCode} = ${opts.ledgerCode})`
+      : sql`${journalEntries.ledgerCode} IS NULL`;
+    return this.db.select({
+      period: journalEntries.period,
+      revenue: sql<string>`coalesce(sum(case when ${accounts.type} = 'Revenue' then ${journalLines.credit} - ${journalLines.debit} else 0 end),0)`,
+      expense: sql<string>`coalesce(sum(case when ${accounts.type} = 'Expense' then ${journalLines.debit} - ${journalLines.credit} else 0 end),0)`,
+    }).from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .innerJoin(accounts, eq(journalLines.accountCode, accounts.code))
+      .where(and(
+        eq(journalEntries.tenantId, opts.tenantId),
+        eq(journalEntries.status, 'Posted'),
+        gte(journalEntries.entryDate, opts.fromDate),
+        ledgerFilter,
+      ))
+      .groupBy(journalEntries.period)
+      .orderBy(journalEntries.period);
+  }
+
+  // Posted line refs (line id · entry_no · signed amount) for ONE account × period — the account-
+  // reconciliation workbench's GL-side import feed (each line becomes a matchable recon item).
+  async accountLineRefs(opts: { tenantId: number; period: string; account: string }): Promise<{ id: number; refDoc: string; amount: string }[]> {
+    const rows = await this.db.select({
+      id: journalLines.id,
+      refDoc: journalEntries.entryNo,
+      amount: sql<string>`${journalLines.debit} - ${journalLines.credit}`,
+    }).from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(
+        eq(journalEntries.tenantId, opts.tenantId),
+        eq(journalEntries.period, opts.period),
+        eq(journalEntries.status, 'Posted'),
+        eq(journalLines.accountCode, opts.account),
+      ));
+    return rows.map((r) => ({ id: Number(r.id), refDoc: r.refDoc, amount: r.amount }));
   }
 
   // Register listing for one posting SOURCE — one row per (entry × positive-DEBIT line), newest first.
