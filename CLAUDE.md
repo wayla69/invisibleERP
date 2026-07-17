@@ -289,6 +289,20 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     change. NB a new `cutover:<name>` added INSIDE an existing shard job needs NO branch-protection change — the
     shard's check name (`harnesses (platform-a)`) already gates it; only a brand-new top-level JOB introduces a
     new required-check name.
+16. **Tightening an AUTHORIZATION gate: the scope→permission model EXPANDS non-obviously, and the fixture that
+    breaks is the one that PROVISIONS a broad credential (auth-specific extension of #14).** The PE-1 api-key
+    scope-bound (bind a key's scopes to the minter's own perms, PR #819) broke the `ext` harness — which minted
+    a full-scope (`*`) *public-API* key as a `users`-only `AccessAdmin`. Non-obvious root cause: `*`/`admin`
+    scopes resolve via `resolvePermissions('Sales')`, and Sales holds `exec`, which `expandPermissions` turns
+    into `gl_post`/`gl_close` — so a `*` key is **GL-capable**, an AccessAdmin minting one IS the escalation, and
+    the fix is to mint it as an **Admin**, never loosen the bound. Two corollaries when bounding scopes:
+    (a) bound only scopes that are REAL internal permissions (`∈ PERMISSIONS`) — a public-API-ONLY scope like
+    `catalog:read` grants nothing on the `@Permissions` surface, so bounding it wrongly rejects legit
+    integration keys (`common/api-scopes.ts` `scopesToPermissions` is the shared expansion, used by both
+    `guards.ts` and `ApiKeyService.issue`); (b) you can't blanket-`detectSodConflicts` a scope-derived set —
+    coarse roles (Sales/`pos`/`warehouse`) carry GRANDFATHERED SoD conflicts, so the user-grant path SoD-checks
+    only the per-user OVERRIDE, never role defaults. `grep -rln "api-keys\|scopes:" tools/ apps/api/test` before
+    pushing an api-key change — the harness that mints a broad key *as a convenience* is where it breaks.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -312,6 +326,25 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     `app.inject()`s a signed body must create the app with `{ rawBody: true }` too, else rawBody is empty).
   - **API keys carry `created_by`; the guard adopts that human as the maker-checker principal** (H-2) — a key
     can't launder a self-approval. The **guard sources `tenantId` LIVE from the DB** (L-3), like role/orgId.
+- **Privilege-escalation remediation (2026-07-17 audit, PR #819 — `docs/security/2026-07-17-privilege-escalation-audit.md`;
+  don't regress the new fail-closed controls).** The escalation surface is the `users` perm (`AccessAdmin`)
+  granting capability UNBOUNDED by its own — the 2026-07-16 pentest closed the reach-Admin paths (P1/P2/P3);
+  #819 closed the reach-sub-Admin paths. **(PE-1)** `ApiKeyService.issue` bounds a key's scopes to the minter's
+  own perms (`403 KEY_SCOPE_EXCEEDS_GRANTOR`) via `common/api-scopes.ts` `scopesToPermissions` (shared with
+  `guards.ts`) — only scopes `∈ PERMISSIONS` are bounded, the platform owner is exempt (see mantra #16 for the
+  `*`=GL-capable trap). **(PE-2)** an `admin-users` create/update grant BEYOND the grantor's own set is STAGED
+  for a second admin in the existing `access_grant_exceptions` two-person queue (`sod_rules:['ESCALATION']`) —
+  NOT hard-blocked (that would break SCIM + delegated user admin); SCIM opts out with `{viaScim:true}`, and
+  Admin/god hold everything so they never stage. Others (all fail-closed): QC `Scrap` GL write-off needs
+  `quality_approve`/`exec` (PE-4, `mfg-depth/quality.service.ts`); `PUT /api/procurement/match/tolerance` is
+  approver-set (`exec`/`approvals`), not the `creditors` beneficiary (PE-5); platform `mfa/setup` refuses
+  re-enrol when already enabled (PE-6); `hcm/leave/balances` own-scopes non-HR `ess` callers via `callerEmpCode`
+  (PE-3). **Harness patterns for a `users`-holder / AccessAdmin fixture** (learned building the ToE): SEED it
+  directly (`db.insert(s.users)`, `mustChangePassword` unset) and log in — the create→change-password→relogin
+  dance on a *platform-created-tenant* user 401s `USER_NOT_FOUND` on the guard (a PGlite tx-visibility quirk;
+  `access-recert.ts` is the good pattern); a non-Admin (tenant-scoped) session can't insert a NULL-tenant row
+  (RLS `WITH CHECK` — pass `customer_name` = its tenant code); the `/api/login` body does NOT expose
+  `permissions`, so assert effective perms by querying `userPermissions` on the raw harness `db`.
   - **Behind a proxy / multi-replica (L-8/L-12):** `TRUSTED_PROXY_HOPS` sets Fastify `trustProxy` + the
     audit-IP trusted hop; `RATE_LIMIT_REDIS_URL` shares the edge + public-API limiters via
     `common/rate-limit-store.ts`. Both default off = per-process / socket-peer (single-node unchanged).
