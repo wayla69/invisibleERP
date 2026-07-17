@@ -46,8 +46,11 @@ export class ShopFloorController {
 }
 
 // ── Quality ──
+// Inspection + non-financial dispositions are open to the coarse ops duties (PERMS); a Scrap disposition
+// posts a GL write-off and is gated IN-SERVICE to the segregated approver duty (quality_approve/exec, PE-4),
+// which is why quality_approve is added to the class gate so a QC approver can reach the quick path.
 @Controller('api/quality')
-@Permissions(...PERMS)
+@Permissions(...PERMS, 'quality_approve')
 @RequiresSuite('manufacturing')
 export class QualityController {
   constructor(private readonly svc: QualityService) {}

@@ -52,6 +52,7 @@ async function main() {
     { username: 'procT1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },
     { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
     { username: 'apprv', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: hq }, // AP-PAY checker (≠ admin requester)
+    { username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: hq }, // PE-5: creditors-only (the match beneficiary) — must NOT set the tolerance
     { username: 'capT1', passwordHash: await pw.hash('pw'), role: 'StockCounter', tenantId: t1 }, // pr_raise-only (no procurement/creditors) — Quick Capture lane (docs/34)
   ]).onConflictDoNothing();
   // The Procurement role default is now SoD-clean (procurement/pr_raise only). These fixtures need the
@@ -145,6 +146,11 @@ async function main() {
   const m4b = await runMatch(ap4, poNo, [{ item_id: 'X', qty: 100, unit_price: 10.15 }]);
   ok('Tolerance: 10.15 @ price_pct 2% → matched; @ 0% → price_variance', m4.json.match_status === 'matched' && m4.json.payable === true && m4b.json.match_status === 'price_variance', JSON.stringify({ at2: m4.json.match_status, at0: m4b.json.match_status }));
   await inj('PUT', '/api/procurement/match/tolerance', admin, { price_pct: 2 }); // restore
+  // PE-5 — the AP beneficiary (creditors) that runs the match + releases payment must NOT set the tolerance
+  // that governs whether every invoice auto-passes; only an approver duty (exec/approvals) may.
+  const apclerk = await login('apclerk', 'pw');
+  const tolByClerk = await inj('PUT', '/api/procurement/match/tolerance', apclerk, { price_pct: 99 });
+  ok('PE-5: creditors (AP) cannot set the match tolerance (403); approver-only', tolByClerk.status === 403, `${tolByClerk.status} ${tolByClerk.json.error?.code}`);
 
   // ── F. override gate (EXP-01 maker-checker: overrider ≠ matcher, binds Admin) ──
   // the match was RUN by admin → admin cannot also override it.
