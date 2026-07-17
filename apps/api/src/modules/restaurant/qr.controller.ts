@@ -18,6 +18,10 @@ export class QrController {
   @Public() @NoTx() @Post('start/:qrToken')
   start(@Param('qrToken') qrToken: string) { return this.qr.start(qrToken); }
 
+  // Presence-bound rotating QR (#3): a short-TTL HMAC(tenant:table:window) token from a per-table display.
+  @Public() @NoTx() @Post('rstart/:token')
+  startRotating(@Param('token') token: string) { return this.qr.startRotating(token); }
+
   @Public() @NoTx() @Get('t/:token')
   status(@Param('token') token: string) { return this.qr.status(token); }
 
