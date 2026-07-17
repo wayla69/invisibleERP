@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.6** _(2026-07-17: FAQ — language choice no longer reverts to TH on page change (persists on-device when server-side saving is unavailable, e.g. read-only company view); 2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
+**Status: DRAFT v0.7** _(2026-07-17: FAQ — Customer Portal + system error messages now follow the selected language (EN coverage extension); 2026-07-17: FAQ — language choice no longer reverts to TH on page change (persists on-device when server-side saving is unavailable, e.g. read-only company view); 2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -243,7 +243,9 @@ your code below.
 **The screen is in Thai — can I change it to English?**
 Yes. Use the language switcher in the top bar / settings. Page addresses and steps
 are the same in either language. This manual lists English wording with the Thai
-label in brackets.
+label in brackets. The Customer Portal and system error messages follow the
+selected language too (2026-07-17); the sign-in page and the public diner/QR
+pages stay Thai or bilingual by design.
 
 **I switched to EN but the screen went back to TH when I opened another page.**
 This was a defect and is fixed (2026-07-17): your language choice now sticks

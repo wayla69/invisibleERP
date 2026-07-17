@@ -6,11 +6,11 @@
 // interpolation and falls back to the Thai value then the key. setLang persists to the server (best-effort)
 // + localStorage. Catalogs live in messages.ts. Per-screen coverage stays incremental (opt in via t()).
 import * as React from 'react';
-import { MESSAGES, type Lang } from './messages';
+import { type Lang } from './messages';
+import { LANG_KEY as KEY, interpolate, lookup } from './i18n-static';
 import { api, hasSession } from './api';
 
 export type { Lang };
-const KEY = 'ierp_lang';
 // Set (to the chosen locale) when the server persist failed — e.g. offline, or a god in read-only company
 // view where every PUT is rejected (403 READONLY_IMPERSONATION). While present, the local choice is
 // authoritative: on mount we retry the persist instead of letting the stale server value clobber it.
@@ -35,14 +35,6 @@ type Ctx = {
   locales: { code: Lang; label: string }[];
 };
 const LangContext = React.createContext<Ctx | null>(null);
-
-function interpolate(s: string, vars?: Record<string, string | number>) {
-  return vars ? s.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`)) : s;
-}
-function lookup(key: string, lang: Lang, fallback?: string) {
-  const m = MESSAGES[key];
-  return m?.[lang] ?? m?.th ?? fallback ?? key;
-}
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = React.useState<Lang>('th');

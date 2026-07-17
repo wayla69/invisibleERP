@@ -28,6 +28,7 @@ import { CATALOG as CAT_SODREG } from './i18n-catalog/sodreg';
 import { CATALOG as CAT_MDCHANGE } from './i18n-catalog/mdchange';
 import { CATALOG as CAT_REPUTATION } from './i18n-catalog/reputation';
 import { CATALOG as CAT_MMM } from './i18n-catalog/mmm';
+import { CATALOG as CAT_PORTAL } from './i18n-catalog/portal';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -1849,5 +1850,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM, CAT_PORTAL,
 );
