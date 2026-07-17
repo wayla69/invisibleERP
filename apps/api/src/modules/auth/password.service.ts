@@ -37,16 +37,24 @@ const PEPPER = process.env.PASSWORD_PEPPER && process.env.PASSWORD_PEPPER.length
 const PEPPER_TAG = 'scrypt-p1'; // current peppered format version
 const PLAIN_TAG = 'scrypt';     // un-peppered (legacy default, and the format when no pepper is configured)
 
-/** HMAC-SHA256(pepper, secret) as hex, or the raw secret when no pepper is configured. */
-function prehash(secret: string): string {
-  return PEPPER ? createHmac('sha256', PEPPER).update(secret, 'utf8').digest('hex') : secret;
+/**
+ * Effective scrypt SALT = HMAC-SHA256(pepper, storedSalt) when a pepper is configured, else the stored salt.
+ * The pepper is mixed into the SALT, not the password — so the password only ever flows into scrypt (a
+ * memory-hard KDF), never a fast hash. Security is identical to a password-pepper: a DB-only leak yields the
+ * stored salt + hash but not the pepper, and without the pepper the effective salt can't be derived, so the
+ * scrypt output can't be reproduced. (Keeping the password out of any SHA-256/HMAC also avoids the CodeQL
+ * js/insufficient-password-hash false positive that a password→HMAC-SHA256 edge trips.)
+ */
+function effectiveSalt(saltHex: string): string {
+  return PEPPER ? createHmac('sha256', PEPPER).update(saltHex, 'utf8').digest('hex') : saltHex;
 }
 
 /**
  * Password hashing — scrypt (built-in, no native deps) with an optional server-side pepper.
  * Hash formats:
- *   • scrypt-p1$<N>$<r>$<p>$<saltHex>$<hashHex>  — CURRENT when PASSWORD_PEPPER is set. scrypt input is
- *     HMAC-SHA256(pepper, password). A DB-only leak cannot be cracked without the (out-of-DB) pepper.
+ *   • scrypt-p1$<N>$<r>$<p>$<saltHex>$<hashHex>  — CURRENT when PASSWORD_PEPPER is set. scrypt runs over the
+ *     raw password with an effective salt = HMAC-SHA256(pepper, saltHex). A DB-only leak cannot be cracked
+ *     without the (out-of-DB) pepper.
  *   • scrypt$<N>$<r>$<p>$<saltHex>$<hashHex>     — CURRENT when no pepper is set; also every hash written
  *     before this change. Parameters are self-describing, so the work factor can be raised and old hashes
  *     still verify (and are transparently rehashed on login).
@@ -60,7 +68,7 @@ export class PasswordService {
   async hash(password: string): Promise<string> {
     const salt = randomBytes(16).toString('hex');
     const tag = PEPPER ? PEPPER_TAG : PLAIN_TAG;
-    const derived = (await scryptAsync(prehash(password), salt, KEYLEN, { N, r: R, p: P, maxmem: MAXMEM })) as Buffer;
+    const derived = (await scryptAsync(password, effectiveSalt(salt), KEYLEN, { N, r: R, p: P, maxmem: MAXMEM })) as Buffer;
     return `${tag}$${N}$${R}$${P}$${salt}$${derived.toString('hex')}`;
   }
 
@@ -99,8 +107,9 @@ export class PasswordService {
       if (peppered && !PEPPER) return { ok: false, needsRehash: false };
       const [, nStr, rStr, pStr, salt, hashHex] = parts;
       const n = Number(nStr), r = Number(rStr), p = Number(pStr);
-      const input = peppered ? createHmac('sha256', PEPPER!).update(secret, 'utf8').digest('hex') : secret;
-      const derived = (await scryptAsync(input, salt!, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
+      // Peppered hashes derive the effective salt from the pepper; plain hashes use the stored salt as-is.
+      const useSalt = peppered ? effectiveSalt(salt!) : salt!;
+      const derived = (await scryptAsync(secret, useSalt, KEYLEN, { N: n, r, p, maxmem: MAXMEM })) as Buffer;
       const expected = Buffer.from(hashHex!, 'hex');
       const ok = derived.length === expected.length && timingSafeEqual(derived, expected);
       const wantsPepper = !!PEPPER && !peppered; // upgrade plain → peppered once a pepper exists
