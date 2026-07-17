@@ -110,16 +110,65 @@ export class LedgerReadService {
   // account, filtered to the given account TYPES via the chart of accounts (ledger-owned). The
   // segment-profitability read: consumers derive revenue/COGS/opex per segment from the (type, net) pairs.
   // `net` stays the raw numeric string so consumers keep their own num()/rounding conventions.
-  async netByDimension(by: 'branch' | 'cost_center' | 'project', opts: { from: string; to: string; accountTypes: (typeof accounts.$inferSelect)['type'][] }): Promise<{ dim: string | number | null; accountCode: string; type: string | null; net: string }[]> {
-    const dimCol = by === 'branch' ? journalLines.branchId : by === 'cost_center' ? journalLines.costCenterCode : journalLines.projectId;
+  async netByDimension(by: 'branch' | 'cost_center' | 'project' | 'department', opts: { from?: string; to?: string; period?: string; accountTypes: (typeof accounts.$inferSelect)['type'][] }): Promise<{ dim: string | number | null; accountCode: string; type: string | null; net: string }[]> {
+    const dimCol = by === 'branch' ? journalLines.branchId : by === 'cost_center' ? journalLines.costCenterCode : by === 'department' ? journalLines.departmentId : journalLines.projectId;
+    // Time bound: either the fiscal PERIOD column, or an inclusive entry-date window.
+    const conds = [eq(journalEntries.status, 'Posted'), inArray(accounts.type, opts.accountTypes)];
+    if (opts.period) conds.push(eq(journalEntries.period, opts.period));
+    if (opts.from) conds.push(gte(journalEntries.entryDate, opts.from));
+    if (opts.to) conds.push(lte(journalEntries.entryDate, opts.to));
     return this.db.select({
       dim: dimCol, accountCode: journalLines.accountCode, type: accounts.type,
       net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)`,
     }).from(journalLines)
       .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
-      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, opts.from), lte(journalEntries.entryDate, opts.to), inArray(accounts.type, opts.accountTypes)))
+      .where(and(...conds))
       .groupBy(dimCol, journalLines.accountCode, accounts.type);
+  }
+
+  // Net Posted movement (Σ debit − Σ credit) per ACCOUNT for one fiscal period (or unbounded when period is
+  // omitted), optionally filtered to an account set or code prefixes (e.g. the 4%/5% P&L bands). The
+  // planning/allocation actuals read; `net` stays the raw numeric string.
+  async accountNetPerAccount(opts: { tenantId?: number | null; period?: string; accounts?: string[]; accountPrefixes?: string[] }): Promise<{ accountCode: string; net: string }[]> {
+    const conds = [eq(journalEntries.status, 'Posted')];
+    if (opts.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    if (opts.period) conds.push(eq(journalEntries.period, opts.period));
+    if (opts.accounts?.length) conds.push(inArray(journalLines.accountCode, opts.accounts));
+    if (opts.accountPrefixes?.length) conds.push(sql`(${sql.join(opts.accountPrefixes.map((p) => sql`${journalLines.accountCode} LIKE ${p}`), sql` OR `)})`);
+    return this.db.select({
+      accountCode: journalLines.accountCode,
+      net: sql<string>`sum(${journalLines.debit} - ${journalLines.credit})`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds)).groupBy(journalLines.accountCode);
+  }
+
+  // Net Posted movement per ACCOUNT × PERIOD across a set of fiscal periods — the planning driver-actuals
+  // read (index actuals as account → period → net).
+  async accountNetPerAccountPeriod(opts: { tenantId?: number | null; periods: string[]; accounts?: string[] }): Promise<{ accountCode: string; period: string | null; net: string }[]> {
+    if (!opts.periods.length) return [];
+    const conds = [eq(journalEntries.status, 'Posted'), inArray(journalEntries.period, opts.periods)];
+    if (opts.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    if (opts.accounts?.length) conds.push(inArray(journalLines.accountCode, opts.accounts));
+    return this.db.select({
+      accountCode: journalLines.accountCode,
+      period: journalEntries.period,
+      net: sql<string>`sum(${journalLines.debit} - ${journalLines.credit})`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds)).groupBy(journalLines.accountCode, journalEntries.period);
+  }
+
+  // Net Posted movement per TENANT × ACCOUNT for one fiscal period across a set of tenants — the HQ
+  // consolidation batch read (all group entities' trial nets in one grouped query).
+  async accountNetPerTenantAccount(opts: { tenantIds: number[]; period: string }): Promise<{ tenantId: number | null; accountCode: string; net: string }[]> {
+    if (!opts.tenantIds.length) return [];
+    return this.db.select({
+      tenantId: journalEntries.tenantId,
+      accountCode: journalLines.accountCode,
+      net: sql<string>`sum(${journalLines.debit} - ${journalLines.credit})`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(inArray(journalEntries.tenantId, opts.tenantIds), eq(journalEntries.period, opts.period), eq(journalEntries.status, 'Posted')))
+      .groupBy(journalEntries.tenantId, journalLines.accountCode);
   }
 
   // GL-05 detective audit read: MANUAL journal entries dated on a weekend (dow 0=Sun, 6=Sat) with the
