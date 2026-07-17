@@ -290,9 +290,14 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'hqaa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: hq.id },
     { username: 'cf2aa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: cf2.id },
+    // cf2 tenant Admin — provisions the cf2 full-scope (`*`) public-API key. A full-scope key expands (via the
+    // Sales role's `exec`) to gl_post/gl_close, so PE-1 permits it only for a holder of those perms (an Admin),
+    // NOT the users-only AccessAdmin (which could otherwise mint a GL-capable machine key it can't use itself).
+    { username: 'cf2admin', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: cf2.id },
   ]).onConflictDoNothing();
   const hqaa = (await inj('POST', '/api/login', undefined, { username: 'hqaa', password: 'pw' })).json.token;
   const cf2aa = (await inj('POST', '/api/login', undefined, { username: 'cf2aa', password: 'pw' })).json.token;
+  const cf2admin = (await inj('POST', '/api/login', undefined, { username: 'cf2admin', password: 'pw' })).json.token;
   // a guaranteed cf2-tenant mutation → one known audit row (actor cfwh2, tenant cf2)
   await inj('POST', '/api/saved-views', token2, { module: 'audit-probe', name: 'AUDITPROBE', config: {}, shared: false });
 
@@ -638,7 +643,7 @@ async function main() {
   const hqKeyR = await inj('POST', '/api/platform/api-keys', token, { name: 'pub-hq', scopes: ['*'] });
   const hqKey = hqKeyR.json.key;
   ok('Public API: an API key is issued (ierp_) for the public surface', /^ierp_/.test(hqKey ?? ''), `${hqKeyR.status}`);
-  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cf2', scopes: ['*'] })).json.key;
+  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2admin, { name: 'pub-cf2', scopes: ['*'] })).json.key; // full-scope key → minted by the cf2 Admin (PE-1)
   const catKey = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cat', scopes: ['catalog:read'] })).json.key;
   const rateKey = (await inj('POST', '/api/platform/api-keys', token, { name: 'pub-rate', scopes: ['*'] })).json.key;
 

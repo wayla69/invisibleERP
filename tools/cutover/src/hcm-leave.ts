@@ -149,6 +149,24 @@ async function main() {
   const t2run = await inj('POST', '/api/hcm/leave/accrual/run', t2s, { period: '2026-06' });
   ok('RLS: T2 accrual run counts only T2 employees (< T1 3)', t2run.status < 300 && Number(t2run.json.employees_count) < 3, JSON.stringify(t2run.json));
 
+  // ── PE-3 (privilege-escalation audit): an `ess` self-service caller reads ONLY their OWN balances ──
+  await runInTenantContext(db, { tenantId: t1, bypass: false, actor: 'seed' }, async () => {
+    await db.update(s.employees).set({ userName: 'empa' }).where(eq(s.employees.empCode, eA.emp_code));
+  });
+  const empaUid = Number((await db.insert(s.users).values({ username: 'empa', passwordHash: await pw.hash('admin123'), role: 'Cashier', tenantId: t1 }).returning({ id: s.users.id }))[0].id);
+  await db.insert(s.userPermissions).values([{ userId: empaUid, perm: 'ess' }]).onConflictDoNothing(); // ess-only (override) → not HR
+  const empa = await login('empa');
+  const ownList = await inj('GET', '/api/hcm/leave/balances', empa);
+  const ownRows = ownList.json.balances ?? [];
+  ok('PE-3: ess caller with no emp_code sees only their OWN balances (no tenant-wide dump)',
+    ownRows.length > 0 && ownRows.every((r: any) => Number(r.employee_id) === Number(eA.id)),
+    JSON.stringify({ n: ownRows.length, ids: [...new Set(ownRows.map((r: any) => r.employee_id))] }));
+  const spyB = await inj('GET', `/api/hcm/leave/balances?emp_code=${eB.emp_code}`, empa);
+  const spyRows = spyB.json.balances ?? [];
+  ok('PE-3: ess caller cannot read a colleague’s balances via emp_code (own-scoped, not eB)',
+    spyRows.every((r: any) => Number(r.employee_id) === Number(eA.id)),
+    JSON.stringify({ bId: Number(eB.id), ids: [...new Set(spyRows.map((r: any) => r.employee_id))] }));
+
   console.log('\n── HR-2 — Leave accrual engine + policies (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

@@ -77,14 +77,21 @@ export class HcmLeaveService {
   }
 
   // ── Balances ────────────────────────────────────────────────────────────────
-  async balances(empCode: string | undefined, _user: JwtUser) {
-    const q = this.db.select().from(leaveBalances);
+  async balances(empCode: string | undefined, user: JwtUser) {
+    // PE-3 — own-scope a non-HR (`ess`) caller: they may only read THEIR OWN leave balances. Ignoring the
+    // caller let any employee read a colleague's balances (or dump every employee's with no `emp_code`). HR
+    // (`hr`/`hr_admin`/`exec`/Admin) keep the full view. Mirrors the sibling own-scope pattern in hcm-comp/perf/training.
+    let code = empCode;
+    if (!this.isHr(user)) {
+      code = (await this.callerEmpCode(user)) ?? undefined;
+      if (!code) return { balances: [], count: 0 }; // an ess caller not linked to an employee record sees nothing
+    }
     let rows;
-    if (empCode) {
-      const e = await this.empByCode(empCode);
+    if (code) {
+      const e = await this.empByCode(code);
       rows = await this.db.select().from(leaveBalances).where(eq(leaveBalances.employeeId, Number(e.id))).orderBy(desc(leaveBalances.year)).limit(200);
     } else {
-      rows = await q.orderBy(desc(leaveBalances.id)).limit(200);
+      rows = await this.db.select().from(leaveBalances).orderBy(desc(leaveBalances.id)).limit(200);
     }
     return {
       balances: rows.map((b) => {
@@ -162,6 +169,15 @@ export class HcmLeaveService {
     const [e] = await this.db.select().from(employees).where(eq(employees.empCode, code)).limit(1);
     if (!e) throw new NotFoundException({ code: 'EMP_NOT_FOUND', message: `Employee ${code} not found`, messageTh: 'ไม่พบพนักงาน' });
     return e;
+  }
+
+  // An HR reader (full view) vs an `ess` self-service caller (own record only). Mirrors hcm-comp/perf/training.
+  private isHr(user: JwtUser): boolean {
+    return user.role === 'Admin' || (user.permissions ?? []).some((p) => p === 'hr' || p === 'hr_admin' || p === 'exec');
+  }
+  private async callerEmpCode(user: JwtUser): Promise<string | null> {
+    const [e] = await this.db.select({ empCode: employees.empCode }).from(employees).where(eq(employees.userName, user.username)).limit(1);
+    return e?.empCode ?? null;
   }
 
   // Highest matching policy rate by grade + tenure; falls back to the type default.

@@ -38,7 +38,12 @@ async function main() {
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
-  await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
+  await db.insert(s.users).values([
+    { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
+    // PE-4 fixture: a coarse-`warehouse` operator — passes the QualityController gate (inspect + non-financial
+    // dispositions) but holds neither quality_approve nor exec, so a Scrap write-off must be refused.
+    { username: 'whqa', passwordHash: await pw.hash('pw'), role: 'Warehouse', tenantId: hq },
+  ]).onConflictDoNothing();
 
   // BOM yields 10; flour 5×20 + sugar 2×15 = material 130; labor 50, oh 30 (per yield).
   const [bom] = await db.insert(s.bomMaster).values({ bomCode: 'BOM-CAKE', productName: 'เค้ก', yieldQty: '10', yieldUom: 'ชิ้น', laborCost: '50', overheadCost: '30' }).returning({ id: s.bomMaster.id });
@@ -87,8 +92,15 @@ async function main() {
 
   // ── 5. issue WO → WIP 420, then QA scrap 2 units @ 21 = 42 → Dr 5810 / Cr 1250 ──
   await inj('POST', `/api/manufacturing/work-orders/${woNo}/issue`, admin);
+  // PE-4 — a coarse-`warehouse` operator can inspect + do a NON-financial disposition, but a Scrap write-off
+  // (posts GL) requires the segregated quality_approve/exec duty.
+  const whqa = (await inj('POST', '/api/login', undefined, { username: 'whqa', password: 'pw' })).json.token;
+  const whQuar = await inj('POST', '/api/quality/inspect', whqa, { ref_type: 'WO', ref_doc: woNo, item_id: 'CAKE', qty_inspected: 20, qty_passed: 18, qty_failed: 2, disposition: 'Quarantine' });
+  ok('PE-4: warehouse operator CAN record a non-financial disposition (Quarantine)', whQuar.status === 201 || whQuar.status === 200, `${whQuar.status} ${JSON.stringify(whQuar.json?.error ?? whQuar.json?.disposition ?? '')}`);
+  const whScrap = await inj('POST', '/api/quality/inspect', whqa, { ref_type: 'WO', ref_doc: woNo, item_id: 'CAKE', qty_inspected: 20, qty_passed: 18, qty_failed: 2, disposition: 'Scrap', unit_cost: 21 });
+  ok('PE-4: warehouse operator CANNOT post a Scrap write-off (403 SCRAP_APPROVAL_REQUIRED)', whScrap.status === 403 && whScrap.json.error?.code === 'SCRAP_APPROVAL_REQUIRED', `${whScrap.status} ${whScrap.json.error?.code}`);
   const qa = await inj('POST', '/api/quality/inspect', admin, { ref_type: 'WO', ref_doc: woNo, item_id: 'CAKE', qty_inspected: 20, qty_passed: 18, qty_failed: 2, disposition: 'Scrap', unit_cost: 21 });
-  ok('QA Scrap: value 42, GL JE posted', near(qa.json.scrap_value, 42) && /^JE-/.test(qa.json.entry_no ?? ''), JSON.stringify({ v: qa.json.scrap_value, e: qa.json.entry_no }));
+  ok('QA Scrap: value 42, GL JE posted (exec/quality_approve duty)', near(qa.json.scrap_value, 42) && /^JE-/.test(qa.json.entry_no ?? ''), JSON.stringify({ v: qa.json.scrap_value, e: qa.json.entry_no }));
 
   const tb = await inj('GET', '/api/ledger/trial-balance', admin);
   const row = (c: string) => (tb.json.rows ?? []).find((r: any) => r.account_code === c);

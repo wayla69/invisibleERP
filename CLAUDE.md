@@ -259,6 +259,62 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     inline duplicate + its dispatch line; never leave both. And remember mantra #9's hidden second collision:
     the auto-merge can silently DROP main's added dispatch line in a region your branch edited — grep the
     merged file for every key main added, not just the conflict hunks.
+14. **A control/validation TIGHTENING breaks test FIXTURES, not just product behaviour — run the `apps/api`
+    vitest suite too, and sweep EVERY harness + test for inputs that now violate the new rule.** Two CI
+    breakages in the 2026-07-16 pentest work, both from tightening a rule (not changing an endpoint's shape):
+    (a) adding `.for('update')` to the in-tx over-receipt read (P5) threw `TypeError:
+    tx.select(...).where(...).for is not a function` in `apps/api/test/procurement-grn.test.ts` — its
+    hand-rolled `tx` query-builder stub (`{from,where,limit,orderBy,then}`) didn't implement `.for`; the
+    PGlite-backed cutover harnesses DID, so they passed and hid it. The `build` gate runs `pnpm --filter
+    @ierp/api test:coverage` (`vitest run --coverage`), so **run the `apps/api` vitest suite locally, not only
+    the cutover harnesses** — a mock missing a newly-called builder method (or a service ctor gaining a param)
+    only fails there. Fix the mock to model the real builder (`for: () => p`), never the product. (b) raising the
+    admin/portal password minimum 6→8 rejected EVERY harness that creates a user via `POST /api/admin/users` /
+    `/api/portal/my/users` with a <8-char password — `gaps.ts` (`'secret1'`) **and** `compliance.ts` (7×
+    `'pw1234'`); a spot-fix of the first let the second fail the NEXT CI cycle. When you tighten a validation
+    (min length, amount cap, required field, real-reference gate), `grep -rn` EVERY `tools/cutover/src/*.ts` +
+    `apps/api/test` for inputs that now violate it and fix them in ONE pass — mantra #11's "grep every harness"
+    applies to fixture INPUTS + mocks, not just endpoint names.
+15. **Before remediating a reported finding (pentest / audit / review), VERIFY ITS PREMISE against the live
+    system — a static audit can miss a later migration that already fixed it, and "fixing" a non-defect can
+    BREAK something.** Pentest P8 claimed four metering tables (`ai_token_usage`, `usage_events`, the two
+    `*_overage_billing_runs`) "never ENABLE ROW LEVEL SECURITY" — but the auditor read only each table's own
+    CREATE-TABLE migration and missed the **canonical generic RLS loop** (`FOR r IN SELECT table_name … WHERE
+    column_name='tenant_id' LOOP … CREATE POLICY tenant_isolation`) that runs in later migrations and sweeps in
+    every pre-existing `tenant_id` table. Proven empirically (mantra #3: instrument, don't theorise) by booting
+    the full migration set over PGlite and querying `pg_class.relrowsecurity` + `pg_policy` — all four were
+    already covered. Enabling RLS "again" would have BROKEN the autocommit operator writers (they run OUTSIDE
+    the request tx and never set `app.tenant_id`, so the canonical `WITH CHECK` rejects them). The durable win
+    was a CI gate (`cutover:rls-coverage`, in the `platform-a` shard) that locks the invariant, not a code
+    change. NB a new `cutover:<name>` added INSIDE an existing shard job needs NO branch-protection change — the
+    shard's check name (`harnesses (platform-a)`) already gates it; only a brand-new top-level JOB introduces a
+    new required-check name.
+16. **A Playwright spec that fails IDENTICALLY on the fixed AND unfixed build is a harness artifact (mantra
+    #2 applied to specs) — and the usual culprit is a PRE-HYDRATION swallowed event.** Next.js SSR paints
+    interactive elements before React hydrates; a `selectOption`/`click` dispatched at first paint changes the
+    DOM but React's handler never fires, and hydration then RESETS the element to React state — which looks
+    exactly like "the fix didn't work" (bit `lang-persistence.spec.ts`: red at the same line on both builds
+    while a paced debug script against the same server passed; the a11y snapshot showed the select back on
+    its initial value). Diagnose by driving the same interaction paced/scripted outside the runner; fix by
+    gating the FIRST interaction on a signal that only exists post-hydration — `waitForResponse` on a call the
+    mount effect makes (keep the predicate method-agnostic if different code paths fire GET vs PUT on mount) —
+    never by sleeps. Related first-paint latency (not hydration): the `frontline-sweep` pos-home test flaked
+    a FIFTH cycle (#821) — on a heavy page every independent-query first-paint assertion needs the generous
+    30s window, not just the first one.
+17. **Tightening an AUTHORIZATION gate: the scope→permission model EXPANDS non-obviously, and the fixture that
+    breaks is the one that PROVISIONS a broad credential (auth-specific extension of #14).** The PE-1 api-key
+    scope-bound (bind a key's scopes to the minter's own perms, PR #819) broke the `ext` harness — which minted
+    a full-scope (`*`) *public-API* key as a `users`-only `AccessAdmin`. Non-obvious root cause: `*`/`admin`
+    scopes resolve via `resolvePermissions('Sales')`, and Sales holds `exec`, which `expandPermissions` turns
+    into `gl_post`/`gl_close` — so a `*` key is **GL-capable**, an AccessAdmin minting one IS the escalation, and
+    the fix is to mint it as an **Admin**, never loosen the bound. Two corollaries when bounding scopes:
+    (a) bound only scopes that are REAL internal permissions (`∈ PERMISSIONS`) — a public-API-ONLY scope like
+    `catalog:read` grants nothing on the `@Permissions` surface, so bounding it wrongly rejects legit
+    integration keys (`common/api-scopes.ts` `scopesToPermissions` is the shared expansion, used by both
+    `guards.ts` and `ApiKeyService.issue`); (b) you can't blanket-`detectSodConflicts` a scope-derived set —
+    coarse roles (Sales/`pos`/`warehouse`) carry GRANDFATHERED SoD conflicts, so the user-grant path SoD-checks
+    only the per-user OVERRIDE, never role defaults. `grep -rln "api-keys\|scopes:" tools/ apps/api/test` before
+    pushing an api-key change — the harness that mints a broad key *as a convenience* is where it breaks.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -282,12 +338,53 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     `app.inject()`s a signed body must create the app with `{ rawBody: true }` too, else rawBody is empty).
   - **API keys carry `created_by`; the guard adopts that human as the maker-checker principal** (H-2) — a key
     can't launder a self-approval. The **guard sources `tenantId` LIVE from the DB** (L-3), like role/orgId.
+- **Privilege-escalation remediation (2026-07-17 audit, PR #819 — `docs/security/2026-07-17-privilege-escalation-audit.md`;
+  don't regress the new fail-closed controls).** The escalation surface is the `users` perm (`AccessAdmin`)
+  granting capability UNBOUNDED by its own — the 2026-07-16 pentest closed the reach-Admin paths (P1/P2/P3);
+  #819 closed the reach-sub-Admin paths. **(PE-1)** `ApiKeyService.issue` bounds a key's scopes to the minter's
+  own perms (`403 KEY_SCOPE_EXCEEDS_GRANTOR`) via `common/api-scopes.ts` `scopesToPermissions` (shared with
+  `guards.ts`) — only scopes `∈ PERMISSIONS` are bounded, the platform owner is exempt (see mantra #16 for the
+  `*`=GL-capable trap). **(PE-2)** an `admin-users` create/update grant BEYOND the grantor's own set is STAGED
+  for a second admin in the existing `access_grant_exceptions` two-person queue (`sod_rules:['ESCALATION']`) —
+  NOT hard-blocked (that would break SCIM + delegated user admin); SCIM opts out with `{viaScim:true}`, and
+  Admin/god hold everything so they never stage. Others (all fail-closed): QC `Scrap` GL write-off needs
+  `quality_approve`/`exec` (PE-4, `mfg-depth/quality.service.ts`); `PUT /api/procurement/match/tolerance` is
+  approver-set (`exec`/`approvals`), not the `creditors` beneficiary (PE-5); platform `mfa/setup` refuses
+  re-enrol when already enabled (PE-6); `hcm/leave/balances` own-scopes non-HR `ess` callers via `callerEmpCode`
+  (PE-3). **Harness patterns for a `users`-holder / AccessAdmin fixture** (learned building the ToE): SEED it
+  directly (`db.insert(s.users)`, `mustChangePassword` unset) and log in — the create→change-password→relogin
+  dance on a *platform-created-tenant* user 401s `USER_NOT_FOUND` on the guard (a PGlite tx-visibility quirk;
+  `access-recert.ts` is the good pattern); a non-Admin (tenant-scoped) session can't insert a NULL-tenant row
+  (RLS `WITH CHECK` — pass `customer_name` = its tenant code); the `/api/login` body does NOT expose
+  `permissions`, so assert effective perms by querying `userPermissions` on the raw harness `db`.
   - **Behind a proxy / multi-replica (L-8/L-12):** `TRUSTED_PROXY_HOPS` sets Fastify `trustProxy` + the
     audit-IP trusted hop; `RATE_LIMIT_REDIS_URL` shares the edge + public-API limiters via
     `common/rate-limit-store.ts`. Both default off = per-process / socket-peer (single-node unchanged).
   - SSRF guard (`net-guard.ts`) now blocks hex IPv4-mapped IPv6 literals (H-1); `image-fetch` routes through
     it (L-6); object-storage keys are `isSafeObjectKey`-validated (L-9); SSE/`realtime-bus.recent()` no longer
     fan `tenant_id==null` events to all tenants (L-7); PII redaction masks international `+` phones (L-11).
+- **Web i18n architecture (2026-07-17 EN coverage, PRs #816/#818/#821) — extend it, don't re-derive.**
+  `LanguageProvider` lives ONLY in the ROOT layout (one app-wide instance; signed-out/public pages get the
+  device's cached `ierp_lang` choice, default th). Per-domain key fragments in `apps/web/src/lib/i18n-catalog/*`
+  (portal `pt.*`, auth `auth.*`, public diner/member `pub.*`/`mb.*`, shared client errors `err.*`/`je.*`) merged
+  in `messages.ts` — the catalog is th+en COMPLETE (≈11.6k keys, audited 0 missing en), so a "แปลไม่ครบ" report
+  means a HARDCODED string, not a missing translation (when grepping for Thai literals, exclude comments and
+  `฿` — U+0E3F is inside the Thai Unicode block). Non-React code translates via `lib/i18n-static.ts`
+  `ts()`/`currentLang()` (evaluated at CALL time — fine for thrown errors/toasts/prompts, never for rendered
+  labels). `lib/api.ts` picks the server error `message` vs `messageTh` by locale (`localizedErr`) — any new
+  fetch layer (cf. `/m`'s `mapi`) must do the same, and regexes matching error text must match BOTH languages
+  (the `/m` session-expiry detector). Client-side status labels/colors key on stable server CODES
+  (`kds_status`), never on the Thai display text (`status_th` is only the fallback). Bilingual-BY-DESIGN, do
+  NOT wire: `/q` scan resolver (server component — no client island, per the use-client ratchet), `/display`
+  pole display (both audiences see it at once), `global-error` (renders without providers), `/legal/privacy`.
+- **A user preference that "PUTs best-effort then trusts the server read" REVERTS under read-only
+  impersonation — every mutation 403s there (`READONLY_IMPERSONATION`), so the server never learns the
+  choice and the next mount's read clobbers it.** Canonical fix shape (`lib/i18n.tsx`, the #816 lang-revert
+  bug): on a failed persist write a localStorage PENDING marker (`ierp_lang_pending`); while pending the
+  LOCAL value is authoritative — the mount effect RETRIES the persist and SKIPS the server read — and a
+  `userChose` ref stops a still-in-flight mount read from clobbering a choice that raced past it; a
+  successful persist clears the marker and restores server authority (cross-device sync). Reuse this shape
+  for any per-user pref that must survive read-only company view / offline.
 - **Business timezone = Asia/Bangkok (UTC+7).** `ymd()`/`bizYmdDash` date everything on the business day,
   not UTC. Seed/compare dates on that basis or you get off-by-one window drift (root cause of the
   `analytics` flake).
@@ -401,7 +498,11 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
-  blocked (403), and the commit-signing server is occasionally flaky (retry the commit).
+  blocked (403), and the commit-signing server is occasionally flaky (retry the commit). Also:
+  **`pkill -f`/`pgrep -f` with the pattern written literally in the SAME Bash command kills your own
+  shell** — the harness runs `bash -c "<command>"`, so the pattern string is on your own process's command
+  line and matches (exit 144, the whole compound dies mid-way). Split the literal (`'next-serv''er'`) or
+  target by port instead.
 - **CodeQL `CodeQL` results gate races / is one commit behind.** The capital-`CodeQL` PR check (distinct
   from the lowercase `codeql` analysis *job*) concludes ~5–8s **before** that run's analysis finishes
   uploading, so on a fresh push it reports the **prior** commit's alerts — a pushed fix can read red even

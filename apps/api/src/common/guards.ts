@@ -7,9 +7,10 @@ import { IS_PUBLIC_KEY, PERMISSIONS_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin, ty
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { users, revokedTokens, posMembers, tenants } from '../database/schema';
-import { resolvePermissions, type Role } from '@ierp/shared';
+import { type Role } from '@ierp/shared';
 import { requiresMfaEnrollment, enforcePrivilegedMfa } from './mfa-gate';
 import { AUTH_COOKIE, CSRF_COOKIE, readCookie, signedCsrf } from './cookies';
+import { scopesToPermissions } from './api-scopes';
 
 // State-changing methods that require a CSRF double-submit check when authenticated via cookie.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -31,13 +32,6 @@ function csrfMatches(header: unknown, cookie: string | undefined): boolean {
   const b = Buffer.from(cookie);
   return a.length === b.length && timingSafeEqual(a, b);
 }
-
-// Map api_keys.scopes (csv) → JwtUser.permissions. A scope is either a known alias,
-// a wildcard ('*'/'admin' → full role-default set), or a literal permission key.
-const SCOPE_ALIASES: Record<string, string[]> = {
-  read: ['dashboard', 'exec', 'cust_dash', 'cust_inventory'],
-  write: ['pos', 'order_mgt', 'warehouse', 'procurement'],
-};
 
 // Global guard: ทุก endpoint ต้องมี JWT (หรือ API key) ยกเว้น @Public (แก้ช่องโหว่ V1 ที่ data endpoints เปิดโล่ง)
 @Injectable()
@@ -109,13 +103,9 @@ export class JwtAuthGuard implements CanActivate {
       // A key is a machine principal — NEVER 'Admin' (no HQ bypass via key). role='Sales' + the key's
       // own tenantId keeps it RLS-scoped to its tenant.
       const role = 'Sales';
-      let permissions: string[];
-      if (scopes.includes('*') || scopes.includes('admin')) {
-        permissions = resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
-      } else {
-        const expanded = scopes.flatMap((s) => SCOPE_ALIASES[s] ?? [s]);
-        permissions = expanded.length ? expanded : resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
-      }
+      // Expand the granted scopes to permissions via the shared map (same definition ApiKeyService.issue
+      // bounds against at mint time, PE-1) — a key can never resolve to more than issuance allowed.
+      const permissions: string[] = scopesToPermissions(scopes);
       // SoD (security review H-2): the key acts AS its minting human for maker-checker/SoD identity, so a
       // person can't launder a self-approval through their own key(s). Legacy keys (no created_by) keep the
       // `apikey:<prefix>` machine identity. The prefix is carried separately (apiKeyPrefix) for the machine

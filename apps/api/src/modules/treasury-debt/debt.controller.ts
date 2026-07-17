@@ -82,7 +82,7 @@ export class DebtController {
   createFacility(@Body(new ZodValidationPipe(FacilityBody)) b: FacilityBodyT, @CurrentUser() u: JwtUser) {
     return this.svc.createFacility({
       name: b.name, lender: b.lender, currency: b.currency, facilityType: b.facility_type,
-      limitAmount: b.limit_amount, eirPct: b.eir_pct, startDate: b.start_date, maturityDate: b.maturity_date, tenantId: b.tenant_id ?? null,
+      limitAmount: b.limit_amount, eirPct: b.eir_pct, startDate: b.start_date, maturityDate: b.maturity_date, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null,
     }, u);
   }
 

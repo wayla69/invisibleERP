@@ -141,6 +141,9 @@ async function main() {
   const al1 = await inj('POST', '/api/costing/allocate', plan1, { item_id: 'WIDGET', qty: 30, ref_doc: 'SO-2', need_by: '2026-12-31' });
   const atpA = await inj('GET', '/api/costing/atp?item_id=WIDGET&need_by=2026-12-31', plan1);
   ok('INV-09: allocate SO-2 (30) reserves stock → ATP 100 → 70', al1.status === 201 && near(atpA.json.atp_qty, 70), `atp=${atpA.json.atp_qty}`);
+  // PE-11 — a customer-portal principal (cust_pos) must NOT create/mutate stock reservations directly.
+  const custAlloc = await inj('POST', '/api/costing/allocate', shop1, { item_id: 'WIDGET', qty: 5, ref_doc: 'SO-EVIL', need_by: '2026-12-31' });
+  ok('PE-11: customer-portal (cust_pos) cannot allocate a stock reservation (403)', custAlloc.status === 403, `${custAlloc.status} ${custAlloc.json?.error?.code}`);
   const al1b = await inj('POST', '/api/costing/allocate', plan1, { item_id: 'WIDGET', qty: 30, ref_doc: 'SO-2', need_by: '2026-12-31' });
   const atpB = await inj('GET', '/api/costing/atp?item_id=WIDGET&need_by=2026-12-31', plan1);
   const so2rows = (await inj('GET', '/api/costing/allocations?ref_doc=SO-2', plan1)).json;

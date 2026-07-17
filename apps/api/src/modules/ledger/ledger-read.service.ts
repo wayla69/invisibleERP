@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq, and, sql, inArray, gte, lt, lte, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { journalEntries, journalLines, accounts } from '../../database/schema/ledger';
 import { n } from '../../database/queries';
 import { CASH_ACCOUNTS } from './ledger-constants';
 
@@ -90,6 +90,46 @@ export class LedgerReadService {
       credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
     }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .where(and(...conds)).groupBy(journalLines.accountCode);
+  }
+
+  // Net Posted balance (Σ debit − Σ credit) per OWNING TENANT across a set of accounts — for HQ-side
+  // cross-company eliminations (the intercompany 1150/2150 due-from/due-to picture). Credit-normal
+  // consumers negate. Grouped on the entry header's tenant_id.
+  async accountNetByTenant(accounts_: string[]): Promise<{ tenantId: number | null; net: number }[]> {
+    if (!accounts_.length) return [];
+    const rows = await this.db.select({ tenant: journalEntries.tenantId, bal: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)` })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(
+        accounts_.length === 1 ? eq(journalLines.accountCode, accounts_[0]!) : inArray(journalLines.accountCode, accounts_),
+        eq(journalEntries.status, 'Posted'),
+      )).groupBy(journalEntries.tenantId);
+    return rows.map((r) => ({ tenantId: r.tenant != null ? Number(r.tenant) : null, net: n(r.bal) }));
+  }
+
+  // Net Posted movement grouped by an ANALYSIS DIMENSION on the line (branch / cost center / project) ×
+  // account, filtered to the given account TYPES via the chart of accounts (ledger-owned). The
+  // segment-profitability read: consumers derive revenue/COGS/opex per segment from the (type, net) pairs.
+  // `net` stays the raw numeric string so consumers keep their own num()/rounding conventions.
+  async netByDimension(by: 'branch' | 'cost_center' | 'project', opts: { from: string; to: string; accountTypes: (typeof accounts.$inferSelect)['type'][] }): Promise<{ dim: string | number | null; accountCode: string; type: string | null; net: string }[]> {
+    const dimCol = by === 'branch' ? journalLines.branchId : by === 'cost_center' ? journalLines.costCenterCode : journalLines.projectId;
+    return this.db.select({
+      dim: dimCol, accountCode: journalLines.accountCode, type: accounts.type,
+      net: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}),0)`,
+    }).from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .leftJoin(accounts, eq(journalLines.accountCode, accounts.code))
+      .where(and(eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, opts.from), lte(journalEntries.entryDate, opts.to), inArray(accounts.type, opts.accountTypes)))
+      .groupBy(dimCol, journalLines.accountCode, accounts.type);
+  }
+
+  // GL-05 detective audit read: MANUAL journal entries dated on a weekend (dow 0=Sun, 6=Sat) with the
+  // summed debit amount — the classic management-override red flag the controls scanner surfaces. No user
+  // input in the predicate.
+  async weekendManualEntries(): Promise<{ entryNo: string; entryDate: string; memo: string | null; amt: string }[]> {
+    return this.db.select({ entryNo: journalEntries.entryNo, entryDate: journalEntries.entryDate, memo: journalEntries.memo, amt: sql<string>`coalesce(sum(${journalLines.debit}),0)` })
+      .from(journalEntries).leftJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalEntries.source, 'Manual'), sql`extract(dow from ${journalEntries.entryDate}) in (0,6)`))
+      .groupBy(journalEntries.entryNo, journalEntries.entryDate, journalEntries.memo);
   }
 
   // Register listing for one posting SOURCE — one row per (entry × positive-DEBIT line), newest first.

@@ -82,7 +82,7 @@ export class HedgeController {
       hedgedItem: b.hedged_item, hedgingInstrument: b.hedging_instrument, hedgeType: b.hedge_type,
       hedgeRatio: b.hedge_ratio, notional: b.notional, documentation: b.documentation,
       hedgedItemAccount: b.hedged_item_account, reclassAccount: b.reclass_account, currency: b.currency,
-      derivativeFv: b.derivative_fv, tenantId: b.tenant_id ?? null,
+      derivativeFv: b.derivative_fv, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null,
     }, u);
   }
 

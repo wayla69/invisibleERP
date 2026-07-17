@@ -21,7 +21,10 @@ export class MatchController {
 
   @Get('tolerance') @Permissions('procurement', 'creditors')
   getTolerance() { return this.svc.getTolerance(); }
-  @Put('tolerance') @Permissions('creditors')
+  // PE-5 — the match tolerance governs whether EVERY invoice auto-passes the 3-way match, so it must NOT be
+  // set by the `creditors` (AP) beneficiary who runs the match and releases payment. Restrict to an approver
+  // duty (exec/approvals), mirroring how EXP-12 receiving-settings excludes the receiving operator.
+  @Put('tolerance') @Permissions('exec', 'approvals')
   setTolerance(@Body(new ZodValidationPipe(ToleranceBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setTolerance(b, u); }
 
   // Match-results register / blocked-invoice worklist (use ?blocked=true for held-from-payment only).
