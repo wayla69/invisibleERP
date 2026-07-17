@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Timer, Utensils } from 'lucide-react';
 import { publicApi } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -28,16 +29,19 @@ type Menu = { categories: Category[]; uncategorized: MenuItem[]; item_count: num
 type Tier = { id: number; code: string; name: string; name_en: string | null; price_per_pax: number; time_limit_min: number; overtime_fee_per_pax: number };
 type CartLine = { key: string; sku: string; name: string; qty: number; unitPrice: number; optionIds: number[]; optionLabels: string[] };
 
+// keyed on the server's kds_status codes (stable), not the Thai display text
 const ITEM_COLOR: Record<string, string> = {
-  'รับออเดอร์': 'text-muted-foreground',
-  'รอคิว': 'text-info',
-  'กำลังปรุง': 'text-warning-foreground dark:text-warning',
-  'พร้อมเสิร์ฟ': 'text-success',
-  'เสิร์ฟแล้ว': 'text-success',
+  new: 'text-muted-foreground',
+  queued: 'text-info',
+  preparing: 'text-warning-foreground dark:text-warning',
+  ready: 'text-success',
+  served: 'text-success',
 };
 
 
 export default function DinerPage() {
+  // Global locale context (persisted per device) — the diner's th/en toggle drives the app-wide setting.
+  const { lang, setLang, t } = useLang();
   const token = String(useParams().token ?? '');
   const [tab, setTab] = useState<'menu' | 'order'>('order');
   const [st, setSt] = useState<Status | null>(null);
@@ -51,16 +55,18 @@ export default function DinerPage() {
   const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean } | null>(null);
   const [paid, setPaid] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [lang, setLang] = useState<'th' | 'en'>('th');
   // show the English name when the diner picks EN (falls back to the Thai name)
   const nm = useCallback((o: { name: string; name_en?: string | null }) => (lang === 'en' ? (o.name_en || o.name) : o.name), [lang]);
+  // item status: translate via the stable kds_status code; fall back to the server's Thai label
+  const stLabel = useCallback((it: { kds_status: string; status_th: string }) => t(`pub.qr.st_${it.kds_status}`, undefined) === `pub.qr.st_${it.kds_status}` ? it.status_th : t(`pub.qr.st_${it.kds_status}`), [t]);
 
   const isBuffet = st?.order_mode === 'buffet';
   const hasOrder = !!st?.order;
 
   const load = useCallback(async () => {
     try { setSt(await publicApi<Status>(`/api/qr/t/${token}`)); setErr(''); }
-    catch (e) { setErr(e instanceof Error ? e.message : 'โหลดไม่สำเร็จ'); }
+    catch (e) { setErr(e instanceof Error ? e.message : t('pub.qr.load_failed')); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => { load(); const i = setInterval(load, 5000); return () => clearInterval(i); }, [load]);
@@ -124,8 +130,8 @@ export default function DinerPage() {
       <main className="mx-auto grid min-h-svh max-w-md place-items-center bg-muted/30 p-4">
         <Card className="w-full items-center gap-2 p-8 text-center">
           <CheckCircle2 className="size-14 text-success" />
-          <h2 className="text-xl font-semibold">ชำระเงินสำเร็จ</h2>
-          <p className="text-sm text-muted-foreground">ขอบคุณที่ใช้บริการ 🙏</p>
+          <h2 className="text-xl font-semibold">{t('pub.qr.paid_title')}</h2>
+          <p className="text-sm text-muted-foreground">{t('pub.qr.paid_thanks')}</p>
         </Card>
       </main>
     );
@@ -141,9 +147,9 @@ export default function DinerPage() {
         <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Utensils className="size-5" />
         </div>
-        <h2 className="text-lg font-semibold">{lang === 'en' ? 'Table' : 'โต๊ะ'} {st?.table_no ?? '…'}</h2>
+        <h2 className="text-lg font-semibold">{t('pub.qr.table')} {st?.table_no ?? '…'}</h2>
         {isBuffet && st?.buffet && <BuffetChip b={st.buffet} />}
-        <button type="button" onClick={() => setLang((l) => (l === 'th' ? 'en' : 'th'))}
+        <button type="button" onClick={() => setLang(lang === 'th' ? 'en' : 'th')}
           className="ml-auto rounded-md border px-2 py-1 text-xs font-semibold uppercase" aria-label="language">
           {lang === 'th' ? 'EN' : 'ไทย'}
         </button>
@@ -152,34 +158,34 @@ export default function DinerPage() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'menu' | 'order')}>
         <TabsList className="mb-3 grid w-full grid-cols-2">
-          <TabsTrigger value="menu"><Utensils className="mr-1.5 size-4" /> เมนู</TabsTrigger>
-          <TabsTrigger value="order"><ReceiptText className="mr-1.5 size-4" /> ออเดอร์ของฉัน</TabsTrigger>
+          <TabsTrigger value="menu"><Utensils className="mr-1.5 size-4" /> {t('pub.qr.tab_menu')}</TabsTrigger>
+          <TabsTrigger value="order"><ReceiptText className="mr-1.5 size-4" /> {t('pub.qr.tab_order')}</TabsTrigger>
         </TabsList>
 
         {/* ── เมนู ── */}
         <TabsContent value="menu">
           {canStartBuffet && (
             <Card className="mb-4 gap-2 border-primary/40 bg-primary/5 p-4">
-              <strong className="text-sm">เลือกบุฟเฟต์ (ทานได้ไม่อั้นตามเวลา)</strong>
-              <p className="text-xs text-muted-foreground">เลือกแพ็กเกจบุฟเฟต์ก่อนเริ่มสั่งอาหาร หรือเลื่อนลงเพื่อสั่งแบบรายจาน</p>
-              <Button onClick={() => setBuffetOpen(true)} className="mt-1 h-11 w-full"><Timer className="size-4" /> เริ่มบุฟเฟต์</Button>
+              <strong className="text-sm">{t('pub.qr.buffet_pick_title')}</strong>
+              <p className="text-xs text-muted-foreground">{t('pub.qr.buffet_pick_desc')}</p>
+              <Button onClick={() => setBuffetOpen(true)} className="mt-1 h-11 w-full"><Timer className="size-4" /> {t('pub.qr.buffet_start')}</Button>
             </Card>
           )}
           {isBuffet && st?.buffet && (
             <Card className="mb-4 gap-1 border-primary/40 bg-primary/5 p-3 text-sm">
               <div className="flex items-center justify-between">
-                <strong>{st.buffet.package_name} · {st.buffet.pax} ท่าน</strong>
+                <strong>{st.buffet.package_name} · {t('pub.qr.pax_n', { n: st.buffet.pax ?? 0 })}</strong>
                 <BuffetChip b={st.buffet} />
               </div>
-              <p className="text-xs text-muted-foreground">เลือกอาหารได้ไม่อั้นภายในเวลาที่กำหนด · ทุกจานรวมในบุฟเฟต์แล้ว</p>
+              <p className="text-xs text-muted-foreground">{t('pub.qr.buffet_note')}</p>
             </Card>
           )}
           {!menu ? (
-            <p className="text-sm text-muted-foreground">กำลังโหลดเมนู…</p>
+            <p className="text-sm text-muted-foreground">{t('pub.qr.menu_loading')}</p>
           ) : allItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">ยังไม่มีเมนู</p>
+            <p className="text-sm text-muted-foreground">{t('pub.qr.menu_empty')}</p>
           ) : (
-            menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: 'อื่น ๆ', items: menu.uncategorized }] : []).map((c) => (
+            menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []).map((c) => (
               <section key={c.id} className="mb-4">
                 <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
                 <div className="grid gap-2">
@@ -193,14 +199,14 @@ export default function DinerPage() {
                         )}
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
-                            {!it.is_available && <Badge variant="secondary" className="text-[10px]">หมด</Badge>}
-                            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">ยังไม่ถึงเวลาขาย</Badge>}
+                            {!it.is_available && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.sold_out')}</Badge>}
+                            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.not_selling')}</Badge>}
                           </div>
                           {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
                         </div>
                       </div>
                       <div className="ml-3 flex shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">บุฟเฟต์</span> : baht(it.price)}</span>
+                        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
                         {orderable(it) && <span className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
                       </div>
                     </button>
@@ -217,23 +223,23 @@ export default function DinerPage() {
             <>
               <Card className="mb-3 gap-3 p-4">
                 <div className="flex items-center justify-between">
-                  <strong className="text-sm">สถานะออเดอร์</strong>
+                  <strong className="text-sm">{t('pub.qr.order_status')}</strong>
                   <span className="text-xs text-muted-foreground">
-                    {st.order.waited_min > 0 ? `รอมาแล้ว ${st.order.waited_min} นาที` : 'เพิ่งสั่ง'}
+                    {st.order.waited_min > 0 ? t('pub.qr.waited', { n: st.order.waited_min }) : t('pub.qr.just_ordered')}
                   </span>
                 </div>
                 {st.order.ready_in_min > 0 && (
                   <div className="flex items-center gap-1.5 text-sm text-warning-foreground dark:text-warning">
-                    <Clock className="size-4" /> อาหารพร้อมในอีกประมาณ {st.order.ready_in_min} นาที
+                    <Clock className="size-4" /> {t('pub.qr.ready_in', { n: st.order.ready_in_min })}
                   </div>
                 )}
-                {dishes.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่ได้สั่งอาหาร — เปิดแท็บเมนูเพื่อสั่ง</p>}
+                {dishes.length === 0 && <p className="text-sm text-muted-foreground">{t('pub.qr.no_dishes')}</p>}
                 <div className="divide-y">
                   {dishes.map((it) => (
                     <div key={it.item_id} className="flex items-center justify-between py-1.5">
                       <span className="text-sm">{it.qty}× {it.name}</span>
-                      <span className={cn('text-xs font-semibold', ITEM_COLOR[it.status_th] ?? 'text-muted-foreground')}>
-                        {it.status_th}
+                      <span className={cn('text-xs font-semibold', ITEM_COLOR[it.kds_status] ?? 'text-muted-foreground')}>
+                        {stLabel(it)}
                       </span>
                     </div>
                   ))}
@@ -245,9 +251,9 @@ export default function DinerPage() {
                   {chargeLines.map((c) => (
                     <div key={c.item_id} className="flex justify-between text-muted-foreground"><span>{c.name}</span><span className="tabular">{baht(c.amount)}</span></div>
                   ))}
-                  <div className="flex justify-between text-muted-foreground"><span>มูลค่าสินค้า</span><span className="tabular">{baht(st.bill.subtotal)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>{t('pub.qr.subtotal')}</span><span className="tabular">{baht(st.bill.subtotal)}</span></div>
                   <div className="flex justify-between text-muted-foreground"><span>VAT 7%</span><span className="tabular">{baht(st.bill.vat)}</span></div>
-                  <div className="mt-1 flex justify-between border-t pt-2 text-lg font-bold text-primary"><span>รวมทั้งสิ้น</span><span className="tabular">{baht(st.bill.total)}</span></div>
+                  <div className="mt-1 flex justify-between border-t pt-2 text-lg font-bold text-primary"><span>{t('pub.qr.grand_total')}</span><span className="tabular">{baht(st.bill.total)}</span></div>
                 </Card>
               )}
 
@@ -255,19 +261,19 @@ export default function DinerPage() {
                 <>
                   {st.session_status === 'open' && (
                     <Button onClick={doBill} disabled={busy} variant="outline" className="h-12 w-full text-base">
-                      <ReceiptText className="size-5" /> เรียกเก็บเงิน
+                      <ReceiptText className="size-5" /> {t('pub.qr.request_bill')}
                     </Button>
                   )}
                   {st.session_status === 'bill_requested' && (
                     <Button onClick={doPay} disabled={busy} className="h-12 w-full text-base">
-                      <Smartphone className="size-5" /> ชำระด้วย PromptPay
+                      <Smartphone className="size-5" /> {t('pub.qr.pay_promptpay')}
                     </Button>
                   )}
                 </>
               )}
               {pay && (
                 <Card className="items-center gap-3 p-5 text-center">
-                  <div className="font-medium">สแกนเพื่อชำระ {baht(pay.total)}</div>
+                  <div className="font-medium">{t('pub.qr.scan_to_pay', { amt: baht(pay.total) })}</div>
                   {pay.qr_image ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={pay.qr_image} alt="PromptPay QR" className="size-48 rounded-xl border bg-white p-2" />
@@ -277,21 +283,21 @@ export default function DinerPage() {
                       PromptPay QR<br />({pay.gateway_ref})
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">เปิดแอปธนาคารแล้วสแกน QR เพื่อชำระด้วย PromptPay</p>
+                  <p className="text-xs text-muted-foreground">{t('pub.qr.scan_hint')}</p>
                   {pay.mock_settle ? (
                     <Button onClick={doConfirm} disabled={busy} className="h-12 w-full bg-success text-base text-success-foreground hover:bg-success/90">
-                      ยืนยันการชำระเงิน (จำลอง)
+                      {t('pub.qr.confirm_mock')}
                     </Button>
                   ) : (
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-4" /> กำลังรอยืนยันการชำระเงินอัตโนมัติ…</p>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-4" /> {t('pub.qr.waiting_confirm')}</p>
                   )}
                 </Card>
               )}
             </>
           ) : (
             <div className="grid place-items-center gap-3 py-10 text-center">
-              <p className="text-sm text-muted-foreground">ยังไม่มีรายการอาหาร</p>
-              <Button onClick={() => setTab('menu')} variant="outline"><Utensils className="size-4" /> เปิดเมนูเพื่อสั่งอาหาร</Button>
+              <p className="text-sm text-muted-foreground">{t('pub.qr.no_order')}</p>
+              <Button onClick={() => setTab('menu')} variant="outline"><Utensils className="size-4" /> {t('pub.qr.open_menu')}</Button>
             </div>
           )}
         </TabsContent>
@@ -301,8 +307,8 @@ export default function DinerPage() {
       {cartCount > 0 && (
         <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4">
           <Button onClick={() => setCartOpen(true)} className="h-14 w-full justify-between text-base shadow-lg">
-            <span className="flex items-center gap-2"><ShoppingCart className="size-5" /> ตะกร้า ({cartCount})</span>
-            <span className="tabular">{isBuffet ? 'บุฟเฟต์' : baht(cartTotal)}</span>
+            <span className="flex items-center gap-2"><ShoppingCart className="size-5" /> {t('pub.qr.cart')} ({cartCount})</span>
+            <span className="tabular">{isBuffet ? t('pub.qr.buffet') : baht(cartTotal)}</span>
           </Button>
         </div>
       )}
@@ -315,12 +321,14 @@ export default function DinerPage() {
 }
 
 function BuffetChip({ b }: { b: Buffet }) {
-  if (b.expired) return <Badge variant="destructive" className="text-[10px]">หมดเวลา</Badge>;
-  return <Badge variant="secondary" className="gap-1 text-[10px]"><Timer className="size-3" /> เหลือ {b.minutes_left} นาที</Badge>;
+  const { t } = useLang();
+  if (b.expired) return <Badge variant="destructive" className="text-[10px]">{t('pub.qr.expired')}</Badge>;
+  return <Badge variant="secondary" className="gap-1 text-[10px]"><Timer className="size-3" /> {t('pub.qr.mins_left', { n: b.minutes_left ?? 0 })}</Badge>;
 }
 
 // ── modifier picker (one item) ──
 function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buffet: boolean; onClose: () => void; onAdd: (l: CartLine) => void }) {
+  const { t } = useLang();
   const [sel, setSel] = useState<Record<number, number[]>>(() => {
     const init: Record<number, number[]> = {};
     for (const g of item.modifier_groups) { const d = g.options.find((o) => o.is_default); init[g.group_id] = d ? [d.option_id] : []; }
@@ -358,7 +366,7 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
             <div key={g.group_id}>
               <div className="mb-1.5 flex items-center gap-2 text-sm font-medium">
                 {g.name}
-                {g.required ? <Badge variant="destructive" className="text-[10px]">จำเป็น</Badge> : <span className="text-xs text-muted-foreground">เลือกได้สูงสุด {g.max_select}</span>}
+                {g.required ? <Badge variant="destructive" className="text-[10px]">{t('pub.qr.required')}</Badge> : <span className="text-xs text-muted-foreground">{t('pub.qr.max_select', { n: g.max_select })}</span>}
               </div>
               <div className="grid gap-1.5">
                 {g.options.map((o) => {
@@ -382,7 +390,7 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
         </div>
         <DialogFooter>
           <Button onClick={confirm} disabled={!!missing} className="h-12 w-full justify-between text-base">
-            <span>เพิ่มลงตะกร้า</span><span className="tabular">{buffet ? 'บุฟเฟต์' : baht(unitPrice)}</span>
+            <span>{t('pub.qr.add_to_cart')}</span><span className="tabular">{buffet ? t('pub.qr.buffet') : baht(unitPrice)}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -394,15 +402,16 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
 function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, onSubmit }: {
   open: boolean; onOpenChange: (o: boolean) => void; cart: CartLine[]; setCart: (f: (c: CartLine[]) => CartLine[]) => void; total: number; buffet: boolean; busy: boolean; onSubmit: () => void;
 }) {
+  const { t } = useLang();
   const setQty = (key: string, delta: number) =>
     setCart((cur) => cur.flatMap((c) => (c.key === key ? (c.qty + delta <= 0 ? [] : [{ ...c, qty: c.qty + delta }]) : [c])));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>ตะกร้าของฉัน</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('pub.qr.my_cart')}</DialogTitle></DialogHeader>
         {cart.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">ตะกร้าว่าง</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">{t('pub.qr.cart_empty')}</p>
         ) : (
           <div className="max-h-[55svh] space-y-3 overflow-y-auto">
             {cart.map((c) => (
@@ -410,7 +419,7 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{c.name}</div>
                   {c.optionLabels.length > 0 && <p className="text-xs text-muted-foreground">{c.optionLabels.join(' · ')}</p>}
-                  <p className="text-xs text-muted-foreground tabular">{buffet ? 'บุฟเฟต์' : baht(c.unitPrice)}</p>
+                  <p className="text-xs text-muted-foreground tabular">{buffet ? t('pub.qr.buffet') : baht(c.unitPrice)}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Button size="icon" variant="outline" className="size-7" onClick={() => setQty(c.key, -1)}><Minus className="size-3.5" /></Button>
@@ -423,7 +432,7 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
         )}
         <DialogFooter>
           <Button onClick={onSubmit} disabled={busy || cart.length === 0} className="h-12 w-full justify-between text-base">
-            <span>ส่งออเดอร์เข้าครัว</span><span className="tabular">{buffet ? 'บุฟเฟต์' : baht(total)}</span>
+            <span>{t('pub.qr.send_order')}</span><span className="tabular">{buffet ? t('pub.qr.buffet') : baht(total)}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -435,17 +444,18 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
 function BuffetStartDialog({ tiers, defaultPax, busy, onClose, onStart }: {
   tiers: Tier[]; defaultPax: number; busy: boolean; onClose: () => void; onStart: (packageId: number, pax: number) => void;
 }) {
+  const { t } = useLang();
   const [pax, setPax] = useState(defaultPax);
   const [sel, setSel] = useState<number | null>(tiers[0]?.id ?? null);
-  const tier = tiers.find((t) => t.id === sel);
+  const tier = tiers.find((x) => x.id === sel);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>เริ่มบุฟเฟต์</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('pub.qr.buffet_start')}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border p-3">
-            <span className="text-sm font-medium">จำนวนคน</span>
+            <span className="text-sm font-medium">{t('pub.qr.pax_label')}</span>
             <div className="flex items-center gap-2">
               <Button size="icon" variant="outline" className="size-8" onClick={() => setPax((p) => Math.max(1, p - 1))}><Minus className="size-4" /></Button>
               <span className="w-6 text-center text-base tabular">{pax}</span>
@@ -453,21 +463,21 @@ function BuffetStartDialog({ tiers, defaultPax, busy, onClose, onStart }: {
             </div>
           </div>
           <div className="grid gap-2">
-            {tiers.map((t) => (
-              <button key={t.id} type="button" onClick={() => setSel(t.id)}
-                className={cn('flex items-center justify-between rounded-lg border p-3 text-left transition', t.id === sel ? 'border-primary bg-primary/5' : 'hover:border-primary/40')}>
+            {tiers.map((x) => (
+              <button key={x.id} type="button" onClick={() => setSel(x.id)}
+                className={cn('flex items-center justify-between rounded-lg border p-3 text-left transition', x.id === sel ? 'border-primary bg-primary/5' : 'hover:border-primary/40')}>
                 <div>
-                  <div className="text-sm font-medium">{t.name}</div>
-                  <p className="text-xs text-muted-foreground">{t.time_limit_min} นาที{t.overtime_fee_per_pax > 0 ? ` · เกินเวลา +${baht(t.overtime_fee_per_pax)}/ท่าน` : ''}</p>
+                  <div className="text-sm font-medium">{x.name}</div>
+                  <p className="text-xs text-muted-foreground">{t('pub.qr.tier_mins', { n: x.time_limit_min })}{x.overtime_fee_per_pax > 0 ? t('pub.qr.overtime', { amt: baht(x.overtime_fee_per_pax) }) : ''}</p>
                 </div>
-                <span className="text-sm font-semibold tabular">{baht(t.price_per_pax)}/ท่าน</span>
+                <span className="text-sm font-semibold tabular">{t('pub.qr.per_pax', { amt: baht(x.price_per_pax) })}</span>
               </button>
             ))}
           </div>
         </div>
         <DialogFooter>
           <Button onClick={() => sel && onStart(sel, pax)} disabled={busy || !sel} className="h-12 w-full justify-between text-base">
-            <span>เริ่มบุฟเฟต์</span><span className="tabular">{tier ? baht(tier.price_per_pax * pax) : ''}</span>
+            <span>{t('pub.qr.buffet_start')}</span><span className="tabular">{tier ? baht(tier.price_per_pax * pax) : ''}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
