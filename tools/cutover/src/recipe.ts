@@ -80,6 +80,13 @@ async function main() {
   const noPerm = await inj('POST', '/api/menu/items/KP01/recipe', cust1, { lines: [{ ingredient_item_id: 'PORK', qty_per: 1 }] });
   ok('Permission: Customer (no bom_master/masterdata/exec) → 403', noPerm.status === 403, `${noPerm.status}`);
 
+  // ── SoD (audit #6): a BoM submitter cannot approve their OWN submission (maker ≠ checker). admin holds
+  //    both cust_bom (submit) and bom_master (approve), so without the control it could self-approve. ──
+  const bomSub = await inj('POST', '/api/portal/bom', admin, { bom_code: 'SODBOM1', product_name: 'ชุดทดสอบ SoD', selling_price: 100 });
+  ok('BoM submission created via portal (records submitter)', bomSub.status < 300 && bomSub.json.submission_id != null, `${bomSub.status} ${JSON.stringify(bomSub.json).slice(0, 70)}`);
+  const bomSelf = await inj('PATCH', `/api/bom/submissions/${bomSub.json.submission_id}/approve`, admin);
+  ok('SoD: BoM submitter cannot self-approve → 403 SOD_SELF_APPROVAL', bomSelf.status === 403 && bomSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${bomSelf.status} ${bomSelf.json.error?.code}`);
+
   // ── dine-in 2×KP01 → checkout → deduct ingredients + COGS ──
   const tbl = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'R1', seats: 2 });
   const o1 = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tbl.json.id, items: [{ sku: 'KP01', qty: 2 }] });
