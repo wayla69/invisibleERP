@@ -226,6 +226,38 @@ export class LedgerReadService {
     return rows.map((r) => ({ id: Number(r.id), refDoc: r.refDoc, amount: r.amount }));
   }
 
+  // Posted lines on ONE account with full matching context (line id · debit/credit · entry no/date ·
+  // source/sourceRef · line memo) — the bank-reconciliation matching feed (auto-match candidates and the
+  // unmatched-book side of the recon statement). `cutoff` bounds entry_date inclusively; tenant on the
+  // entry header (a shared bank GL account needs the owning account's tenant scope, HQ accounts pass null).
+  async accountLines(account: string, opts?: { tenantId?: number | null; cutoff?: string | null }): Promise<{ id: number; debit: string | null; credit: string | null; entryNo: string; entryDate: string; source: string | null; sourceRef: string | null; memo: string | null }[]> {
+    const conds = [eq(journalLines.accountCode, account), eq(journalEntries.status, 'Posted')];
+    if (opts?.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    if (opts?.cutoff) conds.push(sql`${journalEntries.entryDate} <= ${opts.cutoff}`);
+    const rows = await this.db.select({
+      id: journalLines.id, debit: journalLines.debit, credit: journalLines.credit,
+      entryNo: journalEntries.entryNo, entryDate: journalEntries.entryDate,
+      source: journalEntries.source, sourceRef: journalEntries.sourceRef, memo: journalLines.memo,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
+    return rows.map((r) => ({ ...r, id: Number(r.id) }));
+  }
+
+  // Does a journal LINE with this id exist? — referential guard for consumers that store a line id
+  // (the bank manual-match handler validating a caller-supplied journal_line_id).
+  async lineExists(journalLineId: number): Promise<boolean> {
+    const [jl] = await this.db.select({ id: journalLines.id }).from(journalLines).where(eq(journalLines.id, journalLineId)).limit(1);
+    return jl != null;
+  }
+
+  // The line id an entry (source, sourceRef) posted against ONE account — the bank-adjustment approval
+  // linking the approved BANKADJ's bank-GL leg back to the statement line it reconciles.
+  async sourceLineId(source: string, sourceRef: string, account: string): Promise<number | null> {
+    const [jl] = await this.db.select({ id: journalLines.id }).from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef), eq(journalLines.accountCode, account))).limit(1);
+    return jl != null ? Number(jl.id) : null;
+  }
+
   // Register listing for one posting SOURCE — one row per (entry × positive-DEBIT line), newest first.
   // Serves maker-checker registers whose document of record IS the journal entry (e.g. the AR write-off
   // register: every AR-WRITEOFF entry has exactly one expense debit leg, so this yields one row per
