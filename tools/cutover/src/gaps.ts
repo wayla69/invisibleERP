@@ -177,6 +177,13 @@ async function main() {
   ok('sub-account appears in my-users', sl.json.users.some((x: any) => x.username === 'staff1'));
   const sd = await inj('DELETE', '/api/portal/my/users/staff1', token);
   ok('delete sub-account', sd.json.deleted === true);
+  // PE-9 — a portal customer cannot grant a sub-user the back-office `loyalty` duty (it would satisfy the
+  // OR-gated staff loyalty routes, incl. member points-transfer). The allow-list filters it out.
+  await inj('POST', '/api/portal/my/users', token, { username: 'staff2', password: 'secret12', permissions: ['cust_pos', 'loyalty'] });
+  const [s2row] = await db.select({ id: s.users.id }).from(s.users).where(eq(s.users.username, 'staff2')).limit(1);
+  const s2perms = (await db.select({ perm: s.userPermissions.perm }).from(s.userPermissions).where(eq(s.userPermissions.userId, Number(s2row.id)))).map((r: any) => r.perm);
+  ok('PE-9: portal sub-user cannot be granted the back-office `loyalty` duty (filtered out)',
+    s2perms.includes('cust_pos') && !s2perms.includes('loyalty'), JSON.stringify(s2perms));
 
   await app.close();
   await pg.close();

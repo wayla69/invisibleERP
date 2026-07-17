@@ -5,6 +5,7 @@
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover onboarding
  */
 import 'reflect-metadata';
+import { authenticator } from 'otplib';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'onb-secret';
 process.env.NODE_ENV = 'test';
 
@@ -159,6 +160,35 @@ async function main() {
   const godKey = (await inj('POST', '/api/platform/api-keys', owner, { name: 'god-key', scopes: ['exec'] })).json.key;
   const keyHitsPlatform = await inj('GET', '/api/admin/tenants', godKey);
   ok('P3: a platform-owner-minted API key is NOT a platform-admin credential (403 PLATFORM_ADMIN_REQUIRED)', keyHitsPlatform.status === 403 && keyHitsPlatform.json.error?.code === 'PLATFORM_ADMIN_REQUIRED', `${keyHitsPlatform.status} ${keyHitsPlatform.json.error?.code}`);
+
+  // ── 3b4. Privilege-escalation audit (2026-07-17, PE-1/PE-2): the `users` permission grants capability
+  //         BOUNDED by the grantor's OWN — a least-privilege AccessAdmin (holds only `users`) cannot silently
+  //         escalate, whether via an API-key scope (PE-1) or by provisioning a transacting puppet account
+  //         (PE-2, which is routed to a second admin for approval — not blocked, so delegated admin still works). ──
+  await db.insert(s.users).values([{ username: 'pe_iam', passwordHash: await pw.hash('peiam12345'), role: 'AccessAdmin', tenantId: hq }]).onConflictDoNothing();
+  const iam = (await login('pe_iam', 'peiam12345')).json.token;
+  // PE-2 — an AccessAdmin provisioning a role BEYOND its own set (GlAccountant ⇒ gl_post) is STAGED for a
+  // different admin (two-person control), not applied. (customer_name=HQ keeps the staged row in-tenant.)
+  const escGrant = await inj('POST', '/api/admin/users', iam, { username: 'iam_puppet', password: 'puppet12345', role: 'GlAccountant', customer_name: 'HQ' });
+  ok('PE-2: AccessAdmin provisioning a transacting role is STAGED for approval, not applied', escGrant.json?.pending === true && !!escGrant.json?.access_exception_req_no, `${escGrant.status} ${JSON.stringify(escGrant.json)}`);
+  const puppetLogin = await login('iam_puppet', 'puppet12345');
+  ok('PE-2: the escalated puppet account was NOT created (cannot log in)', puppetLogin.status === 401, `${puppetLogin.status}`);
+  // An Admin is unaffected (holds all perms) — proven by the existing grants above (platco_admin/owner create
+  // Sales/Admin directly). PE-1 — an AccessAdmin cannot mint an API key whose scopes exceed its own perms.
+  const escKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'esc-key', scopes: ['gl_post'] });
+  ok('PE-1: AccessAdmin cannot mint an API key with scopes beyond its perms (403 KEY_SCOPE_EXCEEDS_GRANTOR)', escKey.status === 403 && escKey.json.error?.code === 'KEY_SCOPE_EXCEEDS_GRANTOR', `${escKey.status} ${escKey.json.error?.code}`);
+  const okKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-key', scopes: ['users'] });
+  ok('PE-1: AccessAdmin CAN mint a key within its own permissions (users scope)', !!okKey.json?.key, `${okKey.status}`);
+  // PE-1 (refinement) — a public-API-ONLY scope (`catalog:read`, not an internal permission) is not an
+  // escalation and may be minted by any `users`-holder for integration.
+  const pubKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-pub', scopes: ['catalog:read'] });
+  ok('PE-1: AccessAdmin CAN mint a public-API-only scope key (catalog:read — not an internal permission)', !!pubKey.json?.key, `${pubKey.status}`);
+  // PE-6 — the platform MFA surface must NOT silently re-enrol/downgrade an already-enrolled account (no
+  // step-up). Enrol once (setup → verify), then a second setup is refused (must disable first, needs password+TOTP).
+  const pmSetup = await inj('POST', '/api/platform/mfa/setup', iam);
+  await inj('POST', '/api/platform/mfa/verify', iam, { token: authenticator.generate(pmSetup.json.secret) });
+  const pmReenrol = await inj('POST', '/api/platform/mfa/setup', iam);
+  ok('PE-6: platform mfa/setup refuses to re-enrol an MFA-enabled account (400 MFA_ALREADY_ENABLED)', pmReenrol.status === 400 && pmReenrol.json.error?.code === 'MFA_ALREADY_ENABLED', `${pmReenrol.status} ${pmReenrol.json.error?.code}`);
   // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
   // status/plan/user-count; a non-platform-admin is blocked at the guard.
   const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner

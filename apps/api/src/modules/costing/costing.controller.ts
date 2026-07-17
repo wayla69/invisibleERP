@@ -39,12 +39,15 @@ export class CostingController {
   atpGet(@Query('item_id') itemId: string, @Query('need_by') needBy: string, @CurrentUser() u: JwtUser) { return this.atp.atp(u.tenantId as number, itemId, needBy); }
   @Post('atp/check') @Permissions('cust_pos', 'order_cust', 'planner', 'pos')
   check(@Body(new ZodValidationPipe(CheckBody)) b: any, @CurrentUser() u: JwtUser) { return this.atp.canPromise(u.tenantId as number, b.item_id, b.qty, b.date); }
-  @Post('allocate') @Permissions('cust_pos', 'planner', 'pos')
+  // PE-11 — creating/releasing a stock reservation is an internal ops action; a customer-portal principal
+  // (`cust_pos`) must not mutate reservations against an arbitrary ref_doc/qty (stock-hold abuse). The
+  // read-only availability check (`atp/check`) keeps its portal access.
+  @Post('allocate') @Permissions('planner', 'pos')
   allocate(@Body(new ZodValidationPipe(AllocBody)) b: any, @CurrentUser() u: JwtUser) { return this.atp.allocate(u.tenantId as number, b.item_id, b.qty, b.ref_doc, b.need_by, u); }
   // Reservation lifecycle (INV-09): release (order cancelled) / fulfill (goods shipped) / register.
-  @Post('allocations/:refDoc/release') @HttpCode(200) @Permissions('cust_pos', 'planner', 'pos')
+  @Post('allocations/:refDoc/release') @HttpCode(200) @Permissions('planner', 'pos')
   release(@Param('refDoc') refDoc: string, @CurrentUser() u: JwtUser) { return this.atp.releaseAllocation(u.tenantId as number, refDoc, u); }
-  @Post('allocations/:refDoc/fulfill') @HttpCode(200) @Permissions('cust_pos', 'planner', 'pos', 'warehouse')
+  @Post('allocations/:refDoc/fulfill') @HttpCode(200) @Permissions('planner', 'pos', 'warehouse')
   fulfill(@Param('refDoc') refDoc: string, @CurrentUser() u: JwtUser) { return this.atp.fulfillAllocation(u.tenantId as number, refDoc, u); }
   @Get('allocations') @Permissions('cust_inventory', 'planner', 'pos', 'procurement')
   allocations(@Query('item_id') itemId: string | undefined, @Query('status') status: string | undefined, @Query('ref_doc') refDoc: string | undefined, @CurrentUser() u: JwtUser) { return this.atp.listAllocations(u.tenantId as number, { item_id: itemId, status, ref_doc: refDoc }); }

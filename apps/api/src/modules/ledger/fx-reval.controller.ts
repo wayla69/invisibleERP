@@ -31,7 +31,7 @@ export class FxRevalController {
   @HttpCode(200)
   @Permissions('gl_close', 'gl_post')
   run(@Body(new ZodValidationPipe(RunBody)) b: RunBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.runReval({ period: b.period, asOfDate: b.as_of_date, rates: b.rates, tenantId: b.tenant_id ?? null, runBy: u.username });
+    return this.svc.runReval({ period: b.period, asOfDate: b.as_of_date, rates: b.rates, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null, runBy: u.username });
   }
 
   @Post(':id/post')

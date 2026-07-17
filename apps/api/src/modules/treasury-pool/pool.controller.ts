@@ -78,7 +78,7 @@ export class PoolController {
     return this.svc.definePool({
       name: b.name, poolType: b.pool_type, headerAccount: b.header_account, currency: b.currency,
       members: (b.members ?? []).map((m) => ({ memberAccount: m.member_account, memberTenantId: m.member_tenant_id ?? null, cap: m.cap })),
-      tenantId: b.tenant_id ?? null,
+      tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null,
     }, u);
   }
 
