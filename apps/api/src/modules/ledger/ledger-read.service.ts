@@ -130,10 +130,13 @@ export class LedgerReadService {
   // Net Posted movement (Σ debit − Σ credit) per ACCOUNT for one fiscal period (or unbounded when period is
   // omitted), optionally filtered to an account set or code prefixes (e.g. the 4%/5% P&L bands). The
   // planning/allocation actuals read; `net` stays the raw numeric string.
-  async accountNetPerAccount(opts: { tenantId?: number | null; period?: string; accounts?: string[]; accountPrefixes?: string[] }): Promise<{ accountCode: string; net: string }[]> {
+  async accountNetPerAccount(opts: { tenantId?: number | null; period?: string; periodBefore?: string; accounts?: string[]; accountPrefixes?: string[] }): Promise<{ accountCode: string; net: string }[]> {
     const conds = [eq(journalEntries.status, 'Posted')];
     if (opts.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
     if (opts.period) conds.push(eq(journalEntries.period, opts.period));
+    // periodBefore (exclusive) = everything posted in fiscal periods strictly before it — the REC-01
+    // roll-forward OPENING balance read (opening + period activity = closing, tying to the TB).
+    if (opts.periodBefore) conds.push(lt(journalEntries.period, opts.periodBefore));
     if (opts.accounts?.length) conds.push(inArray(journalLines.accountCode, opts.accounts));
     if (opts.accountPrefixes?.length) conds.push(sql`(${sql.join(opts.accountPrefixes.map((p) => sql`${journalLines.accountCode} LIKE ${p}`), sql` OR `)})`);
     return this.db.select({
@@ -200,6 +203,38 @@ export class LedgerReadService {
   // classifier lives here with the ledger instead of being re-derived by consumers.
   async cashPosition(tenantId?: number | null): Promise<number> {
     return this.accountNet([...CASH_ACCOUNTS], { tenantId });
+  }
+
+  // Posted GL lines on ONE account with the line id + entry metadata — for line-level matchers (bank
+  // auto/manual reconciliation, the REC-01 GL-item import) that pair individual legs against an external
+  // register. Deliberately single-account with narrow filters; NOT a general journal browse.
+  async postedLinesForAccount(accountCode: string, opts?: { tenantId?: number | null; period?: string; toDate?: string }):
+    Promise<{ id: number; debit: string | null; credit: string | null; entryNo: string; entryDate: string; source: string | null; sourceRef: string | null; memo: string | null }[]> {
+    const conds = [eq(journalLines.accountCode, accountCode), eq(journalEntries.status, 'Posted')];
+    if (opts?.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    if (opts?.period) conds.push(eq(journalEntries.period, opts.period));
+    if (opts?.toDate) conds.push(lte(journalEntries.entryDate, opts.toDate));
+    const rows = await this.db.select({
+      id: journalLines.id, debit: journalLines.debit, credit: journalLines.credit,
+      entryNo: journalEntries.entryNo, entryDate: journalEntries.entryDate,
+      source: journalEntries.source, sourceRef: journalEntries.sourceRef, memo: journalLines.memo,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
+    return rows.map((r) => ({ ...r, id: Number(r.id) }));
+  }
+
+  // Does a journal line exist? — the bank manual-match referential check (a fabricated line id must 404).
+  async lineExists(lineId: number): Promise<boolean> {
+    const [row] = await this.db.select({ id: journalLines.id }).from(journalLines).where(eq(journalLines.id, lineId)).limit(1);
+    return !!row;
+  }
+
+  // The journal-line id of a (source, source_ref) entry's leg on ONE account, any status — the bank
+  // adjustment-approval flow links the statement line to the approved BANKADJ's bank-GL leg.
+  async lineIdBySourceRef(source: string, sourceRef: string, accountCode: string): Promise<number | null> {
+    const [row] = await this.db.select({ id: journalLines.id })
+      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef), eq(journalLines.accountCode, accountCode))).limit(1);
+    return row ? Number(row.id) : null;
   }
 
   // Recover the entry_no of an already-posted (source, source_ref) — the read-side companion of

@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { eq, and, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { reconPeriods, reconItems } from '../../database/schema/reconciliation';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
@@ -11,7 +11,12 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
 @Injectable()
 export class ReconciliationService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3, round 10); ctor-body construction
+  // keeps the DI surface unchanged (the read service only needs db).
+  private readonly ledgerRead: LedgerReadService;
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // ── Open / find recon period ──
 
@@ -19,31 +24,13 @@ export class ReconciliationService {
     const db = this.db;
     const tenantId = user.tenantId!;
 
-    // Period activity for the account (posted GL only).
-    const [glRow] = await db.select({
-      net: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}), 0)`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, tenantId),
-        eq(journalEntries.period, dto.period),
-        eq(journalEntries.status, 'Posted'),
-        eq(journalLines.accountCode, dto.account_code),
-      ));
+    // Period activity for the account (posted GL only) — via the narrow ledger read.
+    const [glRow] = await this.ledgerRead.accountNetPerAccountPeriod({ tenantId, periods: [dto.period], accounts: [dto.account_code] });
     const glBalance = n(glRow?.net ?? 0);
     // B4 (docs/50 Wave 4) — roll-forward: opening = Σ posted GL BEFORE the period; activity = the period's
     // net; closing = opening + activity. Computed from the same posted ledger the TB reads, so the
     // roll-forward ties to the trial balance by construction.
-    const [openRow] = await db.select({
-      net: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}), 0)`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, tenantId),
-        sql`${journalEntries.period} < ${dto.period}`,
-        eq(journalEntries.status, 'Posted'),
-        eq(journalLines.accountCode, dto.account_code),
-      ));
+    const [openRow] = await this.ledgerRead.accountNetPerAccount({ tenantId, periodBefore: dto.period, accounts: [dto.account_code] });
     const opening = n(openRow?.net ?? 0);
 
     const [existing] = await db.select().from(reconPeriods)
@@ -95,30 +82,19 @@ export class ReconciliationService {
     const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
-    const glLines = await db.select({
-      id: journalLines.id,
-      refDoc: journalEntries.entryNo,
-      amount: sql<string>`${journalLines.debit} - ${journalLines.credit}`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, rp.tenantId!),
-        eq(journalEntries.period, rp.period),
-        eq(journalEntries.status, 'Posted'),
-        eq(journalLines.accountCode, rp.accountCode),
-      ));
+    const glLines = await this.ledgerRead.postedLinesForAccount(rp.accountCode, { tenantId: rp.tenantId!, period: rp.period });
 
     if (!glLines.length) return { imported: 0 };
 
     await db.insert(reconItems).values(
-      glLines.map((l: any) => ({
-        reconPeriodId, source: 'GL', refDoc: l.refDoc, refLineId: Number(l.id),
-        amount: fx(n(l.amount), 4), isMatched: false,
+      glLines.map((l) => ({
+        reconPeriodId, source: 'GL', refDoc: l.entryNo, refLineId: Number(l.id),
+        amount: fx(n(l.debit) - n(l.credit), 4), isMatched: false,
       }))
     ).onConflictDoNothing();
 
     // Update GL balance
-    const glBalance = round4(glLines.reduce((s: number, l: any) => s + n(l.amount), 0));
+    const glBalance = round4(glLines.reduce((s: number, l) => s + (n(l.debit) - n(l.credit)), 0));
     await db.update(reconPeriods).set({ glBalance: fx(glBalance, 4), preparedBy: user.username, preparedAt: new Date() }).where(eq(reconPeriods.id, reconPeriodId));
 
     return { imported: glLines.length, gl_balance: glBalance };

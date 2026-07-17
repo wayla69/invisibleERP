@@ -1,12 +1,13 @@
 import { Inject, Injectable, BadRequestException, Optional } from '@nestjs/common';
 import { and, eq, gte, lt, asc, desc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
-import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, journalLines, journalEntries, thaiTaxFilings, taxCodes, vendors, reContracts } from '../../../database/schema';
+import { taxInvoices, apTransactions, apPayments, whtCertificates, whtCertLines, thaiTaxFilings, taxCodes, vendors, reContracts } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PND_LABELS } from '../documents/wht-rates';
 import { pndEfilingText, type PndEfilingRow } from './rd-efiling';
 import { currentTenantStore } from '../../../common/tenant-context';
 import { LedgerService } from '../../ledger/ledger.service';
+import { LedgerReadService } from '../../ledger/ledger-read.service';
 import { NotFoundException } from '@nestjs/common';
 import type { JwtUser } from '../../../common/decorators';
 
@@ -20,7 +21,12 @@ const nextMonthDay = (month: number, year: number, day: number) => {
 export class TaxReportsService {
   // docs/43 PR-7: @Optional ledger — the tie-outs read the WIDENED account sets (canonical ∪ approved
   // override); hand-constructed harness instances without it fall back to the canonical single account.
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly ledger?: LedgerService) {}
+  // GL tie-out reads ride the narrow LedgerReadService (docs/46 Phase 3, round 10); ctor-body
+  // construction keeps the DI surface unchanged (the read service only needs db).
+  private readonly ledgerRead: LedgerReadService;
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb, @Optional() private readonly ledger?: LedgerService) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   private async acctSet(eventType: string, role: string, fallback: string): Promise<string[]> {
     return this.ledger ? this.ledger.postingAccountSet(eventType, role, this.tenantId()) : [fallback];
@@ -97,10 +103,8 @@ export class TaxReportsService {
     for (const c of await db.select({ o: taxCodes.outputAccount, i: taxCodes.inputAccount }).from(taxCodes).where(eq(taxCodes.kind, 'vat'))) {
       if (c.o) vatAccounts.add(c.o); if (c.i) vatAccounts.add(c.i);
     }
-    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(inArray(journalLines.accountCode, [...vatAccounts]), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
-    const gl2100Net = round2(n(g?.v));
+    const g = await this.ledgerRead.accountGross([...vatAccounts], { from: start, toExcl: end });
+    const gl2100Net = round2(g.credit - g.debit);
     return {
       report: 'pp30', month, year, period,
       form: { sales_taxable: out.totals.value, output_vat: outputTax, purchases: inp.totals.base, input_vat: inputTax, vat_payable: netVat > 0 ? netVat : 0, vat_credit_carry_forward: netVat < 0 ? -netVat : 0 },
@@ -152,10 +156,8 @@ export class TaxReportsService {
     // PR-7: sum the widened vendor-WHT set (2361 ∪ approved APPAY.WHT override) so an overridden
     // payable still ties; the subcontract WHT leg stays on the canonical 2361 inside the same set.
     const whtSet = await this.acctSet('APPAY.WHT', 'wht_payable', '2361');
-    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(inArray(journalLines.accountCode, whtSet), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
-    const gl2361 = round2(n(g?.v));
+    const g = await this.ledgerRead.accountGross(whtSet, { from: start, toExcl: end });
+    const gl2361 = round2(g.credit - g.debit);
     // (2) WHT withheld on AP payments approved in the period (the operational record).
     const [a] = await db.select({ v: sql<string>`coalesce(sum(${apPayments.whtAmount}),0)` })
       .from(apPayments).where(and(eq(apPayments.status, 'Approved'), sql`${apPayments.approvedAt} >= ${start} AND ${apPayments.approvedAt} < ${end}`));
@@ -192,10 +194,8 @@ export class TaxReportsService {
     const out = rows.map((r: any) => ({ date: r.date, doc_no: r.doc_no, invoice_no: r.invoice_no, vendor_name: r.vendor_name, base: round2(n(r.base)), vat: round2(n(r.base) * 0.07) }));
     const vatRemit = round2(out.reduce((a: number, r: any) => a + r.vat, 0));
     // GL 2120 net credit movement (Posted) in the period — the self-assessed VAT payable accrued.
-    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2120'), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
-    const gl2120 = round2(n(g?.v));
+    const g = await this.ledgerRead.accountGross(['2120'], { from: start, toExcl: end });
+    const gl2120 = round2(g.credit - g.debit);
     return {
       report: 'pp36', month, year, period, rows: out,
       totals: { base: round2(out.reduce((a: number, r: any) => a + r.base, 0)), vat: vatRemit, count: out.length },
@@ -222,10 +222,8 @@ export class TaxReportsService {
     const sbtTotal = round2(out.reduce((a: number, r: any) => a + r.sbt, 0));
     // PR-7: sum the widened SBT set (2130 ∪ approved SBT.TAX override).
     const sbtSet = await this.acctSet('SBT.TAX', 'sbt_payable', '2130');
-    const [g] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(inArray(journalLines.accountCode, sbtSet), eq(journalEntries.status, 'Posted'), gte(journalEntries.entryDate, start), lt(journalEntries.entryDate, end)));
-    const gl2130 = round2(n(g?.v));
+    const g = await this.ledgerRead.accountGross(sbtSet, { from: start, toExcl: end });
+    const gl2130 = round2(g.credit - g.debit);
     return {
       report: 'pt40', month, year, period, rows: out,
       totals: { gross_receipts: round2(out.reduce((a: number, r: any) => a + r.gross_receipts, 0)), sbt: sbtTotal, count: out.length },

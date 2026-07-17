@@ -2,9 +2,10 @@ import { Inject, Injectable, BadRequestException, NotFoundException } from '@nes
 import { assertMakerChecker } from '../../common/control-profile';
 import { eq, and, desc, asc, isNotNull, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { bankAccounts, bankStatements, bankStatementLines, journalLines, journalEntries, accounts, cashMovements, bankDeposits, apPaymentRuns, apPaymentRunLines } from '../../database/schema';
+import { bankAccounts, bankStatements, bankStatementLines, accounts, cashMovements, bankDeposits, apPaymentRuns, apPaymentRunLines } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import { roundCurrency } from '../tax/money';
@@ -18,11 +19,16 @@ import { round4, daysApart as days, amountDateMatch, TOLERANCE_DAYS } from './ma
 
 @Injectable()
 export class BankService {
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3, round 10); ctor-body construction
+  // keeps the DI surface unchanged (the read service only needs db).
+  private readonly ledgerRead: LedgerReadService;
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
     private readonly ledger: LedgerService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // ── REC-05: cash banking — batch till safe-drops into a bank deposit + reconcile ──
 
@@ -172,10 +178,7 @@ export class BankService {
     // Scope book lines to THIS account's tenant — the bank GL (e.g. 1010) is shared across tenants, so an
     // Admin caller (RLS-bypass) would otherwise match/aggregate another tenant's cash movements. (null
     // tenant = an HQ-level account → no scope predicate, by the HQ-sees-all model.)
-    const tenantPred = acct.tenantId != null ? [eq(journalEntries.tenantId, acct.tenantId)] : [];
-    const bookLines = await db.select({ id: journalLines.id, debit: journalLines.debit, credit: journalLines.credit, entryDate: journalEntries.entryDate, source: journalEntries.source, sourceRef: journalEntries.sourceRef })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, bankGl), eq(journalEntries.status, 'Posted'), ...tenantPred));
+    const bookLines = await this.ledgerRead.postedLinesForAccount(bankGl, { tenantId: acct.tenantId });
     const matchedRows = await db.select({ jl: bankStatementLines.matchedJournalLineId }).from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), isNotNull(bankStatementLines.matchedJournalLineId)));
     const usedJl = new Set<number>(matchedRows.map((r: any) => Number(r.jl)));
     const stmtLines = await db.select().from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), eq(bankStatementLines.reconciled, 'false'))).orderBy(asc(bankStatementLines.lineDate));
@@ -234,8 +237,7 @@ export class BankService {
     const db = this.db;
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Statement line not found', messageTh: 'ไม่พบรายการ statement' });
-    const [jl] = await db.select({ id: journalLines.id }).from(journalLines).where(eq(journalLines.id, journalLineId)).limit(1);
-    if (!jl) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal line not found', messageTh: 'ไม่พบรายการบัญชี' });
+    if (!(await this.ledgerRead.lineExists(journalLineId))) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Journal line not found', messageTh: 'ไม่พบรายการบัญชี' });
     await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: journalLineId }).where(eq(bankStatementLines.id, statementLineId));
     return { statement_line_id: statementLineId, journal_line_id: journalLineId, reconciled: true };
   }
@@ -286,12 +288,12 @@ export class BankService {
     const acct = await this.loadAccount(Number(sl.bankAccountId));
     const bankGl = acct.glAccountCode;
     const sourceRef = `STMTLN-${statementLineId}`;
-    const [draft] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries).where(and(eq(journalEntries.source, 'BANKADJ'), eq(journalEntries.sourceRef, sourceRef), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
-    if (!draft) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
-    const res: any = await this.ledger.approveEntry(draft.entryNo, user);
-    const [jl] = await db.select({ id: journalLines.id }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(eq(journalEntries.source, 'BANKADJ'), eq(journalEntries.sourceRef, sourceRef), eq(journalLines.accountCode, bankGl))).limit(1);
-    await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: jl ? Number(jl.id) : null }).where(eq(bankStatementLines.id, statementLineId));
-    return { statement_line_id: statementLineId, journal_no: draft.entryNo, status: 'Posted', approved_by: user.username, prepared_by: res?.prepared_by ?? null };
+    const draftNo = await this.ledgerRead.entryRefNo('BANKADJ', sourceRef, { status: 'Draft' });
+    if (!draftNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
+    const res: any = await this.ledger.approveEntry(draftNo, user);
+    const jlId = await this.ledgerRead.lineIdBySourceRef('BANKADJ', sourceRef, bankGl);
+    await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: jlId }).where(eq(bankStatementLines.id, statementLineId));
+    return { statement_line_id: statementLineId, journal_no: draftNo, status: 'Posted', approved_by: user.username, prepared_by: res?.prepared_by ?? null };
   }
 
   // Reject a pending bank adjustment (checker) — voids the Draft JE and frees the line.
@@ -300,11 +302,11 @@ export class BankService {
     const [sl] = await db.select().from(bankStatementLines).where(eq(bankStatementLines.id, statementLineId)).limit(1);
     if (!sl || sl.reconciled === 'true' || !sl.adjustmentJournalNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No bank adjustment pending approval for this line', messageTh: 'ไม่พบรายการปรับปรุงที่รออนุมัติ' });
     const sourceRef = `STMTLN-${statementLineId}`;
-    const [draft] = await db.select({ entryNo: journalEntries.entryNo }).from(journalEntries).where(and(eq(journalEntries.source, 'BANKADJ'), eq(journalEntries.sourceRef, sourceRef), eq(journalEntries.status, 'Draft'))).orderBy(desc(journalEntries.id)).limit(1);
-    if (!draft) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
-    await this.ledger.rejectEntry(draft.entryNo, user, reason);
+    const draftNo = await this.ledgerRead.entryRefNo('BANKADJ', sourceRef, { status: 'Draft' });
+    if (!draftNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
+    await this.ledger.rejectEntry(draftNo, user, reason);
     await db.update(bankStatementLines).set({ adjustmentJournalNo: null }).where(eq(bankStatementLines.id, statementLineId));
-    return { statement_line_id: statementLineId, journal_no: draft.entryNo, status: 'Rejected', rejected_by: user.username };
+    return { statement_line_id: statementLineId, journal_no: draftNo, status: 'Rejected', rejected_by: user.username };
   }
 
   async reconciliation(bankAccountId: number, asOf: string | undefined, _user: JwtUser) {
@@ -313,10 +315,7 @@ export class BankService {
     const bankGl = acct.glAccountCode;
     const cutoff = asOf ?? '9999-12-31';
     // Scope to this account's tenant (shared bank GL across tenants) — see autoMatch.
-    const tenantPred = acct.tenantId != null ? [eq(journalEntries.tenantId, acct.tenantId)] : [];
-    const bookLines = await db.select({ id: journalLines.id, debit: journalLines.debit, credit: journalLines.credit, entryNo: journalEntries.entryNo, entryDate: journalEntries.entryDate, memo: journalLines.memo })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, bankGl), eq(journalEntries.status, 'Posted'), sql`${journalEntries.entryDate} <= ${cutoff}`, ...tenantPred));
+    const bookLines = await this.ledgerRead.postedLinesForAccount(bankGl, { tenantId: acct.tenantId, toDate: cutoff });
     const glBalance = round4(n(acct.openingBalance) + bookLines.reduce((a: number, l: any) => a + (n(l.debit) - n(l.credit)), 0));
     const [stmt] = await db.select().from(bankStatements).where(and(eq(bankStatements.bankAccountId, bankAccountId), sql`${bankStatements.statementDate} <= ${cutoff}`)).orderBy(desc(bankStatements.statementDate), desc(bankStatements.id)).limit(1);
     const statementBalance = stmt ? round4(n(stmt.closingBal)) : round4(n(acct.openingBalance));
