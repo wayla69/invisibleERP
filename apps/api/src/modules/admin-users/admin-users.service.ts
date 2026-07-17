@@ -5,7 +5,7 @@ import { users, userPermissions, tenants, accessReviews, accessReviewItems, acce
 import { PasswordService } from '../auth/password.service';
 import { BillingService } from '../billing/billing.service';
 import { DocNumberService } from '../../common/doc-number.service';
-import { resolvePermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
+import { resolvePermissions, expandPermissions, detectSodConflicts, type Role, type Permission } from '@ierp/shared';
 import { appendAuditMeta } from '../../common/tenant-context';
 import { assertMakerChecker } from '../../common/control-profile';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
@@ -117,6 +117,31 @@ export class AdminUsersService {
     }
   }
 
+  // PE-2 — two-person control on privilege escalation via provisioning. A grant confers an effective
+  // permission set (a per-user override REPLACES the role defaults; otherwise the role's own defaults apply).
+  // A non-platform-owner grantor may not SILENTLY confer a permission it does not itself hold — else a
+  // `users`-only AccessAdmin could provision a transacting account (e.g. gl_post / creditors) and control it,
+  // defeating the "AccessAdmin cannot escalate" invariant (and SoD R01). Returns the permissions granted
+  // BEYOND the grantor's own set — empty for a platform owner or an Admin (who holds everything). A non-empty
+  // result routes the grant through stageException (a DIFFERENT admin must approve it), rather than blocking
+  // delegated user administration outright. The IdP-governed SCIM channel opts out (its assignable roles are
+  // already allow-list-constrained by isJitForbiddenRole + default_role validation).
+  private escalatedGrant(role: string | undefined, permissions: string[] | undefined, actor: JwtUser | undefined): string[] {
+    if (isPlatformAdmin(actor?.username)) return [];
+    const granted = permissions?.length
+      ? expandPermissions(permissions as Permission[])
+      : role ? resolvePermissions(role as Role) : [];
+    const held = new Set<string>(actor?.permissions ?? []);
+    return [...new Set(granted)].filter((p) => !held.has(p));
+  }
+
+  // Reason recorded on a staged grant-exception: the SoD reason when the requester supplied one, else a
+  // synthesized privilege-escalation note (an escalation is auto-staged and needs no requester acknowledgement).
+  private grantExceptionReason(sodReason: string | undefined, escalated: string[], actor: JwtUser | undefined): string {
+    if (sodReason?.trim()) return sodReason.trim();
+    return `Privilege escalation — grantor "${actor?.username ?? '?'}" does not hold: ${escalated.join(', ')}`;
+  }
+
   private async tenantIdFor(code?: string): Promise<number | null> {
     if (!code) return null;
     const db = this.db;
@@ -133,7 +158,7 @@ export class AdminUsersService {
     return { users: rows.map((r: any) => ({ username: r.username, role: r.role, customer_name: r.code ?? null, must_change_password: !!r.mustChange })), count: rows.length };
   }
 
-  async create(dto: CreateUserDto, actor: JwtUser) {
+  async create(dto: CreateUserDto, actor: JwtUser, opts?: { viaScim?: boolean }) {
     const db = this.db;
     if (!dto.password || dto.password.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     const username = normalizeUsername(dto.username);
@@ -141,25 +166,29 @@ export class AdminUsersService {
     this.assertCanGrantRole(dto.role, actor);
     const [exists] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
-    // G11: a SoD-conflicting override is staged for a DIFFERENT admin to approve — not applied here.
+    // G11 / PE-2: a SoD-conflicting OR privilege-escalating grant is STAGED for a DIFFERENT admin to approve —
+    // not applied here. (SCIM opts out — its roles are IdP-governed + allow-list-constrained.)
     const conflicts = this.sodConflictOrThrow(dto.permissions, dto.allow_sod_override, dto.sod_reason);
-    if (conflicts.length) {
-      return this.stageException({ isNewUser: true, targetUsername: username, role: dto.role, permissions: dto.permissions!, customerName: dto.customer_name, passwordHash: await this.passwords.hash(dto.password), reason: dto.sod_reason!.trim(), rules: conflicts.map((c) => c.ruleId) }, actor);
+    const escalated = opts?.viaScim ? [] : this.escalatedGrant(dto.role, dto.permissions, actor);
+    if (conflicts.length || escalated.length) {
+      return this.stageException({ isNewUser: true, targetUsername: username, role: dto.role, permissions: dto.permissions ?? [], customerName: dto.customer_name, passwordHash: await this.passwords.hash(dto.password), reason: this.grantExceptionReason(dto.sod_reason, escalated, actor), rules: [...conflicts.map((c) => c.ruleId), ...(escalated.length ? ['ESCALATION'] : [])] }, actor);
     }
     this.logGrandfatheredRoleConflict(username, dto.role);
     return this.applyCreate({ username, password: dto.password, role: dto.role, customerName: dto.customer_name, permissions: dto.permissions });
   }
 
-  async update(username: string, dto: UpdateUserDto, actor: JwtUser) {
+  async update(username: string, dto: UpdateUserDto, actor: JwtUser, opts?: { viaScim?: boolean }) {
     username = normalizeUsername(username);
     const db = this.db;
     const [u] = await db.select().from(users).where(eq(users.username, username)).limit(1);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
     this.assertCanGrantRole(dto.role, actor);
-    // G11: a SoD-conflicting override is staged for a DIFFERENT admin to approve — not applied here.
+    // G11 / PE-2: a SoD-conflicting OR privilege-escalating grant is STAGED for a DIFFERENT admin to approve —
+    // not applied here. (SCIM opts out — its roles are IdP-governed + allow-list-constrained.)
     const conflicts = this.sodConflictOrThrow(dto.permissions, dto.allow_sod_override, dto.sod_reason);
-    if (conflicts.length) {
-      return this.stageException({ isNewUser: false, targetUsername: username, role: dto.role, permissions: dto.permissions!, customerName: dto.customer_name, reason: dto.sod_reason!.trim(), rules: conflicts.map((c) => c.ruleId), tenantId: u.tenantId ?? null }, actor);
+    const escalated = opts?.viaScim ? [] : this.escalatedGrant(dto.role, dto.permissions, actor);
+    if (conflicts.length || escalated.length) {
+      return this.stageException({ isNewUser: false, targetUsername: username, role: dto.role, permissions: dto.permissions ?? [], customerName: dto.customer_name, reason: this.grantExceptionReason(dto.sod_reason, escalated, actor), rules: [...conflicts.map((c) => c.ruleId), ...(escalated.length ? ['ESCALATION'] : [])], tenantId: u.tenantId ?? null }, actor);
     }
     this.logGrandfatheredRoleConflict(username, dto.role ?? (u.role as string));
     return this.applyUpdate(u, { role: dto.role, customer_name: dto.customer_name, permissions: dto.permissions });
@@ -198,14 +227,18 @@ export class AdminUsersService {
     // Self-benefit authorization (approving an exception that grants YOURSELF) stays a hard block even under docs/49 SME mode — it is not plain maker-checker.
     if (ex.targetUsername === actor.username) throw new ForbiddenException({ code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve an access exception that grants yourself', messageTh: 'แยกหน้าที่: อนุมัติการให้สิทธิ์แก่ตนเองไม่ได้' });
     const permissions: string[] = ex.permissions ? JSON.parse(ex.permissions) : [];
+    // A role-only escalation (PE-2) stages an EMPTY permission set — apply undefined, not [], so approval only
+    // sets the role and does NOT wipe the target's existing per-user overrides (an override-bearing SoD
+    // exception still carries its non-empty set through unchanged).
+    const permsToApply = permissions.length ? permissions : undefined;
     // ITGC-AC-09 evidence: persist WHO requested, WHO approved, WHY, and the rules into the hash-chained audit row.
     appendAuditMeta({ sod_override: { username: ex.targetUsername, requested_by: ex.requestedBy, approved_by: actor.username, reason: ex.reason, rules: (ex.sodRules ?? '').split(',').filter(Boolean) } });
     const applied = ex.isNewUser === 'true'
-      ? await this.applyCreate({ username: ex.targetUsername, passwordHash: ex.passwordHash ?? undefined, role: ex.role ?? undefined, customerName: ex.customerName ?? undefined, permissions })
+      ? await this.applyCreate({ username: ex.targetUsername, passwordHash: ex.passwordHash ?? undefined, role: ex.role ?? undefined, customerName: ex.customerName ?? undefined, permissions: permsToApply })
       : await (async () => {
           const [u] = await db.select().from(users).where(eq(users.username, ex.targetUsername)).limit(1);
           if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found', messageTh: 'ไม่พบผู้ใช้' });
-          return this.applyUpdate(u, { role: ex.role ?? undefined, customer_name: ex.customerName ?? undefined, permissions });
+          return this.applyUpdate(u, { role: ex.role ?? undefined, customer_name: ex.customerName ?? undefined, permissions: permsToApply });
         })();
     await db.update(accessGrantExceptions).set({ status: 'Approved', approvedBy: actor.username, approvedAt: new Date() }).where(eq(accessGrantExceptions.id, Number(ex.id)));
     return { req_no: reqNo, status: 'Approved', approved_by: actor.username, requested_by: ex.requestedBy, target: ex.targetUsername, ...applied };

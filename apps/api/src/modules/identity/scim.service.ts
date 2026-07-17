@@ -88,7 +88,7 @@ export class ScimService {
     const code = await this.tenantCode(user.tenantId as number);
     // Reuse the SoD-safe admin create path (random unusable password; SSO/SCIM users never password-login).
     // actor=SCIM principal (AccessAdmin) so the Admin-grant guard applies: SCIM cannot provision an Admin.
-    await this.adminUsers.create({ username: userName, password: 'scim_' + randomBytes(16).toString('hex'), role, customer_name: code }, user);
+    await this.adminUsers.create({ username: userName, password: 'scim_' + randomBytes(16).toString('hex'), role, customer_name: code }, user, { viaScim: true });
     // Link the IdP subject + active state.
     const externalId = body?.externalId ? String(body.externalId) : null;
     const active = body?.active !== false;
@@ -109,7 +109,7 @@ export class ScimService {
     if (body?.externalId !== undefined) set.ssoSubject = body.externalId ? String(body.externalId) : null;
     const role = body?.[ROLE_EXT]?.role;
     if (role) {
-      await this.adminUsers.update(u.username, { role }, user); // SoD-checked + Admin-grant guarded
+      await this.adminUsers.update(u.username, { role }, user, { viaScim: true }); // SoD-checked + Admin-grant guarded (IdP-governed roles)
     }
     if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, u.id));
     return this.get(user, id);
