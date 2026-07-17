@@ -289,6 +289,18 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     change. NB a new `cutover:<name>` added INSIDE an existing shard job needs NO branch-protection change — the
     shard's check name (`harnesses (platform-a)`) already gates it; only a brand-new top-level JOB introduces a
     new required-check name.
+16. **A Playwright spec that fails IDENTICALLY on the fixed AND unfixed build is a harness artifact (mantra
+    #2 applied to specs) — and the usual culprit is a PRE-HYDRATION swallowed event.** Next.js SSR paints
+    interactive elements before React hydrates; a `selectOption`/`click` dispatched at first paint changes the
+    DOM but React's handler never fires, and hydration then RESETS the element to React state — which looks
+    exactly like "the fix didn't work" (bit `lang-persistence.spec.ts`: red at the same line on both builds
+    while a paced debug script against the same server passed; the a11y snapshot showed the select back on
+    its initial value). Diagnose by driving the same interaction paced/scripted outside the runner; fix by
+    gating the FIRST interaction on a signal that only exists post-hydration — `waitForResponse` on a call the
+    mount effect makes (keep the predicate method-agnostic if different code paths fire GET vs PUT on mount) —
+    never by sleeps. Related first-paint latency (not hydration): the `frontline-sweep` pos-home test flaked
+    a FIFTH cycle (#821) — on a heavy page every independent-query first-paint assertion needs the generous
+    30s window, not just the first one.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -318,6 +330,28 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   - SSRF guard (`net-guard.ts`) now blocks hex IPv4-mapped IPv6 literals (H-1); `image-fetch` routes through
     it (L-6); object-storage keys are `isSafeObjectKey`-validated (L-9); SSE/`realtime-bus.recent()` no longer
     fan `tenant_id==null` events to all tenants (L-7); PII redaction masks international `+` phones (L-11).
+- **Web i18n architecture (2026-07-17 EN coverage, PRs #816/#818/#821) — extend it, don't re-derive.**
+  `LanguageProvider` lives ONLY in the ROOT layout (one app-wide instance; signed-out/public pages get the
+  device's cached `ierp_lang` choice, default th). Per-domain key fragments in `apps/web/src/lib/i18n-catalog/*`
+  (portal `pt.*`, auth `auth.*`, public diner/member `pub.*`/`mb.*`, shared client errors `err.*`/`je.*`) merged
+  in `messages.ts` — the catalog is th+en COMPLETE (≈11.6k keys, audited 0 missing en), so a "แปลไม่ครบ" report
+  means a HARDCODED string, not a missing translation (when grepping for Thai literals, exclude comments and
+  `฿` — U+0E3F is inside the Thai Unicode block). Non-React code translates via `lib/i18n-static.ts`
+  `ts()`/`currentLang()` (evaluated at CALL time — fine for thrown errors/toasts/prompts, never for rendered
+  labels). `lib/api.ts` picks the server error `message` vs `messageTh` by locale (`localizedErr`) — any new
+  fetch layer (cf. `/m`'s `mapi`) must do the same, and regexes matching error text must match BOTH languages
+  (the `/m` session-expiry detector). Client-side status labels/colors key on stable server CODES
+  (`kds_status`), never on the Thai display text (`status_th` is only the fallback). Bilingual-BY-DESIGN, do
+  NOT wire: `/q` scan resolver (server component — no client island, per the use-client ratchet), `/display`
+  pole display (both audiences see it at once), `global-error` (renders without providers), `/legal/privacy`.
+- **A user preference that "PUTs best-effort then trusts the server read" REVERTS under read-only
+  impersonation — every mutation 403s there (`READONLY_IMPERSONATION`), so the server never learns the
+  choice and the next mount's read clobbers it.** Canonical fix shape (`lib/i18n.tsx`, the #816 lang-revert
+  bug): on a failed persist write a localStorage PENDING marker (`ierp_lang_pending`); while pending the
+  LOCAL value is authoritative — the mount effect RETRIES the persist and SKIPS the server read — and a
+  `userChose` ref stops a still-in-flight mount read from clobbering a choice that raced past it; a
+  successful persist clears the marker and restores server authority (cross-device sync). Reuse this shape
+  for any per-user pref that must survive read-only company view / offline.
 - **Business timezone = Asia/Bangkok (UTC+7).** `ymd()`/`bizYmdDash` date everything on the business day,
   not UTC. Seed/compare dates on that basis or you get off-by-one window drift (root cause of the
   `analytics` flake).
@@ -431,7 +465,11 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
-  blocked (403), and the commit-signing server is occasionally flaky (retry the commit).
+  blocked (403), and the commit-signing server is occasionally flaky (retry the commit). Also:
+  **`pkill -f`/`pgrep -f` with the pattern written literally in the SAME Bash command kills your own
+  shell** — the harness runs `bash -c "<command>"`, so the pattern string is on your own process's command
+  line and matches (exit 144, the whole compound dies mid-way). Split the literal (`'next-serv''er'`) or
+  target by port instead.
 - **CodeQL `CodeQL` results gate races / is one commit behind.** The capital-`CodeQL` PR check (distinct
   from the lowercase `codeql` analysis *job*) concludes ~5–8s **before** that run's analysis finishes
   uploading, so on a fresh push it reports the **prior** commit's alerts — a pushed fix can read red even
