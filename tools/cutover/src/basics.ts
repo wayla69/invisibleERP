@@ -2127,6 +2127,31 @@ async function main() {
     JSON.stringify({ tb: f1Steps.find((x: any) => x.step_key === 'trial_balance_review')?.status, run: f1Auto1.json.run?.status }));
   const f1Auto2 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
   ok('F1: re-run is idempotent (0 completed, already_done)', (f1Auto2.json.completed ?? []).length === 0 && (f1Auto2.json.skipped ?? []).filter((x: any) => x.reason === 'already_done').length >= 4, JSON.stringify(f1Auto2.json.skipped?.slice(0, 5)));
+  // ── G3 (Close Manager v2b): bank_rec / subledger_tieout tick from CERTIFIED REC-01 recons ──
+  //    Absence never ticks: with zero recon workspaces for 2028-02 both steps read evidence_not_met.
+  ok('G3: with no recon workspaces bank_rec/subledger_tieout stay evidence_not_met (absence is not evidence)',
+    ['bank_rec', 'subledger_tieout'].every((k) => (f1Auto2.json.skipped ?? []).some((x: any) => x.step_key === k && x.reason === 'evidence_not_met')),
+    JSON.stringify((f1Auto2.json.skipped ?? []).filter((x: any) => x.reason === 'evidence_not_met')));
+  // A cash recon exists but is only Reconciled (not certified) → still blocked; tie-out has 1100 Certified
+  // but 2000 still Open → the one uncertified workspace blocks the whole set.
+  await db.insert(s.reconPeriods).values({ tenantId: hq, accountCode: '1000', period: '2028-02', status: 'Reconciled', preparedBy: 'admin' } as any);
+  await db.insert(s.reconPeriods).values({ tenantId: hq, accountCode: '1100', period: '2028-02', status: 'Certified', preparedBy: 'admin', certifiedBy: 'mgr' } as any);
+  await db.insert(s.reconPeriods).values({ tenantId: hq, accountCode: '2000', period: '2028-02', status: 'Open', preparedBy: 'admin' } as any);
+  const g3Auto1 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('G3: an un-certified workspace in the set blocks the step (both still evidence_not_met)',
+    (g3Auto1.json.completed ?? []).length === 0
+      && ['bank_rec', 'subledger_tieout'].every((k) => (g3Auto1.json.skipped ?? []).some((x: any) => x.step_key === k && x.reason === 'evidence_not_met')),
+    JSON.stringify((g3Auto1.json.skipped ?? []).filter((x: any) => x.step_key === 'bank_rec' || x.step_key === 'subledger_tieout')));
+  // Certify the blockers (the REC-01 certification is the human act; the tick only reflects it).
+  await pg.query(`UPDATE recon_periods SET status='Certified', certified_by='mgr' WHERE period='2028-02' AND account_code IN ('1000','2000')`);
+  const g3Auto2 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('G3: once every opened workspace on the set is Certified both steps flip Done',
+    ['bank_rec', 'subledger_tieout'].every((k) => (g3Auto2.json.completed ?? []).some((x: any) => x.step_key === k)),
+    JSON.stringify((g3Auto2.json.completed ?? []).map((x: any) => x.step_key)));
+  const g3Bank = (g3Auto2.json.run?.steps ?? []).find((x: any) => x.step_key === 'bank_rec');
+  ok('G3: the tick pins the human certifications it rests on ((auto) attribution + certifier per account)',
+    g3Bank?.completed_by === 'admin (auto)' && g3Bank?.detail?.evidence?.certifications?.some((c: any) => c.account === '1000' && c.certified_by === 'mgr'),
+    JSON.stringify({ by: g3Bank?.completed_by, ev: g3Bank?.detail?.evidence }));
   // Overdue close task → GOV-01 pending-approvals worklist (GL-15 detective).
   await pg.query(`UPDATE close_run_steps SET due_date='2026-01-15' WHERE close_run_id=${Number(f1RunId)} AND step_key='trial_balance_review'`);
   const f1Gov = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
