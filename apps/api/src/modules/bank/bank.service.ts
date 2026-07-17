@@ -19,9 +19,10 @@ import { round4, daysApart as days, amountDateMatch, TOLERANCE_DAYS } from './ma
 
 @Injectable()
 export class BankService {
-  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3, round 10); ctor-body construction
-  // keeps the DI surface unchanged (the read service only needs db).
+  // GL matching reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
   private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly docNo: DocNumberService,
@@ -178,7 +179,7 @@ export class BankService {
     // Scope book lines to THIS account's tenant — the bank GL (e.g. 1010) is shared across tenants, so an
     // Admin caller (RLS-bypass) would otherwise match/aggregate another tenant's cash movements. (null
     // tenant = an HQ-level account → no scope predicate, by the HQ-sees-all model.)
-    const bookLines = await this.ledgerRead.postedLinesForAccount(bankGl, { tenantId: acct.tenantId });
+    const bookLines = await this.ledgerRead.accountLines(bankGl, { tenantId: acct.tenantId != null ? Number(acct.tenantId) : null });
     const matchedRows = await db.select({ jl: bankStatementLines.matchedJournalLineId }).from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), isNotNull(bankStatementLines.matchedJournalLineId)));
     const usedJl = new Set<number>(matchedRows.map((r: any) => Number(r.jl)));
     const stmtLines = await db.select().from(bankStatementLines).where(and(eq(bankStatementLines.bankAccountId, bankAccountId), eq(bankStatementLines.reconciled, 'false'))).orderBy(asc(bankStatementLines.lineDate));
@@ -291,7 +292,7 @@ export class BankService {
     const draftNo = await this.ledgerRead.entryRefNo('BANKADJ', sourceRef, { status: 'Draft' });
     if (!draftNo) throw new BadRequestException({ code: 'NO_PENDING_ADJUSTMENT', message: 'No draft adjustment entry for this line', messageTh: 'ไม่พบรายการบัญชีปรับปรุงที่รออนุมัติ' });
     const res: any = await this.ledger.approveEntry(draftNo, user);
-    const jlId = await this.ledgerRead.lineIdBySourceRef('BANKADJ', sourceRef, bankGl);
+    const jlId = await this.ledgerRead.sourceLineId('BANKADJ', sourceRef, bankGl);
     await db.update(bankStatementLines).set({ reconciled: 'true', matchedJournalLineId: jlId }).where(eq(bankStatementLines.id, statementLineId));
     return { statement_line_id: statementLineId, journal_no: draftNo, status: 'Posted', approved_by: user.username, prepared_by: res?.prepared_by ?? null };
   }
@@ -315,7 +316,7 @@ export class BankService {
     const bankGl = acct.glAccountCode;
     const cutoff = asOf ?? '9999-12-31';
     // Scope to this account's tenant (shared bank GL across tenants) — see autoMatch.
-    const bookLines = await this.ledgerRead.postedLinesForAccount(bankGl, { tenantId: acct.tenantId, toDate: cutoff });
+    const bookLines = await this.ledgerRead.accountLines(bankGl, { tenantId: acct.tenantId != null ? Number(acct.tenantId) : null, cutoff });
     const glBalance = round4(n(acct.openingBalance) + bookLines.reduce((a: number, l: any) => a + (n(l.debit) - n(l.credit)), 0));
     const [stmt] = await db.select().from(bankStatements).where(and(eq(bankStatements.bankAccountId, bankAccountId), sql`${bankStatements.statementDate} <= ${cutoff}`)).orderBy(desc(bankStatements.statementDate), desc(bankStatements.id)).limit(1);
     const statementBalance = stmt ? round4(n(stmt.closingBal)) : round4(n(acct.openingBalance));

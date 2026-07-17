@@ -247,6 +247,23 @@ async function main() {
   const whAgain = await wh('whsec'); const whAgainJson: any = (() => { try { return whAgain.json(); } catch { return {}; } })();
   ok('PromptPay webhook: idempotent on re-delivery (no double-post)', whAgain.statusCode < 300 && (whAgainJson.paid === true || whAgainJson.settled === true), `${whAgain.statusCode}`);
 
+  // ── audit #3: public-QR-ordering hardening (rotating token + staff-fire gate) ──
+  const tblR = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6R', seats: 2 });
+  const rot = await inj('GET', `/api/restaurant/tables/${tblR.json.id}/rotating-qr`, sales1);
+  ok('#3 rotating QR: staff mints a short-TTL token + start_url + window', rot.status === 200 && typeof rot.json.token === 'string' && rot.json.token.length > 20 && rot.json.window_sec > 0, `${rot.status}`);
+  const rStart = await inj('POST', `/api/qr/rstart/${rot.json.token}`, undefined, {});
+  ok('#3 rotating QR: scanning a fresh token opens a session', (rStart.status === 200 || rStart.status === 201) && !!rStart.json.public_token, `${rStart.status}`);
+  const rBad = await inj('POST', '/api/qr/rstart/not-a-valid-rotating-token', undefined, {});
+  ok('#3 rotating QR: a forged/expired token → 401 QR_EXPIRED', rBad.status === 401 && rBad.json.error?.code === 'QR_EXPIRED', `${rBad.status} ${rBad.json.error?.code}`);
+  // staff-fire gate: enable per tenant → a diner QR order PARKS (pending_fire) instead of auto-firing to KDS.
+  const setGate = await inj('PUT', '/api/restaurant/qr-settings', sales1, { require_staff_fire: true });
+  ok('#3 staff-fire gate: PUT qr-settings require_staff_fire=true', setGate.status === 200 && setGate.json.require_staff_fire === true, `${setGate.status}`);
+  const tblG = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6G', seats: 2 });
+  const startG = await inj('POST', `/api/qr/start/${tblG.json.qr_token}`, undefined, {});
+  const orderG = await inj('POST', `/api/qr/t/${startG.json.public_token}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] });
+  ok('#3 staff-fire gate: a QR order parks (pending_fire) instead of auto-firing', (orderG.status === 200 || orderG.status === 201) && orderG.json.pending_fire === true, `${orderG.status} pf=${orderG.json.pending_fire}`);
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { require_staff_fire: false }); // reset so later checks see auto-fire
+
   // ── staff-initiated buffet (from POS/floor) ──
   const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
   const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });

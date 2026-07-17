@@ -27,9 +27,13 @@ const PUBLIC_WRITE_PATHS = new Set(['/api/crm/web-to-lead']);
 const SIGNUP_PATHS = new Set(['/api/auth/signup', '/api/auth/signup-requests']);
 
 const pathOf = (req: { url?: string }) => (req.url ?? '').split('?')[0];
-type Bucket = 'otp' | 'auth' | 'lead' | 'signup' | 'api';
+type Bucket = 'otp' | 'auth' | 'lead' | 'signup' | 'qr' | 'api';
 const bucketOf = (p: string): Bucket =>
-  OTP_PATHS.has(p) ? 'otp' : AUTH_PATHS.has(p) ? 'auth' : SIGNUP_PATHS.has(p) ? 'signup' : PUBLIC_WRITE_PATHS.has(p) ? 'lead' : 'api';
+  OTP_PATHS.has(p) ? 'otp' : AUTH_PATHS.has(p) ? 'auth' : SIGNUP_PATHS.has(p) ? 'signup' : PUBLIC_WRITE_PATHS.has(p) ? 'lead'
+    // Public restaurant QR ordering (SOX-ICFR #3): entirely unauthenticated (@Public), can open sessions and
+    // fire kitchen orders, so it gets its OWN strict per-IP bucket instead of hiding in the loose 300/min
+    // global budget — an attacker enumerating table QRs can't flood the kitchen/inventory from one source.
+    : p.startsWith('/api/qr/') ? 'qr' : 'api';
 // Exported for the control-test harness (ToE): asserts the public web-to-lead path is on the strict bucket.
 export const rateLimitBucketOf = (path: string): Bucket => bucketOf(path);
 
@@ -38,6 +42,7 @@ const AUTH_MAX = Number(process.env.RATE_LIMIT_AUTH_MAX ?? 30);   // login / pin
 const OTP_MAX = Number(process.env.RATE_LIMIT_OTP_MAX ?? 10);     // request-otp (outbound SMS), per IP per window
 const LEAD_MAX = Number(process.env.RATE_LIMIT_WEB_LEAD_MAX ?? 20); // public web-to-lead form, per IP per window
 const SIGNUP_MAX = Number(process.env.RATE_LIMIT_SIGNUP_MAX ?? 10); // public tenant-minting (signup / request), per IP per window
+const QR_MAX = Number(process.env.RATE_LIMIT_QR_MAX ?? 60);       // public QR ordering (#3), per IP per window
 
 export async function registerEdge(app: NestFastifyApplication): Promise<void> {
   const fastify = app.getHttpAdapter().getInstance();
@@ -57,7 +62,7 @@ export async function registerEdge(app: NestFastifyApplication): Promise<void> {
     // Per-request ceiling: stricter for auth/OTP, loose for the rest.
     max: (req: { url?: string }) => {
       const b = bucketOf(pathOf(req)!);
-      return b === 'otp' ? OTP_MAX : b === 'auth' ? AUTH_MAX : b === 'signup' ? SIGNUP_MAX : b === 'lead' ? LEAD_MAX : GLOBAL_MAX;
+      return b === 'otp' ? OTP_MAX : b === 'auth' ? AUTH_MAX : b === 'signup' ? SIGNUP_MAX : b === 'lead' ? LEAD_MAX : b === 'qr' ? QR_MAX : GLOBAL_MAX;
     },
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
     // Segment the counter by bucket so each (IP, bucket) is isolated — auth attempts can't drain the

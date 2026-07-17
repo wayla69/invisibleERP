@@ -8,7 +8,7 @@ export { roleEnum };
 export const users = pgTable('users', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   username: text('username').notNull().unique(),
-  passwordHash: text('password_hash').notNull(), // argon2/scrypt; legacy sha256 verified+rehashed on login
+  passwordHash: text('password_hash').notNull(), // scrypt, optionally peppered (scrypt-p1$…, PASSWORD_PEPPER); param-less legacy scrypt is rehashed on login. Bare unsalted-SHA-256 is REJECTED (never accepted) and scrubbed by 0428.
   role: roleEnum('role').notNull().default('Sales'), // เดิม PG default 'Staff' (bug) → แก้เป็น Sales
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
   // ── Hybrid tenancy (0196) — the HQ "org" an Admin belongs to. Under TENANCY_MODE=multi-company the
