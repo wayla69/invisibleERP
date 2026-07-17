@@ -182,11 +182,20 @@ jobs:
             # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
             ev=""
             if [ "$script" = "compliance" ]; then ev="${GITHUB_WORKSPACE}/compliance-evidence.json"; fi
-            if EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script"; then
-              echo "::endgroup::"
-            else
-              echo "::endgroup::"
-              echo "::error::harness FAILED: ${pkg} → ${script}"
+            # `&& rc=0 || rc=$?` captures the exit code without tripping the step's `set -e` (errexit).
+            EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script" && rc=0 || rc=$?
+            # Retry ONCE on a native CRASH SIGNAL (exit >=128, e.g. 139 SIGSEGV / 134 SIGABRT) — a rare,
+            # non-deterministic PGlite / node:sqlite (--experimental-sqlite) segfault at boot, before any
+            # check runs. A real assertion failure (exit 1) is NOT retried: it fails fast, so this can never
+            # mask a logic regression, only self-heal an infrastructure flake (previously needed a manual
+            # re-run of the whole shard). The harnesses are deterministic, so a genuine failure fails twice.
+            if [ "$rc" -ge 128 ]; then
+              echo "::warning::${pkg} → ${script} crashed (exit ${rc}, signal) — retrying once (native flake)"
+              EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script" && rc=0 || rc=$?
+            fi
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::harness FAILED: ${pkg} → ${script} (exit ${rc})"
               failed="$failed ${pkg}:${script}"
             fi
           done

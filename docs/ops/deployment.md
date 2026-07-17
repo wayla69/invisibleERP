@@ -131,6 +131,13 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
     Add a new harness to its domain shard in `ci.yml`; split a shard if it outgrows ~9 minutes.
     NB: branch-protection **required checks** now name the shards (`harnesses (pos)`, …) — update the
     protected-check list when shard names change.
+  - **Native-crash retry**: the shard runner retries a harness **once** when it exits with a crash signal
+    (exit ≥128, e.g. `139` SIGSEGV / `134` SIGABRT) — a rare, non-deterministic PGlite / `node:sqlite`
+    (`--experimental-sqlite`) segfault at process boot that previously forced a manual re-run of the whole
+    shard. A real assertion failure (exit `1`) is **not** retried — it fails fast, so the retry can only
+    self-heal an infra flake, never mask a logic regression (a genuine failure fails both times). Node is
+    pinned to **22** across all jobs (`package.json` `engines`, `.nvmrc`, each `setup-node`); `node:sqlite`
+    requires Node ≥22, so downgrading is not an option — the retry is the mitigation for the flake.
 - `deploy.yml` — approval-gated production deploy to Railway, pinned to the GitHub `production`
   Environment (required reviewers ⇒ deployer ≠ author, ITGC-CM-03). See `change-management.md`.
   - **Post-deploy smoke (ITGC-OP-04).** After both services deploy, the job hits the API's `/healthz`
@@ -162,6 +169,7 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 |---|---|---|---|
 | 1.8 | 2026-07-10 | Platform | §5: `ci.yml` per-ref `concurrency` group (cancel superseded PR runs; main keeps in-flight + newest pending) — fixes the 2026-07-10 Actions queue freeze (26 runs / ~2,000 jobs backlogged, 0 in progress). |
 | 1.9 | 2026-07-10 | Platform | §5: harness matrix sharded ~89 jobs → 11 domain shards (balanced by measured runtime; per-harness log groups + full-shard run-through on failure preserved) — a full CI run is now ~18 jobs and fits one ~20-job concurrency wave; branch-protection required checks must reference the shard names. |
+| 1.10 | 2026-07-17 | Platform | §5: the shard runner retries a harness ONCE on a native crash signal (exit ≥128, e.g. 139 SIGSEGV) — a rare non-deterministic PGlite/`node:sqlite` segfault at boot that previously needed a manual shard re-run; a real assertion failure (exit 1) is never retried. Node stays pinned to 22 (node:sqlite requires ≥22, so a downgrade is not viable). |
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |
