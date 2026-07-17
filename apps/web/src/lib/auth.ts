@@ -6,7 +6,8 @@ import { api, hasSession } from './api';
 export interface Me {
   username: string;
   role: string;
-  customer_name: string | null;
+  customer_name: string | null; // tenant CODE
+  company_name?: string | null; // tenant display name — shown in the sidebar header
   permissions: string[];
   must_change_password?: boolean;
   is_platform_owner?: boolean; // configured platform owner ("god") — gates the cross-company switcher
