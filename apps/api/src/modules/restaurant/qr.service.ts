@@ -13,6 +13,9 @@ import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
 import { verifyTableToken, type TableClaim } from './qr-token.util';
 import { rateLimit } from './rate-limit.util';
+import { verifyInboundWebhook } from '../../common/webhook-auth';
+import { safeEqualStr } from '../../common/crypto';
+import { WebhookIdempotencyService } from '../../common/webhook-idempotency.service';
 import type { PublicOrderDto, CreateOrderDto, AddItemsDto } from './dto';
 
 const LIVE: NonNullable<typeof tableSessions.$inferSelect.status>[] = ['open', 'bill_requested', 'paying'];
@@ -28,6 +31,7 @@ export class QrService {
     private readonly menuSvc: MenuService,
     private readonly buffet: BuffetService,
     private readonly payments: PaymentService,
+    private readonly idem: WebhookIdempotencyService,
   ) {}
 
   // diner scans the printed QR (stable table token) → mint/join a session, return the per-session token
@@ -210,11 +214,25 @@ export class QrService {
   }
 
   // PSP settlement webhook (real PromptPay): the bank/aggregator calls this when the diner has paid.
-  // Shared-secret gated + fail-closed in prod (mirrors the channel webhook); idempotent on re-delivery.
-  async promptPayWebhook(paymentNo: string, secret?: string) {
-    const expected = webhookSecret();
-    if (expected) { if (secret !== expected) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
-    else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+  // Auth (SOX-ICFR #5): additive HMAC-over-rawBody with a replay window when a PROMPTPAY_WEBHOOK_HMAC_SECRET
+  // is configured (mirrors the L-1/L-2 additive pattern), else the legacy static shared secret — now
+  // compared CONSTANT-TIME (was a plain `!==`, a timing side-channel). Fail-closed in prod when neither is
+  // set. Replay is then blocked hard by a (source, tenant:payment_no) idempotency claim below, so a
+  // redelivery within the window can never double-settle / double-post.
+  async promptPayWebhook(paymentNo: string, opts: { secret?: string; rawBody?: Buffer | string; signature?: string; timestamp?: string } = {}) {
+    const hmac = webhookHmacSecret();
+    if (hmac) {
+      const res = verifyInboundWebhook({
+        rawBody: opts.rawBody, hmacSecret: hmac, signature: opts.signature, timestamp: opts.timestamp,
+        toleranceSec: Number(process.env.PROMPTPAY_WEBHOOK_TOLERANCE_SEC ?? process.env.PSP_WEBHOOK_TOLERANCE_SEC ?? 300),
+      });
+      if (res === 'stale') throw new UnauthorizedException({ code: 'WEBHOOK_STALE', message: 'Webhook timestamp outside the replay window', messageTh: 'เวลาของ webhook อยู่นอกช่วงที่อนุญาต' });
+      if (res !== 'ok') throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
+    } else {
+      const expected = webhookSecret();
+      if (expected) { if (!opts.secret || !safeEqualStr(opts.secret, expected)) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
+      else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+    }
     // controlled bypass: discover which tenant + sale this payment belongs to (reads no tenant-private data)
     const found = await this.scope.bypassQuery(async () => {
       const dbx = this.db;
@@ -223,6 +241,10 @@ export class QrService {
     });
     if (!found) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
     return this.scope.run(found.tenantId, async () => {
+      // Replay guard — single-shot per (tenant, payment). A redelivery acks as a duplicate without
+      // re-settling; the claim rides this tenant tx, so a processing failure rolls it back for a clean retry.
+      if ((await this.idem.claim('promptpay', `${found.tenantId}:${paymentNo}`, found.tenantId)) === 'duplicate')
+        return { settled: true, note: 'duplicate_event', payment_no: paymentNo };
       const dbx = this.db;
       const [session] = found.saleNo ? await dbx.select().from(tableSessions).where(eq(tableSessions.saleNo, found.saleNo)).limit(1) : [];
       if (!session) { await this.payments.settle(paymentNo, diner(found.tenantId)); return { settled: true, note: 'no live session (already finalised)' }; }
@@ -254,4 +276,11 @@ export class QrService {
 // The PromptPay settlement webhook is enabled (real, out-of-band) when a shared secret is configured.
 function webhookSecret(): string | undefined {
   return process.env.PROMPTPAY_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET || undefined;
+}
+
+// Optional HMAC signing secret (SOX-ICFR #5). When set, an HMAC-SHA256 signature over the raw body (with a
+// replay-window timestamp) REPLACES the static-secret check — proving possession AND binding to the exact
+// payload. Unset = legacy static shared secret (back-compat).
+function webhookHmacSecret(): string | undefined {
+  return process.env.PROMPTPAY_WEBHOOK_HMAC_SECRET || process.env.PAYMENT_WEBHOOK_HMAC_SECRET || undefined;
 }
