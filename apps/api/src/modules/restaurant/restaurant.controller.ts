@@ -13,6 +13,8 @@ import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto, type Di
 import { ReservationService, type CreateReservationDto, type ListReservationsDto } from './reservation.service';
 import { GuestProfileService, type UpsertDiningProfileDto, type AddCompanionDto } from './guest-profile.service';
 import { TipService, type DistributeTipsDto } from './tip.service';
+import { QrService } from './qr.service';
+import { mintRotatingTableToken } from './qr-token.util';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody, AssignSeatBody,
@@ -98,7 +100,25 @@ export class RestaurantController {
     private readonly reservations: ReservationService,
     private readonly guests: GuestProfileService,
     private readonly tips: TipService,
+    private readonly qr: QrService,
   ) {}
+
+  // ── Public-QR-ordering controls (SOX-ICFR #3). Staff-managed; the diner endpoints live in QrController. ──
+  @Get('qr-settings') @Permissions('order_mgt', 'exec', 'pos')
+  qrSettings(@CurrentUser() u: JwtUser) { return this.qr.getSettings(u.tenantId as number); }
+
+  @Put('qr-settings') @Permissions('order_mgt', 'exec')
+  setQrSettings(@Body(new ZodValidationPipe(z.object({ require_staff_fire: z.boolean() }))) b: { require_staff_fire: boolean }, @CurrentUser() u: JwtUser) {
+    return this.qr.setSettings(u.tenantId as number, b.require_staff_fire, u.username);
+  }
+
+  // A per-table display fetches the current SHORT-TTL rotating QR token to render (refreshes each window);
+  // a diner scans it and POSTs to /api/qr/rstart/:token. Presence-bound alternative to the static placard.
+  @Get('tables/:id/rotating-qr') @Permissions('order_mgt', 'exec', 'pos')
+  rotatingQr(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    const token = mintRotatingTableToken(u.tenantId as number, parseInt(id, 10));
+    return { token, start_url: `/api/qr/rstart/${token}`, window_sec: Number(process.env.QR_ROTATING_WINDOW_MS ?? 30000) / 1000 };
+  }
 
   // ── Tip pooling / distribution (TIP-01). SoD: distributing tips is a manager/finance duty (order_mgt /
   //    exec / hr), separate from the cashier who rings sales (pos_sell) — a cashier can't pay tips to self. ──

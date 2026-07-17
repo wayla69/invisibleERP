@@ -2808,6 +2808,34 @@
       "when": 2023820000366,
       "tag": "0427_free_issue_custody",
       "breakpoints": true
+    },
+    {
+      "idx": 402,
+      "version": "7",
+      "when": 2023820000367,
+      "tag": "0428_scrub_legacy_sha256_password_hashes",
+      "breakpoints": true
+    },
+    {
+      "idx": 403,
+      "version": "7",
+      "when": 2023820000368,
+      "tag": "0429_webhook_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 404,
+      "version": "7",
+      "when": 2023820000369,
+      "tag": "0430_bom_submission_maker",
+      "breakpoints": true
+    },
+    {
+      "idx": 405,
+      "version": "7",
+      "when": 2023820000370,
+      "tag": "0431_qr_settings",
+      "breakpoints": true
     }
   ]
 }

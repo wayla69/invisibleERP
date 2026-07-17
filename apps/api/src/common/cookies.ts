@@ -1,12 +1,43 @@
 // Cookie-based session auth (P1 web hardening). The JWT is delivered to the browser as an httpOnly cookie
 // so it is unreachable from JS (XSS can't exfiltrate it), paired with a readable double-submit CSRF token.
 // Dependency-free (manual Set-Cookie / Cookie parsing) to avoid a new runtime dependency.
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHmac } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 
 export const AUTH_COOKIE = 'ierp_token'; // httpOnly — the JWT (short-lived access token)
 export const CSRF_COOKIE = 'ierp_csrf';  // readable — double-submit CSRF token (also the client's "session exists" flag)
 export const REFRESH_COOKIE = 'ierp_refresh'; // httpOnly — opaque refresh token, scoped to /api/auth
+
+// ── Signed CSRF token (SOX-ICFR #4) ────────────────────────────────────────────────────────────────────
+// The double-submit CSRF token is now BOUND to the session by deriving it as HMAC(secret, jti) rather than a
+// free random value, so a token minted for one session cannot authorize a mutation on another (defends
+// against cross-session token reuse / CSRF-token fixation). It remains a valid double-submit token, so the
+// client contract is unchanged (read the cookie, echo it in X-CSRF-Token). Secret falls back to JWT_SECRET
+// (always present outside dev). Guard-side ENFORCEMENT of the binding is staged behind CSRF_SIGNED_ENFORCE
+// (see guards.ts) so an in-flight session minted before the rollout is not forced to re-auth.
+const CSRF_SECRET = () => process.env.CSRF_SECRET || process.env.JWT_SECRET || '';
+export function signedCsrf(jti: string | undefined): string {
+  const secret = CSRF_SECRET();
+  if (!jti || !secret) return randomBytes(24).toString('hex'); // dev / no-jti fallback → random double-submit
+  return createHmac('sha256', secret).update(`csrf:${jti}`).digest('hex').slice(0, 48);
+}
+
+// Best-effort decode of a JWT payload (base64url) WITHOUT verifying — used only to read our own freshly
+// minted token's jti/role/kind to bind the CSRF cookie and choose the cookie SameSite. Never trust this for
+// authorization (the guard verifies the signature); it only shapes cookies we are about to set.
+function decodeJwtPayload(token: string): { jti?: string; role?: string; kind?: string } {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return {};
+    return JSON.parse(Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) ?? {};
+  } catch { return {}; }
+}
+
+// External/portal-facing principals reach the app through top-level navigation (an email link, a QR page),
+// which a SameSite=Strict cookie would strip → logged-out. They get SameSite=Lax; internal staff get Strict.
+function isPortalAudience(p: { role?: string; kind?: string }): boolean {
+  return p.kind === 'member' || p.role === 'Customer';
+}
 
 // Access-cookie lifetime — coherent with the ACCESS-TOKEN TTL by default (docs/27 R2-4 / AUD-SEC-05: the
 // signed JWT always governs; a cookie that outlives it only confuses audits). Parses JWT_EXPIRES_IN
@@ -38,11 +69,16 @@ const isProd = () => process.env.NODE_ENV === 'production';
 // Read per-call (not memoised) so a deploy can change them without a code change — and so tests can flip
 // them for a single request. Only ever evaluated on login/logout, so the cost is irrelevant.
 const cookieDomain = (): string => (process.env.AUTH_COOKIE_DOMAIN ?? '').trim();
-const cookieSameSite = (): 'Lax' | 'None' | 'Strict' => {
-  const v = (process.env.AUTH_COOKIE_SAMESITE ?? 'Lax').trim().toLowerCase();
-  if (v === 'none') return 'None';
-  if (v === 'strict') return 'Strict';
-  return 'Lax';
+// Resolve SameSite (SOX-ICFR #4). An explicit AUTH_COOKIE_SAMESITE always wins (cross-origin deploys set
+// 'None'; it also preserves any operator override). Otherwise the default is now per-audience: Strict for
+// internal staff sessions (closes CSRF structurally for the internal app), Lax for portal/member sessions
+// (external links must still carry the cookie on top-level navigation). `audience` unknown ⇒ Strict.
+const cookieSameSite = (audience?: 'internal' | 'portal'): 'Lax' | 'None' | 'Strict' => {
+  const raw = (process.env.AUTH_COOKIE_SAMESITE ?? '').trim().toLowerCase();
+  if (raw === 'none') return 'None';
+  if (raw === 'strict') return 'Strict';
+  if (raw === 'lax') return 'Lax';
+  return audience === 'portal' ? 'Lax' : 'Strict'; // no explicit env → per-audience default
 };
 
 // Parse a single cookie value out of the raw Cookie header.
@@ -57,8 +93,8 @@ export function readCookie(req: { headers?: Record<string, any> }, name: string)
   return undefined;
 }
 
-function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxAge?: number; path?: string }): string {
-  const sameSite = cookieSameSite();
+function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxAge?: number; path?: string; audience?: 'internal' | 'portal' }): string {
+  const sameSite = cookieSameSite(opts.audience);
   const domain = cookieDomain();
   const p = [`${name}=${encodeURIComponent(value)}`, `Path=${opts.path ?? '/'}`, `SameSite=${sameSite}`];
   if (domain) p.push(`Domain=${domain}`);
@@ -74,12 +110,16 @@ function serialize(name: string, value: string, opts: { httpOnly?: boolean; maxA
 // CSRF token minted. All cookies are written in ONE set-cookie array — a second reply.header('set-cookie')
 // call would clobber the first.
 export function setAuthCookies(reply: FastifyReply, token: string, refreshToken?: string): string {
-  const csrf = randomBytes(24).toString('hex');
+  // Derive the session's jti (to sign the CSRF token) and audience (to choose SameSite) from the token we
+  // are about to set — no controller plumbing needed. Portal/member sessions → Lax, internal → Strict.
+  const p = decodeJwtPayload(token);
+  const audience: 'internal' | 'portal' = isPortalAudience(p) ? 'portal' : 'internal';
+  const csrf = signedCsrf(p.jti);
   const cookies = [
-    serialize(AUTH_COOKIE, token, { httpOnly: true, maxAge: MAX_AGE }),
-    serialize(CSRF_COOKIE, csrf, { httpOnly: false, maxAge: MAX_AGE }),
+    serialize(AUTH_COOKIE, token, { httpOnly: true, maxAge: MAX_AGE, audience }),
+    serialize(CSRF_COOKIE, csrf, { httpOnly: false, maxAge: MAX_AGE, audience }),
   ];
-  if (refreshToken) cookies.push(serialize(REFRESH_COOKIE, refreshToken, { httpOnly: true, maxAge: REFRESH_MAX_AGE, path: REFRESH_PATH }));
+  if (refreshToken) cookies.push(serialize(REFRESH_COOKIE, refreshToken, { httpOnly: true, maxAge: REFRESH_MAX_AGE, path: REFRESH_PATH, audience }));
   reply.header('set-cookie', cookies);
   return csrf;
 }

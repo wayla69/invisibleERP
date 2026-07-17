@@ -2,7 +2,7 @@ import { Inject, Injectable, UnauthorizedException, BadRequestException, NotFoun
 import { eq, and, ne, inArray, desc } from 'drizzle-orm';
 import QRCode from 'qrcode';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { diningTables, tableSessions, dineInOrders, buffetPackages, payments } from '../../database/schema';
+import { diningTables, tableSessions, dineInOrders, buffetPackages, payments, qrSettings } from '../../database/schema';
 import { PaymentService } from '../payments/payments.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -11,8 +11,11 @@ import { TableService } from './table.service';
 import { DineInService } from './dine-in.service';
 import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
-import { verifyTableToken, type TableClaim } from './qr-token.util';
+import { verifyTableToken, verifyRotatingTableToken, type TableClaim } from './qr-token.util';
 import { rateLimit } from './rate-limit.util';
+import { verifyInboundWebhook } from '../../common/webhook-auth';
+import { safeEqualStr } from '../../common/crypto';
+import { WebhookIdempotencyService } from '../../common/webhook-idempotency.service';
 import type { PublicOrderDto, CreateOrderDto, AddItemsDto } from './dto';
 
 const LIVE: NonNullable<typeof tableSessions.$inferSelect.status>[] = ['open', 'bill_requested', 'paying'];
@@ -28,6 +31,7 @@ export class QrService {
     private readonly menuSvc: MenuService,
     private readonly buffet: BuffetService,
     private readonly payments: PaymentService,
+    private readonly idem: WebhookIdempotencyService,
   ) {}
 
   // diner scans the printed QR (stable table token) → mint/join a session, return the per-session token
@@ -39,7 +43,24 @@ export class QrService {
       return t ? { tenantId: Number(t.tenantId), tableId: Number(t.id) } : null;
     });
     if (!resolved) throw new NotFoundException({ code: 'BAD_QR', message: 'Unknown table QR', messageTh: 'ไม่พบโต๊ะของ QR นี้' });
+    this.throttleTable(resolved.tenantId, resolved.tableId); // one placard can't open sessions unboundedly (#3)
     return this.scope.run(resolved.tenantId, () => this.tables.openTable(resolved.tableId, undefined, 'diner:qr', null));
+  }
+
+  // Presence-bound entry (#3): a per-table display shows a SHORT-TTL rotating token `HMAC(tenant:table:window)`
+  // instead of a permanent printed code — a photographed code expires within ~a minute. Additive; the stable
+  // printed-token start() above is unchanged for static placards.
+  async startRotating(token: string) {
+    const claim = verifyRotatingTableToken(token);
+    if (!claim) throw new UnauthorizedException({ code: 'QR_EXPIRED', message: 'QR expired or invalid — please rescan', messageTh: 'QR หมดอายุหรือไม่ถูกต้อง กรุณาสแกนใหม่' });
+    this.throttleTable(claim.tenantId, claim.tableId);
+    return this.scope.run(claim.tenantId, () => this.tables.openTable(claim.tableId, undefined, 'diner:qr', null));
+  }
+
+  // Per-(tenant, table) start throttle (#3): a single compromised/leaked QR can't exceed a human rate of
+  // opening sessions from one instance. Best-effort in-process (pairs with the edge per-IP 'qr' bucket).
+  private throttleTable(tenantId: number, tableId: number) {
+    rateLimit(`qr:start:${tenantId}:${tableId}`, Number(process.env.QR_START_PER_MIN_PER_TABLE ?? 20), 60_000);
   }
 
   // verify HMAC + live session (under RLS) → claim. Throws 401 on forged/closed token.
@@ -136,9 +157,32 @@ export class QrService {
         const created = await this.dineIn.createOrder({ table_id: claim.tableId, session_id: claim.sessionId, items: dto.items as CreateOrderDto['items'] }, u, { buffet, buffetPackageId });
         orderNo = created.order_no;
       }
+      // Staff-fire gate (#3): when the tenant requires it, a diner's QR order is PARKED, not auto-fired —
+      // floor staff release it (existing POST /api/restaurant/orders/:orderNo/fire), so an injected/spam
+      // order is a queue item a human clears, not an unbounded kitchen/inventory event. Default: auto-fire.
+      const requireStaffFire = await this.requiresStaffFire(claim.tenantId);
+      if (requireStaffFire) return { ...(await this.snapshot(token, claim)), pending_fire: true };
       await this.dineIn.fire(orderNo, u); // diner orders fire straight to the kitchen
       return this.snapshot(token, claim);
     });
+  }
+
+  // Per-tenant QR settings (#3). Assumes we are inside scope.run(tenantId) (RLS-scoped read).
+  private async requiresStaffFire(_tenantId: number): Promise<boolean> {
+    const [row] = await this.db.select({ v: qrSettings.requireStaffFire }).from(qrSettings).limit(1);
+    return row?.v === true;
+  }
+
+  async getSettings(tenantId: number): Promise<{ require_staff_fire: boolean }> {
+    const [row] = await this.db.select({ v: qrSettings.requireStaffFire }).from(qrSettings).where(eq(qrSettings.tenantId, tenantId)).limit(1);
+    return { require_staff_fire: row?.v === true };
+  }
+
+  async setSettings(tenantId: number, requireStaffFire: boolean, actor: string): Promise<{ require_staff_fire: boolean }> {
+    await this.db.insert(qrSettings)
+      .values({ tenantId, requireStaffFire, updatedBy: actor, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: qrSettings.tenantId, set: { requireStaffFire, updatedBy: actor, updatedAt: new Date() } });
+    return { require_staff_fire: requireStaffFire };
   }
 
   // per-session throttle for public diner endpoints — keyed off the verified HMAC token (no DB hit)
@@ -210,11 +254,25 @@ export class QrService {
   }
 
   // PSP settlement webhook (real PromptPay): the bank/aggregator calls this when the diner has paid.
-  // Shared-secret gated + fail-closed in prod (mirrors the channel webhook); idempotent on re-delivery.
-  async promptPayWebhook(paymentNo: string, secret?: string) {
-    const expected = webhookSecret();
-    if (expected) { if (secret !== expected) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
-    else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+  // Auth (SOX-ICFR #5): additive HMAC-over-rawBody with a replay window when a PROMPTPAY_WEBHOOK_HMAC_SECRET
+  // is configured (mirrors the L-1/L-2 additive pattern), else the legacy static shared secret — now
+  // compared CONSTANT-TIME (was a plain `!==`, a timing side-channel). Fail-closed in prod when neither is
+  // set. Replay is then blocked hard by a (source, tenant:payment_no) idempotency claim below, so a
+  // redelivery within the window can never double-settle / double-post.
+  async promptPayWebhook(paymentNo: string, opts: { secret?: string; rawBody?: Buffer | string; signature?: string; timestamp?: string } = {}) {
+    const hmac = webhookHmacSecret();
+    if (hmac) {
+      const res = verifyInboundWebhook({
+        rawBody: opts.rawBody, hmacSecret: hmac, signature: opts.signature, timestamp: opts.timestamp,
+        toleranceSec: Number(process.env.PROMPTPAY_WEBHOOK_TOLERANCE_SEC ?? process.env.PSP_WEBHOOK_TOLERANCE_SEC ?? 300),
+      });
+      if (res === 'stale') throw new UnauthorizedException({ code: 'WEBHOOK_STALE', message: 'Webhook timestamp outside the replay window', messageTh: 'เวลาของ webhook อยู่นอกช่วงที่อนุญาต' });
+      if (res !== 'ok') throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
+    } else {
+      const expected = webhookSecret();
+      if (expected) { if (!opts.secret || !safeEqualStr(opts.secret, expected)) throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIG', message: 'Invalid webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' }); }
+      else if (process.env.NODE_ENV === 'production') throw new UnauthorizedException({ code: 'WEBHOOK_NOT_CONFIGURED', message: 'Webhook secret not configured', messageTh: 'ยังไม่ได้ตั้งค่า webhook secret' });
+    }
     // controlled bypass: discover which tenant + sale this payment belongs to (reads no tenant-private data)
     const found = await this.scope.bypassQuery(async () => {
       const dbx = this.db;
@@ -223,6 +281,10 @@ export class QrService {
     });
     if (!found) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Payment not found', messageTh: 'ไม่พบรายการชำระเงิน' });
     return this.scope.run(found.tenantId, async () => {
+      // Replay guard — single-shot per (tenant, payment). A redelivery acks as a duplicate without
+      // re-settling; the claim rides this tenant tx, so a processing failure rolls it back for a clean retry.
+      if ((await this.idem.claim('promptpay', `${found.tenantId}:${paymentNo}`, found.tenantId)) === 'duplicate')
+        return { settled: true, note: 'duplicate_event', payment_no: paymentNo };
       const dbx = this.db;
       const [session] = found.saleNo ? await dbx.select().from(tableSessions).where(eq(tableSessions.saleNo, found.saleNo)).limit(1) : [];
       if (!session) { await this.payments.settle(paymentNo, diner(found.tenantId)); return { settled: true, note: 'no live session (already finalised)' }; }
@@ -254,4 +316,11 @@ export class QrService {
 // The PromptPay settlement webhook is enabled (real, out-of-band) when a shared secret is configured.
 function webhookSecret(): string | undefined {
   return process.env.PROMPTPAY_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET || undefined;
+}
+
+// Optional HMAC signing secret (SOX-ICFR #5). When set, an HMAC-SHA256 signature over the raw body (with a
+// replay-window timestamp) REPLACES the static-secret check — proving possession AND binding to the exact
+// payload. Unset = legacy static shared secret (back-compat).
+function webhookHmacSecret(): string | undefined {
+  return process.env.PROMPTPAY_WEBHOOK_HMAC_SECRET || process.env.PAYMENT_WEBHOOK_HMAC_SECRET || undefined;
 }

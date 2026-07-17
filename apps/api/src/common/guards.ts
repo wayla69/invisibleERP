@@ -9,11 +9,21 @@ import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { users, revokedTokens, posMembers, tenants } from '../database/schema';
 import { type Role } from '@ierp/shared';
 import { requiresMfaEnrollment, enforcePrivilegedMfa } from './mfa-gate';
-import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
+import { AUTH_COOKIE, CSRF_COOKIE, readCookie, signedCsrf } from './cookies';
 import { scopesToPermissions } from './api-scopes';
 
 // State-changing methods that require a CSRF double-submit check when authenticated via cookie.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Best-effort decode of a JWT's `jti` (unverified — the token is verified later; used only to check the
+// CSRF token was bound to this same session).
+function jwtJti(token: string): string | undefined {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return undefined;
+    return JSON.parse(Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'))?.jti;
+  } catch { return undefined; }
+}
 
 // Constant-time CSRF token comparison — never compare a secret with `===`/`!==` (timing oracle, CWE-208).
 function csrfMatches(header: unknown, cookie: string | undefined): boolean {
@@ -66,8 +76,19 @@ export class JwtAuthGuard implements CanActivate {
     // cookie (double-submit). Header/Bearer-authenticated requests (harnesses, API keys, mobile) are exempt
     // because they don't ride an ambient cookie and so aren't forgeable cross-site.
     if (fromCookie && MUTATING.has((req.method ?? '').toUpperCase())) {
-      if (!csrfMatches(req.headers?.['x-csrf-token'], readCookie(req, CSRF_COOKIE))) {
+      const csrfCookie = readCookie(req, CSRF_COOKIE);
+      if (!csrfMatches(req.headers?.['x-csrf-token'], csrfCookie)) {
         throw new ForbiddenException({ code: 'CSRF', message: 'Missing or invalid CSRF token', messageTh: 'CSRF token ไม่ถูกต้อง' });
+      }
+      // SOX-ICFR #4 (staged) — additionally bind the CSRF token to THIS session: it must equal
+      // HMAC(secret, jti) of the auth cookie, so a token minted for another session can't be replayed.
+      // Enabled via CSRF_SIGNED_ENFORCE=1 after a >TTL rollout window (in-flight sessions minted before the
+      // rollout carry a random token that predates the binding).
+      if (process.env.CSRF_SIGNED_ENFORCE === '1') {
+        const jti = jwtJti(token);
+        if (!jti || !csrfMatches(csrfCookie, signedCsrf(jti))) {
+          throw new ForbiddenException({ code: 'CSRF', message: 'CSRF token not bound to this session', messageTh: 'CSRF token ไม่ผูกกับเซสชันนี้' });
+        }
       }
     }
 

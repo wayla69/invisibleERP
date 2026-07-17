@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Headers, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { Public, NoTx } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -17,6 +17,10 @@ export class QrController {
 
   @Public() @NoTx() @Post('start/:qrToken')
   start(@Param('qrToken') qrToken: string) { return this.qr.start(qrToken); }
+
+  // Presence-bound rotating QR (#3): a short-TTL HMAC(tenant:table:window) token from a per-table display.
+  @Public() @NoTx() @Post('rstart/:token')
+  startRotating(@Param('token') token: string) { return this.qr.startRotating(token); }
 
   @Public() @NoTx() @Get('t/:token')
   status(@Param('token') token: string) { return this.qr.status(token); }
@@ -45,7 +49,16 @@ export class QrController {
   @Public() @NoTx() @Get('t/:token/payment-status')
   paymentStatus(@Param('token') token: string) { return this.qr.paymentStatus(token); }
 
-  // PSP settlement webhook (real PromptPay) — shared-secret gated, fail-closed in prod, idempotent.
+  // PSP settlement webhook (real PromptPay) — static-secret OR additive HMAC-over-rawBody (constant-time,
+  // replay window), fail-closed in prod, and single-shot per payment via the idempotency claim.
   @Public() @NoTx() @Post('webhook/promptpay')
-  promptpayWebhook(@Headers('x-webhook-secret') secret: string | undefined, @Body(new ZodValidationPipe(WebhookBody)) b: z.infer<typeof WebhookBody>) { return this.qr.promptPayWebhook(b.payment_no, secret); }
+  promptpayWebhook(
+    @Req() req: { rawBody?: Buffer | string },
+    @Headers('x-webhook-secret') secret: string | undefined,
+    @Headers('x-webhook-signature') signature: string | undefined,
+    @Headers('x-webhook-timestamp') timestamp: string | undefined,
+    @Body(new ZodValidationPipe(WebhookBody)) b: z.infer<typeof WebhookBody>,
+  ) {
+    return this.qr.promptPayWebhook(b.payment_no, { secret, rawBody: req?.rawBody, signature, timestamp });
+  }
 }
