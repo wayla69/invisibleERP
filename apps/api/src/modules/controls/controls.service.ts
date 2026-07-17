@@ -1,7 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { controlFindings, apTransactions, vendors, purchaseOrders, journalEntries, journalLines } from '../../database/schema';
+import { controlFindings, apTransactions, vendors, purchaseOrders } from '../../database/schema';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import type { JwtUser } from '../../common/decorators';
 
 // Continuous controls monitoring (Platform Phase 19 — B5; GRC-4 disposition + KCI, GOV-02). Detective controls
@@ -48,7 +49,13 @@ function ymd(d: Date): string { return d.toISOString().slice(0, 10); }
 
 @Injectable()
 export class ControlsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   catalog() { return { controls: CONTROLS.map((c) => ({ ...c })) }; }
 
@@ -130,10 +137,7 @@ export class ControlsService {
     // ── 5. Weekend / after-hours manual JE (GL-05) ──
     // A manual adjustment posted on a Saturday/Sunday is a classic management-override red flag. dow 0=Sun,
     // 6=Sat. No user input in the predicate → no injection sink.
-    const weekendJes = await db.select({ entryNo: journalEntries.entryNo, entryDate: journalEntries.entryDate, memo: journalEntries.memo, amt: sql<string>`coalesce(sum(${journalLines.debit}),0)` })
-      .from(journalEntries).leftJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalEntries.source, 'Manual'), sql`extract(dow from ${journalEntries.entryDate}) in (0,6)`))
-      .groupBy(journalEntries.entryNo, journalEntries.entryDate, journalEntries.memo);
+    const weekendJes = await this.ledgerRead.weekendManualEntries();
     for (const r of weekendJes as { entryNo: string; entryDate: string; memo: string | null; amt: string }[]) {
       await this.upsert(user, { controlKey: 'weekend_je', severity: 'warning', entityRef: r.entryNo, detail: `รายการปรับปรุงบัญชี ${r.entryNo} ลงวันที่ ${r.entryDate} (วันหยุดสุดสัปดาห์)${r.memo ? ` — ${r.memo}` : ''}`, amount: Number(r.amt), fingerprint: `weekendje:${r.entryNo}` }); candidates++;
     }
