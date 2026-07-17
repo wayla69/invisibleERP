@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, and, sql, inArray, gte, lt, desc } from 'drizzle-orm';
+import { eq, and, sql, inArray, gte, lt, lte, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { journalEntries, journalLines } from '../../database/schema/ledger';
 import { n } from '../../database/queries';
@@ -55,6 +55,56 @@ export class LedgerReadService {
     }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
     const debit = n(r?.debit), credit = n(r?.credit);
     return { debit, credit, net: debit - credit };
+  }
+
+  // Posted line-level activity for a SMALL set of control accounts — for consumers that reconstruct a
+  // rollforward/movement schedule from the raw legs (e.g. the TFRS-15 contract-liability disclosure).
+  // Returns the line columns as stored (debit/credit are the raw numeric strings) so consumers keep their
+  // own n()/rounding conventions. Deliberately per-account-set, not a general journal browse.
+  async accountActivity(accounts: string[], opts?: { tenantId?: number | null }): Promise<{ accountCode: string; debit: string | null; credit: string | null; entryDate: string; source: string | null }[]> {
+    if (!accounts.length) return [];
+    const conds = [
+      eq(journalEntries.status, 'Posted'),
+      accounts.length === 1 ? eq(journalLines.accountCode, accounts[0]!) : inArray(journalLines.accountCode, accounts),
+    ];
+    if (opts?.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    return this.db.select({
+      accountCode: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit,
+      entryDate: journalEntries.entryDate, source: journalEntries.source,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
+  }
+
+  // Posted gross debit/credit GROUPED per account — the actuals side of budget-vs-actual style reports.
+  // `period` matches the entry's fiscal PERIOD column; `from`/`to` bound entry_date INCLUSIVELY (a fiscal
+  // year is [YYYY-01-01, YYYY-12-31]); `costCenter` filters the line's cost-center code.
+  async accountGrossByAccount(opts?: { tenantId?: number | null; period?: string | null; from?: string | null; to?: string | null; costCenter?: string | null }): Promise<{ accountCode: string; debit: string; credit: string }[]> {
+    const conds = [eq(journalEntries.status, 'Posted')];
+    if (opts?.period) conds.push(sql`${journalEntries.period} = ${opts.period}`);
+    if (opts?.from) conds.push(gte(journalEntries.entryDate, opts.from));
+    if (opts?.to) conds.push(lte(journalEntries.entryDate, opts.to));
+    if (opts?.costCenter) conds.push(eq(journalLines.costCenterCode, opts.costCenter));
+    if (opts?.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    return this.db.select({
+      accountCode: journalLines.accountCode,
+      debit: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
+      credit: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
+    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds)).groupBy(journalLines.accountCode);
+  }
+
+  // Register listing for one posting SOURCE — one row per (entry × positive-DEBIT line), newest first.
+  // Serves maker-checker registers whose document of record IS the journal entry (e.g. the AR write-off
+  // register: every AR-WRITEOFF entry has exactly one expense debit leg, so this yields one row per
+  // write-off regardless of which account the tenant's posting rules routed it to). All statuses returned —
+  // Draft = pending approval, Posted = effective, Voided = rejected.
+  async sourceRegister(source: string, opts?: { tenantId?: number | null; limit?: number }): Promise<{ entryNo: string; status: string | null; memo: string | null; createdBy: string | null; date: string; debit: string | null }[]> {
+    const conds = [eq(journalEntries.source, source), sql`${journalLines.debit} > 0`];
+    if (opts?.tenantId != null) conds.push(eq(journalEntries.tenantId, opts.tenantId));
+    return this.db.select({
+      entryNo: journalEntries.entryNo, status: journalEntries.status, memo: journalEntries.memo,
+      createdBy: journalEntries.createdBy, date: journalEntries.entryDate, debit: journalLines.debit,
+    }).from(journalEntries).innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+      .where(and(...conds)).orderBy(desc(journalEntries.id)).limit(opts?.limit ?? 200);
   }
 
   // The GL cash position (Σ debit − Σ credit over the CASH_ACCOUNTS set, Posted only) — the module

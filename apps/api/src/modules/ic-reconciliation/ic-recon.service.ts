@@ -3,7 +3,7 @@ import { eq, and, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { icReconPeriods } from '../../database/schema/ic-recon';
 import { consolidationGroups } from '../../database/schema/consolidation';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { icTransactions } from '../../database/schema/intercompany';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -16,7 +16,13 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 // so the group's IC balances are reconciled BEFORE consolidation eliminates them. HQ-only; maker-checker.
 @Injectable()
 export class IcReconService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   private hqOnly(user: JwtUser) {
     if (user.role !== 'Admin') throw new ForbiddenException({ code: 'IC_RECON_HQ_ONLY', message: 'Intercompany reconciliation is HQ-only', messageTh: 'การกระทบยอดระหว่างกันทำได้เฉพาะสำนักงานใหญ่' });
@@ -33,14 +39,10 @@ export class IcReconService {
   // items not yet settled. Mirrors consolidation.reconciliation() but self-contained (no service dependency).
   private async snapshot() {
     const db = this.db;
-    const [df] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '1150'), eq(journalEntries.status, 'Posted')));
-    const [dt] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2150'), eq(journalEntries.status, 'Posted')));
+    const dfNet = await this.ledgerRead.accountNet(['1150']);          // Due-From: debit-normal net
+    const dtNet = await this.ledgerRead.accountNet(['2150']);          // Due-To: credit-normal → negate
     const [oc] = await db.select({ c: sql<string>`count(*)` }).from(icTransactions).where(ne(icTransactions.status, 'Settled'));
-    const dueFrom = round4(n(df?.v)), dueTo = round4(n(dt?.v));
+    const dueFrom = round4(dfNet), dueTo = round4(-dtNet);
     return { dueFrom, dueTo, eliminates: Math.abs(dueFrom - dueTo) < 0.01, unmatched: Number(oc?.c ?? 0) };
   }
 
