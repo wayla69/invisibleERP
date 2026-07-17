@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalPeriods, journalEntries, journalLines, reconPeriods } from '../../database/schema';
+import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalPeriods, journalEntries, journalLines, reconPeriods, recurringJournals, prepaidSchedules, fxRevalRuns, deferredTaxRuns } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
@@ -136,6 +136,86 @@ export class CloseService {
       await db.update(closeRuns).set({ status: 'ReadyToLock' }).where(eq(closeRuns.id, dto.closeRunId));
     }
     return this.shape(await this.getRun(dto.closeRunId), steps);
+  }
+
+  // ───────────────────── Close Manager v2 — evidence-driven auto-complete (docs/50 follow-up) ─────────
+  // Marks a checklist step Done ONLY when the system can VERIFY its completion from its own records —
+  // never from judgment. The auto-mappable steps and their evidence:
+  //   recurring     ← zero active recurring templates AND zero active prepaid schedules still due on/before
+  //                   period end (the GL-08/GL-09 sweeps have nothing left to run for the period)
+  //   fx_reval      ← a POSTED GL-18 revaluation run exists for the period
+  //   deferred_tax  ← a POSTED deferred-tax run exists for the period
+  //   depreciation  ← ≥1 POSTED depreciation JE (source 'DEP') dated in the period
+  // Human sign-offs (trial_balance_review, flux_review, disclosure_review, bank_rec, subledger_tieout —
+  // REC-04/CLS-01/CLS-02 judgments) and custom tenant tasks NEVER auto-complete. Attribution mirrors B4's
+  // auto-certify: completedBy "<user> (auto)", detail { auto: true, evidence } — so the GL-15 sign-off
+  // trail always shows which steps a human asserted vs the system proved. Dependencies still gate
+  // (a step whose predecessor is not Done is skipped, never forced). Idempotent: Done steps skip.
+  async autoComplete(closeRunId: number, user: JwtUser) {
+    const db = this.db;
+    const tenantId = this.tenantId();
+    const run = await this.getRun(closeRunId);
+    if (run.status === 'Locked') {
+      throw new BadRequestException({ code: 'PERIOD_ALREADY_LOCKED', message: `Period ${run.period} is already locked`, messageTh: `งวดบัญชี ${run.period} ถูกล็อกแล้ว` });
+    }
+    const period = run.period as string;
+    const end = this.periodEndDate(period);
+    const tconds = (col: any) => (tenantId != null ? [eq(col, tenantId)] : []);
+
+    const evidenceOf: Record<string, () => Promise<{ ok: boolean; evidence: Record<string, unknown> }>> = {
+      recurring: async () => {
+        const [rec] = await db.select({ c: sql<string>`count(*)` }).from(recurringJournals)
+          .where(and(eq(recurringJournals.active, 'true'), lte(recurringJournals.nextRunDate, end), ...tconds(recurringJournals.tenantId)));
+        const [pre] = await db.select({ c: sql<string>`count(*)` }).from(prepaidSchedules)
+          .where(and(eq(prepaidSchedules.status, 'active'), lte(prepaidSchedules.nextRunDate, end), ...tconds(prepaidSchedules.tenantId)));
+        const due = num(rec?.c) + num(pre?.c);
+        return { ok: due === 0, evidence: { due_recurring: num(rec?.c), due_prepaid: num(pre?.c) } };
+      },
+      fx_reval: async () => {
+        const [row] = await db.select({ id: fxRevalRuns.id }).from(fxRevalRuns)
+          .where(and(eq(fxRevalRuns.period, period), eq(fxRevalRuns.status, 'Posted'), ...tconds(fxRevalRuns.tenantId))).limit(1);
+        return { ok: !!row, evidence: { posted_reval_run: row ? Number(row.id) : null } };
+      },
+      deferred_tax: async () => {
+        const [row] = await db.select({ id: deferredTaxRuns.id }).from(deferredTaxRuns)
+          .where(and(eq(deferredTaxRuns.period, period), eq(deferredTaxRuns.status, 'Posted'), ...tconds(deferredTaxRuns.tenantId))).limit(1);
+        return { ok: !!row, evidence: { posted_deferred_tax_run: row ? Number(row.id) : null } };
+      },
+      depreciation: async () => {
+        const [row] = await db.select({ c: sql<string>`count(*)` }).from(journalEntries)
+          .where(and(eq(journalEntries.source, 'DEP'), eq(journalEntries.status, 'Posted'),
+            gte(journalEntries.entryDate, `${period}-01`), lte(journalEntries.entryDate, end), ...tconds(journalEntries.tenantId)));
+        return { ok: num(row?.c) > 0, evidence: { posted_dep_entries: num(row?.c) } };
+      },
+    };
+
+    const steps = await this.stepsFor(closeRunId);
+    const byKey = new Map(steps.map((s: any) => [s.step_key, s]));
+    const completed: { step_key: string; evidence: Record<string, unknown> }[] = [];
+    const skipped: { step_key: string; reason: string }[] = [];
+    for (const s of steps) {
+      const evaluate = evidenceOf[s.step_key];
+      if (!evaluate) continue; // human/custom steps are not auto-mappable — not even reported
+      if (s.status === 'Done') { skipped.push({ step_key: s.step_key, reason: 'already_done' }); continue; }
+      if (s.depends_on_key) {
+        const dep: any = byKey.get(s.depends_on_key);
+        if (dep && dep.status !== 'Done') { skipped.push({ step_key: s.step_key, reason: `dependency_not_done:${s.depends_on_key}` }); continue; }
+      }
+      const { ok, evidence } = await evaluate();
+      if (!ok) { skipped.push({ step_key: s.step_key, reason: 'evidence_not_met' }); continue; }
+      await db.update(closeRunSteps).set({
+        status: 'Done', completedBy: `${user.username} (auto)`, completedAt: new Date(),
+        detail: { auto: true, evidence },
+      }).where(eq(closeRunSteps.id, s.id));
+      completed.push({ step_key: s.step_key, evidence });
+    }
+    // Re-evaluate ReadyToLock exactly as completeStep does.
+    const after = await this.stepsFor(closeRunId);
+    const allReqDone = after.filter((s: any) => s.required).every((s: any) => s.status === 'Done');
+    if (allReqDone && run.status !== 'ReadyToLock') {
+      await db.update(closeRuns).set({ status: 'ReadyToLock' }).where(eq(closeRuns.id, closeRunId));
+    }
+    return { close_run_id: closeRunId, period, completed, skipped, run: this.shape(await this.getRun(closeRunId), after) };
   }
 
   // ───────────────────── Lock the period (maker-checker) ─────────────────────

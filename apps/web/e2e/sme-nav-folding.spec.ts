@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * docs/50 Track B — SME industry-aware nav folding (B1) + the "show hidden menus" escape hatch (B2).
+ * docs/51 Track B — SME industry-aware nav folding (B1) + the "show hidden menus" escape hatch (B2).
  * Proves in a real browser what the unit test can only assert structurally: an SME tenant stamped with a
  * restaurant profile hides the industry-irrelevant domains, opens only the industry's daily-work groups,
  * folds every other subgroup, and lets the user reveal the hidden domains themselves. Backend fully

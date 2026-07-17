@@ -2099,6 +2099,43 @@ async function main() {
   const jeJob = await inj('POST', `/api/bi/subscriptions/${jeSub.json.id}/run`, admin);
   ok('B5: scheduled sweep runs (summary carries the finding counts)', jeJob.status === 200 && /JE exceptions/.test(JSON.stringify(jeJob.json)), JSON.stringify(jeJob.json).slice(0, 140));
 
+  // ── F1 (Close Manager v2, docs/50 follow-up): evidence-driven auto-complete + overdue tasks in GOV-01 ──
+  //    Isolated period 2028-02 so every evidence source is controlled by THIS block.
+  const f1Start = await inj('POST', '/api/ledger/close/start', admin, { period: '2028-02' });
+  const f1RunId = f1Start.json.id;
+  ok('F1: close run started for the isolated period', f1Start.status < 300 && !!f1RunId, `id=${f1RunId}`);
+  const f1Auto0 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('F1: with NO evidence nothing auto-completes (all four candidates evidence_not_met)',
+    f1Auto0.status === 200 && (f1Auto0.json.completed ?? []).length === 0
+      && ['recurring', 'fx_reval', 'deferred_tax', 'depreciation'].every((k) => (f1Auto0.json.skipped ?? []).some((x: any) => x.step_key === k && x.reason === 'evidence_not_met')),
+    JSON.stringify(f1Auto0.json.skipped));
+  // Manufacture the evidence: nothing left due for the sweeps; a Posted reval + deferred-tax run; a Posted DEP entry.
+  await pg.query(`UPDATE recurring_journals SET next_run_date='2028-03-05' WHERE active='true' AND next_run_date <= '2028-02-29'`);
+  await pg.query(`UPDATE prepaid_schedules SET next_run_date='2028-03-05' WHERE status='active' AND next_run_date <= '2028-02-29'`);
+  await db.insert(s.fxRevalRuns).values({ tenantId: hq, period: '2028-02', asOfDate: '2028-02-29', status: 'Posted', runBy: 'admin', postedBy: 'mgr' });
+  await db.insert(s.deferredTaxRuns).values({ tenantId: hq, period: '2028-02', asOfDate: '2028-02-29', status: 'Posted' } as any);
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-F1-DEP-1', entryDate: '2028-02-05', period: '2028-02', source: 'DEP', status: 'Posted', memo: 'F1 dep evidence', tenantId: hq, createdBy: 'system' });
+  const f1Auto1 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('F1: with evidence all four system-verifiable steps flip Done',
+    f1Auto1.status === 200 && ['recurring', 'fx_reval', 'deferred_tax', 'depreciation'].every((k) => (f1Auto1.json.completed ?? []).some((x: any) => x.step_key === k)),
+    JSON.stringify((f1Auto1.json.completed ?? []).map((x: any) => x.step_key)));
+  const f1Steps = f1Auto1.json.run?.steps ?? [];
+  const f1Fx = f1Steps.find((x: any) => x.step_key === 'fx_reval');
+  ok('F1: auto-completed steps carry the (auto) attribution + pinned evidence', f1Fx?.completed_by === 'admin (auto)' && f1Fx?.detail?.auto === true && f1Fx?.detail?.evidence?.posted_reval_run != null, JSON.stringify({ by: f1Fx?.completed_by, d: f1Fx?.detail }));
+  ok('F1: human sign-offs are NEVER auto-completed (trial_balance_review stays Pending; run not ReadyToLock)',
+    f1Steps.find((x: any) => x.step_key === 'trial_balance_review')?.status === 'Pending' && f1Auto1.json.run?.status !== 'ReadyToLock',
+    JSON.stringify({ tb: f1Steps.find((x: any) => x.step_key === 'trial_balance_review')?.status, run: f1Auto1.json.run?.status }));
+  const f1Auto2 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('F1: re-run is idempotent (0 completed, already_done)', (f1Auto2.json.completed ?? []).length === 0 && (f1Auto2.json.skipped ?? []).filter((x: any) => x.reason === 'already_done').length >= 4, JSON.stringify(f1Auto2.json.skipped?.slice(0, 5)));
+  // Overdue close task → GOV-01 pending-approvals worklist (GL-15 detective).
+  await pg.query(`UPDATE close_run_steps SET due_date='2026-01-15' WHERE close_run_id=${Number(f1RunId)} AND step_key='trial_balance_review'`);
+  const f1Gov = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  const f1Over = (f1Gov.items ?? []).find((i: any) => i.type === 'close_task_overdue' && i.ref === 'CLOSE-2028-02:trial_balance_review');
+  ok('F1: an overdue, not-Done close task surfaces in the GOV-01 center with its overdue age', !!f1Over && f1Over.age_days > 0 && f1Over.control === 'GL-15', JSON.stringify(f1Over));
+  await inj('POST', '/api/ledger/close/step', admin, { close_run_id: f1RunId, step_key: 'trial_balance_review' });
+  const f1Gov2 = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  ok('F1: signing the task off clears it from the overdue worklist', !(f1Gov2.items ?? []).some((i: any) => i.type === 'close_task_overdue' && i.ref === 'CLOSE-2028-02:trial_balance_review'), '');
+
   console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides + B5 JE anomaly analytics (GL-28) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

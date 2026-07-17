@@ -795,6 +795,12 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'pj.resv_opt_none': { th: '— ไม่ระบุ —', en: '— None —' },
   'pj.resv_available_label': { th: 'พร้อมจ่าย (available-to-issue):', en: 'Available to issue:' },
   'pj.resv_btn_confirm': { th: 'จอง', en: 'Reserve' },
+  // F2 (PROJ-28): subcontractor free-issue custody
+  'pj.resv_f_subcontract': { th: 'สัญญาผู้รับเหมาช่วง — ฝากวัสดุ (ถ้ามี)', en: 'Subcontract — free-issue custody (optional)' },
+  'pj.resv_subcontract_ph': { th: 'เลขที่สัญญา เช่น SC-2026-001', en: 'Subcontract no., e.g. SC-2026-001' },
+  'pj.resv_ack_tip': { th: 'รับรู้การใช้วัสดุฝาก (ผู้รับเหมาช่วง) — PROJ-28', en: 'Acknowledge free-issue material used (subcontractor) — PROJ-28' },
+  'pj.resv_ack_qty_prompt': { th: 'จำนวนที่ผู้รับเหมาช่วงใช้แล้ว (คงฝาก {qty})', en: 'Quantity used by the subcontractor (in custody {qty})' },
+  'pj.resv_ack_done': { th: 'รับรู้การใช้แล้ว (คงฝาก {left})', en: 'Usage acknowledged (in custody {left})' },
 
   // ── site cash / petty cash (pj.sc_*) ──
   'pj.sc_toast_advance_raised': { th: 'ออกเงินทดรองจ่ายแล้ว', en: 'Advance issued' },

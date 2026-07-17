@@ -188,6 +188,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.close.toast_validate_notready': { th: 'ยังไม่พร้อม: {blockers}', en: 'Not ready: {blockers}' },
   'fnx.close.toast_validate_ready': { th: 'ตรวจสอบแล้ว: พร้อมล็อก', en: 'Checked: ready to lock' },
   'fnx.close.validate': { th: 'ตรวจสอบ', en: 'Check' },
+  'fnx.close.auto_complete': { th: 'ติ๊กอัตโนมัติจากหลักฐานระบบ', en: 'Auto-complete from evidence' },
+  'fnx.close.toast_auto': { th: 'ติ๊กอัตโนมัติแล้ว {done} ขั้นตอน (จากหลักฐานในระบบ)', en: 'Auto-completed {done} step(s) from system evidence' },
   'fnx.close.warnings_count': { th: 'คำเตือน {count}', en: 'Warnings {count}' },
   'fnx.coa.add_to_chart': { th: 'เพิ่มเข้าผังของกิจการ', en: 'Add to my chart' },
   'fnx.coa.all': { th: 'ทั้งหมด', en: 'All' },

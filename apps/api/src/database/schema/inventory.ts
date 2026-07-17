@@ -296,12 +296,20 @@ export const stockReservations = pgTable('stock_reservations', {
   qtyReserved: numeric('qty_reserved', { precision: 18, scale: 4 }).notNull().default('0'),
   status: text('status').notNull().default('held'),                 // held | released | consumed
   issueNo: text('issue_no'),                                        // the INV move / JE that consumed it
+  // Free-issue custody (PROJ-28, migration 0427): a reservation issued FOR A SUBCONTRACTOR carries the
+  // subcontract, and the material stays "in custody" until returned (MRET) or its consumption is
+  // acknowledged (custody_ack_qty) — final subcontract certification is gated on cleared custody.
+  subcontractId: bigint('subcontract_id', { mode: 'number' }),
+  custodyAckQty: numeric('custody_ack_qty', { precision: 18, scale: 4 }).default('0'),
+  custodyAckBy: text('custody_ack_by'),
+  custodyAckAt: timestamp('custody_ack_at', { withTimezone: true }),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byItemLoc: index('idx_stock_res_item').on(t.tenantId, t.itemId, t.locationId),
   byProject: index('idx_stock_res_project').on(t.projectId),
+  bySubcontract: index('idx_stock_res_subcontract').on(t.tenantId, t.subcontractId),
 }));
 export type StockReservation = typeof stockReservations.$inferSelect;
 

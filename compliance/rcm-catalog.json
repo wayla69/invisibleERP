@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 297,
+    "total": 298,
     "by_status": {
-      "Implemented": 294,
+      "Implemented": 295,
       "Partial": 3
     },
     "by_family": {
@@ -28,7 +28,7 @@
       "Multi-Branch & Offline POS": 7,
       "Payroll": 15,
       "Privacy · PDPA": 5,
-      "Project Accounting": 28,
+      "Project Accounting": 29,
       "Quality & Manufacturing": 1,
       "Real Estate": 4,
       "Reconciliation": 5,
@@ -3759,6 +3759,25 @@
       "tod": "Inspect the append-only measurement series (latest = current actual), the realisation % + health/overdue derivation, the program roll-up, and the maker-checker benefit sign-off (confirmer <> author, closed-benefit guards).",
       "toe": "Re-perform: declare a financial benefit (target 1,000,000) under a real program (an unknown program → PROGRAM_NOT_FOUND); record 600,000 → 60% on_track; record 300,000 → the latest is current (30%, at_risk) with the measurement count reflecting both; the author self-confirms → SOD_SELF_APPROVAL; a different user confirms not_realized → status + confirmed_by recorded; a closed benefit rejects a new measurement (BENEFIT_CLOSED) and re-confirmation (BENEFIT_ALREADY_CONFIRMED) — all re-performed by the projects harness.",
       "evidence": "Program benefits register (baseline/target/target-date/owner, realised % + health, confirmer); the append-only measurement series; the program benefits roll-up",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "PROJ-28",
+      "cycle": "Project Accounting",
+      "category": "Application",
+      "fsli": "Free-issue material custody (subcontractor)",
+      "risk": "Company-owned material FREE-ISSUED to a subcontractor for use in their contracted scope leaves the warehouse (its cost capitalised into project WIP at issue) but nobody tracks it in the subcontractor's CUSTODY: unused, diverted or over-drawn material is invisible, and the subcontract can be certified out to its full value and paid while company material remains unaccounted in the subcontractor's hands — shrinkage the works valuation never surfaces.",
+      "assertion": "Existence/Completeness/Accuracy",
+      "description": "Free-issue custody register + final-certification clearance gate (docs/50 Track A parked item, unblocked by A1's return mechanics; migration 0427). A stock reservation may be stamped with the subcontract it is free-issued FOR (POST /api/reservations subcontract_no — fail-closed: SUBCONTRACT_NOT_FOUND / SUBCONTRACT_PROJECT_MISMATCH / SUBCONTRACT_NOT_ACTIVE); the issue rides the existing INV-13 path (Dr 1260 project WIP / Cr 1200) and the material is then tracked IN CUSTODY until it either (a) returns to stock through the governed INV-19 MRET path (qty-capped, reason-mandatory, maker-checker at threshold), or (b) its consumption in the works is acknowledged (POST /api/reservations/:id/custody-ack — capped so acknowledged + posted returns can never exceed the issue, OVER_ACK; who/when stamped). GET /api/reservations/custody?subcontract_no= is the per-subcontract statement (issued / returned / acknowledged / in-custody per reservation + totals). The teeth: certifying the FINAL valuation (the one reaching the subcontract's full contract value, PROJ-17 flow) is BLOCKED while any free-issue reservation still holds unaccounted material (FREE_ISSUE_CUSTODY_OPEN listing the open reservations) — so the subcontractor cannot be fully paid out while company material in their custody is unexplained. Interim valuations are unaffected. GL untouched by ack (the cost already sits in WIP from the issue).",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per free-issue + at final certification",
+      "owner": "Project Manager / QS",
+      "coso": "P10",
+      "code_reference": "reservations.service.ts (reserve subcontract stamping, custodyStatement, ackCustody OVER_ACK); reservations.controller.ts (GET custody, POST :id/custody-ack); subcontracts.service.ts certifyValuation FREE_ISSUE_CUSTODY_OPEN gate (plain filtered custody read — no module cycle); schema stock_reservations.subcontract_id/custody_ack_* + migration 0427; cutover/projects.ts (ToE)",
+      "tod": "Inspect the fail-closed subcontract stamping, the custody statement arithmetic (issued − Posted returns − acknowledged), the OVER_ACK cap, and the final-certification gate.",
+      "toe": "Re-perform (projects ToE): free-issue against a subcontract (wrong project → SUBCONTRACT_PROJECT_MISMATCH; unknown → SUBCONTRACT_NOT_FOUND); custody shows issued; a Posted MRET return and an acknowledgment both reduce it; over-ack → OVER_ACK; the FINAL valuation with open custody → FREE_ISSUE_CUSTODY_OPEN, clears after the residual is acknowledged and then certifies; an interim valuation is never gated.",
+      "evidence": "Custody statements (issued/returned/acked/in-custody); FREE_ISSUE_CUSTODY_OPEN rejections; custody_ack who/when stamps",
       "status": "Implemented"
     },
     {
