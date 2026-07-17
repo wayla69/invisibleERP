@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, ledgers, tenantAccounts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 
@@ -142,7 +142,9 @@ export class LedgerService implements OnModuleInit {
     // canonical account, so a registry typo can never become a silent mis-posting fallback.
     assertPostingEventDefaults(COA.map((a) => a.code));
     const db = this.db;
-    await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
+    // Global boot seed of the canonical (shared) chart of accounts — runs at onModuleInit outside any
+    // request. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool insert.
+    await runGlobalDb('ledger:seed-coa', () => db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code }));
     return { seeded: COA.length };
   }
 

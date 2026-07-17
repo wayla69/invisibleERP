@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { tenantAwareProxy, runGlobalDb } from '../src/database/database.module';
 import { tenantALS } from '../src/common/tenant-context';
 
@@ -43,5 +43,18 @@ describe('tenantAwareProxy — fail-closed (#2)', () => {
     // Accessing/calling transaction outside a context must NOT throw — it is how a scoping tx is opened.
     expect(() => (proxy as any).transaction((tx: any) => tx.select())).not.toThrow();
     expect((proxy as any).transaction((tx: any) => tx.select())).toBe('TX_SELECT');
+  });
+
+  it('mode WARN: a context-free query is logged (call site + stack) but STILL falls through to the base pool', () => {
+    process.env.STRICT_TENANT_PROXY = 'warn';
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Audit-only: no throw, base pool is used, and the site is logged so a rollout sweep can enumerate it.
+      expect((proxy as any).select()).toBe('BASE_SELECT');
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]?.[0])).toMatch(/base-pool select\(\) with NO tenant context/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

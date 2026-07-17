@@ -1,6 +1,6 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { eq, sql, and, desc } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -84,18 +84,22 @@ export class BillingService {
 
   // ───────────────────── Seed (idempotent — run at startup) ─────────────────────
   async seedPlans(): Promise<{ seeded: number }> {
-    const db = this.db;
-    let seeded = 0;
-    for (const p of PLAN_SEED) {
-      await db.insert(plans).values({
-        code: p.code, name: p.name, priceMonthly: p.priceMonthly, priceYearly: p.priceYearly ?? null, currency: p.currency, prices: p.prices ?? null, features: p.features, active: 'true',
-      }).onConflictDoUpdate({
-        target: plans.code,
-        set: { name: p.name, priceMonthly: p.priceMonthly, priceYearly: p.priceYearly ?? null, currency: p.currency, prices: p.prices ?? null, features: p.features, active: 'true' },
-      });
-      seeded++;
-    }
-    return { seeded };
+    // Boot seed of the GLOBAL plan catalogue (`plans` has no tenant_id — a platform-level table, like currency
+    // codes). Runs at startup with no request/tenant context, so it's declared global for STRICT_TENANT_PROXY.
+    return runGlobalDb('billing:seed-plans', async () => {
+      const db = this.db;
+      let seeded = 0;
+      for (const p of PLAN_SEED) {
+        await db.insert(plans).values({
+          code: p.code, name: p.name, priceMonthly: p.priceMonthly, priceYearly: p.priceYearly ?? null, currency: p.currency, prices: p.prices ?? null, features: p.features, active: 'true',
+        }).onConflictDoUpdate({
+          target: plans.code,
+          set: { name: p.name, priceMonthly: p.priceMonthly, priceYearly: p.priceYearly ?? null, currency: p.currency, prices: p.prices ?? null, features: p.features, active: 'true' },
+        });
+        seeded++;
+      }
+      return { seeded };
+    });
   }
 
   // ───────────────────── PUBLIC plan catalogue ─────────────────────
@@ -309,6 +313,10 @@ export class BillingService {
   // Idempotent: re-delivering the same event converges to the same end state. All updates are scoped to a
   // single tenant by tenant_id / stripe_customer_id.
   async applyStripeEvent(event: { type?: string; data?: { object?: any } }): Promise<{ handled: boolean; tenant_id?: number; status?: string }> {
+    // @NoTx Stripe webhook (system caller, no tenant context): resolve the tenant from the Stripe customer/
+    // metadata, then every write is scoped EXPLICITLY by tenant_id. Declared global so the fail-closed proxy
+    // (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('billing:stripe-event', async () => {
     const db = this.db;
     const obj = event?.data?.object ?? {};
     const setByTenant = (tenantId: number, patch: Record<string, unknown>) =>
@@ -356,6 +364,7 @@ export class BillingService {
       default:
         return { handled: false };
     }
+    });
   }
 }
 
