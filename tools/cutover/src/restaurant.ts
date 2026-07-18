@@ -264,6 +264,67 @@ async function main() {
   ok('#3 staff-fire gate: a QR order parks (pending_fire) instead of auto-firing', (orderG.status === 200 || orderG.status === 201) && orderG.json.pending_fire === true, `${orderG.status} pf=${orderG.json.pending_fire}`);
   await inj('PUT', '/api/restaurant/qr-settings', sales1, { require_staff_fire: false }); // reset so later checks see auto-fire
 
+  // ── 0434: dynamic QR + food-priority KDS + recommended + serve-ticket + auto-close-on-paid ──
+  // qr-settings surfaces the three flags
+  const cfg0 = await inj('GET', '/api/restaurant/qr-settings', sales1);
+  ok('0434 qr-settings exposes dynamic_mode + auto_close_on_paid', cfg0.status === 200 && cfg0.json.dynamic_mode === false && cfg0.json.auto_close_on_paid === false, JSON.stringify(cfg0.json));
+
+  // recommended flag flows to the diner menu
+  await inj('POST', '/api/menu/items', sales1, { sku: 'REC1', name: 'เมนูเด็ด', price: 88, station_code: 'hot', is_recommended: true, kds_priority: 4 });
+  const tblRec = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6C', seats: 2 });
+  const openRec = await inj('POST', `/api/restaurant/tables/${tblRec.json.id}/open`, sales1, {});
+  const recMenu = await inj('GET', `/api/qr/t/${openRec.json.public_token}/menu`, undefined);
+  const recItems = [...(recMenu.json.categories ?? []).flatMap((c: any) => c.items), ...(recMenu.json.uncategorized ?? [])];
+  const recItem = recItems.find((i: any) => i.sku === 'REC1');
+  ok('0434 recommended: is_recommended surfaced on the diner menu', recItem?.is_recommended === true, JSON.stringify({ r: recItem?.is_recommended }));
+
+  // food-priority: two items ordered together (same lot) → higher priority sorts first on the KDS feed
+  await inj('POST', '/api/menu/items', sales1, { sku: 'PLO', name: 'จานช้า', price: 40, station_code: 'hot', kds_priority: 0 });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'PHI', name: 'จานด่วน', price: 40, station_code: 'hot', kds_priority: 5 });
+  const tblP = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6P', seats: 2 });
+  const ordP = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblP.json.id, items: [{ sku: 'PLO', qty: 1 }, { sku: 'PHI', qty: 1 }] });
+  await inj('POST', `/api/restaurant/orders/${ordP.json.order_no}/fire`, sales1);
+  const feedP = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  const hotP = (feedP.json.stations ?? []).flatMap((s: any) => s.items).filter((i: any) => i.order_no === ordP.json.order_no);
+  const idxHi = hotP.findIndex((i: any) => i.name === 'จานด่วน');
+  const idxLo = hotP.findIndex((i: any) => i.name === 'จานช้า');
+  ok('0434 food-priority: within one lot the higher priority plates out first', idxHi >= 0 && idxLo >= 0 && idxHi < idxLo && hotP[idxHi].priority === 5, `hi=${idxHi} lo=${idxLo} p=${hotP[idxHi]?.priority}`);
+
+  // stuck alarm: backdate the fired lines past the threshold → feed flags them and counts them
+  await pg.query(`UPDATE dine_in_order_items SET fired_at = now() - interval '15 minutes' WHERE order_id = (SELECT id FROM dine_in_orders WHERE order_no='${ordP.json.order_no}')`);
+  const feedStuck = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  const stuckItems = (feedStuck.json.stations ?? []).flatMap((s: any) => s.items).filter((i: any) => i.order_no === ordP.json.order_no);
+  ok('0434 stuck alarm: lines hung > threshold flagged stuck + counted', feedStuck.json.stuck_minutes === 10 && feedStuck.json.stuck_count >= 2 && stuckItems.every((i: any) => i.stuck === true), `min=${feedStuck.json.stuck_minutes} count=${feedStuck.json.stuck_count}`);
+
+  // serve whole ticket (scan/tap): mark both lines ready then serve the order in one call
+  for (const it of ordP.json.items) { await inj('PATCH', `/api/restaurant/kds/items/${it.item_id}`, sales1, { action: 'start' }); await inj('PATCH', `/api/restaurant/kds/items/${it.item_id}`, sales1, { action: 'ready' }); }
+  const serveP = await inj('POST', '/api/restaurant/kds/serve', sales1, { order_no: ordP.json.order_no });
+  ok('0434 serve-ticket: POST kds/serve marks every ready line served', (serveP.status === 200 || serveP.status === 201) && serveP.json.served === 2, `${serveP.status} served=${serveP.json.served}`);
+  const feedAfterServe = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  ok('0434 serve-ticket: served lines leave the KDS feed', !(feedAfterServe.json.stations ?? []).flatMap((s: any) => s.items).some((i: any) => i.order_no === ordP.json.order_no), 'no active lines remain');
+
+  // dynamic QR: with dynamic_mode on, scanning a NOT-open table refuses; opening it first lets the scan join
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { dynamic_mode: true });
+  const tblDyn = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6D', seats: 2 });
+  const scanClosed = await inj('POST', `/api/qr/start/${tblDyn.json.qr_token}`, undefined, {});
+  ok('0434 dynamic QR: scanning an un-opened table → 401 QR_TABLE_NOT_OPEN', scanClosed.status === 401 && scanClosed.json.error?.code === 'QR_TABLE_NOT_OPEN', `${scanClosed.status} ${scanClosed.json.error?.code}`);
+  await inj('POST', `/api/restaurant/tables/${tblDyn.json.id}/open`, sales1, {});
+  const scanOpen = await inj('POST', `/api/qr/start/${tblDyn.json.qr_token}`, undefined, {});
+  ok('0434 dynamic QR: after staff open the table, the scan joins the session', (scanOpen.status === 200 || scanOpen.status === 201) && !!scanOpen.json.public_token, `${scanOpen.status}`);
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { dynamic_mode: false }); // reset
+
+  // auto-close on paid: a paid table is freed straight to 'available'
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { auto_close_on_paid: true });
+  const tblAC = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6AC', seats: 2 });
+  const openAC = await inj('POST', `/api/restaurant/tables/${tblAC.json.id}/open`, sales1, {});
+  await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblAC.json.id, session_id: openAC.json.session_id, items: [{ sku: 'PLO', qty: 1 }] });
+  const acOrderNo = (await inj('GET', '/api/restaurant/tables/status', sales1)).json.tables.find((x: any) => x.id === tblAC.json.id)?.order?.order_no;
+  await inj('POST', `/api/restaurant/orders/${acOrderNo}/bill`, sales1);
+  await inj('POST', `/api/restaurant/orders/${acOrderNo}/checkout`, sales1, { method: 'Cash' });
+  const tblACafter = (await pg.query(`SELECT status FROM dining_tables WHERE id = ${tblAC.json.id}`)).rows as any[];
+  ok('0434 auto-close: a paid table is freed straight to available (no cleaning hold)', tblACafter[0].status === 'available', tblACafter[0].status);
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { auto_close_on_paid: false }); // reset
+
   // ── staff-initiated buffet (from POS/floor) ──
   const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
   const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });

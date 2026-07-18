@@ -2850,6 +2850,13 @@
       "when": 2023820000372,
       "tag": "0433_vendor_taxid_bidx",
       "breakpoints": true
+    },
+    {
+      "idx": 408,
+      "version": "7",
+      "when": 2023820000373,
+      "tag": "0434_qr_dynamic_kds_priority",
+      "breakpoints": true
     }
   ]
 }

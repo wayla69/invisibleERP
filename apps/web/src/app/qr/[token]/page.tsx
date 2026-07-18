@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Timer, Utensils } from 'lucide-react';
+import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Sparkles, Star, Timer, Utensils } from 'lucide-react';
 import { publicApi } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -23,7 +23,7 @@ type Status = {
 };
 type Option = { option_id: number; name: string; price_delta: number; is_default: boolean };
 type Group = { group_id: number; code: string; name: string; min_select: number; max_select: number; required: boolean; options: Option[] };
-type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
+type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; is_recommended?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
 type Category = { id: number; code: string; name: string; items: MenuItem[] };
 type Menu = { categories: Category[]; uncategorized: MenuItem[]; item_count: number };
 type Tier = { id: number; code: string; name: string; name_en: string | null; price_per_pax: number; time_limit_min: number; overtime_fee_per_pax: number };
@@ -49,6 +49,7 @@ export default function DinerPage() {
   const [tiers, setTiers] = useState<Tier[] | null>(null);
   const [err, setErr] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [catFilter, setCatFilter] = useState<number | 'all' | 'rec'>('all');   // diner menu category filter (0434)
   const [picker, setPicker] = useState<MenuItem | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [buffetOpen, setBuffetOpen] = useState(false);
@@ -103,6 +104,31 @@ export default function DinerPage() {
     if (it.modifier_groups.length) { setPicker(it); return; }
     addToCart({ key: `${it.sku}`, sku: it.sku, name: it.name, qty: 1, unitPrice: isBuffet ? 0 : it.price, optionIds: [], optionLabels: [] });
   };
+  // one tappable menu card — shared by the recommended row and the per-category lists
+  const renderItem = (it: MenuItem) => (
+    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
+      className={cn('flex items-center justify-between rounded-xl border bg-card p-3 text-left transition active:scale-[0.99]', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
+      <div className="flex min-w-0 items-center gap-3">
+        {it.image_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={it.image_url} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
+        )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            {it.is_recommended && <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label={t('pub.qr.recommended')} />}
+            <span className="truncate">{nm(it)}</span>
+            {!it.is_available && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.sold_out')}</Badge>}
+            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.not_selling')}</Badge>}
+          </div>
+          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
+        </div>
+      </div>
+      <div className="ml-3 flex shrink-0 items-center gap-2">
+        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
+        {orderable(it) && <span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
+      </div>
+    </button>
+  );
 
   const submitOrder = async () => {
     if (!cart.length) return;
@@ -137,6 +163,9 @@ export default function DinerPage() {
     );
 
   const allItems = menu ? [...menu.categories.flatMap((c) => c.items), ...menu.uncategorized] : [];
+  const menuCats = menu ? menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []) : [];
+  const recommended = allItems.filter((it) => it.is_recommended && orderable(it));
+  const shownCats = catFilter === 'all' ? menuCats : catFilter === 'rec' ? [] : menuCats.filter((c) => c.id === catFilter);
   const dishes = st?.order?.items.filter((i) => !i.charge) ?? [];
   const chargeLines = st?.order?.items.filter((i) => i.charge) ?? [];
   const canStartBuffet = !isBuffet && !hasOrder && (tiers?.length ?? 0) > 0;
@@ -185,35 +214,39 @@ export default function DinerPage() {
           ) : allItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('pub.qr.menu_empty')}</p>
           ) : (
-            menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []).map((c) => (
-              <section key={c.id} className="mb-4">
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
-                <div className="grid gap-2">
-                  {c.items.map((it) => (
-                    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
-                      className={cn('flex items-center justify-between rounded-lg border bg-card p-3 text-left transition', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
-                      <div className="flex min-w-0 items-center gap-3">
-                        {it.image_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={it.image_url} alt="" className="size-14 shrink-0 rounded-lg object-cover" />
-                        )}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
-                            {!it.is_available && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.sold_out')}</Badge>}
-                            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.not_selling')}</Badge>}
-                          </div>
-                          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
-                        </div>
-                      </div>
-                      <div className="ml-3 flex shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
-                        {orderable(it) && <span className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
-                      </div>
-                    </button>
+            <>
+              {/* category filter — sticky chip bar, horizontally scrollable on the phone */}
+              {(menuCats.length > 1 || recommended.length > 0) && (
+                <div className="sticky top-0 z-10 -mx-4 mb-3 flex gap-2 overflow-x-auto bg-muted/30 px-4 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <FilterChip active={catFilter === 'all'} onClick={() => setCatFilter('all')}>{t('pub.qr.cat_all')}</FilterChip>
+                  {recommended.length > 0 && (
+                    <FilterChip active={catFilter === 'rec'} onClick={() => setCatFilter('rec')}>
+                      <Star className="size-3.5 fill-current" /> {t('pub.qr.recommended')}
+                    </FilterChip>
+                  )}
+                  {menuCats.map((c) => (
+                    <FilterChip key={c.id} active={catFilter === c.id} onClick={() => setCatFilter(c.id)}>{c.name}</FilterChip>
                   ))}
                 </div>
-              </section>
-            ))
+              )}
+
+              {/* recommended row — surfaced first when viewing all, or as the sole list when filtered to it */}
+              {recommended.length > 0 && (catFilter === 'all' || catFilter === 'rec') && (
+                <section className="mb-4">
+                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400">
+                    <Sparkles className="size-4" /> {t('pub.qr.recommended_section')}
+                  </h3>
+                  <div className="grid gap-2">{recommended.map(renderItem)}</div>
+                </section>
+              )}
+
+              {shownCats.map((c) => (
+                <section key={c.id} className="mb-4">
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
+                  <div className="grid gap-2">{c.items.map(renderItem)}</div>
+                </section>
+              ))}
+            </>
           )}
         </TabsContent>
 
@@ -317,6 +350,16 @@ export default function DinerPage() {
       <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder} />
       {buffetOpen && tiers && <BuffetStartDialog tiers={tiers} defaultPax={2} busy={busy} onClose={() => setBuffetOpen(false)} onStart={startBuffet} />}
     </main>
+  );
+}
+
+// diner menu category filter chip
+function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={cn('inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition', active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:border-primary/50')}>
+      {children}
+    </button>
   );
 }
 

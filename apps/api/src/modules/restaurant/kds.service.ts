@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { eq, inArray, asc } from 'drizzle-orm';
+import { eq, inArray, asc, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dineInOrderItems, kitchenStations, dineInOrders, diningTables } from '../../database/schema';
 import { n } from '../../database/queries';
@@ -15,6 +15,10 @@ import { GuestProfileService } from './guest-profile.service';
 export type SlaState = 'ok' | 'warn' | 'late';
 export const kdsSla = (elapsedMin: number, prepMin: number): SlaState =>
   elapsedMin < prepMin ? 'ok' : elapsedMin < prepMin * 1.5 ? 'warn' : 'late';
+
+// Hard "stuck" alarm (POS): a line still cooking past this many minutes since it fired must raise a loud
+// warning on the board regardless of its per-dish prep SLA — a ticket that has hung this long needs a human.
+export const kdsStuckMinutes = (): number => Number(process.env.KDS_STUCK_MINUTES ?? 10);
 
 type KdsStatus = typeof dineInOrderItems.$inferSelect['kdsStatus'];
 type ReadyItem = { item_id: number; name: string; qty: number; station_name: string | null; course: number; ready_at: Date | null; ready_min: number };
@@ -35,7 +39,7 @@ export class KdsService {
       itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
       firedAt: dineInOrderItems.firedAt, estPrep: dineInOrderItems.estPrepMinutes,
-      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course,
+      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course, kdsPriority: dineInOrderItems.kdsPriority,
       stationId: kitchenStations.id, stationCode: kitchenStations.code, stationName: kitchenStations.name, stationSort: kitchenStations.sort, stationPrep: kitchenStations.defaultPrepMinutes,
       orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo, tableId: dineInOrders.tableId,
     }).from(dineInOrderItems)
@@ -43,7 +47,9 @@ export class KdsService {
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
       .where(inArray(dineInOrderItems.kdsStatus, ['queued', 'preparing', 'ready']))
-      .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.course), asc(dineInOrderItems.firedAt));
+      // fire-time order first (oldest lot cooks next); WITHIN one fire lot the higher food-priority plates
+      // out first (same-lot prioritisation); course breaks any remaining tie.
+      .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.firedAt), desc(dineInOrderItems.kdsPriority), asc(dineInOrderItems.course));
 
     // Consent-gated dining cautions of the guest seated at each ticket's table — the kitchen sees
     // "แพ้กุ้ง" on the ticket itself. Computed at read time (never stored on the item), best-effort.
@@ -54,6 +60,8 @@ export class KdsService {
     } catch { /* the board must render regardless */ }
 
     const now = Date.now();
+    const stuckMin = kdsStuckMinutes();
+    let stuckCount = 0;
     const stations = new Map<number, any>();
     for (const r of rows) {
       const sid = Number(r.stationId);
@@ -61,17 +69,21 @@ export class KdsService {
       const fired = r.firedAt ? new Date(r.firedAt).getTime() : now;
       const prep = r.estPrep ?? r.stationPrep ?? 10;
       const elapsedMin = Math.floor((now - fired) / 60000);
+      const stuck = elapsedMin >= stuckMin; // hard aging alarm: hung this long since firing → needs a human
+      if (stuck) stuckCount += 1;
       stations.get(sid).items.push({
-        item_id: Number(r.itemId), order_no: r.orderNo, table_label: r.tableNo ?? null, name: r.name, qty: n(r.qty),
+        item_id: Number(r.itemId), order_no: r.orderNo, table_label: r.tableNo ?? null, table_id: r.tableId != null ? Number(r.tableId) : null,
+        name: r.name, qty: n(r.qty),
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
-        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1,
+        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1, priority: Number(r.kdsPriority) || 0,
         elapsed_min: elapsedMin, prep_min: prep, remaining_min: Math.max(0, prep - elapsedMin),
         sla: kdsSla(elapsedMin, prep), // aging colour (POS-4)
+        stuck, // over the hard stuck threshold (default 10 min)
         guest_allergies: (r.tableId != null && guestFlags.get(Number(r.tableId))?.allergies) || [],
         guest_dietary: (r.tableId != null ? guestFlags.get(Number(r.tableId))?.dietary : null) ?? null,
       });
     }
-    return { stations: [...stations.values()], generated_at: new Date().toISOString() };
+    return { stations: [...stations.values()], stuck_count: stuckCount, stuck_minutes: stuckMin, generated_at: new Date().toISOString() };
   }
 
   // Expo / order-ready pass (POS-4): aggregates the active kitchen lines BY ORDER so the expeditor sees
@@ -81,7 +93,7 @@ export class KdsService {
     const db = this.db;
     const rows = await db.select({
       itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
-      kdsStatus: dineInOrderItems.kdsStatus, readyAt: dineInOrderItems.readyAt, course: dineInOrderItems.course,
+      kdsStatus: dineInOrderItems.kdsStatus, readyAt: dineInOrderItems.readyAt, course: dineInOrderItems.course, kdsPriority: dineInOrderItems.kdsPriority,
       stationName: kitchenStations.name,
       orderId: dineInOrders.id, orderNo: dineInOrders.orderNo, firedAt: dineInOrders.firedAt,
       tableNo: diningTables.tableNo,
@@ -90,7 +102,8 @@ export class KdsService {
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
       .where(inArray(dineInOrderItems.kdsStatus, ACTIVE_KDS))
-      .orderBy(asc(dineInOrders.firedAt), asc(dineInOrderItems.course));
+      // oldest ticket first; within it the higher food-priority line lists first for the runner.
+      .orderBy(asc(dineInOrders.firedAt), desc(dineInOrderItems.kdsPriority), asc(dineInOrderItems.course));
 
     const now = Date.now();
     const orders = new Map<number, any>();

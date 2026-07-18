@@ -2,13 +2,15 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Sparkles, Split, Trash2, Utensils, Wallet, Wifi, WifiOff, X } from 'lucide-react';
+import { Armchair, ArrowLeftRight, Flame, Plus, QrCode, Receipt, Settings2, Sparkles, Split, Trash2, Utensils, Wallet, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useRealtime } from '@/hooks/use-realtime';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { DineInOrderDialog } from '@/components/dine-in-order-dialog';
 import { FloorPlan, statusTh, tone, type TableRow, type ZoneRow } from '@/components/floor-plan';
 import { cn } from '@/lib/utils';
 import { useLang } from '@/lib/i18n';
+import { useMe, hasPerm } from '@/lib/auth';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -19,6 +21,7 @@ import { statusVariant } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -33,6 +36,8 @@ import {
 export default function TablesPage() {
   const { t } = useLang();
   const qc = useQueryClient();
+  const { data: me } = useMe();
+  const [qrCfgOpen, setQrCfgOpen] = useState(false);
   // Live via SSE: a table freed/occupied/fired on another terminal updates this board at once; polling
   // drops to a 20s fallback while the stream is connected.
   const { connected } = useRealtime((e) => { if (e.type === 'table' || e.type === 'kds_item') qc.invalidateQueries({ queryKey: ['tables-status'] }); });
@@ -54,11 +59,17 @@ export default function TablesPage() {
         title={t('px.tbl_page_title')}
         description={t('px.tbl_page_desc')}
         actions={
-          <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
-            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('px.tbl_realtime') : t('px.tbl_connecting')}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {hasPerm(me, 'order_mgt', 'exec') && (
+              <Button variant="outline" size="sm" onClick={() => setQrCfgOpen(true)}><Settings2 className="size-4" /> {t('px.tbl_qr_settings')}</Button>
+            )}
+            <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
+              {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('px.tbl_realtime') : t('px.tbl_connecting')}
+            </Badge>
+          </div>
         }
       />
+      {qrCfgOpen && <QrSettingsDialog onClose={() => setQrCfgOpen(false)} />}
       <Tabs
         tabs={[
           { key: 'board', label: t('px.tbl_tab_board'), content: <Board tables={tables} zones={zones} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
@@ -77,6 +88,48 @@ export default function TablesPage() {
         />
       )}
     </div>
+  );
+}
+
+type QrCfg = { require_staff_fire: boolean; dynamic_mode: boolean; auto_close_on_paid: boolean };
+
+// Public-QR ordering controls (0434): dynamic QR (active only while a table is open), auto-close on paid,
+// and the staff-fire gate. Manager/exec duty. Each toggle PUTs a partial patch and re-reads the server state.
+function QrSettingsDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<QrCfg>({ queryKey: ['qr-settings'], queryFn: () => api('/api/restaurant/qr-settings') });
+  const save = useMutation({
+    mutationFn: (patch: Partial<QrCfg>) => api<QrCfg>('/api/restaurant/qr-settings', { method: 'PUT', body: JSON.stringify(patch) }),
+    onSuccess: (r) => { qc.setQueryData(['qr-settings'], r); notifySuccess(t('px.tbl_qr_settings_saved')); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const cfg = q.data;
+  const row = (key: keyof QrCfg, label: string, hint: string) => (
+    <label className="flex items-start justify-between gap-3 rounded-lg border p-3">
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="block text-xs text-muted-foreground">{hint}</span>
+      </span>
+      <input type="checkbox" className="mt-1 size-4 shrink-0" checked={!!cfg?.[key]} disabled={!cfg || save.isPending} onChange={(e) => save.mutate({ [key]: e.target.checked })} />
+    </label>
+  );
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('px.tbl_qr_settings')}</DialogTitle>
+          <DialogDescription>{t('px.tbl_qr_settings_desc')}</DialogDescription>
+        </DialogHeader>
+        <StateView q={q}>
+          <div className="space-y-2">
+            {row('dynamic_mode', t('px.tbl_qr_dynamic'), t('px.tbl_qr_dynamic_hint'))}
+            {row('auto_close_on_paid', t('px.tbl_qr_autoclose'), t('px.tbl_qr_autoclose_hint'))}
+            {row('require_staff_fire', t('px.tbl_qr_staff_fire'), t('px.tbl_qr_staff_fire_hint'))}
+          </div>
+        </StateView>
+      </DialogContent>
+    </Dialog>
   );
 }
 

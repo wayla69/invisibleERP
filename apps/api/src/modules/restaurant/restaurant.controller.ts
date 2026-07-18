@@ -108,8 +108,8 @@ export class RestaurantController {
   qrSettings(@CurrentUser() u: JwtUser) { return this.qr.getSettings(u.tenantId as number); }
 
   @Put('qr-settings') @Permissions('order_mgt', 'exec')
-  setQrSettings(@Body(new ZodValidationPipe(z.object({ require_staff_fire: z.boolean() }))) b: { require_staff_fire: boolean }, @CurrentUser() u: JwtUser) {
-    return this.qr.setSettings(u.tenantId as number, b.require_staff_fire, u.username);
+  setQrSettings(@Body(new ZodValidationPipe(z.object({ require_staff_fire: z.boolean().optional(), dynamic_mode: z.boolean().optional(), auto_close_on_paid: z.boolean().optional() }))) b: { require_staff_fire?: boolean; dynamic_mode?: boolean; auto_close_on_paid?: boolean }, @CurrentUser() u: JwtUser) {
+    return this.qr.setSettings(u.tenantId as number, b, u.username);
   }
 
   // A per-table display fetches the current SHORT-TTL rotating QR token to render (refreshes each window);
@@ -227,6 +227,9 @@ export class RestaurantController {
   @Get('kds/expo') kdsExpo(@CurrentUser() u: JwtUser) { return this.kds.expo(u); }            // order-ready pass (POS-4)
   @Get('kds/load') kdsLoad(@CurrentUser() u: JwtUser) { return this.kds.stationLoad(u); }     // per-station load + bump/recall counts (POS-4)
   @Patch('kds/items/:id') itemAction(@Param('id') id: string, @Body(new ZodValidationPipe(KdsActionBody)) b: KdsActionDto, @CurrentUser() u: JwtUser) { return this.dineIn.itemTransition(+id, b.action, b.reason, u); }
+  // Serve a whole ticket: scan the order QR (or tap "Served" on the expo card) → every ready line flips to
+  // served in one go, so a finished ticket never lingers on the pass.
+  @Post('kds/serve') serveOrder(@Body(new ZodValidationPipe(z.object({ order_no: z.string().min(1) }))) b: { order_no: string }, @CurrentUser() u: JwtUser) { return this.dineIn.serveOrder(b.order_no, u); }
   @Get('kds/stations') stations(@CurrentUser() u: JwtUser) { return this.kds.listStations(u); }
 
   // ── buffet packages / tiers (Phase 2) — read for POS/floor, manage for master-data roles (SoD) ──

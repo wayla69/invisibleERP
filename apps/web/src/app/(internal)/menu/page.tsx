@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, FolderTree, Pencil, Plus, Power, Utensils } from 'lucide-react';
+import { BookOpen, FolderTree, Pencil, Plus, Power, Star, Utensils } from 'lucide-react';
 import { api } from '@/lib/api';
 import { baht, num } from '@/lib/format';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -36,6 +36,8 @@ interface Item {
   tax_type: string;
   track_stock: boolean;
   is_available: boolean;
+  is_recommended?: boolean;
+  kds_priority?: number;
   has_modifiers?: boolean;
   image_url?: string | null;
 }
@@ -115,6 +117,8 @@ function Items() {
   const [startT, setStartT] = useState('');
   const [endT, setEndT] = useState('');
   const [days, setDays] = useState<boolean[]>([true, true, true, true, true, true, true]);
+  const [recommended, setRecommended] = useState(false);
+  const [priority, setPriority] = useState('0');
 
   const toMin = (t: string) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : undefined);
 
@@ -129,6 +133,8 @@ function Items() {
           type,
           tax_type: taxType,
           category_id: categoryId ? Number(categoryId) : undefined,
+          is_recommended: recommended,
+          kds_priority: Number(priority) || 0,
           avail_start_min: toMin(startT),
           avail_end_min: toMin(endT),
           avail_days: days.every(Boolean) ? undefined : days.map((d) => (d ? '1' : '0')).join(''),
@@ -136,7 +142,7 @@ function Items() {
       }),
     onSuccess: (it) => {
       notifySuccess(t('mf.menu_added', { sku: it.sku, name: it.name }));
-      setSku(''); setName(''); setPrice(''); setCategoryId(''); setStartT(''); setEndT(''); setDays([true, true, true, true, true, true, true]);
+      setSku(''); setName(''); setPrice(''); setCategoryId(''); setStartT(''); setEndT(''); setDays([true, true, true, true, true, true, true]); setRecommended(false); setPriority('0');
       qc.invalidateQueries({ queryKey: ['menu'] });
     },
     onError: (e: Error) => notifyError(e.message),
@@ -211,6 +217,20 @@ function Items() {
                 ))}
               </div>
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="mi-priority">{t('mf.menu_priority_label')}</Label>
+              <Select id="mi-priority" value={priority} onChange={(e) => setPriority(e.target.value)}>
+                <option value="0">{t('mf.menu_priority_normal')}</option>
+                {[1, 2, 3, 4, 5].map((p) => <option key={p} value={p}>{t('mf.menu_priority_n', { n: p })}</option>)}
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-2">{t('mf.menu_recommended_label')}</Label>
+              <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
+                <input type="checkbox" className="size-4" checked={recommended} onChange={(e) => setRecommended(e.target.checked)} />
+                {t('mf.menu_recommended_hint')}
+              </label>
+            </div>
           </div>
           <Button disabled={!sku || !name || price === '' || create.isPending} onClick={() => create.mutate()}>
             <Plus className="size-4" /> {create.isPending ? t('mf.saving') : t('mf.menu_add_btn')}
@@ -230,7 +250,13 @@ function Items() {
                 ? <img src={r.image_url} alt="" className="size-10 shrink-0 rounded-md object-cover" />
                 : <div className="size-10 rounded-md bg-muted" /> },
               { key: 'sku', label: 'SKU' },
-              { key: 'name', label: t('mf.menu_name_label') },
+              { key: 'name', label: t('mf.menu_name_label'), render: (r) => (
+                <span className="flex items-center gap-1.5">
+                  {r.is_recommended && <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label={t('mf.menu_recommended_label')} />}
+                  {r.name}
+                  {(r.kds_priority ?? 0) > 0 && <Badge variant="secondary" className="text-[10px]">{t('mf.menu_priority_n', { n: r.kds_priority ?? 0 })}</Badge>}
+                </span>
+              ) },
               { key: 'category_id', label: t('mf.menu_tab_categories'), render: (r) => catName(r.category_id) },
               { key: 'type', label: t('mf.col_type'), render: (r) => <Badge variant="secondary">{r.type}</Badge> },
               { key: 'price', label: t('mf.menu_col_price'), align: 'right', render: (r) => <span className="tabular">{baht(r.price)}</span> },
@@ -280,6 +306,8 @@ function EditItemDialog({ item, categories, onClose }: { item: Item; categories:
   const [cost, setCost] = useState(item.cost != null ? String(item.cost) : '');
   const [categoryId, setCategoryId] = useState(item.category_id != null ? String(item.category_id) : '');
   const [taxType, setTaxType] = useState(item.tax_type);
+  const [recommended, setRecommended] = useState(!!item.is_recommended);
+  const [priority, setPriority] = useState(String(item.kds_priority ?? 0));
 
   const save = useMutation({
     mutationFn: () =>
@@ -292,6 +320,8 @@ function EditItemDialog({ item, categories, onClose }: { item: Item; categories:
           cost: cost === '' ? undefined : Number(cost),
           category_id: categoryId ? Number(categoryId) : undefined,
           tax_type: taxType,
+          is_recommended: recommended,
+          kds_priority: Number(priority) || 0,
         }),
       }),
     onSuccess: () => {
@@ -344,6 +374,20 @@ function EditItemDialog({ item, categories, onClose }: { item: Item; categories:
               <option value="exempt">{t('mf.menu_tax_exempt')}</option>
               <option value="zero">{t('mf.menu_tax_zero')}</option>
             </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ei-priority">{t('mf.menu_priority_label')}</Label>
+            <Select id="ei-priority" value={priority} onChange={(e) => setPriority(e.target.value)}>
+              <option value="0">{t('mf.menu_priority_normal')}</option>
+              {[1, 2, 3, 4, 5].map((p) => <option key={p} value={p}>{t('mf.menu_priority_n', { n: p })}</option>)}
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>{t('mf.menu_recommended_label')}</Label>
+            <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
+              <input type="checkbox" className="size-4" checked={recommended} onChange={(e) => setRecommended(e.target.checked)} />
+              {t('mf.menu_recommended_hint')}
+            </label>
           </div>
         </div>
         <DialogFooter>

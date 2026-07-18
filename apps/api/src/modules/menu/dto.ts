@@ -24,6 +24,8 @@ export const CreateItemBody = z.object({
   image_url: z.string().optional(),
   description: z.string().optional(),
   sort: z.number().int().optional(),
+  is_recommended: z.boolean().optional(),                 // "เมนูแนะนำ" — featured first on the diner QR menu
+  kds_priority: z.number().int().min(0).max(9).optional(), // food-prioritisation: higher plates out first in a lot
   // day-parting (Asia/Bangkok): 7-char day mask (idx0=Sun) + minutes-from-midnight window; null = always
   avail_days: z.string().regex(/^[01]{7}$/).optional().nullable(),
   avail_start_min: z.number().int().min(0).max(1440).optional().nullable(),
@@ -46,6 +48,8 @@ export const UpdateItemBody = z.object({
   description: z.string().optional(),
   sort: z.number().int().optional(),
   active: z.boolean().optional(),
+  is_recommended: z.boolean().optional(),
+  kds_priority: z.number().int().min(0).max(9).optional(),
   avail_days: z.string().regex(/^[01]{7}$/).optional().nullable(),
   avail_start_min: z.number().int().min(0).max(1440).optional().nullable(),
   avail_end_min: z.number().int().min(0).max(1440).optional().nullable(),
