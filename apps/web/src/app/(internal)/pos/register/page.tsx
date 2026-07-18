@@ -46,7 +46,10 @@ export default function RegisterPage() {
   // generic register: no table/dine-in affordances (attach-table, floor link, order-type/pax/service-charge).
   // Default to the restaurant layout while the profile loads (safe — that is the current behaviour).
   const profileQ = useQuery<{ business_type: string; tables: boolean; kds: boolean; sale_path: string }>({ queryKey: ['pos-profile'], queryFn: () => api('/api/pos/profile') });
-  const restaurant = profileQ.data ? profileQ.data.tables : true;
+  // Restaurant layout is the default: only drop to the generic register when the profile EXPLICITLY says
+  // tables === false. This stays robust to a still-loading, errored, or partial profile response (all of
+  // which keep the current restaurant behaviour) rather than flipping generic on any falsy `tables`.
+  const restaurant = profileQ.data?.tables !== false;
   const favIds = useMemo(() => new Set<number>(prefsQ.data?.pos_fav ?? []), [prefsQ.data]);
   const favMut = useMutation({
     mutationFn: (ids: number[]) => api('/api/user-prefs', { method: 'PUT', body: JSON.stringify({ pos_fav: ids }) }),
@@ -151,10 +154,18 @@ export default function RegisterPage() {
       if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
       const genericItems = lines.map((l) => ({ item_id: l.sku, item_description: l.name, qty: l.qty, unit_price: l.unit_price, discount_pct: l.discount_pct || undefined, modifier_option_ids: l.modifier_option_ids }));
       const genericDiscount = discountPct > 0 ? Math.round(cartTotals(lines).sub * discountPct) / 100 : undefined;
-      const gsale = await api<{ sale_no: string; total: number }>('/api/pos/sales', {
-        method: 'POST',
-        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
-      });
+      let gsale: { sale_no: string; total: number };
+      try {
+        gsale = await api<{ sale_no: string; total: number }>('/api/pos/sales', {
+          method: 'POST',
+          body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
+        });
+      } catch (e) {
+        // network died mid-checkout while the browser still reports online → queue the sale offline instead
+        // of erroring at the cashier (mirrors the restaurant path). HTTP errors (validation etc.) surface.
+        if ((e as Error & { status?: number }).status === undefined) return queueOffline();
+        throw e;
+      }
       const gtotal = Number(gsale.total ?? tot.total);
       const gchange = cashReceived != null ? Math.round((cashReceived - gtotal) * 100) / 100 : undefined;
       tm.pushDisplay({ message: t('px.reg_disp_thanks'), total: gtotal, amount_due: cashReceived ?? undefined, change: gchange });
