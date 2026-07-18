@@ -42,6 +42,11 @@ export default function RegisterPage() {
   // last good localStorage snapshot, so a reload mid-outage still renders a sellable menu.
   const menu = useQuery<MenuResp>({ queryKey: ['menu'], networkMode: 'always', queryFn: () => fetchMenuOfflineFirst(() => api('/api/menu')) });
   const prefsQ = useQuery<UserPrefs>({ queryKey: ['user-prefs'], queryFn: () => api('/api/user-prefs') });
+  // docs/52 Phase 1 — business-type POS profile. A non-restaurant tenant (retail/services/…) gets a clean
+  // generic register: no table/dine-in affordances (attach-table, floor link, order-type/pax/service-charge).
+  // Default to the restaurant layout while the profile loads (safe — that is the current behaviour).
+  const profileQ = useQuery<{ business_type: string; tables: boolean; kds: boolean; sale_path: string }>({ queryKey: ['pos-profile'], queryFn: () => api('/api/pos/profile') });
+  const restaurant = profileQ.data ? profileQ.data.tables : true;
   const favIds = useMemo(() => new Set<number>(prefsQ.data?.pos_fav ?? []), [prefsQ.data]);
   const favMut = useMutation({
     mutationFn: (ids: number[]) => api('/api/user-prefs', { method: 'PUT', body: JSON.stringify({ pos_fav: ids }) }),
@@ -230,16 +235,16 @@ export default function RegisterPage() {
               {online ? <RefreshCw className="size-4" /> : <CloudOff className="size-4" />} {t('px.reg_pending_sync', { count: outbox.count })}
             </Button>
           )}
-          {mode === 'dinein' && tableNo ? (
+          {restaurant && (mode === 'dinein' && tableNo ? (
             <Badge variant="info" className="gap-1">
               <Utensils className="size-3" /> {t('px.reg_table_label', { tableNo })}
               <button aria-label={t('px.reg_aria_clear_table')} onClick={() => { setMode('quick'); setTableId(null); setTableNo(null); }} className="ml-1 hover:text-foreground"><X className="size-3" /></button>
             </Badge>
           ) : (
             <Button variant="outline" size="sm" onClick={() => setTablePicker(true)}><Utensils className="size-4" /> {t('px.reg_attach_table')}</Button>
-          )}
+          ))}
           <Button variant="outline" size="sm" onClick={() => setHeldOpen(true)}><ListChecks className="size-4" /> {t('px.reg_held_bills')}</Button>
-          <Button asChild variant="ghost" size="sm"><Link href="/tables">{t('px.reg_tables_link')}</Link></Button>
+          {restaurant && <Button asChild variant="ghost" size="sm"><Link href="/tables">{t('px.reg_tables_link')}</Link></Button>}
         </div>
       </div>
 
@@ -257,12 +262,14 @@ export default function RegisterPage() {
               onClear={clearCart}
               onHold={hold}
               onCheckout={() => setCheckout(true)}
-              orderType={orderType}
-              onOrderType={changeOrderType}
-              pax={pax}
-              onPax={(delta) => setPax((p) => Math.max(1, p + delta))}
-              serviceChargePct={serviceChargePct}
-              onServiceCharge={setServiceChargePct}
+              {...(restaurant ? {
+                orderType,
+                onOrderType: changeOrderType,
+                pax,
+                onPax: (delta: number) => setPax((p) => Math.max(1, p + delta)),
+                serviceChargePct,
+                onServiceCharge: setServiceChargePct,
+              } : {})}
             />
           </div>
         )}

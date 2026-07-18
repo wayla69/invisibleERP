@@ -98,6 +98,7 @@
     "splitbill": "tsx src/splitbill.ts",
     "cashreport": "tsx src/cashreport.ts",
     "pos-discount": "tsx src/pos-discount.ts",
+    "pos-profile": "tsx src/pos-profile.ts",
     "pricing": "tsx src/pricing.ts",
     "returns": "tsx src/returns.ts",
     "bankrec": "tsx src/bankrec.ts",

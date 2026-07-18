@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PosController, OrdersController } from './pos.controller';
 import { PosService } from './pos.service';
+import { PosProfileService } from './pos-profile.service';
 import { SplitController } from './split.controller';
 import { SplitBillService } from './split.service';
 import { ReceiptController } from './receipt.controller';
@@ -29,7 +30,7 @@ import { PosTerminalModule } from './terminal/pos-terminal.module';
   imports: [RestaurantModule, PaymentsModule, TaxModule, MessagingModule, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
   controllers: [PosController, OrdersController, SplitController, ReceiptController],
   // TaxDocsPdfService + RealtimeScope have no own deps (DRIZZLE is global) → provide directly.
-  providers: [PosService, SplitBillService, ReceiptService, ReceiptDeliveryService, NoopReceiptProvider, CfdService, TaxDocsPdfService, RealtimeScope],
-  exports: [PosService, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
+  providers: [PosService, PosProfileService, SplitBillService, ReceiptService, ReceiptDeliveryService, NoopReceiptProvider, CfdService, TaxDocsPdfService, RealtimeScope],
+  exports: [PosService, PosProfileService, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
 })
 export class PosModule {}

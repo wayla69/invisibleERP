@@ -4,6 +4,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { qint } from '../../common/query';
 import { PosService, type CreateOrderDto } from './pos.service';
+import { PosProfileService } from './pos-profile.service';
 import { ConvertAbbBody, type ConvertAbbDto } from '../tax/documents/dto';
 
 const CreateOrderBody = z.object({
@@ -24,7 +25,13 @@ const UpdateStatusBody = z.object({
 
 @Controller('api/pos')
 export class PosController {
-  constructor(private readonly svc: PosService) {}
+  constructor(private readonly svc: PosService, private readonly profile: PosProfileService) {}
+
+  // docs/52 Phase 1 — the caller's tenant's business-type POS feature profile (tables/KDS/courses/buffet/
+  // recipe_deduction/revenue_event/sale_path), derived from tenants.industry. The register reads this to
+  // hide restaurant surfaces for a retail/services business. Readable by any POS operator.
+  @Get('profile') @Permissions('pos', 'pos_sell', 'pos_till', 'cust_pos', 'order_mgt', 'dashboard')
+  posProfile(@CurrentUser() u: JwtUser) { return this.profile.resolve(u); }
 
   // Read-only shift KPIs — also visible to single-duty POS operators (Cashier/PosSupervisor) for the POS home.
   @Get('summary') @Permissions('pos', 'pos_sell', 'pos_till', 'dashboard')

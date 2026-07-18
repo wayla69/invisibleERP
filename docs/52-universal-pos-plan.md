@@ -61,9 +61,22 @@ This is what makes the other nine dimensions deliverable **without forking the U
 - **Phase 0 — First increment (this change, delivered):** the universal cashier essentials that every
   business needs immediately — **#1 cash tendering / change-due**, **#2 credit note (ใบลดหนี้) auto-issued on
   a return**, **#3 pending-settlement reconciliation worklist**. See §6.
-- **Phase 1 — Business-type feature profile + generic checkout path.** A `SALE.GOODS`/`SALE.SERVICE` posting
-  event and a checkout that skips table/KDS/recipe; the register reads the profile and hides restaurant
-  surfaces. *Highest leverage — unblocks every non-restaurant tenant.*
+- **Phase 1 — Business-type feature profile + generic checkout path.** *Highest leverage — unblocks every
+  non-restaurant tenant.* Split into two shippable slices:
+  - **Phase 1a — profile + de-restaurant the register (DELIVERED).** `GET /api/pos/profile`
+    (`PosProfileService`) derives the register/checkout feature set from `tenants.industry`
+    (restaurant → tables/KDS/courses + `SALE.FOOD`; retail/distribution/general → generic register +
+    `SALE.GOODS`; services → `SALE.SERVICE`; unset → restaurant, non-breaking). The internal register reads
+    it and hides the table/dine-in affordances (attach-table, floor link, order-type/pax/service-charge) for
+    a non-restaurant tenant. New neutral revenue events `SALE.GOODS`/`SALE.SERVICE` (both default `4000` — no
+    GL drift — remappable via a GL-24 override). **No money-path change** (the sale still rings through the
+    existing engine), so golden/writeflow are untouched. Harness `pos-profile`.
+  - **Phase 1b — generic sale-path cutover (NEXT).** Route the non-restaurant register to a generic checkout
+    that creates **no** `dine_in_orders` and posts revenue under `profile.revenue_event` — reusing the
+    already-generic `PortalPosService.createSale` engine (extract a shared `PosSaleService`; add an optional
+    `revenueEvent` param, default `SALE.FOOD` so existing behaviour is byte-identical). Money-path-sensitive
+    → its own PR with a golden re-pin only if intentional. Plus per-tenant feature-flag overrides on the
+    industry defaults.
 - **Phase 2 — Sellable-item model uplift.** Unify the sellable catalog with the `items` master; add
   **variants / matrix items**, first-class **service** & **non-inventory** items, general **kits/bundles**.
 - **Phase 3 — Regulated-goods capture.** **Serial/IMEI** and **lot/expiry** on the sale line (electronics,
@@ -96,4 +109,5 @@ filtering, and docs synced in the same change (narratives, user manual, UAT, RCM
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.2 | 2026-07-18 | Platform | **Phase 1a delivered — business-type POS profile + de-restaurant the register.** New `PosProfileService` + `GET /api/pos/profile` derives `{tables,kds,courses,buffet,recipe_deduction,revenue_event,sale_path}` from `tenants.industry` (unset → restaurant, non-breaking). Neutral revenue events `SALE.GOODS`/`SALE.SERVICE` added to `SALES_POSTING_EVENTS` (both default `4000` → no GL drift). The internal register reads the profile and hides table/dine-in affordances for a non-restaurant tenant. No money-path change (golden/writeflow untouched). Harness `pos-profile` (8 checks). Phase 1 split into 1a (this) + 1b (generic sale-path cutover, next). |
 | 0.1 | 2026-07-18 | Platform | Initial plan. Gap analysis across ten dimensions; business-type feature profile as the linchpin; six-phase roadmap; Phase 0 (#1/#2/#3) delivered. |

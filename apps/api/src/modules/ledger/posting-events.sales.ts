@@ -7,6 +7,15 @@ import { type PostingEventDef, r, DR, CR } from './posting-events.types';
 export const SALES_POSTING_EVENTS: Record<string, PostingEventDef> = {
   'SALE.FOOD':        { name: 'Sale — revenue',                description: 'POS/AR sale revenue leg (composes UNDER item-determination when the flag is on)', wired: true, roles: {
     revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
+  // docs/52 Phase 1 — business-type-neutral revenue events for a UNIVERSAL POS. The generic (non-restaurant)
+  // checkout posts revenue via the business-type profile's revenue_event (SALE.GOODS for retail, SALE.SERVICE
+  // for services) instead of the restaurant-flavoured SALE.FOOD. Both DEFAULT to 4000 — byte-identical to the
+  // current generic-sale GL — so a business can remap SALE.SERVICE to a distinct service-income account via a
+  // GL-24 posting override (`free` tier) without a code change, and existing books never drift.
+  'SALE.GOODS':       { name: 'Sale — goods revenue',          description: 'Generic retail-goods sale revenue leg (universal POS; profile revenue_event)', wired: true, roles: {
+    revenue: r(CR, '4000', 'free', 'Sales revenue — goods') } },
+  'SALE.SERVICE':     { name: 'Sale — service revenue',        description: 'Generic service sale revenue leg (universal POS; remap to a service-income account via override)', wired: true, roles: {
+    revenue: r(CR, '4000', 'free', 'Sales revenue — services') } },
   'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
     vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
   'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: true, roles: {
