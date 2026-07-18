@@ -23,7 +23,11 @@
 // ignored gracefully by the web, so drift degrades folding rather than breaking navigation.
 
 /** Industry keys — mirrors the CoA template keys (`apps/api/src/modules/ledger/coa-templates.ts`). */
-export const SME_NAV_INDUSTRIES = ['restaurant', 'retail', 'distribution', 'services', 'general'] as const;
+export const SME_NAV_INDUSTRIES = [
+  'restaurant', 'retail', 'distribution', 'services', 'manufacturing', 'construction', 'ecommerce',
+  'hospitality', 'healthcare', 'professional', 'agriculture', 'automotive', 'logistics', 'education',
+  'nonprofit', 'realestate', 'general',
+] as const;
 export type SmeNavIndustry = (typeof SME_NAV_INDUSTRIES)[number];
 
 export interface SmeNavProfile {
@@ -100,6 +104,66 @@ export const SME_NAV_PROFILES: Record<SmeNavIndustry, SmeNavProfile> = {
   services: {
     hidden: ['nav.group.supply_chain', 'nav.group.store_ops'],
     open: ['nav.group.overview', 'nav.group.commercial', 'nav.group.crm', 'nav.group.projects'],
+  },
+  // Factory floor: production + procurement are the daily work; no POS/store, no projects.
+  manufacturing: {
+    hidden: ['nav.group.pos_sales', 'nav.group.store_ops', 'nav.group.projects'],
+    open: ['nav.group.overview', 'nav.group.supply_chain', 'nav.group.production', 'nav.group.procurement'],
+  },
+  // Contractors run on the project spine + procurement of materials; no POS/store.
+  construction: {
+    hidden: ['nav.group.pos_sales', 'nav.group.store_ops'],
+    open: ['nav.group.overview', 'nav.group.projects', 'nav.group.pm', 'nav.group.realestate'],
+  },
+  // Online sellers live in commercial (CRM/loyalty/pricing) over their catalogue; no physical store ops.
+  ecommerce: {
+    hidden: ['nav.group.store_ops'],
+    open: ['nav.group.overview', 'nav.group.commercial', 'nav.group.crm', 'nav.group.pricing'],
+  },
+  // Hotels: front-of-house POS + dining; no projects.
+  hospitality: {
+    hidden: ['nav.group.projects'],
+    open: ['nav.group.overview', 'nav.group.pos_sales', 'nav.sub.pos_frontline', 'nav.sub.pos_dining'],
+  },
+  // Clinics bill via POS and manage patients in CRM; no store-ops/projects.
+  healthcare: {
+    hidden: ['nav.group.store_ops', 'nav.group.projects'],
+    open: ['nav.group.overview', 'nav.group.commercial', 'nav.group.crm'],
+  },
+  // Consultancies: project delivery + client CRM; no supply chain / POS / store.
+  professional: {
+    hidden: ['nav.group.supply_chain', 'nav.group.store_ops', 'nav.group.pos_sales'],
+    open: ['nav.group.overview', 'nav.group.projects', 'nav.group.pm', 'nav.group.commercial', 'nav.group.crm'],
+  },
+  // Farms: inventory of produce/supplies is the core; no POS/store/projects.
+  agriculture: {
+    hidden: ['nav.group.pos_sales', 'nav.group.store_ops', 'nav.group.projects'],
+    open: ['nav.group.overview', 'nav.group.supply_chain', 'nav.group.inventory'],
+  },
+  // Repair centres sell parts + labour at the counter; no projects.
+  automotive: {
+    hidden: ['nav.group.projects'],
+    open: ['nav.group.overview', 'nav.group.pos_sales', 'nav.sub.pos_frontline', 'nav.sub.pos_shift'],
+  },
+  // Carriers run on procurement/fleet; no POS/store.
+  logistics: {
+    hidden: ['nav.group.pos_sales', 'nav.group.store_ops'],
+    open: ['nav.group.overview', 'nav.group.supply_chain', 'nav.group.procurement'],
+  },
+  // Schools manage students in CRM + fees in finance; no supply chain / POS / store / projects.
+  education: {
+    hidden: ['nav.group.supply_chain', 'nav.group.store_ops', 'nav.group.pos_sales', 'nav.group.projects'],
+    open: ['nav.group.overview', 'nav.group.commercial', 'nav.group.crm'],
+  },
+  // Non-profits track donors in CRM + funds in finance; no supply chain / POS / store.
+  nonprofit: {
+    hidden: ['nav.group.supply_chain', 'nav.group.store_ops', 'nav.group.pos_sales'],
+    open: ['nav.group.overview', 'nav.group.commercial', 'nav.group.crm'],
+  },
+  // Property firms live in the project/real-estate spine; no supply chain / POS / store.
+  realestate: {
+    hidden: ['nav.group.supply_chain', 'nav.group.store_ops', 'nav.group.pos_sales'],
+    open: ['nav.group.overview', 'nav.group.projects', 'nav.group.pm', 'nav.group.realestate'],
   },
   general: {
     hidden: [],

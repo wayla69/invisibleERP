@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.7 · 2026-07-17** · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
+**Status: DRAFT v0.8 · 2026-07-18** · *v0.8: Business type — the Sign-up business-type list expanded from 5 to 17 (added manufacturing, construction, e-commerce, hospitality, healthcare, professional services, agriculture, automotive, logistics, education, non-profit, real estate); each still tailors your chart of accounts and starting menu.* · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -31,7 +31,10 @@ finding your way around, and logging out.
 [screenshot: login page with username and password fields]
 
 > **Creating a brand-new company?** On the self-serve **Sign up** page you choose your
-> **business type** (restaurant, retail, distribution, services, or general). Your
+> **business type** from a full list — restaurant, retail, wholesale/distribution, services,
+> manufacturing, construction, e-commerce, hospitality (hotel), healthcare/clinic, professional
+> services, agriculture, automotive/service, logistics/transport, education, non-profit, real
+> estate, or general (full chart). Your
 > company starts with a **chart of accounts tailored to that industry** — the right
 > accounts switched on and named in your industry's language — so your books are
 > meaningful from day one. You can change or extend it later under **Onboarding →

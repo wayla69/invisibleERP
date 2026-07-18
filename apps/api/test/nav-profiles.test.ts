@@ -15,7 +15,11 @@ import {
 
 describe('SME nav profiles (B1 industry-aware folding)', () => {
   it('covers every industry key, including the general fallback', () => {
-    expect([...SME_NAV_INDUSTRIES].sort()).toEqual(['distribution', 'general', 'restaurant', 'retail', 'services']);
+    expect([...SME_NAV_INDUSTRIES].sort()).toEqual([
+      'agriculture', 'automotive', 'construction', 'distribution', 'ecommerce', 'education', 'general',
+      'healthcare', 'hospitality', 'logistics', 'manufacturing', 'nonprofit', 'professional', 'realestate',
+      'restaurant', 'retail', 'services',
+    ]);
     for (const ind of SME_NAV_INDUSTRIES) expect(SME_NAV_PROFILES[ind]).toBeTruthy();
   });
 

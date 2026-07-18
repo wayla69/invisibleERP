@@ -66,7 +66,13 @@ interface SignupRequest {
   requested_at: string | null;
 }
 
-const INDUSTRIES = ['restaurant', 'retail', 'distribution', 'services', 'manufacturing'];
+// Mirrors INDUSTRY_KEYS in apps/api/src/modules/ledger/coa-templates.ts (the CoA-template packs the platform
+// owner can provision a company with). 'general' = full canonical chart.
+const INDUSTRIES = [
+  'restaurant', 'retail', 'distribution', 'services', 'manufacturing', 'construction', 'ecommerce',
+  'hospitality', 'healthcare', 'professional', 'agriculture', 'automotive', 'logistics', 'education',
+  'nonprofit', 'realestate', 'general',
+];
 
 function statusBadge(s: string | null, t: (key: string, vars?: Record<string, string | number>) => string) {
   const variant =
