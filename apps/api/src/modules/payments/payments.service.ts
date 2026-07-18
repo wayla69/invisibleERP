@@ -39,6 +39,7 @@ export interface RecordTenderDto {
   method: string;
   amount: number;
   tip?: number;          // tip portion — persisted separately, NOT folded into amount (cash recon)
+  cash_tendered?: number; // #1: cash physically handed over (cash tenders) → change_due computed & recorded
   currency?: string;
   gateway?: string;
   token?: string;             // card token / wallet source from the terminal SDK — for a real PSP charge
@@ -98,10 +99,26 @@ export class PaymentService {
     const promptpayId = gatewayName === 'promptpay' ? await this.tenantPromptPayId(tenantId) : undefined;
     const paymentNo = await this.docNo.nextDaily('PAY');
 
+    // #1 cash tendering / change-due: when the cashier passes the cash physically handed over we record the
+    // change to give back. For a CASH tender the tendered amount must cover what is due (INSUFFICIENT_TENDER);
+    // for a non-cash method the field is accepted but never gates (a "cash-back" style entry stays informational).
+    // Net drawer cash = amount (tendered in − change out), so this never touches the GL — it is a cashier aid
+    // and an audit trail for the drawer count / change disputes.
+    const isCashTender = /^cash$/i.test(dto.method) || /เงินสด/.test(dto.method);
+    let cashTendered: number | null = null, changeGiven: number | null = null;
+    if (dto.cash_tendered != null) {
+      cashTendered = round2(n(dto.cash_tendered));
+      if (isCashTender && cashTendered + 1e-9 < n(dto.amount)) {
+        throw new BadRequestException({ code: 'INSUFFICIENT_TENDER', message: `Cash tendered ${cashTendered} is less than the amount due ${n(dto.amount)}`, messageTh: `เงินที่รับมา (${cashTendered}) น้อยกว่ายอดที่ต้องชำระ (${n(dto.amount)})` });
+      }
+      changeGiven = round2(Math.max(0, cashTendered - n(dto.amount)));
+    }
+
     // Persist a Pending row first. ON CONFLICT DO NOTHING absorbs the concurrent-retry race on the key.
     const inserted = await db.insert(payments).values({
       paymentNo, saleNo: dto.sale_no, tenantId, tillSessionId: dto.till_session_id ?? null,
       method: dto.method, amount: fx(dto.amount, 4), tip: fx(dto.tip ?? 0, 4), currency, gateway: gatewayName,
+      cashTendered: cashTendered != null ? fx(cashTendered, 4) : null, changeGiven: changeGiven != null ? fx(changeGiven, 4) : null,
       status: 'Pending', idempotencyKey: key, createdBy: user.username,
     }).onConflictDoNothing({ target: payments.idempotencyKey }).returning({ id: payments.id });
 
@@ -134,7 +151,8 @@ export class PaymentService {
     }).where(eq(payments.paymentNo, paymentNo));
 
     // gateway_ref is the EMVCo payload for PromptPay → surface it as qr_payload for the POS to render.
-    return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref, qr_payload: gatewayName === 'promptpay' && promptpayId ? result.ref : null };
+    // change_due is what the cashier hands back (null unless cash_tendered was supplied).
+    return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref, qr_payload: gatewayName === 'promptpay' && promptpayId ? result.ref : null, cash_tendered: cashTendered, change_due: changeGiven };
   }
 
   // Look up a tender by its idempotency key (globally unique). Used to replay a retried capture.
@@ -147,7 +165,9 @@ export class PaymentService {
   private tenderResult(row: any, gatewayName: string) {
     return {
       payment_no: row.paymentNo, status: row.status, amount: n(row.amount), gateway_ref: row.gatewayRef,
-      qr_payload: gatewayName === 'promptpay' ? row.gatewayRef : null, replayed: true,
+      qr_payload: gatewayName === 'promptpay' ? row.gatewayRef : null,
+      cash_tendered: row.cashTendered != null ? n(row.cashTendered) : null, change_due: row.changeGiven != null ? n(row.changeGiven) : null,
+      replayed: true,
     };
   }
 

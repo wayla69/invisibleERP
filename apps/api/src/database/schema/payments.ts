@@ -14,6 +14,11 @@ export const payments = pgTable('payments', {
   method: text('method').notNull(), // Cash | Card | QR | PromptPay | Transfer | Wallet
   amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
   tip: numeric('tip', { precision: 18, scale: 4 }).default('0'), // tip portion of this tender — NOT in amount, excluded from cash recon
+  // #1 cash tendering: the cash the customer physically handed over, and the change returned. NULL for
+  // non-cash / when not supplied. Net drawer cash = amount (tendered − change), so NO GL effect — these
+  // are cashier convenience + an audit trail for the drawer count and change disputes.
+  cashTendered: numeric('cash_tendered', { precision: 18, scale: 4 }),
+  changeGiven: numeric('change_given', { precision: 18, scale: 4 }),
   currency: text('currency').default('THB'),
   gateway: text('gateway').default('mock'), // mock | stripe | promptpay | adyen
   gatewayRef: text('gateway_ref'),

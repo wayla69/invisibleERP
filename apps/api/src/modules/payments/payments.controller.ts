@@ -22,6 +22,7 @@ const TenderBody = z.object({
   method: z.string().min(1),
   amount: z.number().positive(),
   tip: z.number().nonnegative().optional(),
+  cash_tendered: z.number().nonnegative().optional(),   // #1: cash handed over → change_due computed & recorded
   currency: z.string().optional(),
   gateway: z.string().optional(),
   token: z.string().min(1).max(500).optional(),   // card token / wallet source from the terminal SDK
