@@ -338,6 +338,28 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     advances under a green PR but the new commit touches only files your branch never modified (e.g. a
     docs-only PR), attempt the squash merge directly — it succeeds without re-merging or another CI run;
     only a 405 sends you into mantra #10's fetch-remerge-renumber loop.
+21. **A parallel session can CANNIBALIZE your open PR's scope — on every main advance, diff main against
+    your PR's INTENT, and resolve overlap by adopting main's CI-proven twin wholesale.** PR #830 (boundary
+    round: bank+recon+tax) had recon absorbed by #828 and bank by #831 while its CI ran — both concurrent
+    sessions built near-twin narrow readers under different names (`accountLines`/`sourceLineId` vs this
+    branch's `postedLinesForAccount`/`lineIdBySourceRef`) and the auto-merge silently kept BOTH, including a
+    DUPLICATE `lineExists` class member (grep the merged file for twin/duplicate METHODS, not just conflict
+    hunks — mantra #13's shadow rule applied to class members). Resolution: `git checkout origin/main --`
+    the overlapping files (theirs is merged and CI-proven), delete your now-orphaned near-twins, keep only
+    your disjoint remainder, baseline = union of removals (mantra #19). Don't mourn the discarded work —
+    the ratchet moved either way; re-scope the PR title/body to what actually remains yours.
+22. **A fixture that BACKDATES a timestamp into a metric windowed on the Asia/Bangkok business day flips
+    day near midnight — a 1-of-N harness failure that passes locally and passed at other hours is a
+    time-of-day flake; find the windowed metric AND the backdated fixture before touching anything.** The
+    POS-4 recall counter failed 0→0 exactly once, on the 00:0x-BKK run: the harness backdates SLA-WARN's
+    `fired_at` by 12 min for the SLA-band check, and `recalls_today` windows on the ticket's FIRE business
+    day — so runs inside 00:00–00:12 BKK fired it "yesterday". The failure's SHAPE pinpoints the window:
+    sibling checks on the same station passed because `bumped_today` windows on `servedAt` (set live) and
+    overdue ignores fire-day. Fix at the FIXTURE (product semantics were right): re-pin the timestamp to
+    `now()` once the assertion that needed the backdate has run, and re-pin again after the mutation so a
+    midnight between the before/after reads can't reopen the window. Sweep candidates: any harness
+    `interval 'N minutes'` backdate feeding a `bizYmd`-windowed read. (An empty-commit re-run is the
+    correct IMMEDIATE unblock once diagnosed — but only after diagnosis, and land the structural fix next.)
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -472,9 +494,14 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
   after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
   `modules/ledger` referencing the `journalEntries`/`journalLines` tables are grandfathered in
-  `ledger-boundary-baseline.json` and the set may only SHRINK — read GL state via **`LedgerReadService`**
-  (`accountNet`/`cashPosition`/`entryRefNo`, exported by LedgerModule) and post via `LedgerService.postEntry`,
-  never a direct journal join from another module. Run all four scripts locally before pushing. Also: **PR CI runs
+  `ledger-boundary-baseline.json` and the set may only SHRINK — **at its FLOOR of 1 since the 2026-07-17/18
+  rounds 6–12 (#815/#817/#820/#826/#828/#830/#831): only `seed-demo-finance.ts` remains, BY DESIGN (a demo
+  fixture writer; posting through `postEntry` would renumber docs), so any new direct read fails outright.**
+  Read GL state via **`LedgerReadService`** (now a rich narrow surface: `accountNet`/`accountGross{from,toExcl}`/
+  `accountNetPerAccount{periodBefore}`/`accountLineRefs`/`accountLines`/`lineExists`/`sourceLineId`/
+  `revenueExpenseByPeriod`/`entryRefNo{status}` — check it BEFORE adding a method; two sessions built
+  near-twins in one day) and post via `LedgerService.postEntry`, never a direct journal join from another
+  module. Run all four scripts locally before pushing. Also: **PR CI runs
   on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
   count can be off by the files `main` added since you branched (relative pass/fail still holds).
 - **docs/46 is fully delivered (PRs #740/#749/#755) — its growth seams are now the ONLY way to add these
@@ -618,7 +645,9 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **After merging `main`, rebuild `@ierp/shared` before trusting typecheck/ratchets.** If the merge brings
   in new shared exports (e.g. main's `qr.ts` adding `qrLink`/`stripTrailingSlashes`), code importing them
   fails with `TS2305: has no exported member` against the **stale dist** — which the `check-ts-debt` gate
-  surfaces as phantom "new errors". Read the actual error (`TS2305` ≠ a `noUncheckedIndexedAccess` index
+  surfaces as phantom "new errors". Same phantom when main widens a shared ZOD SCHEMA/type: the consumer
+  errors `TS2353: 'x' does not exist in type` (bit the #829 `company_name` auth-schema merge, showing up as
+  a strict-index count 1>0). Read the actual error (`TS2305`/`TS2353` ≠ a `noUncheckedIndexedAccess` index
   error) before assuming new debt, and run `pnpm --filter @ierp/shared build` to resolve.
 - **Authoring `basics` harness GL assertions:** trial-balance rows expose `debit`, `credit`, *and* `balance`
   (= debit − credit). Use `balance` for net-position checks (e.g. a control account that gets both a debit
