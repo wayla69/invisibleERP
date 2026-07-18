@@ -6,14 +6,17 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
 // Canonical-universe write bodies (docs/42 step 2 — the /chart-of-accounts manage UI posts these).
-// Codes are the 4-digit universe convention; type drives normal-balance defaulting in the service.
+// Codes are the 4-digit universe convention for control/summary accounts; SUB-ACCOUNTS extend the parent
+// with one or two extra digits (e.g. 5150 → 51501/51502), so a code is 4–6 digits. `type` drives
+// normal-balance defaulting in the service; a sub-account's type is validated ⊆ its parent's (coa.service).
+const ACCOUNT_CODE_RE = /^\d{4,6}$/;
 const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
 const CreateAccountBody = z.object({
-  code: z.string().regex(/^\d{4}$/, 'Account code must be 4 digits'),
+  code: z.string().regex(ACCOUNT_CODE_RE, 'Account code must be 4–6 digits'),
   name: z.string().min(1),
   nameTh: z.string().optional(),
   type: z.enum(ACCOUNT_TYPES),
-  parentCode: z.string().regex(/^\d{4}$/).optional(),
+  parentCode: z.string().regex(ACCOUNT_CODE_RE).optional(),
   accountGroupId: z.number().int().optional(),
   normalBalance: z.enum(['D', 'C']).optional(),
   isPostable: z.boolean().optional(),

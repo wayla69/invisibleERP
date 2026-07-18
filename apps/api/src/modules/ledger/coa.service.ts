@@ -123,10 +123,20 @@ export class CoaService {
       if (existing) throw new BadRequestException({ code: 'DUPLICATE_ACCOUNT', message: `Account ${code} already exists`, messageTh: `บัญชี ${code} มีอยู่แล้ว` });
       // COA-D2: a parent must be a real account (was accepted unvalidated — a typo'd parent silently
       // orphaned the row in every hierarchy rollup).
-      const parent = (dto as { parentCode?: string } | undefined)?.parentCode;
+      const parent = (dto as { parentCode?: string; type?: string } | undefined)?.parentCode;
       if (parent) {
-        const [p] = await this.db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, parent)).limit(1);
+        if (parent === code) throw new BadRequestException({ code: 'PARENT_SELF', message: `Account ${code} cannot be its own parent`, messageTh: `บัญชี ${code} เป็นบัญชีแม่ของตัวเองไม่ได้` });
+        const [p] = await this.db.select({ code: accounts.code, type: accounts.type }).from(accounts).where(eq(accounts.code, parent)).limit(1);
         if (!p) throw new BadRequestException({ code: 'PARENT_NOT_FOUND', message: `Parent account ${parent} does not exist`, messageTh: `ไม่พบบัญชีแม่ ${parent}` });
+        // COA-SUB: a sub-account must share its parent's account type — a sub-account of an Expense header
+        // (e.g. 5150 ค่าเดินทาง → 51501 ค่าเครื่องบิน) is itself an Expense, and an AR debtor sub-type
+        // (1100 → 11010 ลูกหนี้การค้า) is an Asset. This keeps the parent's rollup one-typed.
+        const childType = (dto as { type?: string } | undefined)?.type;
+        if (childType && p.type && childType !== p.type) throw new BadRequestException({
+          code: 'PARENT_TYPE_MISMATCH',
+          message: `Sub-account type ${childType} must match its parent ${parent} (${p.type})`,
+          messageTh: `ประเภทบัญชีย่อย (${childType}) ต้องตรงกับบัญชีแม่ ${parent} (${p.type})`,
+        });
       }
     } else {
       if (!existing) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found`, messageTh: `ไม่พบบัญชี ${code}` });
