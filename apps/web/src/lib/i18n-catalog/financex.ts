@@ -206,7 +206,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.coa.create_title': { th: 'เพิ่มบัญชีในผังกลาง', en: 'Add canonical account' },
   'fnx.coa.add_sub': { th: 'เพิ่มบัญชีย่อย', en: 'Add sub-account' },
   'fnx.coa.create_sub_title': { th: 'เพิ่มบัญชีย่อยใต้ {parent}', en: 'Add sub-account under {parent}' },
-  'fnx.coa.create_sub_desc': { th: 'บัญชีย่อยผูกกับบัญชีแม่และเป็นประเภทเดียวกัน เช่น 5150 ค่าเดินทาง → 515001 ค่าเครื่องบิน', en: 'A sub-account links to its parent and shares its type — e.g. 5150 Travel → 515001 Airfare' },
+  'fnx.coa.create_sub_desc': { th: 'บัญชีย่อยผูกกับบัญชีแม่และเป็นประเภทเดียวกัน เช่น 5110 ค่าเดินทาง → 511001 ค่าเครื่องบิน', en: 'A sub-account links to its parent and shares its type — e.g. 5110 Travel → 511001 Airfare' },
   'fnx.coa.f_type_sub_hint': { th: 'บัญชีย่อยใช้ประเภทเดียวกับบัญชีแม่ {parent}', en: 'A sub-account uses the same type as its parent {parent}' },
   'fnx.coa.f_parent_hint': { th: 'ระบุรหัสบัญชีแม่เพื่อสร้างบัญชีย่อย (ประเภทต้องตรงกับบัญชีแม่)', en: 'Set a parent code to make this a sub-account (its type must match the parent)' },
   'fnx.coa.created': { th: 'เพิ่มบัญชี {code} แล้ว', en: 'Account {code} created' },

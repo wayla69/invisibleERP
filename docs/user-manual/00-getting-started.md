@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.8 · 2026-07-18** · *v0.8: Business type — the Sign-up business-type list expanded from 5 to 17 (added manufacturing, construction, e-commerce, hospitality, healthcare, professional services, agriculture, automotive, logistics, education, non-profit, real estate); each still tailors your chart of accounts and starting menu.* · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
+**Status: DRAFT v0.9 · 2026-07-18** · *v0.9: Starter data — every one of the 17 business types now gets a sample starter kit + a matching one-click industry pack, and the chart of accounts ships six everyday expense accounts (ค่าเดินทาง, ค่าสาธารณูปโภค, ค่าเช่า, ค่าการตลาด, ค่าธรรมเนียมวิชาชีพ, ค่าวัสดุสำนักงาน) you can also hang sub-accounts under.* · *v0.8: Business type — the Sign-up business-type list expanded from 5 to 17 (added manufacturing, construction, e-commerce, hospitality, healthcare, professional services, agriculture, automotive, logistics, education, non-profit, real estate); each still tailors your chart of accounts and starting menu.* · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -214,11 +214,15 @@ appear in **both** workspaces.
   synced across your devices.
 - **Industry starter kit (SME companies only):** the setup wizard's **สร้างสำนักงานใหญ่** step (or
   `POST /api/tenant/starter-pack`) also drops in a little sample content matching your business type so
-  the first screens aren't empty — a restaurant gets a sample menu category with two items and four
-  tables; a retail shop gets two sample products in the POS catalog; a wholesaler gets a **คลังสินค้า 1**
-  warehouse branch; a services firm gets a demo project. Everything is plainly marked (DEMO/ตัวอย่าง),
-  belongs only to your company, is safe to edit or delete, and is never re-created once the area has real
-  data.
+  the first screens aren't empty. Every one of the 17 business types now gets a kit: food service
+  (restaurant, hotel) gets a sample menu + dining tables; counter/online sellers (retail, e-commerce,
+  automotive, healthcare, education) get a sample POS catalog; stock-heavy operations (wholesale,
+  manufacturing, agriculture, logistics) get a **คลังสินค้า 1** warehouse branch; and project-driven work
+  (services, construction, professional, real estate, non-profit) gets a demo project. On top of that,
+  **Onboarding → Industry packs** offers one-click sample objects tuned to each type (e.g. a BOM + work
+  centre for manufacturing, a BoQ + subcontractor for construction, a room type + recipe for a hotel).
+  Everything is plainly marked (DEMO/ตัวอย่าง), belongs only to your company, is safe to edit or delete,
+  and is never re-created once the area has real data.
 - **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
   home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
   bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first

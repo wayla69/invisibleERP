@@ -22,6 +22,15 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '4000', name: 'Sales Revenue', type: 'Revenue' },
   { code: '5000', name: 'COGS', type: 'Expense' },
   { code: '5100', name: 'Operating Expense', type: 'Expense' },
+  // Everyday SME operating-expense detail (add-on 2026-07-18) — named breakdowns of the 5100 catch-all so a
+  // company can post/report by expense kind out of the box (and hang sub-accounts under any of them, e.g.
+  // 5110 ค่าเดินทาง → 511001 ค่าเครื่องบิน). All ordinary P&L expenses (no CF_CLASSIFY — captured in net income).
+  { code: '5110', name: 'Travel & Transport Expense', type: 'Expense' },   // ค่าเดินทางและขนส่ง
+  { code: '5120', name: 'Utilities Expense', type: 'Expense' },            // ค่าสาธารณูปโภค (ไฟฟ้า/น้ำ/อินเทอร์เน็ต)
+  { code: '5130', name: 'Rent Expense', type: 'Expense' },                 // ค่าเช่า — short-term / low-value leases (TFRS 16 recognition exemption); capitalised leases use 5210/5900
+  { code: '5140', name: 'Marketing & Advertising Expense', type: 'Expense' }, // ค่าการตลาดและโฆษณา
+  { code: '5150', name: 'Professional & Legal Fees', type: 'Expense' },    // ค่าธรรมเนียมวิชาชีพและกฎหมาย (audit/legal/consulting)
+  { code: '5160', name: 'Office Supplies & Admin Expense', type: 'Expense' }, // ค่าวัสดุสำนักงานและค่าใช้จ่ายบริหาร
   { code: '1500', name: 'Fixed Assets', type: 'Asset' },
   { code: '1520', name: 'Construction in Progress', type: 'Asset' }, // สินทรัพย์ระหว่างก่อสร้าง (CIP/AUC) — accumulates cost until settled to 1500 (FA-13)
   { code: '1590', name: 'Accumulated Depreciation', type: 'Asset' }, // contra-asset (normal credit bal)

@@ -39,9 +39,12 @@ deployment plan (roadmap `13` §5/§8).
    by the `ext` harness (default oklch primary / set-tokens / bad-hue / bad-radius / RLS isolation). Email-template
    overrides + a public login-page theme by tenant code are noted follow-ups.*
 2. **Guided onboarding + industry packs — Phase 26 (E1).** A curated **setup checklist** (per-tenant step
-   completion + a % progress) and one-click **industry template packs** (restaurant / retail / distribution /
-   services) that **seed a working set of custom objects** (reusing the A1 store). Pack apply is **idempotent**
-   (skips an object the tenant already has) and posts **nothing** to the GL. `GET /api/onboarding` (+ `/packs`),
+   completion + a % progress) and one-click **industry template packs** — one per curated business type
+   (restaurant / retail / distribution / services / manufacturing / construction / ecommerce / hospitality /
+   healthcare / professional / agriculture / automotive / logistics / education / nonprofit / realestate) —
+   that **seed a working set of custom objects** (reusing the A1 store; e.g. BOM + work centre for
+   manufacturing, BoQ + subcontractor for construction, room type + recipe for hospitality). Pack apply is
+   **idempotent** (skips an object the tenant already has) and posts **nothing** to the GL. `GET /api/onboarding` (+ `/packs`),
    `POST /api/onboarding/apply-pack`, `POST /api/onboarding/steps/:key/complete|reset`. Perm
    `users`/`exec`/`dashboard` (reads + steps), `masterdata`/`users`/`exec` (apply). Tables `onboarding_progress`
    + `pack_installs` (migration `0095`); RLS-scoped. Web `/onboarding`. *Verified by the `ext` harness
@@ -93,3 +96,4 @@ migration — `BAD_SOURCE`, `BAD_ENTITY`, `BAD_ROWS`. Unauthorized → `403`/`40
 | 0.3 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 27 — data-migration toolkit (E2)**: source adapters (Loyverse/FlowAccount/CSV) map a vendor export → canonical → dry-run validation (mirroring Phase-7) with a recorded job, previewed before the Phase-7 commit. Table `migration_jobs` (migration `0098`). RLS-scoped, validation-only, no GL; new §4.3, control-matrix row (MDM-02), `BAD_SOURCE`/`BAD_ENTITY`/`BAD_ROWS`; `ext` +6 checks. |
 | 0.4 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 28 — mobile PWA (E3)**: installable, offline-capable PWA (`manifest.webmanifest` + icon + registration of the existing app-shell `sw.js`) wired into the root layout; pairs with the offline-POS outbox. No backend model, no GL; new §4.4, control-matrix row. Verified by the web build. |
 | 0.5 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 30 — scale interfaces (E5)**: a `CacheService` (in-memory TTL default; Redis swap behind the interface) + an ops metrics endpoint (cache/queue posture; the health probes already exist). No schema, no GL; new §4.5, control-matrix row; `ext` +2 checks. Infra (Redis / read replicas / partitioning) is an ops follow-up. **Pillar E software complete (E1–E5); E6 SOC2 is external.** |
+| 0.6 DRAFT | 2026-07-18 | Platform | **Sample-data + industry packs extended to all 17 business types (E1/B3 — no control/schema change).** The B3 starter pack (`StarterPackService`) now maps every industry to one of four seed kinds — POS **catalog** (restaurant/retail/ecommerce/hospitality/automotive/healthcare/education), **dining tables** (restaurant/hospitality), **warehouse** branch (distribution/manufacturing/agriculture/logistics), or **demo project** (services/construction/professional/realestate/nonprofit) — refactored config-driven (the four original industries seed byte-identically). The E1 onboarding **industry packs** gain a pack per new industry (custom objects only, idempotent, no GL). ToE: `onboarding` harness +5 (ecommerce catalog, manufacturing warehouse, construction project, manufacturing pack objects) → 157. |
