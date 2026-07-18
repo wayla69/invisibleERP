@@ -17,17 +17,19 @@ const FEED = {
         kds_status: 'queued', fired_at: '2026-07-18T03:00:00Z', elapsed_min: 15, prep_min: 8, sla: 'late', stuck: true, priority: 0, is_buffet: false, from_diner: true, course: 1 },
     ] },
     { station_id: 2, station_code: 'drink', station_name: 'เครื่องดื่ม', items: [
-      { item_id: 201, order_no: 'DIN-B', table_label: '9', table_id: 9, name: 'ชาเย็น', qty: 2, modifiers: [], notes: null,
+      { item_id: 201, sku: 'D-CHA', order_no: 'DIN-B', table_label: '9', table_id: 9, name: 'ชาเย็น', qty: 2, modifiers: [], notes: null,
         kds_status: 'ready', fired_at: '2026-07-18T03:12:00Z', elapsed_min: 3, prep_min: 5, sla: 'ok', stuck: false, priority: 0, is_buffet: false, from_diner: false, course: 1 },
     ] },
   ],
   stuck_count: 2,
   stuck_minutes: 10,
+  summary: { active_count: 3, avg_wait_min: 11, served_today: 7, avg_prep_today_min: 9 },
 };
 
 async function boot(page: Page) {
   await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
   let served = false;
+  let eightySixed = false;
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -38,10 +40,12 @@ async function boot(page: Page) {
     if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {}, shop_favs: [], shop_templates: [] });
     if (url.includes('/api/restaurant/kds/serve') && method === 'POST') { served = true; return json({ order_no: 'DIN-B', served: 1 }); }
     if (url.includes('/api/restaurant/kds/start') && method === 'POST') return json({ order_no: 'DIN-A', started: 2 });
+    if (url.includes('/availability') && method === 'PATCH') { eightySixed = true; return json({ sku: 'D-CHA', is_available: false }); }
     if (url.includes('/api/restaurant/kds/feed')) return json(FEED);
     return json({});
   });
   (page as unknown as { _servedFlag: () => boolean })._servedFlag = () => served;
+  (page as unknown as { _eightySixFlag: () => boolean })._eightySixFlag = () => eightySixed;
 }
 
 test('KDS board: grouping tabs, priority badge, stuck alarm, serve-whole-ticket', async ({ page }) => {
@@ -57,10 +61,24 @@ test('KDS board: grouping tabs, priority badge, stuck alarm, serve-whole-ticket'
   await expect(page.getByRole('tab', { name: 'ตามเวลา' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'ตามลำดับความสำคัญ' })).toBeVisible();
 
+  // live summary strip + ergonomics controls (sound / big text / fullscreen)
+  await expect(page.getByText(/กำลังทำ 3/)).toBeVisible();
+  await expect(page.getByText(/เฉลี่ย\/จานวันนี้ 9/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'เสียงเตือน' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ตัวอักษรใหญ่ (จอไกล)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'เต็มจอ' })).toBeVisible();
+  await page.getByRole('button', { name: 'ตัวอักษรใหญ่ (จอไกล)' }).click(); // big mode zooms the board (no crash)
+
   // stuck alarm banner (2 lines over 10 min) + the food-priority badge on the priority-5 dish
   await expect(page.getByText(/รายการค้างเกิน/)).toBeVisible();
   await expect(page.getByText('ลำดับ 5')).toBeVisible();
   await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/kds-board-station.png', fullPage: true });
+
+  // 86-from-KDS: the drink line (has a menu sku) shows an "ของหมด (86)" button → PATCH availability
+  const req86 = page.waitForRequest((r) => r.url().includes('/availability') && r.method() === 'PATCH');
+  await page.getByRole('button', { name: 'ของหมด (86)' }).first().click();
+  await req86;
+  expect((page as unknown as { _eightySixFlag: () => boolean })._eightySixFlag()).toBe(true);
 
   // group by table → the table with a READY line (โต๊ะ 9, fired later ⇒ second card) has an enabled
   // "เสิร์ฟทั้งออเดอร์"; the all-queued table's button is correctly disabled.

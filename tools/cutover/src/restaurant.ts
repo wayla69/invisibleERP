@@ -363,6 +363,19 @@ async function main() {
   const lotItem2 = ((await inj('GET', `/api/qr/t/${lotTok}`, undefined)).json.order?.items ?? []).find((i: any) => i.name === 'จานยอดนิยมกำไรดี');
   ok('0435 served item: kds_status served + served_at set (wait freezes)', lotItem2?.kds_status === 'served' && !!lotItem2?.served_at, `st=${lotItem2?.kds_status} served=${!!lotItem2?.served_at}`);
 
+  // KDS ergonomics: feed exposes the menu sku (86-from-KDS) + a live throughput summary (served-today avg prep)
+  const tblSku = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6SKU' });
+  const ordSku = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblSku.json.id, items: [{ sku: 'RMID', qty: 1 }] });
+  await inj('POST', `/api/restaurant/orders/${ordSku.json.order_no}/fire`, sales1);
+  const feedSku = await inj('GET', '/api/restaurant/kds/feed', sales1);
+  const skuItem = (feedSku.json.stations ?? []).flatMap((st: any) => st.items).find((i: any) => i.order_no === ordSku.json.order_no);
+  ok('0435 KDS feed exposes menu sku (86-from-KDS) + live summary (served-today avg prep)', skuItem?.sku === 'RMID' && !!feedSku.json.summary && feedSku.json.summary.served_today >= 1 && typeof feedSku.json.summary.avg_prep_today_min === 'number', `sku=${skuItem?.sku} served=${feedSku.json.summary?.served_today}`);
+  // 86 a dish from the kitchen → the diner menu blocks ordering it
+  await inj('PATCH', '/api/menu/items/RMID/availability', sales1, { available: false });
+  const ord86b = await inj('POST', `/api/qr/t/${lotTok}/order`, undefined, { items: [{ sku: 'RMID', qty: 1 }] });
+  ok('0435 86-from-KDS: the 86\'d dish is blocked at diner order (400 ITEM_UNAVAILABLE)', ord86b.status === 400 && ord86b.json.error?.code === 'ITEM_UNAVAILABLE', `${ord86b.status} ${ord86b.json.error?.code}`);
+  await inj('PATCH', '/api/menu/items/RMID/availability', sales1, { available: true }); // reset
+
   // ── staff-initiated buffet (from POS/floor) ──
   const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
   const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });

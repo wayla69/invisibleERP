@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { eq, inArray, asc, desc } from 'drizzle-orm';
+import { eq, inArray, asc, desc, and, gte, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dineInOrderItems, kitchenStations, dineInOrders, diningTables } from '../../database/schema';
 import { n } from '../../database/queries';
@@ -36,7 +36,7 @@ export class KdsService {
   async feed(_user: JwtUser) {
     const db = this.db;
     const rows = await db.select({
-      itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
+      itemId: dineInOrderItems.id, sku: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
       firedAt: dineInOrderItems.firedAt, estPrep: dineInOrderItems.estPrepMinutes,
       isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course, kdsPriority: dineInOrderItems.kdsPriority,
@@ -62,6 +62,7 @@ export class KdsService {
     const now = Date.now();
     const stuckMin = kdsStuckMinutes();
     let stuckCount = 0;
+    let waitSum = 0;
     const stations = new Map<number, any>();
     for (const r of rows) {
       const sid = Number(r.stationId);
@@ -69,10 +70,11 @@ export class KdsService {
       const fired = r.firedAt ? new Date(r.firedAt).getTime() : now;
       const prep = r.estPrep ?? r.stationPrep ?? 10;
       const elapsedMin = Math.floor((now - fired) / 60000);
+      waitSum += elapsedMin;
       const stuck = elapsedMin >= stuckMin; // hard aging alarm: hung this long since firing → needs a human
       if (stuck) stuckCount += 1;
       stations.get(sid).items.push({
-        item_id: Number(r.itemId), order_no: r.orderNo, table_label: r.tableNo ?? null, table_id: r.tableId != null ? Number(r.tableId) : null,
+        item_id: Number(r.itemId), sku: r.sku ?? null, order_no: r.orderNo, table_label: r.tableNo ?? null, table_id: r.tableId != null ? Number(r.tableId) : null,
         name: r.name, qty: n(r.qty),
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
         is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1, priority: Number(r.kdsPriority) || 0,
@@ -83,7 +85,26 @@ export class KdsService {
         guest_dietary: (r.tableId != null ? guestFlags.get(Number(r.tableId))?.dietary : null) ?? null,
       });
     }
-    return { stations: [...stations.values()], stuck_count: stuckCount, stuck_minutes: stuckMin, generated_at: new Date().toISOString() };
+    // Live throughput summary for the board header: current WIP + average wait of active lines, and the
+    // business-day (Asia/Bangkok) average completion time (fired → served) with the served count.
+    const dayStartApprox = new Date(now - 30 * 3600 * 1000); // bound the served scan; biz-day filter below is exact
+    const servedRows = await db.select({ firedAt: dineInOrderItems.firedAt, servedAt: dineInOrderItems.servedAt })
+      .from(dineInOrderItems)
+      .where(and(eq(dineInOrderItems.kdsStatus, 'served'), isNotNull(dineInOrderItems.servedAt), isNotNull(dineInOrderItems.firedAt), gte(dineInOrderItems.servedAt, dayStartApprox)));
+    const today = bizYmdDash();
+    let prepSum = 0, servedToday = 0;
+    for (const s of servedRows) {
+      if (!s.servedAt || !s.firedAt || bizYmdDash(new Date(s.servedAt)) !== today) continue;
+      prepSum += Math.max(0, (new Date(s.servedAt).getTime() - new Date(s.firedAt).getTime()) / 60000);
+      servedToday += 1;
+    }
+    const summary = {
+      active_count: rows.length,
+      avg_wait_min: rows.length ? Math.round(waitSum / rows.length) : 0,
+      served_today: servedToday,
+      avg_prep_today_min: servedToday ? Math.round(prepSum / servedToday) : 0,
+    };
+    return { stations: [...stations.values()], stuck_count: stuckCount, stuck_minutes: stuckMin, summary, generated_at: new Date().toISOString() };
   }
 
   // Expo / order-ready pass (POS-4): aggregates the active kitchen lines BY ORDER so the expeditor sees

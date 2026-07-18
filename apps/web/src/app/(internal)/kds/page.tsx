@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlarmClock, ChefHat, ScanLine, Smartphone, Utensils, Wifi, WifiOff, Undo2, BellRing, Gauge } from 'lucide-react';
+import { AlarmClock, Ban, ChefHat, Maximize, ScanLine, Smartphone, Timer, Utensils, Volume2, VolumeX, Wifi, WifiOff, Undo2, BellRing, Gauge, ZoomIn } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -17,9 +17,10 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type Sla = 'ok' | 'warn' | 'late';
-type KdsItem = { item_id: number; order_no: string; table_label: string | null; table_id: number | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; fired_at?: string | null; elapsed_min: number; prep_min: number; sla?: Sla; stuck?: boolean; priority?: number; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
+type KdsItem = { item_id: number; sku?: string | null; order_no: string; table_label: string | null; table_id: number | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; fired_at?: string | null; elapsed_min: number; prep_min: number; sla?: Sla; stuck?: boolean; priority?: number; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
-type Feed = { stations: Station[]; stuck_count?: number; stuck_minutes?: number };
+type Summary = { active_count: number; avg_wait_min: number; served_today: number; avg_prep_today_min: number };
+type Feed = { stations: Station[]; stuck_count?: number; stuck_minutes?: number; summary?: Summary };
 type Group = 'station' | 'table' | 'time' | 'priority';
 type ExpoItem = { item_id: number; name: string; qty: number; station_name: string; course: number; ready_min: number };
 type ExpoTicket = { order_id: number; order_no: string; table_label: string | null; ready_items: ExpoItem[]; ready_count: number; pending_count: number; all_ready: boolean; oldest_ready_min: number };
@@ -76,20 +77,73 @@ export default function KdsPage() {
   });
   const onScan = () => { const c = scan.trim(); if (c) { serve.mutate(c); setScan(''); } };
 
+  // ── kitchen ergonomics: sound cue, 86-from-KDS, big/fullscreen display ──
+  const [soundOn, setSoundOn] = useState(false);
+  const [big, setBig] = useState(false);
+  const audioRef = useRef<AudioContext | null>(null);
+  const prevIdsRef = useRef<Set<number>>(new Set());
+  const prevStuckRef = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // short Web-Audio chime (no asset, CSP-safe): a single tone for a new ticket, a two-tone alarm for stuck.
+  const beep = useCallback((kind: 'new' | 'alarm') => {
+    try {
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AC) return;
+      const ctx = audioRef.current ?? (audioRef.current = new AC());
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      const t = ctx.currentTime;
+      if (kind === 'alarm') { osc.frequency.setValueAtTime(880, t); osc.frequency.setValueAtTime(620, t + 0.16); } else osc.frequency.setValueAtTime(760, t);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'alarm' ? 0.5 : 0.18));
+      osc.start(t); osc.stop(t + (kind === 'alarm' ? 0.52 : 0.2));
+    } catch { /* audio is best-effort */ }
+  }, []);
+  // 86 a dish straight from the kitchen (out of stock) — flips availability everywhere the catalog is read
+  const eightySix = useMutation({
+    mutationFn: (sku: string) => api(`/api/menu/items/${encodeURIComponent(sku)}/availability`, { method: 'PATCH', body: JSON.stringify({ available: false }) }),
+    onSuccess: () => { notifySuccess(t('mx.kds_86_ok')); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const toggleFull = () => { const el = rootRef.current; if (!el) return; if (document.fullscreenElement) document.exitFullscreen?.(); else el.requestFullscreen?.().catch(() => {}); };
+
   // flatten the station feed for the table/time/priority groupings
   const allItems: KdsItem[] = (feed.data?.stations ?? []).flatMap((s) => s.items);
   const stuckCount = feed.data?.stuck_count ?? 0;
   const stuckMin = feed.data?.stuck_minutes ?? 10;
+  const summary = feed.data?.summary;
+
+  // new-ticket + rising-stuck chime (only when sound is on and the board is the active view)
+  useEffect(() => {
+    if (view !== 'board') return;
+    const ids = new Set(allItems.map((i) => i.item_id));
+    if (soundOn) {
+      let hasNew = false; for (const id of ids) if (!prevIdsRef.current.has(id)) { hasNew = true; break; }
+      if (stuckCount > prevStuckRef.current) beep('alarm');
+      else if (hasNew && prevIdsRef.current.size > 0) beep('new');
+    }
+    prevIdsRef.current = ids;
+    prevStuckRef.current = stuckCount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed.data, soundOn, view]);
 
   return (
-    <div>
+    <div ref={rootRef} className="bg-background">
       <PageHeader
         title={t('mx.kds_title')}
         description={view === 'expo' ? t('mx.kds_expo_desc') : view === 'load' ? t('mx.kds_load_desc') : t('mx.kds_desc')}
         actions={
-          <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
-            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('mx.kds_realtime') : t('mx.kds_connecting')}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button variant={soundOn ? 'default' : 'outline'} size="icon" onClick={() => setSoundOn((s) => { if (!s) beep('new'); return !s; })} aria-label={t('mx.kds_sound')} title={t('mx.kds_sound')}>
+              {soundOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+            </Button>
+            <Button variant={big ? 'default' : 'outline'} size="icon" onClick={() => setBig((b) => !b)} aria-label={t('mx.kds_big')} title={t('mx.kds_big')}><ZoomIn className="size-4" /></Button>
+            <Button variant="outline" size="icon" onClick={toggleFull} aria-label={t('mx.kds_fullscreen')} title={t('mx.kds_fullscreen')}><Maximize className="size-4" /></Button>
+            <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
+              {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('mx.kds_realtime') : t('mx.kds_connecting')}
+            </Badge>
+          </div>
         }
       />
 
@@ -123,6 +177,16 @@ export default function KdsPage() {
             </form>
           </div>
 
+          {/* live throughput summary (real-time, recomputed each poll) */}
+          {summary && (
+            <div className="mb-3 flex flex-wrap gap-2 text-sm">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><ChefHat className="size-4 text-primary" /> {t('mx.kds_sum_active', { n: summary.active_count })}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><Timer className="size-4 text-muted-foreground" /> {t('mx.kds_sum_avg_wait', { n: summary.avg_wait_min })}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><Timer className="size-4 text-success" /> {t('mx.kds_sum_avg_prep', { n: summary.avg_prep_today_min })}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><BellRing className="size-4 text-success" /> {t('mx.kds_sum_served', { n: summary.served_today })}</span>
+            </div>
+          )}
+
           {/* hard "stuck" alarm: lines hung past the threshold need a human */}
           {stuckCount > 0 && (
             <div className="mb-3 flex items-center gap-2 rounded-lg border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive">
@@ -130,6 +194,7 @@ export default function KdsPage() {
             </div>
           )}
 
+          <div style={big ? { zoom: 1.25 } : undefined}>
           <StateView q={feed}>
             {feed.data && (allItems.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t('mx.kds_no_orders')}</p>
@@ -142,7 +207,7 @@ export default function KdsPage() {
                       <span className="text-sm font-normal text-muted-foreground">({st.items.length})</span>
                     </h3>
                     <div className="grid gap-2">
-                      {st.items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} />)}
+                      {st.items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} />)}
                       {st.items.length === 0 && <span className="text-sm text-muted-foreground">{t('mx.kds_empty_station')}</span>}
                     </div>
                   </Card>
@@ -162,17 +227,18 @@ export default function KdsPage() {
                         <Button variant="outline" size="sm" disabled={serve.isPending || !items.some((i) => i.kds_status === 'ready')} onClick={() => serve.mutate(items[0].order_no)}>{t('mx.kds_serve_ticket')}</Button>
                       </div>
                     </div>
-                    <div className="grid gap-2">{items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} />)}</div>
+                    <div className="grid gap-2">{items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} />)}</div>
                   </Card>
                 ))}
               </div>
             ) : (
               // time (oldest lot first) or priority (highest first) — one flat, wrapping grid
               <div className="grid items-start gap-2 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-                {[...allItems].sort(group === 'time' ? byTime : byPriority).map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} />)}
+                {[...allItems].sort(group === 'time' ? byTime : byPriority).map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} />)}
               </div>
             ))}
           </StateView>
+          </div>
         </>
       )}
 
@@ -308,10 +374,11 @@ function groupByTable(items: KdsItem[]): [string, KdsItem[]][] {
 }
 
 // one kitchen line card — SLA aging colour, stuck alarm, food-priority + course/buffet/diner badges, actions.
-function ItemCard({ it, t, act }: { it: KdsItem; t: (k: string, v?: Record<string, string | number>) => string; act: { isPending: boolean; mutate: (v: { id: number; action: string }) => void } }) {
+function ItemCard({ it, t, act, onEightySix }: { it: KdsItem; t: (k: string, v?: Record<string, string | number>) => string; act: { isPending: boolean; mutate: (v: { id: number; action: string }) => void }; onEightySix?: (sku: string) => void }) {
   const nxt = NEXT[it.kds_status];
   const u = URGENCY[slaOf(it)];
   const canRecall = it.kds_status === 'preparing' || it.kds_status === 'ready';
+  const canEightySix = !!it.sku && !!onEightySix;
   return (
     <div className={cn('rounded-lg border-2 bg-card p-2', it.stuck ? 'border-destructive ring-2 ring-destructive/40' : u.border)}>
       <div className="flex items-baseline justify-between gap-2">
@@ -340,7 +407,7 @@ function ItemCard({ it, t, act }: { it: KdsItem; t: (k: string, v?: Record<strin
           ⚠️ {(it.guest_allergies?.length ?? 0) > 0 ? `${t('px.gp_allergies')}: ${(it.guest_allergies ?? []).join(', ')}` : ''}{(it.guest_allergies?.length ?? 0) > 0 && it.guest_dietary ? ' · ' : ''}{it.guest_dietary ?? ''}
         </div>
       )}
-      {(nxt || canRecall) && (
+      {(nxt || canRecall || canEightySix) && (
         <div className="mt-1.5 flex gap-1.5">
           {nxt && (
             <Button className="flex-1" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
@@ -350,6 +417,11 @@ function ItemCard({ it, t, act }: { it: KdsItem; t: (k: string, v?: Record<strin
           {canRecall && (
             <Button variant="outline" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: 'recall' })} aria-label={t('mx.kds_recall')} title={t('mx.kds_recall')}>
               <Undo2 className="size-4" />
+            </Button>
+          )}
+          {canEightySix && (
+            <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => onEightySix!(it.sku!)} aria-label={t('mx.kds_86')} title={t('mx.kds_86')}>
+              <Ban className="size-4" />
             </Button>
           )}
         </div>
