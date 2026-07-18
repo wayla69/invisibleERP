@@ -298,9 +298,12 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     its initial value). Diagnose by driving the same interaction paced/scripted outside the runner; fix by
     gating the FIRST interaction on a signal that only exists post-hydration — `waitForResponse` on a call the
     mount effect makes (keep the predicate method-agnostic if different code paths fire GET vs PUT on mount) —
-    never by sleeps. Related first-paint latency (not hydration): the `frontline-sweep` pos-home test flaked
-    a FIFTH cycle (#821) — on a heavy page every independent-query first-paint assertion needs the generous
-    30s window, not just the first one.
+    never by sleeps. Related first-paint latency (not hydration): the `frontline-sweep` pos-home test kept
+    flaking even with generous 30s windows (#791/#794/#805×2/#821 + twice post-#809) because the window
+    starts at `goto` and must absorb app boot + hydration + query dispatch BEFORE any render. The durable
+    fix (#835): set up `page.waitForResponse` waiters for the page's own mocked queries BEFORE `goto`,
+    await them, THEN assert visibility — each visibility window then covers only render-after-data. Prefer
+    this response-anchored shape over widening timeouts for any heavy first-paint spec.
 17. **Tightening an AUTHORIZATION gate: the scope→permission model EXPANDS non-obviously, and the fixture that
     breaks is the one that PROVISIONS a broad credential (auth-specific extension of #14).** The PE-1 api-key
     scope-bound (bind a key's scopes to the minter's own perms, PR #819) broke the `ext` harness — which minted
@@ -360,6 +363,20 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     midnight between the before/after reads can't reopen the window. Sweep candidates: any harness
     `interval 'N minutes'` backdate feeding a `bizYmd`-windowed read. (An empty-commit re-run is the
     correct IMMEDIATE unblock once diagnosed — but only after diagnosis, and land the structural fix next.)
+23. **A green PR whose ENTIRE intent already merged via a concurrent twin gets CLOSED as superseded — never
+    merged; on EVERY green-PR merge attempt, first diff `origin/main` against your branch on the PR's own
+    files.** Mantra #21's limit case, hit twice in one day: #833 (ledger-boundary round 12) went all-19-green
+    while #830 merged the identical tax-reports migration + baseline→1; and #835's POS-4 half was superseded
+    mid-flight by #836 (same root cause, superset fix — re-pins fired_at around BOTH load reads). The tell is
+    `mergeable_state: dirty` + the same intent already on main; the residual deltas (comment wording, a
+    competing baseline `_note`, slightly worse lambda typing) are NEVER worth a conflict re-merge + CI cycle.
+    Full supersede → close with an explanatory comment, restart the branch from main. Partial supersede →
+    take main's file VERBATIM (`git checkout origin/main -- <file>`; an auto-merge that "succeeds" can leave
+    BOTH fixes stacked — three fired_at re-pins — so never trust it on the overlapping file), re-scope the PR
+    title/body to the disjoint remainder, and re-verify the merged tree locally before pushing. Corollary:
+    with several sessions burning down the same lists, treat every merge attempt as contested — the
+    ancestry check (`merge-base --is-ancestor`) says main moved, but only the per-file diff says WHOSE
+    change survived.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -492,7 +509,19 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   `service-size-baseline.json`; 14 at Phase 0, **0 (EMPTY)** after the 2026-07-17 burn-down rounds 2–5 (#809 + G4 + #810/#812/#813 — every god-service extracted off; the list may only shrink, so it must STAY empty: any module file crossing 600 LOC now fails outright) may not GROW — in lines **or** constructor params — and no NEW module file may
   pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
-  after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
+  after an extraction. **Headroom rounds 14–15 (2026-07-18, #839/#840) pre-buffered every near-cap file — no
+  module file is now within ~80 lines of the cap — by extracting five ctor-body sub-services: EXTEND THESE,
+  don't grow the facades back:** `finance/ap-payment-run-file.service.ts` (EXP-13 bank bulk-transfer file;
+  `loadRun` closure), `restaurant/dine-in-sale.service.ts` (`buildSale` — the ONE place POS food GL posts —
+  + `buildCheckSale`; channel-order/qr/split call through facade delegators), `cpq/cpq-bundles.service.ts`
+  (bundles + recommendations; assertConfig/assertQuote/fmtQuote closures), `crm/pipeline/crm-lead-capture.service.ts`
+  (webToLead + import; `LEAD_IMPORT_HEADERS` static alias keeps the controller import), `crm/crm-audience.service.ts`
+  (PDPA-05 audience/CDP egress, db-only). Proven extraction recipe: move method blocks VERBATIM (python
+  line-range script), name the plain class's ctor params exactly like the facade's fields so bodies stay
+  byte-identical, wire canonical primitives as facade-ctor closures, keep thin delegators, sweep dead
+  imports, then verify with the OWNING harnesses (a money-path move like buildSale warrants the full
+  consumer sweep — 12 harnesses — plus vitest + golden; NB the `pdpa` harness alone runs >10 min, so give
+  the Bash call a generous timeout or run it solo). (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
   `modules/ledger` referencing the `journalEntries`/`journalLines` tables are grandfathered in
   `ledger-boundary-baseline.json` and the set may only SHRINK — **at its FLOOR of 1 since the 2026-07-17/18
   rounds 6–12 (#815/#817/#820/#826/#828/#830/#831): only `seed-demo-finance.ts` remains, BY DESIGN (a demo
