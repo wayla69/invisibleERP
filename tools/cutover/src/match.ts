@@ -637,6 +637,69 @@ async function main() {
       JSON.stringify({ method: in2.json.map_method, vendor: in2.json.vendor_name, decoy: Number(decoy.id) }));
   }
 
+  // (h) Multi-currency intake bill (C1 parity): the extracted currency books onto the AP bill with the
+  // latest APPROVED fx rate at the invoice date, and the EXP-06 vendor statement reads it — base-THB
+  // statements convert at the booked rate; ?currency=USD reports the document's own units.
+  {
+    await db.insert(s.fxRates).values({ currency: 'USD', rateDate: '2026-06-01', rate: '35', status: 'Approved' });
+    // Amount far from VTX's open PO total so the mapper leaves it NeedsReview → posts as a non-PO bill.
+    const inU = await inj('POST', '/api/procurement/ap-intake', admin, { text: 'VTX Trading Co\nTax ID 0123456789012\nInvoice# IV-USD-77\nDate 2026-07-10\nGrand Total USD 2,500.00' });
+    ok('USD intake: rules path detects the currency', inU.json.currency === 'USD' && inU.json.invoice_no === 'IV-USD-77', JSON.stringify({ cur: inU.json.currency, inv: inU.json.invoice_no }));
+    const postU = await inj('POST', `/api/procurement/ap-intake/${inU.json.intake_no}/post`, admin, {});
+    const [apRow] = await db.select({ currency: s.apTransactions.currency, fxRate: s.apTransactions.fxRate, amount: s.apTransactions.amount }).from(s.apTransactions).where(eq(s.apTransactions.txnNo, postU.json.txn_no));
+    ok('USD intake books a USD bill at the approved rate (currency=USD, fx=35, amount in doc units)',
+      postU.json.status === 'Posted' && apRow?.currency === 'USD' && Math.abs(Number(apRow.fxRate) - 35) < 1e-6 && Math.abs(Number(apRow.amount) - 2500) < 0.01,
+      JSON.stringify({ cur: apRow?.currency, fx: apRow?.fxRate, amt: apRow?.amount }));
+    const stB = await inj('GET', '/api/finance/ap/statement?vendor=' + encodeURIComponent('VTX Trading Co') + '&from=2026-01-01&to=2026-12-31', admin);
+    const stU = await inj('GET', '/api/finance/ap/statement?vendor=' + encodeURIComponent('VTX Trading Co') + '&from=2026-01-01&to=2026-12-31&currency=USD', admin);
+    ok('EXP-06 statement: base THB converts at the booked rate (2,500×35=87,500); ?currency=USD shows doc units',
+      Math.abs(Number(stB.json.total_charges) - 87500) < 0.01 && Math.abs(Number(stU.json.total_charges) - 2500) < 0.01,
+      JSON.stringify({ thb: stB.json.total_charges, usd: stU.json.total_charges }));
+  }
+
+  // (i) LINE-level escalation (EXP-10 upgrade): when every vision line maps unambiguously onto the PO's
+  // lines (item_id-as-token / normalized description), the intake match runs PER-LINE — a price variance
+  // inside the header amount tolerance now blocks payment. Unmappable lines fall back to header-level.
+  {
+    const { setLlmClientForTests } = require('../../../apps/api/dist/common/llm-client');
+    const mkPo = async () => {
+      const p = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+      await inj('PATCH', `/api/procurement/pos/${p.json.po_no}/approve`, admin, { approve: true });
+      await inj('POST', '/api/procurement/grs', admin, { po_no: p.json.po_no, items: [{ item_id: 'X', received_qty: 10 }] });
+      return p.json.po_no as string;
+    };
+    const scriptVision = (fields: any) => setLlmClientForTests({
+      async create() { return { content: [{ type: 'text', text: JSON.stringify(fields) }] }; },
+      stream() { throw new Error('not used'); },
+    });
+    process.env.ANTHROPIC_API_KEY = 'fake-key-harness';
+    try {
+      // Case 1: mapped lines engage the per-line verdict. Header would PASS (1,008 vs received value
+      // 1,000 = 0.8% ≤ 2% amount tolerance) — the 12% unit-price variance only blocks at line level.
+      const poH = await mkPo();
+      scriptVision({ vendor_name: 'ผู้ขาย V1', invoice_no: 'IV-9500', invoice_date: '2026-07-02', amount: 1008, currency: 'THB', po_no: poH,
+        lines: [{ description: 'Widget X', qty: 9, unit_price: 112, amount: 1008 }] });
+      const upH = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'iv-9500.png', data_url: png1x1 });
+      const postH = await inj('POST', `/api/procurement/ap-intake/${upH.json.intake_no}/post`, admin, {});
+      ok('Line-level escalation: a 12% unit-price variance blocks even though the header amount is in tolerance',
+        postH.json.status === 'Posted' && postH.json.match_status === 'price_variance' && postH.json.payable === false,
+        JSON.stringify({ m: postH.json.match_status, pay: postH.json.payable }));
+
+      // Case 2: an unmappable line (no item identity) falls the whole set back to header-level → matched.
+      const poF = await mkPo();
+      scriptVision({ vendor_name: 'ผู้ขาย V1', invoice_no: 'IV-9600', invoice_date: '2026-07-02', amount: 1000, currency: 'THB', po_no: poF,
+        lines: [{ description: 'ค่าบริการจัดส่งพิเศษ', qty: 1, unit_price: 1000, amount: 1000 }] });
+      const upF2 = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'iv-9600.png', data_url: png1x1 });
+      const postF2 = await inj('POST', `/api/procurement/ap-intake/${upF2.json.intake_no}/post`, admin, {});
+      ok('Unmappable vision lines fall back to the header-level match (matched/payable — never a degraded verdict)',
+        postF2.json.status === 'Posted' && postF2.json.match_status === 'matched' && truthy(postF2.json.payable),
+        JSON.stringify({ m: postF2.json.match_status, pay: postF2.json.payable }));
+    } finally {
+      setLlmClientForTests(null);
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  }
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

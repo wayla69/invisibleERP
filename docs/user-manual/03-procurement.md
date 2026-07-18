@@ -651,7 +651,11 @@ payable is an accounting act).
    document, the **line items** it found (description, qty, unit price, amount)
    are listed on the result card for your review — if the sum of the lines
    doesn't match the bill total, a warning asks you to check the source document.
-   The lines are informational: matching stays at the bill-total level.
+   When every line can be identified against the PO's own lines, the 3-way match
+   runs **per line** (a wrong unit price blocks payment even if the bill total
+   looks fine); lines that can't be identified keep the bill-total match as before.
+   A foreign-currency invoice (e.g. USD) books in its own currency at the latest
+   approved exchange rate, and the vendor statement reports it accordingly.
 
 **Expected result:** a *matched* intake is immediately **payment-ready** — AP can
 request payment as usual. Payment itself is **never** automated: it still goes
