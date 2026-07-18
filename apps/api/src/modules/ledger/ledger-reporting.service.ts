@@ -6,6 +6,10 @@ import { currentTenantStore } from '../../common/tenant-context';
 import { n } from '../../database/queries';
 import { toMinor4, minorToNumber4 } from '../../common/money';
 import { LEADING } from './ledger-constants';
+import {
+  resolveBsGroup, resolveIsGroup, BS_GROUPS, IS_GROUPS, BS_GROUP_LABELS, IS_GROUP_LABELS,
+  type BsGroup, type IsGroup,
+} from './ledger-statement-sections';
 
 // FIN-7a — dimension filter for TB / account-ledger / income statement. All fields optional; when NONE
 // is set the reports keep their original (snapshot / unfiltered) paths byte-identically.
@@ -246,12 +250,42 @@ export class LedgerReportingService {
     const revenue = round4(typeTotal(rows, 'Revenue', 'credit') - typeTotal(rows, 'Revenue', 'debit'));
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
     const netIncome = round4(revenue - expense);
+    const plLines = rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense');
+    // Section binding (0438): group the lines into the P&L sections (own is_group column → canonical default
+    // → type fallback) and derive a structured statement. Additive — existing callers read revenue/expense.
+    const meta = await this.accountClassMeta(db, plLines.map((l: any) => l.account_code));
+    const buckets = new Map<IsGroup, { total: number; lines: any[] }>();
+    const CREDIT_NORMAL = new Set<IsGroup>(['revenue', 'other_income']);
+    for (const l of plLines) {
+      const m = meta.get(l.account_code);
+      const g = resolveIsGroup({ code: l.account_code, type: l.account_type, isGroup: m?.isGroup }) ?? (l.account_type === 'Revenue' ? 'revenue' : 'selling_admin');
+      // Each section subtotal is a positive natural amount (revenue/other-income are credit-normal).
+      const amount = CREDIT_NORMAL.has(g) ? n(l.credit) - n(l.debit) : n(l.debit) - n(l.credit);
+      const b = buckets.get(g) ?? { total: 0, lines: [] };
+      b.total = round4(b.total + amount);
+      b.lines.push({ ...l, is_group: g });
+      buckets.set(g, b);
+    }
+    const gt = (g: IsGroup) => round4(buckets.get(g)?.total ?? 0);
+    const grossProfit = round4(gt('revenue') - gt('cogs'));
+    const operatingProfit = round4(grossProfit - gt('selling_admin'));
+    const profitBeforeTax = round4(operatingProfit + gt('other_income') - gt('other_expense') - gt('finance_cost'));
+    const summary = {
+      revenue: gt('revenue'), cogs: gt('cogs'), gross_profit: grossProfit,
+      selling_admin: gt('selling_admin'), operating_profit: operatingProfit,
+      other_income: gt('other_income'), other_expense: gt('other_expense'), finance_cost: gt('finance_cost'),
+      profit_before_tax: profitBeforeTax, tax: gt('tax'), net_income: round4(profitBeforeTax - gt('tax')),
+    };
+    const groups = IS_GROUPS.filter((g) => buckets.has(g)).map((g) => {
+      const b = buckets.get(g)!;
+      return { group: g, label_th: IS_GROUP_LABELS[g].th, label_en: IS_GROUP_LABELS[g].en, total: round4(b.total), lines: b.lines };
+    });
     return {
       from, to, cost_center: costCenter ?? null, ledger: ledgerCode ?? LEADING,
       // FIN-7a: dimension-filter echo only when a filter was given (default response unchanged).
       ...(this.hasDims(dims) ? { project_id: dims?.projectId ?? null, dept_id: dims?.deptId ?? null, branch_id: dims?.branchId ?? null } : {}),
       revenue, expense, net_income: netIncome,
-      lines: rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense'),
+      lines: plLines, groups, summary,
     };
   }
 
@@ -329,13 +363,29 @@ export class LedgerReportingService {
         balance: round4(r.account_type === 'Asset' ? r.debit - r.credit : r.credit - r.debit),
       }))
       .filter((r: any) => Math.abs(r.balance) > 1e-9);
+    // Section binding (0438): group the lines into the five Balance-Sheet sections (own bs_group column →
+    // canonical default → type + is_current fallback). Additive — existing callers read only the totals.
+    const meta = await this.accountClassMeta(db, lines.map((l: any) => l.account_code));
+    const buckets = new Map<BsGroup, { total: number; lines: any[] }>();
+    for (const l of lines) {
+      const m = meta.get(l.account_code);
+      const g = resolveBsGroup({ code: l.account_code, type: l.account_type, bsGroup: m?.bsGroup, isCurrent: m?.isCurrent }) ?? 'current_asset';
+      const b = buckets.get(g) ?? { total: 0, lines: [] };
+      b.total = round4(b.total + l.balance);
+      b.lines.push({ ...l, bs_group: g });
+      buckets.set(g, b);
+    }
+    const sections = BS_GROUPS.filter((g) => buckets.has(g)).map((g) => {
+      const b = buckets.get(g)!;
+      return { group: g, label_th: BS_GROUP_LABELS[g].th, label_en: BS_GROUP_LABELS[g].en, total: round4(b.total), lines: b.lines };
+    });
     return {
       as_of: asOf, ledger: ledgerCode ?? LEADING,
       assets: minorToNumber4(assetsM), liabilities: minorToNumber4(liabilitiesM), equity: minorToNumber4(equityM),
       retained_earnings: minorToNumber4(retainedEarningsM), net_income: minorToNumber4(netIncomeM),
       liabilities_plus_equity: minorToNumber4(liabilitiesEquityM),
       balanced: assetsM === liabilitiesEquityM,
-      lines,
+      lines, sections,
     };
   }
 
@@ -383,6 +433,19 @@ export class LedgerReportingService {
       difference: round4(c.net_income - b.net_income),
       lines,
     };
+  }
+
+  // Statement-section classification for a set of account codes (bs_group / is_group / is_current). Fetched
+  // separately from aggregateByType so the shared aggregation engine stays untouched (mirrors how the
+  // cash-flow service reads cf_bucket into acctMeta). Empty input → empty map.
+  private async accountClassMeta(db: any, codes: string[]): Promise<Map<string, { bsGroup: string | null; isGroup: string | null; isCurrent: boolean | null }>> {
+    const uniq = [...new Set(codes)];
+    if (!uniq.length) return new Map();
+    const rows = await db
+      .select({ code: accounts.code, bsGroup: accounts.bsGroup, isGroup: accounts.isGroup, isCurrent: accounts.isCurrent })
+      .from(accounts)
+      .where(inArray(accounts.code, uniq));
+    return new Map(rows.map((r: any) => [r.code, { bsGroup: r.bsGroup ?? null, isGroup: r.isGroup ?? null, isCurrent: r.isCurrent ?? null }]));
   }
 
   // group Posted journal_lines by account type within optional date window.

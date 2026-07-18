@@ -33,6 +33,7 @@ export class CoaService {
     isPostable?: boolean; requireDimension?: Record<string, boolean>;
     effectiveFrom?: string; effectiveTo?: string;
     cfBucket?: string; cfLabel?: string; isCurrent?: boolean;
+    bsGroup?: string; isGroup?: string;
   }) {
     const existing = await this.db.select({ id: accounts.id }).from(accounts)
       .where(eq(accounts.code, dto.code)).limit(1);
@@ -52,6 +53,8 @@ export class CoaService {
       cfBucket: dto.cfBucket,
       cfLabel: dto.cfLabel,
       isCurrent: dto.isCurrent,
+      bsGroup: dto.bsGroup,
+      isGroup: dto.isGroup,
     }).returning();
     return row;
   }
@@ -61,6 +64,7 @@ export class CoaService {
     isPostable?: boolean; requireDimension?: Record<string, boolean>;
     effectiveFrom?: string; effectiveTo?: string; active?: string;
     cfBucket?: string | null; cfLabel?: string | null; isCurrent?: boolean | null;
+    bsGroup?: string | null; isGroup?: string | null;
   }) {
     // Block code changes for accounts with postings
     if (dto.isPostable === false) {
@@ -84,6 +88,8 @@ export class CoaService {
       ...(dto.cfBucket !== undefined && { cfBucket: dto.cfBucket }),
       ...(dto.cfLabel !== undefined && { cfLabel: dto.cfLabel }),
       ...(dto.isCurrent !== undefined && { isCurrent: dto.isCurrent }),
+      ...(dto.bsGroup !== undefined && { bsGroup: dto.bsGroup }),
+      ...(dto.isGroup !== undefined && { isGroup: dto.isGroup }),
     }).where(eq(accounts.code, code)).returning();
     if (!row) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found`, messageTh: `ไม่พบบัญชี ${code}` });
     return row;

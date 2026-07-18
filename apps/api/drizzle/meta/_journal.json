@@ -2878,6 +2878,13 @@
       "when": 2023820000376,
       "tag": "0437_session_member",
       "breakpoints": true
+    },
+    {
+      "idx": 412,
+      "version": "7",
+      "when": 2023820000377,
+      "tag": "0438_accounts_statement_sections",
+      "breakpoints": true
     }
   ]
 }

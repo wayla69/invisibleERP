@@ -42,6 +42,8 @@ type RawAccount = {
   isPostable?: boolean | null;
   cfBucket?: string | null;
   isCurrent?: boolean | null;
+  bsGroup?: string | null;
+  isGroup?: string | null;
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   requireDimension?: Record<string, boolean> | null;
@@ -63,6 +65,8 @@ type Row = {
   active: boolean;
   cfBucket: string | null;
   isCurrent: boolean | null;
+  bsGroup: string | null;
+  isGroup: string | null;
   effectiveFrom: string | null;
   effectiveTo: string | null;
 };
@@ -166,6 +170,8 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
         active: activeRaw === false || activeRaw === 'false' ? false : true,
         cfBucket: c?.cfBucket ?? null,
         isCurrent: c?.isCurrent ?? null,
+        bsGroup: c?.bsGroup ?? null,
+        isGroup: c?.isGroup ?? null,
         effectiveFrom: c?.effectiveFrom ?? null,
         effectiveTo: c?.effectiveTo ?? null,
       };
@@ -421,6 +427,36 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
 
 const SELECT_CLS = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
+const BS_GROUP_OPTS = ['current_asset', 'noncurrent_asset', 'current_liability', 'noncurrent_liability', 'equity'] as const;
+const IS_GROUP_OPTS = ['revenue', 'cogs', 'selling_admin', 'other_income', 'other_expense', 'finance_cost', 'tax'] as const;
+
+// 0438 — statement-section binding fields, shared by the create + edit dialogs. Balance-sheet accounts
+// (Asset/Liability/Equity) pick a งบดุล section; P&L accounts (Revenue/Expense) pick a งบกำไรขาดทุน section.
+// '' = the canonical default (resolved server-side). Renders nothing for a type with no statement.
+function StatementSectionFields({ type, bsGroup, setBsGroup, isGroup, setIsGroup }: {
+  type: string; bsGroup: string; setBsGroup: (v: string) => void; isGroup: string; setIsGroup: (v: string) => void;
+}) {
+  const { t } = useLang();
+  const isBs = type === 'Asset' || type === 'Liability' || type === 'Equity';
+  const isPl = type === 'Revenue' || type === 'Expense';
+  if (!isBs && !isPl) return null;
+  return isBs ? (
+    <FormField label={t('fnx.coa.f_bs_group')} htmlFor="coa-bsg">
+      <select id="coa-bsg" className={SELECT_CLS} value={bsGroup} onChange={(e) => setBsGroup(e.target.value)}>
+        <option value="">{t('fnx.coa.f_stmt_auto')}</option>
+        {BS_GROUP_OPTS.map((g) => <option key={g} value={g}>{t(`fnx.coa.bs_${g}`)}</option>)}
+      </select>
+    </FormField>
+  ) : (
+    <FormField label={t('fnx.coa.f_is_group')} htmlFor="coa-isg">
+      <select id="coa-isg" className={SELECT_CLS} value={isGroup} onChange={(e) => setIsGroup(e.target.value)}>
+        <option value="">{t('fnx.coa.f_stmt_auto')}</option>
+        {IS_GROUP_OPTS.map((g) => <option key={g} value={g}>{t(`fnx.coa.is_${g}`)}</option>)}
+      </select>
+    </FormField>
+  );
+}
+
 // Suggest the next free sub-account code under a parent: the parent code + a running 2-digit ordinal
 // (e.g. 5150 → 515001, 515002…). Falls back to a longer suffix if the 6-digit space fills; the server
 // re-checks uniqueness + the 4–6-digit format, so a clash just needs a manual edit.
@@ -452,6 +488,9 @@ function CreateAccountDialog({ preset, onClose, onSaved }: { preset?: { parentCo
   // indirect cash flow and the BS metrics classify it without a code change.
   const [cfBucket, setCfBucket] = useState('');
   const [isCurrent, setIsCurrent] = useState('');
+  // 0438: which งบดุล / งบกำไรขาดทุน section this account rolls into ('' = canonical default).
+  const [bsGroup, setBsGroup] = useState('');
+  const [isGroup, setIsGroup] = useState('');
   // COA-D2: effective window + required dimensions — now ENFORCED by the posting guard when set.
   const [effFrom, setEffFrom] = useState('');
   const [effTo, setEffTo] = useState('');
@@ -468,6 +507,8 @@ function CreateAccountDialog({ preset, onClose, onSaved }: { preset?: { parentCo
           isPostable: postable,
           ...(cfBucket ? { cfBucket } : {}),
           ...(isCurrent !== '' ? { isCurrent: isCurrent === 'true' } : {}),
+          ...(bsGroup ? { bsGroup } : {}),
+          ...(isGroup ? { isGroup } : {}),
           ...(effFrom ? { effectiveFrom: effFrom } : {}),
           ...(effTo ? { effectiveTo: effTo } : {}),
           ...(Object.values(reqDims).some(Boolean) ? { requireDimension: reqDims } : {}),
@@ -545,6 +586,7 @@ function CreateAccountDialog({ preset, onClose, onSaved }: { preset?: { parentCo
               </FormField>
             </>
           )}
+          <StatementSectionFields type={type} bsGroup={bsGroup} setBsGroup={setBsGroup} isGroup={isGroup} setIsGroup={setIsGroup} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
@@ -568,6 +610,10 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
   const cur0 = account.isCurrent === true ? 'true' : account.isCurrent === false ? 'false' : '';
   const [cfBucket, setCfBucket] = useState(cf0);
   const [isCurrent, setIsCurrent] = useState(cur0);
+  // 0438: statement-section binding backfill ('' = auto; null clears back to auto).
+  const bsg0 = account.bsGroup ?? '', isg0 = account.isGroup ?? '';
+  const [bsGroup, setBsGroup] = useState(bsg0);
+  const [isGroup, setIsGroup] = useState(isg0);
   // COA-D2: effective window + required dimensions (enforced by the posting guard when set).
   const ef0 = account.effectiveFrom ?? '', et0 = account.effectiveTo ?? '';
   const rd0 = account.requireDimension ?? {};
@@ -585,6 +631,8 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
           ...(postable !== account.isPostable ? { isPostable: postable } : {}),
           ...(cfBucket !== cf0 ? { cfBucket: cfBucket || null } : {}),
           ...(isCurrent !== cur0 ? { isCurrent: isCurrent === '' ? null : isCurrent === 'true' } : {}),
+          ...(bsGroup !== bsg0 ? { bsGroup: bsGroup || null } : {}),
+          ...(isGroup !== isg0 ? { isGroup: isGroup || null } : {}),
           ...(effFrom !== ef0 ? { effectiveFrom: effFrom } : {}),
           ...(effTo !== et0 ? { effectiveTo: effTo } : {}),
           ...(JSON.stringify(reqDims) !== JSON.stringify(rd0) ? { requireDimension: reqDims } : {}),
@@ -651,6 +699,7 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
               </FormField>
             </>
           )}
+          <StatementSectionFields type={account.type} bsGroup={bsGroup} setBsGroup={setBsGroup} isGroup={isGroup} setIsGroup={setIsGroup} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
