@@ -23,7 +23,10 @@ import type { JwtUser } from '../../common/decorators';
 import { approvalAgeDays, type ApprovalQueue, type ApprovalQueueSource } from '../../common/approval-queues';
 
 export interface ReceiptDto { invoice_no: string; amount: number; method?: string; ref_no?: string; remarks?: string; idempotency_key?: string }
-export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero' | 'reverse_charge'; tax_code?: string; idempotency_key?: string; expense_account?: string; tenant_id?: number | null }
+// currency/fx_rate (C1 parity with POs/GRs): `amount` is in the DOCUMENT currency; fx_rate is the booked
+// rate to functional THB (default 1). The GL posts the THB-converted legs; statements (EXP-06) read the
+// stored currency/rate. Internal callers only today (AP intake) — the HTTP body schema is unchanged.
+export interface ApTxnDto { vendor_id?: number; vendor_name?: string; txn_type?: string; invoice_no?: string; invoice_date?: string; due_date?: string; amount: number; paid_amount?: number; remarks?: string; vat_treatment?: 'standard' | 'exempt' | 'zero' | 'reverse_charge'; tax_code?: string; idempotency_key?: string; expense_account?: string; tenant_id?: number | null; currency?: string; fx_rate?: number }
 export interface AdvanceDto { payee: string; amount: number; purpose?: string; expense_account?: string; tenant_id?: number | null; project_code?: string; boq_line_id?: number }
 export interface SettleAdvanceDto { settled_expense: number; returned_cash?: number; expense_account?: string }
 // project_code (M4, docs/32) — an advance can be raised against a project so site cash is managed on it.

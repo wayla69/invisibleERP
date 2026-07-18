@@ -1,5 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
+**Status: DRAFT v7.57 · *v7.57: intake line-level match escalation + multi-currency bill booking (EXP-10 control text updated — no count change, xlsx regenerated) — maps UAT-P2P-151..152: all-or-nothing vision-line mapper engages EXP-01 per-line tolerances; extracted currency books at the latest approved fx rate feeding EXP-06.* ·
 **Status: DRAFT v7.56 · *v7.56: AP-intake vision line items (extends EXP-10, no new control, migration `0432`) — maps UAT-P2P-150: normalized vision lines stored on `ap_invoice_intakes.lines` + reviewer table with Σ-drift hint; 3-way match deliberately unchanged (header-level).* ·
 **Status: DRAFT v7.55 · *v7.55: doc-AI extraction quality round (extends EXP-10, no new control) — maps UAT-P2P-148..149: `usableTextLayer` PDF routing (Thai CID mojibake → vision/NeedsReview), ISO-4217 currency detection, BE→CE date normalization, tolerant model-JSON parse + bounded lines[] (`modules/doc-ai/doc-ai.extract.ts`); opt-in live vision-accuracy eval `doc-ai-live-eval` (not a CI gate).* ·
 **Status: DRAFT v7.54 · *v7.54: camera-scanner quality round (no new control) — maps UAT-INV-069d (zoom slider) and re-evidences UAT-INV-069/069c as automated (`apps/web/e2e/qr-decode.spec.ts` real-decode e2e: stubbed getUserMedia canvas stream through the actual @zxing/browser fallback, QR + hand-encoded EAN-13; native-BarcodeDetector variant auto-skips headless). Payload helpers + shared↔web mirror parity locked in `module-qr.ts` (12 checks).* ·
@@ -696,6 +697,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-P2P-148 | AP intake upload: garbled Thai CID PDF routes to vision/review, never junk-extracted | EXP-10 | 02 §7.9 |
 | UAT-P2P-149 | Doc-AI currency extraction (ISO-4217, THB default) + normalized output, rules path lines=[] | EXP-10 | 02 §7.9 |
 | UAT-P2P-150 | AP-intake vision line items stored/shown for review; header-level match unchanged (migration 0432) | EXP-10 | 02 §7.9 |
+| UAT-P2P-151 | Intake books foreign-currency bill at approved fx rate; EXP-06 statement converts | EXP-10 / EXP-06 | 02 §7.9 |
+| UAT-P2P-152 | Line-level match escalation (per-line tolerance inside passing header; escalate-only fallback) | EXP-10 / EXP-01 | 02 §7.9 |
 | UAT-UI-P2P-ACC-01 | Procurement & AP screens split by user group | R03/R04/R07 | 02 §3 |
 | UAT-UI-SUP-01 | Supplier portal screen (vendor self-service) — PO ack + invoice submit | Feature (supplier portal UI) | 02 §7 |
 | UAT-P2P-040 | Capital PO line → GR eligible (not stocked) | FA-10 | 02 §7, 09 §7 |

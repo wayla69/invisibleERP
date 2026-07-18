@@ -1,10 +1,10 @@
 import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { eq, and, ne, desc, inArray } from 'drizzle-orm';
+import { eq, and, ne, desc, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { apInvoiceIntakes, apTransactions, purchaseOrders, vendors } from '../../database/schema';
+import { apInvoiceIntakes, apTransactions, purchaseOrders, poItems, vendors, fxRates } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
-import { n } from '../../database/queries';
+import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { DocAiService } from '../doc-ai/doc-ai.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
@@ -12,6 +12,7 @@ import { FinanceService } from '../finance/finance.service';
 import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
 import { parseInvoiceDataUrl } from '../../common/invoice-doc';
 import { blindIndex } from '../../database/encrypted-column';
+import { mapVisionLinesToPo, type MappedMatchLine } from './ap-intake.match-lines';
 
 // AP invoice intake (EXP-10): scanned/pasted vendor invoice → doc-ai extraction → PO auto-map →
 // post AP bill → automated 3-way match. Automates the path TO payment-ready only — the disbursement
@@ -140,7 +141,8 @@ export class ApIntakeService {
     const vals: any = { poNo, mapMethod: 'manual', mapConfidence: '100', vendorId: po.vendorId ?? it.vendorId ?? null };
     let matchRes: any = null;
     if (it.status === 'Posted' && it.txnNo) {
-      matchRes = await this.matchSvc.match(it.txnNo, poNo, undefined, user);
+      // Re-match against the corrected PO — same line-level escalation rule as post().
+      matchRes = await this.matchSvc.match(it.txnNo, poNo, await this.visionMatchLines(it.lines as any, poNo), user);
       vals.matchStatus = matchRes.match_status; vals.payable = matchRes.payable;
     } else if (it.status === 'NeedsReview') vals.status = 'Mapped';
     await db.update(apInvoiceIntakes).set(vals).where(eq(apInvoiceIntakes.id, it.id));
@@ -161,22 +163,34 @@ export class ApIntakeService {
     if (dupOf && !opts.allow_duplicate) {
       throw new ConflictException({ code: 'DUPLICATE_INVOICE', message: `Invoice ${it.invoiceNo} already booked via ${dupOf}`, messageTh: `ใบแจ้งหนี้เลขนี้ถูกบันทึกแล้ว (${dupOf})`, dup_of: dupOf });
     }
+    // The extracted document currency books onto the bill (C1 parity with POs/GRs) so a scanned USD
+    // invoice feeds the EXP-06 multi-currency statement in its own units. The booked rate comes from the
+    // latest APPROVED fx_rates row at the invoice date (the ledger's canonical rateAsOf rule); with no
+    // approved rate it books at 1 — same manual-default behavior as PO creation.
+    const currency = (it.currency ?? 'THB').trim().toUpperCase() || 'THB';
     const bill = await this.finance.createApTxn({
       vendor_id: it.vendorId != null ? Number(it.vendorId) : undefined, vendor_name: it.vendorName ?? undefined,
       txn_type: 'Invoice', invoice_no: it.invoiceNo ?? undefined, invoice_date: it.invoiceDate ?? undefined,
       amount: n(it.amount), tenant_id: it.tenantId ?? undefined, idempotency_key: `apintake:${it.intakeNo}`,
       remarks: `AP intake ${it.intakeNo}${poNo ? ` → ${poNo}` : ''}`,
+      currency, fx_rate: await this.bookedFxRate(currency, it.invoiceDate ?? ymd()),
     }, user);
-    // PO-based → run the 3-way match now — deliberately HEADER-level (third arg undefined): extracted
-    // vision lines carry no internal item_id, so they are reviewer detail only, never match input.
+    // PO-based → run the 3-way match now. Vision lines ESCALATE it to LINE-level when every extracted
+    // line maps unambiguously onto the PO's own lines (per-line qty/price tolerance verdicts, EXP-01);
+    // any unmapped/ambiguous line falls the whole set back to today's header-level amount match — the
+    // mapper can tighten precision but never loosen the existing verdict path.
     // Non-PO (utilities/services) posts unmatched and stays payable per the fail-open EXP-01 policy.
     let matchRes: any = null;
-    if (poNo) matchRes = await this.matchSvc.match(bill.txn_no, poNo, undefined, user);
+    let matchLines: MappedMatchLine[] | undefined;
+    if (poNo) {
+      matchLines = await this.visionMatchLines(it.lines as any, poNo);
+      matchRes = await this.matchSvc.match(bill.txn_no, poNo, matchLines, user);
+    }
     await db.update(apInvoiceIntakes).set({
       status: 'Posted', txnNo: bill.txn_no, poNo, matchStatus: matchRes?.match_status ?? null,
       payable: matchRes ? matchRes.payable : true, postedBy: user.username, postedAt: new Date(),
     }).where(eq(apInvoiceIntakes.id, it.id));
-    await this.statusLog.log('AINV', intakeNo, it.status, 'Posted', user.username, `Bill ${bill.txn_no}${matchRes ? ` match=${matchRes.match_status}` : ' (non-PO)'}`);
+    await this.statusLog.log('AINV', intakeNo, it.status, 'Posted', user.username, `Bill ${bill.txn_no}${matchRes ? ` match=${matchRes.match_status}${matchLines ? ' (line-level)' : ''}` : ' (non-PO)'}`);
     return this.get(intakeNo);
   }
 
@@ -271,6 +285,29 @@ export class ApIntakeService {
     const norm = (s: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9ก-๙]/g, '');
     const x = norm(a), y = norm(b);
     return !x || !y || x.includes(y) || y.includes(x); // unknown vendor on either side → treat same invoice no as a duplicate
+  }
+
+  // Vision lines → 3-way-match line input, against the mapped PO's own lines (small candidate set).
+  // Returns undefined (→ header-level match, today's behavior) unless EVERY line maps unambiguously —
+  // see ap-intake.match-lines.ts for the identity rules.
+  private async visionMatchLines(lines: unknown, poNo: string): Promise<MappedMatchLine[] | undefined> {
+    if (!Array.isArray(lines) || lines.length === 0) return undefined;
+    const [po] = await this.db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
+    if (!po) return undefined;
+    const pls = await this.db.select({ itemId: poItems.itemId, itemDescription: poItems.itemDescription }).from(poItems).where(eq(poItems.poId, po.id));
+    return mapVisionLinesToPo(lines as any, pls.map((p: any) => ({ item_id: String(p.itemId), item_description: p.itemDescription ?? null })));
+  }
+
+  // Booked rate for a foreign-currency bill: latest APPROVED fx_rates row with rate_date <= asOf (the
+  // canonical rateAsOf rule from fx.service/fx-reval.service). THB ⇒ 1; no approved rate ⇒ 1 (parity with
+  // PO creation's manual-default rate — never blocks the posting).
+  private async bookedFxRate(currency: string, asOf: string): Promise<number> {
+    if (currency === 'THB') return 1;
+    const [r] = await this.db.select().from(fxRates)
+      .where(and(eq(fxRates.currency, currency), eq(fxRates.status, 'Approved'), sql`${fxRates.rateDate} <= ${asOf}`))
+      .orderBy(desc(fxRates.rateDate), desc(fxRates.id)).limit(1);
+    const rate = r ? n(r.rate) : 0;
+    return rate > 0 ? rate : 1;
   }
 
   private async load(intakeNo: string) {
