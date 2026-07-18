@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException, GoneException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { eq, and, sql, gte, isNotNull, desc } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { npsResponses, posMembers, dineInOrders } from '../../database/schema';
 import { MessagingService } from '../messaging/messaging.service';
 import { RecoveryService } from './recovery.service';
@@ -88,6 +88,9 @@ export class NpsService {
   // ── Public (tokenized) ──────────────────────────────────────────────────────
   // The token is the ONLY identifier — the response carries the question + state, never member PII.
   async getSurvey(token: string) {
+    // @NoTx public survey read (anonymous respondent, no tenant context): keyed by the single-use random
+    // token only. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('nps:get-survey', async () => {
     const db = this.db;
     const [r] = await db.select().from(npsResponses).where(eq(npsResponses.token, token)).limit(1);
     if (!r) throw new NotFoundException({ code: 'NPS_NOT_FOUND', message: 'Survey not found', messageTh: 'ไม่พบแบบสอบถาม' });
@@ -97,9 +100,14 @@ export class NpsService {
       answered: r.respondedAt != null,
       expired,
     };
+    });
   }
 
   async submit(token: string, dto: { score: number; comment?: string }) {
+    // @NoTx public survey submit (anonymous respondent, no tenant context): keyed by the single-use random
+    // token; the detractor fan-out (recovery/webhook/automation) is explicitly tenant-scoped from the row's
+    // tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('nps:submit', async () => {
     const db = this.db;
     const score = Number(dto.score);
     if (!Number.isInteger(score) || score < 0 || score > 10) throw new BadRequestException({ code: 'BAD_SCORE', message: 'score must be an integer 0–10', messageTh: 'คะแนนต้องเป็น 0–10' });
@@ -126,6 +134,7 @@ export class NpsService {
       try { await this.automation?.runEvent('loyalty.nps_detractor', payload, sysUser); } catch { /* best-effort */ }
     }
     return { answered: true, score, detractor: score <= 6 };
+    });
   }
 
   // ── Staff analytics ─────────────────────────────────────────────────────────

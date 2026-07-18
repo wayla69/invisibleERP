@@ -1,6 +1,6 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { tenantUiConfig } from '../../database/schema';
 import { MODULE_KEYS, ALWAYS_ON_MODULES } from '@ierp/shared';
 
@@ -39,7 +39,11 @@ export class ModuleConfigService {
   // Read one tenant's config blob (explicit tenant filter — never relies on RLS; see file header).
   private async loadConfig(tenantId: number | null): Promise<UiConfig> {
     if (tenantId == null) return {};
-    const rows = await this.db.select().from(tenantUiConfig).where(eq(tenantUiConfig.tenantId, tenantId));
+    // Read from ModuleEnabledGuard, which runs BEFORE the per-request tenant tx — so this is a base-pool read
+    // with no ALS context. Explicit `tenant_id` filter (no cross-tenant leak); declared global so the
+    // fail-closed proxy (STRICT_TENANT_PROXY) permits it.
+    const rows = await runGlobalDb('module-config:load', () =>
+      this.db.select().from(tenantUiConfig).where(eq(tenantUiConfig.tenantId, tenantId)));
     const c = rows[0]?.config as UiConfig | undefined;
     return c && typeof c === 'object' ? c : {};
   }

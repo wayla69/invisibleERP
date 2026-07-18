@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, ledgers, tenantAccounts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 
@@ -142,7 +142,9 @@ export class LedgerService implements OnModuleInit {
     // canonical account, so a registry typo can never become a silent mis-posting fallback.
     assertPostingEventDefaults(COA.map((a) => a.code));
     const db = this.db;
-    await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
+    // Global boot seed of the canonical (shared) chart of accounts — runs at onModuleInit outside any
+    // request. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool insert.
+    await runGlobalDb('ledger:seed-coa', () => db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code }));
     return { seeded: COA.length };
   }
 
@@ -210,9 +212,14 @@ export class LedgerService implements OnModuleInit {
   // ───────────────────── Ledgers (multi-GAAP) ─────────────────────
   // idempotent seed of the parallel ledgers (TFRS leading + TAX + IFRS).
   async seedLedgers() {
-    const db = this.db;
-    await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
-    return { seeded: LEDGERS.length };
+    // Boot seed of the GLOBAL parallel-ledgers catalogue (`ledgers` has no tenant_id). Runs at startup
+    // (main.ts) with no request/tenant context, so it's declared global for STRICT_TENANT_PROXY (mirrors
+    // seedChartOfAccounts).
+    return runGlobalDb('ledger:seed-ledgers', async () => {
+      const db = this.db;
+      await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
+      return { seeded: LEDGERS.length };
+    });
   }
 
   async listLedgers() {

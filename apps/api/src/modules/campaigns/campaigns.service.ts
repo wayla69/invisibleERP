@@ -1,6 +1,6 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc, inArray, lte } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { resolveMessageGateway, type MessageChannel } from '../messaging/gateways';
@@ -73,6 +73,10 @@ export class CampaignsService {
   // auto-commit, so the audit is durable too. (Gateway sends are irreversible; we must not put them inside a
   // transaction whose rollback would re-open the campaign.)
   async sendCampaign(user: JwtUser, id: number) {
+    // @NoTx send route (gateway delivery is irreversible, so no request tx): every read/write is scoped
+    // EXPLICITLY by tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the
+    // base-pool access. (Nested harmlessly when called from runDueAll's own runGlobalDb.)
+    return runGlobalDb('campaigns:send', async () => {
     const db = this.db; const tenantId = this.tid(user);
     const [claimed] = await db.update(loyaltyCampaigns).set({ status: 'sent', sentAt: new Date() })
       .where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId), inArray(loyaltyCampaigns.status, ['draft', 'scheduled']))).returning();
@@ -93,20 +97,25 @@ export class CampaignsService {
     }
     await db.update(loyaltyCampaigns).set({ targeted: members.length, sentCount: sent, skippedCount: skipped, failedCount: failed }).where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId)));
     return { campaign_code: claimed.campaignCode, status: 'sent', targeted: members.length, sent, skipped, failed };
+    });
   }
 
   // Cron entry (the @NoTx run-due route, NOT the sweep's big transaction — so each claim commits durably).
   // Admin/HQ runs every tenant's due campaigns; a tenant-scoped caller runs only its own.
   async runDueAll(user: JwtUser) {
-    const db = this.db;
-    let tenantIds: number[];
-    if (user.role === 'Admin' || user.tenantId == null) {
-      const rows = await db.selectDistinct({ tid: loyaltyCampaigns.tenantId }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
-      tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
-    } else tenantIds = [this.tid(user)];
-    let totalSent = 0; const results: any[] = [];
-    for (const tid of tenantIds) { const ran = await this.runDue(tid, user.username); totalSent += ran; results.push({ tenant_id: tid, campaigns_sent: ran }); }
-    return { tenants_processed: tenantIds.length, campaigns_sent: totalSent, results };
+    // @NoTx cron sweep across every tenant's due campaigns on the base pool, each filtered EXPLICITLY by
+    // tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('campaigns:run-due-all', async () => {
+      const db = this.db;
+      let tenantIds: number[];
+      if (user.role === 'Admin' || user.tenantId == null) {
+        const rows = await db.selectDistinct({ tid: loyaltyCampaigns.tenantId }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
+        tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
+      } else tenantIds = [this.tid(user)];
+      let totalSent = 0; const results: any[] = [];
+      for (const tid of tenantIds) { const ran = await this.runDue(tid, user.username); totalSent += ran; results.push({ tenant_id: tid, campaigns_sent: ran }); }
+      return { tenants_processed: tenantIds.length, campaigns_sent: totalSent, results };
+    });
   }
 
   // Send every scheduled campaign whose time has come, for one tenant. Best-effort per campaign (claim-first

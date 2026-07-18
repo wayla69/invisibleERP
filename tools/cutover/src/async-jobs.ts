@@ -17,7 +17,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy , runGlobalDb} from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
@@ -51,6 +51,9 @@ async function main() {
   await app.getHttpAdapter().getInstance().ready();
   await app.get(LedgerService).seedChartOfAccounts();
   const worker = app.get(JobWorkerService);
+  // enqueue() expects the caller's tenant tx (a request/scheduler context); the harness pokes it
+  // directly, so declare the base-pool access for STRICT_TENANT_PROXY=1 (tenantId passed explicitly).
+  const g = <T>(fn: () => Promise<T>): Promise<T> => runGlobalDb('async-jobs:direct', fn);
 
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
@@ -103,7 +106,7 @@ async function main() {
 
   // 8. dead-letter — a job whose type has NO handler fails; with maxAttempts=1 it exhausts on the first
   // tick and lands in 'failed' (the dead-letter state that raises an ops alert).
-  const dlId = await queue.enqueue({ jobType: 'no_such_handler', tenantId: hq, bypass: true, maxAttempts: 1 });
+  const dlId = await g(() => queue.enqueue({ jobType: 'no_such_handler', tenantId: hq, bypass: true, maxAttempts: 1 }));
   await worker.tick();
   const dl = await inj('GET', `/api/jobs/${dlId}`, admin);
   ok('retry-exhausted job → dead-letter (status failed)', dl.json.status === 'failed', JSON.stringify({ st: dl.json.status, err: dl.json.error }).slice(0, 120));
@@ -163,7 +166,7 @@ async function main() {
   // 15. multi-trigger idempotency — a DUPLICATE enqueue for the just-ran (no longer due) subscription
   // no-ops at execution time (the handler re-checks dueness), so cron + tick + manual can't double-deliver.
   const [hqSub] = await db.select().from(biSchema.reportSubscriptions).where(eq(biSchema.reportSubscriptions.tenantId, hq));
-  const dupId = await queue.enqueue({ jobType: 'report_subscription', payload: { subscriptionId: Number(hqSub.id) }, tenantId: hq, actor: 'toe:dup' });
+  const dupId = await g(() => queue.enqueue({ jobType: 'report_subscription', payload: { subscriptionId: Number(hqSub.id) }, tenantId: hq, actor: 'toe:dup' }));
   await worker.drain();
   const dupJob = await inj('GET', `/api/jobs/${dupId}`, admin);
   ok('duplicate enqueue of a not-due subscription no-ops (skipped: not due)', dupJob.json.status === 'done' && dupJob.json.result?.skipped === 'not due', JSON.stringify(dupJob.json.result));
