@@ -244,7 +244,7 @@ export class DineInService {
     const saleCash = roundCurrency(built.total - Math.min(built.gift_applied, built.total), 'THB');
     const openTill = o.tenantId != null ? await this.payments.currentOpenTill(o.tenantId) : null;
     const tender: any = saleCash > 0
-      ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: saleCash, tip: built.tip, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
+      ? await this.payments.recordTender({ sale_no: saleNo, tenant_id: o.tenantId ?? undefined, method: dto.method ?? 'Cash', amount: saleCash, tip: built.tip, cash_tendered: dto.cash_tendered, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id }, user)
       : null;
     const inv = await this.markPaidAndInvoice(o, saleNo, user);
 
@@ -266,7 +266,7 @@ export class DineInService {
       }, user);
     } catch { /* tamper-evidence is detective: verify() surfaces the gap, the sale stands */ }
 
-    return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, tax_invoice_no: inv };
+    return { order_no: orderNo, sale_no: saleNo, ...built, payment_no: tender?.payment_no ?? null, payment_status: tender?.status ?? null, cash_tendered: tender?.cash_tendered ?? null, change_due: tender?.change_due ?? null, tax_invoice_no: inv };
   }
 
   // shared: insert cust_pos_sales + items + GL from a dine-in order — extracted to DineInSaleService

@@ -22,6 +22,7 @@ const TenderBody = z.object({
   method: z.string().min(1),
   amount: z.number().positive(),
   tip: z.number().nonnegative().optional(),
+  cash_tendered: z.number().nonnegative().optional(),   // #1: cash handed over → change_due computed & recorded
   currency: z.string().optional(),
   gateway: z.string().optional(),
   token: z.string().min(1).max(500).optional(),   // card token / wallet source from the terminal SDK
@@ -107,6 +108,13 @@ export class PaymentsController {
   @Patch(':no/settle') @Permissions('pos_sell', 'ar')
   settle(@Param('no') no: string, @CurrentUser() u: JwtUser) {
     return this.svc.settle(no, u);
+  }
+
+  // #3 pending-settlement reconciliation worklist — async tenders (QR/PromptPay/card-auth) not yet confirmed
+  // Captured, so an unconfirmed taking never sits in limbo. Detective read; any POS/finance duty may view.
+  @Get('pending-settlement') @Permissions('pos_sell', 'pos_till', 'ar', 'exec', 'fin_report')
+  pendingSettlement(@Query('older_than_min') older: string | undefined, @Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.pendingSettlement({ older_than_min: older != null ? Math.max(0, Number(older) || 0) : undefined, limit: limit != null ? Math.min(500, Math.max(1, parseInt(limit, 10) || 200)) : undefined }, u);
   }
 
   @Post('till/open') @Permissions('pos_till', 'ar')

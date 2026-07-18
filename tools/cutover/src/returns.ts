@@ -26,6 +26,8 @@ const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
 const near = (a: any, b: number) => Math.abs(Number(a) - b) < 0.01;
+// 13-digit Thai tax id from a 12-digit prefix (append the RD checksum) — mirrors the taxdocs harness.
+const taxId = (p12: string) => { let sum = 0; for (let i = 0; i < 12; i++) sum += Number(p12[i]) * (13 - i); return p12 + String((11 - (sum % 11)) % 10); };
 
 async function main() {
   const pg = await PGlite.create();
@@ -37,7 +39,7 @@ async function main() {
   await db.insert(s.permissions).values(PERMISSIONS.map((k) => ({ key: k }))).onConflictDoNothing();
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง', vatRegistered: true }, { code: 'T2', name: 'ร้านสอง', vatRegistered: true }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ' }, { code: 'T1', name: 'ร้านหนึ่ง', legalName: 'บริษัท ร้านหนึ่ง จำกัด', taxId: taxId('010555600001'), vatRegistered: true, branchCode: '00000', addressLine1: '123 ถนนสุขุมวิท', province: 'กรุงเทพมหานคร', postalCode: '10110' }, { code: 'T2', name: 'ร้านสอง', vatRegistered: true }]).onConflictDoNothing();
   const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
   const [hq, t1, t2] = [await tid('HQ'), await tid('T1'), await tid('T2')];
   await db.insert(s.users).values([
@@ -120,8 +122,32 @@ async function main() {
   const regT2 = await inj('GET', '/api/pos/returns', sales2);
   ok('Returns register: RLS — T2 sees none of T1 returns', (regT2.json.returns ?? []).length === 0 && regT2.json.total_count === 0, `n=${regT2.json.count}`);
 
+  // ── #2 credit note (ใบลดหนี้ ม.86/10) auto-issued on a return against an Issued tax invoice ──
+  // A POS sale carrying an Issued tax invoice → a return auto-issues the matching credit note so the
+  // output-VAT (ภ.พ.30) report is reduced, WITHOUT a second GL posting (the RTN reversal is the GL effect).
+  const saleCN = await sell(2); // subtotal 200, vat 14, total 214
+  const fullInv = await inj('POST', '/api/tax-invoices/full', sales1, { source_type: 'POS', source_ref: saleCN.json.sale_no, buyer: { name: 'บริษัท ผู้ซื้อ จำกัด', tax_id: taxId('010555600002'), address: '99 ถนนทดสอบ กรุงเทพฯ' } });
+  ok('CN setup: full tax invoice (TIV-) issued for the sale', /^TIV-/.test(fullInv.json.doc_no ?? ''), `${fullInv.status} ${fullInv.json.doc_no}`);
+  const rCN = await inj('POST', '/api/pos/returns', sales1, { sale_no: saleCN.json.sale_no, items: [{ item_id: 'A', qty: 1 }], reason: 'ชำรุด' });
+  ok('Return auto-issues a credit note (CN-) linked to the sale invoice + RTN- + REF-',
+    /^CN-/.test(rCN.json.credit_note_no ?? '') && rCN.json.original_tax_invoice_no === fullInv.json.doc_no && /^RTN-/.test(rCN.json.return_no ?? '') && /^REF-/.test(rCN.json.refund_no ?? ''),
+    `${rCN.status} ${JSON.stringify(rCN.json).slice(0, 150)}`);
+  const cnRow = (await pg.query(`SELECT type, status, original_doc_no, subtotal, vat_amount, grand_total, gl_entry_no, source_ref FROM tax_invoices WHERE doc_no='${rCN.json.credit_note_no}'`)).rows[0] as any;
+  ok('Credit note: type credit_note · Issued · references the original · amounts 100/7/107 · links the RTN journal · source_ref=RTN-',
+    !!cnRow && cnRow.type === 'credit_note' && cnRow.status === 'Issued' && cnRow.original_doc_no === fullInv.json.doc_no && near(cnRow.subtotal, 100) && near(cnRow.vat_amount, 7) && near(cnRow.grand_total, 107) && cnRow.gl_entry_no === rCN.json.journal_no && cnRow.source_ref === rCN.json.return_no,
+    JSON.stringify(cnRow));
+  // NO double GL: the credit note posts NO new journal — the RTN reversal IS the GL effect. No CN-source entry.
+  const cnGl = (await pg.query(`SELECT count(*)::int AS c FROM journal_entries WHERE source='CN'`)).rows[0].c as number;
+  ok('Credit note posts NO new GL (no CN-source journal; the RTN reversal is the only GL effect)', cnGl === 0, `cn_journals=${cnGl}`);
+  // Idempotent: exactly one credit note per return (keyed on source_ref = the RTN-).
+  const cnCount = (await pg.query(`SELECT count(*)::int AS c FROM tax_invoices WHERE type='credit_note' AND source_ref='${rCN.json.return_no}'`)).rows[0].c as number;
+  ok('Credit note written exactly once (idempotent per return)', cnCount === 1, `count=${cnCount}`);
+  // Negative: a sale with NO Issued tax invoice (the earlier portal sale r1) → no credit note, return still OK.
+  ok('Return on a sale with NO tax invoice → no credit note (credit_note_no null), return path unaffected',
+    r1.json.credit_note_no == null && /^RTN-/.test(r1.json.return_no ?? ''), `cn=${r1.json.credit_note_no} rtn=${r1.json.return_no}`);
+
   const tbEnd = (await inj('GET', '/api/ledger/trial-balance', admin)).json.totals ?? {};
-  ok('Trial balance balanced at end', near(tbEnd.debit ?? tbEnd.total_debit, tbEnd.credit ?? tbEnd.total_credit), JSON.stringify(tbEnd).slice(0, 60));
+  ok('Trial balance balanced at end (credit note added no GL)', near(tbEnd.debit ?? tbEnd.total_debit, tbEnd.credit ?? tbEnd.total_credit), JSON.stringify(tbEnd).slice(0, 60));
 
   await app.close();
   await pg.close();
