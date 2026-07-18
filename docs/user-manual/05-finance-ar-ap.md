@@ -1,6 +1,6 @@
 # 05 · Finance — Accounts Receivable & Payable
 
-**Status: DRAFT v0.9 · 2026-07-10** _(v0.9: **AR/AP netting** — offset a counterparty that is both a customer and a supplier with a single **contra settlement** (§B5); a netting agreement + per-counterparty threshold authorises it, and a *different* person must approve. New control REV-23. · v0.8: AR cash application — apply **one customer payment across several invoices** from the **ตัดรับชำระหลายใบแจ้งหนี้** worksheet; remainder parks **on-account**; big batches need a second approver; reversals need a reason. New control REV-21.)_
+**Status: DRAFT v0.10 · 2026-07-18** _(v0.10: **ที่อยู่กรอกง่ายด้วยรหัสไปรษณีย์** — on a customer address, type the 5-digit postal code and pick the ตำบล/แขวง from the dropdown; อำเภอ/เขต and จังหวัด fill in automatically (full Thailand dataset), with a **กรอกเอง** fallback. · v0.9: **AR/AP netting** — offset a counterparty that is both a customer and a supplier with a single **contra settlement** (§B5); a netting agreement + per-counterparty threshold authorises it, and a *different* person must approve. New control REV-23. · v0.8: AR cash application — apply **one customer payment across several invoices** from the **ตัดรับชำระหลายใบแจ้งหนี้** worksheet; remainder parks **on-account**; big batches need a second approver; reversals need a reason. New control REV-21.)_
 
 *v0.7 (2026-07-09): bank-statement file import — upload the bank's CSV/XLSX export on `/bank`, Thai/English headers + BE dates auto-detected, auto-match on import.*
 
@@ -75,10 +75,13 @@ From the 360° view you can also:
 
 - Add multiple **ที่อยู่ (addresses)** — billing / shipping / registered /
   other — and mark one **หลัก (primary)** per customer; delete any address you
-  no longer need. The **จังหวัด (province)** field suggests from the standard
-  77-province list as you type, and is saved in its official spelling (so
-  "กรุงเทพ", "กทม" and "Bangkok" all become **กรุงเทพมหานคร**); the **รหัสไปรษณีย์
-  (postal code)** must be 5 digits.
+  no longer need. **Type the 5-digit รหัสไปรษณีย์ (postal code) first** and a
+  **ตำบล/แขวง (sub-district)** dropdown appears with every sub-district that code
+  covers — pick one and the **อำเภอ/เขต (district)** and **จังหวัด (province)**
+  fill in automatically (from the full Thailand address dataset). For the rare
+  code the list doesn't cover, press **กรอกเอง** to type the fields by hand (the
+  **จังหวัด** field still suggests from the 77-province list and saves the official
+  spelling — "กรุงเทพ", "กทม" and "Bangkok" all become **กรุงเทพมหานคร**).
 - Add multiple **ผู้ติดต่อ (contacts)** — name, title, phone, email — and mark
   one primary; delete a contact when they leave.
 - Link the customer to a **บริษัทแม่ (parent company)** by its customer number
