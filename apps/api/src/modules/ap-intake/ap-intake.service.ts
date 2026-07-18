@@ -12,7 +12,7 @@ import { FinanceService } from '../finance/finance.service';
 import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
 import { parseInvoiceDataUrl } from '../../common/invoice-doc';
 import { blindIndex } from '../../database/encrypted-column';
-import { mapVisionLinesToPo, type MappedMatchLine } from './ap-intake.match-lines';
+import { mapVisionLinesToPo, type MappedMatchLine, type VisionLine } from './ap-intake.match-lines';
 
 // AP invoice intake (EXP-10): scanned/pasted vendor invoice → doc-ai extraction → PO auto-map →
 // post AP bill → automated 3-way match. Automates the path TO payment-ready only — the disbursement
@@ -142,7 +142,7 @@ export class ApIntakeService {
     let matchRes: any = null;
     if (it.status === 'Posted' && it.txnNo) {
       // Re-match against the corrected PO — same line-level escalation rule as post().
-      matchRes = await this.matchSvc.match(it.txnNo, poNo, await this.visionMatchLines(it.lines as any, poNo), user);
+      matchRes = await this.matchSvc.match(it.txnNo, poNo, await this.visionMatchLines(it.lines, poNo), user);
       vals.matchStatus = matchRes.match_status; vals.payable = matchRes.payable;
     } else if (it.status === 'NeedsReview') vals.status = 'Mapped';
     await db.update(apInvoiceIntakes).set(vals).where(eq(apInvoiceIntakes.id, it.id));
@@ -183,7 +183,7 @@ export class ApIntakeService {
     let matchRes: any = null;
     let matchLines: MappedMatchLine[] | undefined;
     if (poNo) {
-      matchLines = await this.visionMatchLines(it.lines as any, poNo);
+      matchLines = await this.visionMatchLines(it.lines, poNo);
       matchRes = await this.matchSvc.match(bill.txn_no, poNo, matchLines, user);
     }
     await db.update(apInvoiceIntakes).set({
@@ -295,7 +295,9 @@ export class ApIntakeService {
     const [po] = await this.db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.poNo, poNo)).limit(1);
     if (!po) return undefined;
     const pls = await this.db.select({ itemId: poItems.itemId, itemDescription: poItems.itemDescription }).from(poItems).where(eq(poItems.poId, po.id));
-    return mapVisionLinesToPo(lines as any, pls.map((p: any) => ({ item_id: String(p.itemId), item_description: p.itemDescription ?? null })));
+    // The jsonb column arrives as unknown; the Array.isArray guard above plus doc-ai's normalization
+    // make this a safe narrow (the mapper re-validates qty/price per line anyway).
+    return mapVisionLinesToPo(lines as VisionLine[], pls.map((p) => ({ item_id: String(p.itemId), item_description: p.itemDescription ?? null })));
   }
 
   // Booked rate for a foreign-currency bill: latest APPROVED fx_rates row with rate_date <= asOf (the
