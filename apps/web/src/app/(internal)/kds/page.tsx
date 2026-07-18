@@ -68,6 +68,12 @@ export default function KdsPage() {
     onSuccess: (r, orderNo) => { notifySuccess(r.served > 0 ? t('mx.kds_serve_ok', { no: orderNo.trim(), n: r.served }) : t('mx.kds_serve_none', { no: orderNo.trim() })); invalidate(); },
     onError: (e: Error) => notifyError(e.message),
   });
+  // Start a whole ticket — accept every queued line of an order in one tap (queued → preparing).
+  const start = useMutation({
+    mutationFn: (orderNo: string) => api<{ started: number }>('/api/restaurant/kds/start', { method: 'POST', body: JSON.stringify({ order_no: orderNo.trim() }) }),
+    onSuccess: invalidate,
+    onError: (e: Error) => notifyError(e.message),
+  });
   const onScan = () => { const c = scan.trim(); if (c) { serve.mutate(c); setScan(''); } };
 
   // flatten the station feed for the table/time/priority groupings
@@ -146,12 +152,15 @@ export default function KdsPage() {
               <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
                 {groupByTable(allItems).map(([label, items]) => (
                   <Card key={label} className="gap-3 p-3">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2">
                       <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
                         <Utensils className="size-5 text-primary" /> {label === '__ta' ? t('mx.kds_takeaway') : t('mx.kds_table', { label })}
                         <span className="text-sm font-normal text-muted-foreground">({items.length})</span>
                       </h3>
-                      <Button variant="outline" size="sm" disabled={serve.isPending || !items.some((i) => i.kds_status === 'ready')} onClick={() => serve.mutate(items[0].order_no)}>{t('mx.kds_serve_ticket')}</Button>
+                      <div className="flex shrink-0 flex-col gap-1">
+                        <Button variant="outline" size="sm" disabled={start.isPending || !items.some((i) => i.kds_status === 'queued')} onClick={() => start.mutate(items[0].order_no)}>{t('mx.kds_start_ticket')}</Button>
+                        <Button variant="outline" size="sm" disabled={serve.isPending || !items.some((i) => i.kds_status === 'ready')} onClick={() => serve.mutate(items[0].order_no)}>{t('mx.kds_serve_ticket')}</Button>
+                      </div>
                     </div>
                     <div className="grid gap-2">{items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} />)}</div>
                   </Card>
@@ -314,6 +323,7 @@ function ItemCard({ it, t, act }: { it: KdsItem; t: (k: string, v?: Record<strin
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground">{it.table_label ? t('mx.kds_table', { label: it.table_label }) : t('mx.kds_takeaway')} · {it.order_no}</div>
         <div className="flex flex-wrap justify-end gap-1">
+          {it.kds_status === 'queued' && it.elapsed_min < 2 && <Badge variant="success" className="px-1.5 text-[10px]">{t('mx.kds_new')}</Badge>}
           {(it.priority ?? 0) > 0 && <Badge variant="warning" className="px-1.5 text-[10px]">{t('mx.kds_priority_badge', { n: it.priority ?? 0 })}</Badge>}
           {(it.course ?? 1) > 1 && <Badge variant="outline" className="px-1.5 text-[10px]">{t('mx.kds_course', { course: it.course ?? 1 })}</Badge>}
           {it.is_buffet && <Badge variant="secondary" className="gap-0.5 px-1.5 text-[10px]"><Utensils className="size-2.5" /> {t('mx.kds_buffet')}</Badge>}

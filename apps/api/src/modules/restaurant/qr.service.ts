@@ -11,6 +11,7 @@ import { TableService } from './table.service';
 import { DineInService } from './dine-in.service';
 import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
+import { RecommendationService, type RecommendMode } from './recommendation.service';
 import { verifyTableToken, verifyRotatingTableToken, type TableClaim } from './qr-token.util';
 import { rateLimit } from './rate-limit.util';
 import { verifyInboundWebhook } from '../../common/webhook-auth';
@@ -30,6 +31,7 @@ export class QrService {
     private readonly dineIn: DineInService,
     private readonly menuSvc: MenuService,
     private readonly buffet: BuffetService,
+    private readonly recommend: RecommendationService,
     private readonly payments: PaymentService,
     private readonly idem: WebhookIdempotencyService,
   ) {}
@@ -155,10 +157,16 @@ export class QrService {
     });
   }
 
-  // diner pulls the menu to order from — full catalog with modifier groups inlined, scoped to the table's tenant.
+  // diner pulls the menu to order from — full catalog with modifier groups inlined, scoped to the table's
+  // tenant. The tenant's recommend_mode decides the "เมนูแนะนำ" set: manual flags, or a dynamic set
+  // (member behaviour / popular+low-cost) computed by the recommendation engine and applied here (0435).
   async menu(token: string) {
     const { claim } = await this.resolve(token);
-    return this.scope.run(claim.tenantId, () => this.menuSvc.listMenuForOrder(diner(claim.tenantId)));
+    return this.scope.run(claim.tenantId, async () => {
+      const cfg = await this.getSettings(claim.tenantId);
+      const recommendedSkus = await this.recommend.recommendedSkus(cfg.recommend_mode as RecommendMode, cfg.recommend_count);
+      return this.menuSvc.listMenuForOrder(diner(claim.tenantId), { recommendedSkus });
+    });
   }
 
   // diner submits menu-driven items → append to (or open) the session's order, then AUTO-FIRE to the KDS so the
@@ -200,23 +208,28 @@ export class QrService {
     return row?.v === true;
   }
 
-  async getSettings(tenantId: number): Promise<{ require_staff_fire: boolean; dynamic_mode: boolean; auto_close_on_paid: boolean }> {
-    const [row] = await this.db.select({ v: qrSettings.requireStaffFire, dm: qrSettings.dynamicMode, ac: qrSettings.autoCloseOnPaid }).from(qrSettings).where(eq(qrSettings.tenantId, tenantId)).limit(1);
-    return { require_staff_fire: row?.v === true, dynamic_mode: row?.dm === true, auto_close_on_paid: row?.ac === true };
+  async getSettings(tenantId: number): Promise<{ require_staff_fire: boolean; dynamic_mode: boolean; auto_close_on_paid: boolean; recommend_mode: RecommendMode; recommend_count: number }> {
+    const [row] = await this.db.select({ v: qrSettings.requireStaffFire, dm: qrSettings.dynamicMode, ac: qrSettings.autoCloseOnPaid, rm: qrSettings.recommendMode, rc: qrSettings.recommendCount }).from(qrSettings).where(eq(qrSettings.tenantId, tenantId)).limit(1);
+    return {
+      require_staff_fire: row?.v === true, dynamic_mode: row?.dm === true, auto_close_on_paid: row?.ac === true,
+      recommend_mode: (row?.rm as RecommendMode) ?? 'manual', recommend_count: row?.rc ?? 6,
+    };
   }
 
-  // Partial update: only the provided flags change; absent flags keep their stored value (defaults on first write).
-  async setSettings(tenantId: number, patch: { require_staff_fire?: boolean; dynamic_mode?: boolean; auto_close_on_paid?: boolean }, actor: string): Promise<{ require_staff_fire: boolean; dynamic_mode: boolean; auto_close_on_paid: boolean }> {
+  // Partial update: only the provided fields change; absent ones keep their stored value (defaults on first write).
+  async setSettings(tenantId: number, patch: { require_staff_fire?: boolean; dynamic_mode?: boolean; auto_close_on_paid?: boolean; recommend_mode?: RecommendMode; recommend_count?: number }, actor: string) {
     const cur = await this.getSettings(tenantId);
     const next = {
       requireStaffFire: patch.require_staff_fire ?? cur.require_staff_fire,
       dynamicMode: patch.dynamic_mode ?? cur.dynamic_mode,
       autoCloseOnPaid: patch.auto_close_on_paid ?? cur.auto_close_on_paid,
+      recommendMode: patch.recommend_mode ?? cur.recommend_mode,
+      recommendCount: patch.recommend_count ?? cur.recommend_count,
     };
     await this.db.insert(qrSettings)
       .values({ tenantId, ...next, updatedBy: actor, updatedAt: new Date() })
       .onConflictDoUpdate({ target: qrSettings.tenantId, set: { ...next, updatedBy: actor, updatedAt: new Date() } });
-    return { require_staff_fire: next.requireStaffFire, dynamic_mode: next.dynamicMode, auto_close_on_paid: next.autoCloseOnPaid };
+    return { require_staff_fire: next.requireStaffFire, dynamic_mode: next.dynamicMode, auto_close_on_paid: next.autoCloseOnPaid, recommend_mode: next.recommendMode, recommend_count: next.recommendCount };
   }
 
   // per-session throttle for public diner endpoints — keyed off the verified HMAC token (no DB hit)

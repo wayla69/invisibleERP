@@ -1,28 +1,40 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * 0434 diner QR — recommended row + category filter chips (mobile viewport).
- * On-demand capture spec (excluded from CI via `*.capture.spec.ts`); run with the local scratchpad config.
- * Backend fully stubbed via route interception.
+ * 0434/0435 diner QR (mobile) — recommended row + category filter, list⇄grid toggle, image zoom lightbox,
+ * and the "ออเดอร์ของฉัน" fire-lot grouping with the served swap. On-demand capture spec (excluded from CI
+ * via `*.capture.spec.ts`); run with the local scratchpad config. Backend fully stubbed.
  */
+
+// 1×1 transparent PNG so the image / zoom / grid paths render
+const IMG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 const MENU = {
   categories: [
     { id: 1, code: 'main', name: 'อาหารจานหลัก', items: [
-      { id: 10, sku: 'M1', name: 'ผัดกะเพราไก่', price: 80, is_available: true, is_recommended: true, description: 'เผ็ดกำลังดี', has_modifiers: false, modifier_groups: [] },
-      { id: 11, sku: 'M2', name: 'ข้าวผัดหมู', price: 70, is_available: true, is_recommended: false, description: null, has_modifiers: false, modifier_groups: [] },
+      { id: 10, sku: 'M1', name: 'ผัดกะเพราไก่', price: 80, is_available: true, is_recommended: true, description: 'เผ็ดกำลังดี', image_url: IMG, has_modifiers: false, modifier_groups: [] },
+      { id: 11, sku: 'M2', name: 'ข้าวผัดหมู', price: 70, is_available: true, is_recommended: false, description: null, image_url: IMG, has_modifiers: false, modifier_groups: [] },
     ] },
     { id: 2, code: 'drink', name: 'เครื่องดื่ม', items: [
-      { id: 20, sku: 'D1', name: 'ชาเย็น', price: 30, is_available: true, is_recommended: true, description: null, has_modifiers: false, modifier_groups: [] },
-      { id: 21, sku: 'D2', name: 'น้ำเปล่า', price: 15, is_available: true, is_recommended: false, description: null, has_modifiers: false, modifier_groups: [] },
+      { id: 20, sku: 'D1', name: 'ชาเย็น', price: 30, is_available: true, is_recommended: true, description: null, image_url: IMG, has_modifiers: false, modifier_groups: [] },
     ] },
   ],
   uncategorized: [],
-  item_count: 4,
+  item_count: 3,
 };
 const statusOpen = { table_no: '7', session_status: 'open', order_mode: 'a_la_carte', buffet: null, order: null, bill: null };
 
-async function stub(page: Page) {
+// a status with two fire lots — one fully served, one still cooking
+const statusLots = {
+  table_no: '7', session_status: 'open', order_mode: 'a_la_carte', buffet: null,
+  order: { order_no: 'DIN-1', status: 'partially_ready', waited_min: 12, ready_in_min: 5, items: [
+    { item_id: 1, name: 'ผัดกะเพราไก่', qty: 1, kds_status: 'served', status_th: 'เสิร์ฟแล้ว', amount: 80, is_buffet: false, charge: false, fired_at: '2026-07-18T11:30:00Z', served_at: '2026-07-18T11:38:00Z', wait_min: 8 },
+    { item_id: 2, name: 'ชาเย็น', qty: 2, kds_status: 'preparing', status_th: 'กำลังปรุง', amount: 60, is_buffet: false, charge: false, fired_at: '2026-07-18T11:45:00Z', served_at: null, wait_min: 6 },
+  ] },
+  bill: { subtotal: 140, vat: 9.8, total: 149.8, settled: false },
+};
+
+async function stubMenu(page: Page) {
   await page.route('**/api/qr/**', async (route) => {
     const url = route.request().url();
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -32,36 +44,50 @@ async function stub(page: Page) {
   });
 }
 
-test('diner menu shows a recommended row + working category filter chips', async ({ page }) => {
-  await stub(page);
+test('diner menu: recommended row, category chips, list⇄grid toggle, image zoom', async ({ page }) => {
+  await stubMenu(page);
   await page.goto('/qr/e2e-token');
   await expect(page.getByText('โต๊ะ 7')).toBeVisible();
-
-  // open the menu tab → filter chip bar + recommended section render
   await page.getByRole('tab', { name: 'เมนู' }).click();
+
+  // chips + recommended row
   await expect(page.getByRole('button', { name: 'ทั้งหมด' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'แนะนำ', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'อาหารจานหลัก' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'เครื่องดื่ม' })).toBeVisible();
-
-  // the "เมนูแนะนำ" section lists both recommended items (starred), before the full categories
   await expect(page.getByText('เมนูแนะนำ')).toBeVisible();
-  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-menu-all.png', fullPage: true });
+  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-menu-list.png', fullPage: true });
 
-  // filter to a single category → recommended header disappears, only that category's items show
-  await page.getByRole('button', { name: 'เครื่องดื่ม' }).click();
-  await expect(page.getByText('เมนูแนะนำ')).toHaveCount(0);
-  await expect(page.getByText('ชาเย็น')).toBeVisible();
-  await expect(page.getByText('ผัดกะเพราไก่')).toHaveCount(0);
-  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-menu-drinks.png', fullPage: true });
+  // grid toggle → tiles render (grid uses aspect-square image tiles)
+  await page.getByRole('button', { name: 'สลับมุมมองรายการ/ตาราง' }).click();
+  await expect(page.getByText('ผัดกะเพราไก่').first()).toBeVisible();
+  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-menu-grid.png', fullPage: true });
 
-  // filter to Recommended → only the two starred dishes across categories
-  await page.getByRole('button', { name: 'แนะนำ', exact: true }).click();
-  await expect(page.getByText('ผัดกะเพราไก่')).toBeVisible();
-  await expect(page.getByText('ชาเย็น')).toBeVisible();
-  await expect(page.getByText('น้ำเปล่า')).toHaveCount(0);
+  // zoom: tap an image tile's ⛶ (the inner zoom control, exact name) → full-screen lightbox
+  await page.getByRole('button', { name: 'ขยายรูป', exact: true }).first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-menu-zoom.png', fullPage: true });
+  await page.getByRole('button', { name: 'close' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   // no horizontal overflow at the phone viewport
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
-  expect(overflow).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+});
+
+test('diner order tab: fire-lot grouping with send-time + served swap', async ({ page }) => {
+  await page.route('**/api/qr/**', async (route) => {
+    const url = route.request().url();
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (url.includes('/menu')) return json(MENU);
+    if (url.includes('/buffet/tiers')) return json({ tiers: [] });
+    return json(statusLots);
+  });
+  await page.goto('/qr/e2e-token');
+
+  // order tab is the default; the two lots show their kitchen send-time (hh:mm, Asia/Bangkok = UTC+7)
+  await expect(page.getByText('สั่งเมื่อ 18:30 น.')).toBeVisible();   // 11:30Z → 18:30 BKK
+  await expect(page.getByText('สั่งเมื่อ 18:45 น.')).toBeVisible();   // 11:45Z → 18:45 BKK
+  // the served dish swaps its wait for เสิร์ฟแล้ว; the cooking dish still shows a status
+  await expect(page.getByText('เสิร์ฟครบแล้ว')).toBeVisible();
+  await expect(page.getByText('เสิร์ฟแล้ว').first()).toBeVisible();
+  await expect(page.getByText('กำลังปรุง')).toBeVisible();
+  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-order-lots.png', fullPage: true });
 });

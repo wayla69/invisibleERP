@@ -91,10 +91,12 @@ export default function TablesPage() {
   );
 }
 
-type QrCfg = { require_staff_fire: boolean; dynamic_mode: boolean; auto_close_on_paid: boolean };
+type RecommendMode = 'manual' | 'behavior' | 'popular_low_cost';
+type QrCfg = { require_staff_fire: boolean; dynamic_mode: boolean; auto_close_on_paid: boolean; recommend_mode: RecommendMode; recommend_count: number };
 
-// Public-QR ordering controls (0434): dynamic QR (active only while a table is open), auto-close on paid,
-// and the staff-fire gate. Manager/exec duty. Each toggle PUTs a partial patch and re-reads the server state.
+// Public-QR ordering controls (0434/0435): dynamic QR (active only while a table is open), auto-close on
+// paid, the staff-fire gate, and how the diner "เมนูแนะนำ" set is chosen. Manager/exec duty. Each change
+// PUTs a partial patch and re-reads the server state.
 function QrSettingsDialog({ onClose }: { onClose: () => void }) {
   const { t } = useLang();
   const qc = useQueryClient();
@@ -105,7 +107,7 @@ function QrSettingsDialog({ onClose }: { onClose: () => void }) {
     onError: (e: Error) => notifyError(e.message),
   });
   const cfg = q.data;
-  const row = (key: keyof QrCfg, label: string, hint: string) => (
+  const row = (key: 'require_staff_fire' | 'dynamic_mode' | 'auto_close_on_paid', label: string, hint: string) => (
     <label className="flex items-start justify-between gap-3 rounded-lg border p-3">
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>
@@ -126,6 +128,26 @@ function QrSettingsDialog({ onClose }: { onClose: () => void }) {
             {row('dynamic_mode', t('px.tbl_qr_dynamic'), t('px.tbl_qr_dynamic_hint'))}
             {row('auto_close_on_paid', t('px.tbl_qr_autoclose'), t('px.tbl_qr_autoclose_hint'))}
             {row('require_staff_fire', t('px.tbl_qr_staff_fire'), t('px.tbl_qr_staff_fire_hint'))}
+            {/* how the diner "เมนูแนะนำ" set is chosen (0435) */}
+            <div className="rounded-lg border p-3">
+              <div className="mb-1 text-sm font-medium">{t('px.tbl_qr_rec_mode')}</div>
+              <p className="mb-2 text-xs text-muted-foreground">{t('px.tbl_qr_rec_mode_hint')}</p>
+              <Select value={cfg?.recommend_mode ?? 'manual'} onValueChange={(v) => save.mutate({ recommend_mode: v as RecommendMode })}>
+                <SelectTrigger disabled={!cfg || save.isPending}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">{t('px.tbl_qr_rec_manual')}</SelectItem>
+                  <SelectItem value="behavior">{t('px.tbl_qr_rec_behavior')}</SelectItem>
+                  <SelectItem value="popular_low_cost">{t('px.tbl_qr_rec_popular')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {cfg && cfg.recommend_mode !== 'manual' && (
+                <label className="mt-2 flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('px.tbl_qr_rec_count')}</span>
+                  <Input type="number" min={1} max={20} className="w-24" defaultValue={cfg.recommend_count}
+                    onBlur={(e) => { const v = Math.max(1, Math.min(20, Number(e.target.value) || cfg.recommend_count)); if (v !== cfg.recommend_count) save.mutate({ recommend_count: v }); }} />
+                </label>
+              )}
+            </div>
           </div>
         </StateView>
       </DialogContent>

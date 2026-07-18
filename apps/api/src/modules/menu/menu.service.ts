@@ -115,9 +115,17 @@ export class MenuService {
 
   // full menu for the diner self-order UI: same as listMenu but each item carries its modifier groups +
   // options inlined, so the phone can render the modifier picker without a second (permissioned) round-trip.
-  async listMenuForOrder(user: JwtUser) {
+  // opts.recommendedSkus (0435): when the tenant's recommend_mode is dynamic (behavior / popular_low_cost),
+  // the QR layer computes the highlighted set and passes it here to OVERRIDE the per-item manual flag; when
+  // omitted (manual mode) the stored is_recommended flags stand.
+  async listMenuForOrder(user: JwtUser, opts?: { recommendedSkus?: Set<string> | null }) {
     const base = await this.listMenu(user);
-    const augment = async (it: any) => ({ ...it, modifier_groups: it.has_modifiers ? await this.itemGroups(Number(it.id)) : [] });
+    const rec = opts?.recommendedSkus ?? null;
+    const augment = async (it: any) => ({
+      ...it,
+      is_recommended: rec ? rec.has(it.sku) : it.is_recommended,
+      modifier_groups: it.has_modifiers ? await this.itemGroups(Number(it.id)) : [],
+    });
     const categories = [];
     for (const c of base.categories) categories.push({ ...c, items: await Promise.all(c.items.map(augment)) });
     const uncategorized = await Promise.all(base.uncategorized.map(augment));

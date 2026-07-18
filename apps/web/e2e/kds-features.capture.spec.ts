@@ -37,6 +37,7 @@ async function boot(page: Page) {
     if (url.includes('/api/modules/effective')) return json({ modules: [], disabled: [] });
     if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {}, shop_favs: [], shop_templates: [] });
     if (url.includes('/api/restaurant/kds/serve') && method === 'POST') { served = true; return json({ order_no: 'DIN-B', served: 1 }); }
+    if (url.includes('/api/restaurant/kds/start') && method === 'POST') return json({ order_no: 'DIN-A', started: 2 });
     if (url.includes('/api/restaurant/kds/feed')) return json(FEED);
     return json({});
   });
@@ -66,6 +67,8 @@ test('KDS board: grouping tabs, priority badge, stuck alarm, serve-whole-ticket'
   await page.getByRole('tab', { name: 'ตามโต๊ะ' }).click();
   const serveBtn = page.getByRole('button', { name: 'เสิร์ฟทั้งออเดอร์' }).nth(1);
   await expect(serveBtn).toBeEnabled();
+  // the all-queued table (โต๊ะ 5, first card) offers an enabled "เริ่มทำทั้งออเดอร์"
+  await expect(page.getByRole('button', { name: 'เริ่มทำทั้งออเดอร์' }).first()).toBeEnabled();
   await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/kds-board-table.png', fullPage: true });
 
   // serve the whole ticket → POST /kds/serve fires

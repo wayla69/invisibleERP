@@ -315,6 +315,23 @@ export class DineInService {
     return { order_no: orderNo, served: served.length };
   }
 
+  // KDS "start the whole ticket" — accept every queued line of an order at once (queued → preparing).
+  // Idempotent (0 queued → noop); lines already preparing/ready/served are left alone.
+  async startOrder(orderNo: string, user: JwtUser) {
+    const db = this.db;
+    const o = await this.loadOrder(orderNo);
+    const now = new Date();
+    const started = await db.update(dineInOrderItems)
+      .set({ kdsStatus: 'preparing', startedAt: now, updatedAt: now })
+      .where(and(eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'queued')))
+      .returning({ id: dineInOrderItems.id });
+    if (started.length) {
+      const status = await this.recomputeOrderStatus(Number(o.id));
+      this.realtime?.publish({ type: 'kds_item', tenant_id: user.tenantId ?? null, order_id: Number(o.id), kds_status: 'preparing', order_status: status, at: now.toISOString() });
+    }
+    return { order_no: orderNo, started: started.length };
+  }
+
   // idempotent abbreviated tax invoice for a sale (VAT-unregistered tenant → null, no slip).
   async issueAbbreviated(saleNo: string, user: JwtUser): Promise<string | null> {
     try { const inv: any = await this.taxInvoice.issueAbbreviatedFromSale(saleNo, user); return inv?.doc_no ?? null; } catch { return null; }
@@ -405,7 +422,7 @@ export class DineInService {
       id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
       amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course, seat: dineInOrderItems.seat,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, firedAt: dineInOrderItems.firedAt,
-      startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, estPrep: dineInOrderItems.estPrepMinutes,
+      startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, servedAt: dineInOrderItems.servedAt, estPrep: dineInOrderItems.estPrepMinutes,
     }).from(dineInOrderItems).where(eq(dineInOrderItems.orderId, Number(o.id))).orderBy(dineInOrderItems.id);
     const now = Date.now();
     const statusTh: Record<string, string> = { new: 'รับออเดอร์', queued: 'รอคิว', preparing: 'กำลังปรุง', ready: 'พร้อมเสิร์ฟ', served: 'เสิร์ฟแล้ว', voided: 'ยกเลิก' };
@@ -416,7 +433,11 @@ export class DineInService {
       const base = i.startedAt ? Math.floor((now - new Date(i.startedAt).getTime()) / 60000) : elapsedMin;
       const remainingMin = ['ready', 'served', 'voided'].includes(i.kdsStatus) ? 0 : Math.max(0, prep - base);
       const charge = i.itemId === '__buffet_charge__' || i.itemId === '__buffet_overtime__';
-      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, seat: i.seat ?? null, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
+      // wait shown to the diner: for a still-cooking line it is time since the line FIRED (the lot clock),
+      // frozen once the dish is served. served_at drives the "เสิร์ฟแล้ว" swap; fired_at labels the lot (hh:mm).
+      const servedMs = i.servedAt ? new Date(i.servedAt).getTime() : null;
+      const waitMin = fired ? Math.floor(((['served', 'voided'].includes(i.kdsStatus) && servedMs ? servedMs : now) - fired) / 60000) : 0;
+      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, seat: i.seat ?? null, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep, fired_at: i.firedAt ?? null, served_at: i.servedAt ?? null, wait_min: Math.max(0, waitMin) };
     });
     const waitedMin = o.firedAt ? Math.floor((now - new Date(o.firedAt).getTime()) / 60000) : 0;
     const readyInMin = Math.max(0, ...viewItems.filter((v: any) => !['served', 'voided'].includes(v.kds_status)).map((v: any) => v.remaining_min), 0);

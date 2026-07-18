@@ -754,6 +754,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.kds_scan_ph': { th: 'สแกน/พิมพ์เลขออเดอร์', en: 'Scan / type order no.' },
   'mx.kds_scan_serve': { th: 'เสิร์ฟ', en: 'Serve' },
   'mx.kds_serve_ticket': { th: 'เสิร์ฟทั้งออเดอร์', en: 'Serve order' },
+  'mx.kds_start_ticket': { th: 'เริ่มทำทั้งออเดอร์', en: 'Start order' },
+  'mx.kds_new': { th: 'มาใหม่', en: 'New' },
   'mx.kds_serve_ok': { th: 'เสิร์ฟออเดอร์ {no} แล้ว {n} รายการ', en: 'Served {n} item(s) on order {no}' },
   'mx.kds_serve_none': { th: 'ออเดอร์ {no} ไม่มีรายการพร้อมเสิร์ฟ', en: 'Order {no} has nothing ready to serve' },
   'mx.kds_expo_desc': { th: 'รวมออเดอร์ที่มีรายการพร้อมเสิร์ฟ · จัดชุดส่งพร้อมกัน', en: 'Orders with lines ready for the pass · run them together' },

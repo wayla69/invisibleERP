@@ -325,6 +325,44 @@ async function main() {
   ok('0434 auto-close: a paid table is freed straight to available (no cleaning hold)', tblACafter[0].status === 'available', tblACafter[0].status);
   await inj('PUT', '/api/restaurant/qr-settings', sales1, { auto_close_on_paid: false }); // reset
 
+  // ── 0435: recommendation modes + diner lot times/served swap + KDS start-order ──
+  const findRec = (m: any, sku: string) => [...(m.categories ?? []).flatMap((c: any) => c.items), ...(m.uncategorized ?? [])].find((i: any) => i.sku === sku);
+  // three dishes with distinct popularity (order qty) + margin (price − cost)
+  await inj('POST', '/api/menu/items', sales1, { sku: 'RHI', name: 'จานยอดนิยมกำไรดี', price: 100, cost: 10, station_code: 'hot' });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'RMID', name: 'จานกลาง', price: 50, cost: 25, station_code: 'hot' });
+  await inj('POST', '/api/menu/items', sales1, { sku: 'RLO', name: 'จานขายน้อยกำไรบาง', price: 40, cost: 38, station_code: 'hot' });
+  const tblRsales = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6RS' });
+  await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblRsales.json.id, items: [{ sku: 'RHI', qty: 100 }, { sku: 'RMID', qty: 30 }, { sku: 'RLO', qty: 1 }] });
+  const tblRQ = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6RQ' });
+  const recTok = (await inj('POST', `/api/restaurant/tables/${tblRQ.json.id}/open`, sales1, {})).json.public_token;
+  // popular_low_cost: top-2 by popularity×margin → RHI in, RLO out
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { recommend_mode: 'popular_low_cost', recommend_count: 2 });
+  const popMenu = await inj('GET', `/api/qr/t/${recTok}/menu`, undefined);
+  ok('0435 popular_low_cost: best-seller+margin dish recommended, weak dish not', findRec(popMenu.json, 'RHI')?.is_recommended === true && findRec(popMenu.json, 'RLO')?.is_recommended === false, `hi=${findRec(popMenu.json, 'RHI')?.is_recommended} lo=${findRec(popMenu.json, 'RLO')?.is_recommended}`);
+  // behavior: a member-attributed order of RMID → RMID recommended
+  const memRow = await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-REC', name: 'ทดสอบ' }).returning({ id: s.posMembers.id });
+  const memOrd = await inj('POST', '/api/restaurant/orders', sales1, { items: [{ sku: 'RMID', qty: 5 }] });
+  await db.update(s.dineInOrders).set({ memberId: Number(memRow[0].id) }).where(eq(s.dineInOrders.orderNo, memOrd.json.order_no));
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { recommend_mode: 'behavior', recommend_count: 1 });
+  const behMenu = await inj('GET', `/api/qr/t/${recTok}/menu`, undefined);
+  ok('0435 behavior: the dish members order most is recommended', findRec(behMenu.json, 'RMID')?.is_recommended === true && findRec(behMenu.json, 'RHI')?.is_recommended === false, `mid=${findRec(behMenu.json, 'RMID')?.is_recommended} hi=${findRec(behMenu.json, 'RHI')?.is_recommended}`);
+  await inj('PUT', '/api/restaurant/qr-settings', sales1, { recommend_mode: 'manual' }); // reset
+
+  // diner "ออเดอร์ของฉัน": each item exposes fired_at (lot time) + wait_min, and a served swap
+  const tblLot = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6LOT' });
+  const lotTok = (await inj('POST', `/api/restaurant/tables/${tblLot.json.id}/open`, sales1, {})).json.public_token;
+  await inj('POST', `/api/qr/t/${lotTok}/order`, undefined, { items: [{ sku: 'RHI', qty: 1 }] }); // auto-fires
+  const lotSt = await inj('GET', `/api/qr/t/${lotTok}`, undefined);
+  const lotItem = (lotSt.json.order?.items ?? []).find((i: any) => i.name === 'จานยอดนิยมกำไรดี');
+  ok('0435 diner order item exposes fired_at (lot) + wait_min', !!lotItem?.fired_at && typeof lotItem?.wait_min === 'number' && lotItem.served_at == null, `fired=${!!lotItem?.fired_at} wait=${lotItem?.wait_min}`);
+  const lotOrderNo = lotSt.json.order.order_no;
+  const startRes = await inj('POST', '/api/restaurant/kds/start', sales1, { order_no: lotOrderNo });
+  ok('0435 KDS start-order: queued lines → preparing in one tap', (startRes.status === 200 || startRes.status === 201) && startRes.json.started >= 1, `${startRes.status} started=${startRes.json.started}`);
+  await inj('PATCH', `/api/restaurant/kds/items/${lotItem.item_id}`, sales1, { action: 'ready' });
+  await inj('POST', '/api/restaurant/kds/serve', sales1, { order_no: lotOrderNo });
+  const lotItem2 = ((await inj('GET', `/api/qr/t/${lotTok}`, undefined)).json.order?.items ?? []).find((i: any) => i.name === 'จานยอดนิยมกำไรดี');
+  ok('0435 served item: kds_status served + served_at set (wait freezes)', lotItem2?.kds_status === 'served' && !!lotItem2?.served_at, `st=${lotItem2?.kds_status} served=${!!lotItem2?.served_at}`);
+
   // ── staff-initiated buffet (from POS/floor) ──
   const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
   const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });
