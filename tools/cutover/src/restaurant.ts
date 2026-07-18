@@ -488,6 +488,12 @@ async function main() {
   const tk2 = (expo2.tickets ?? []).find((t: any) => t.order_no === kdOrd.json.order_no);
   ok('POS-4 expo: once nothing is cooking the ticket is all_ready (ready for pass)', !!tk2 && tk2.all_ready === true && tk2.ready_count === 3 && tk2.pending_count === 0, `${JSON.stringify(tk2 ? { r: tk2.ready_count, all: tk2.all_ready } : null)}`);
   // Recall SLA-WARN off the pass (bump/recall), bump SLA-OK to served.
+  // Re-date the recall target to NOW first: recalls_today is business-day scoped on fired_at
+  // (Asia/Bangkok), so the 12-min SLA backdate above crosses midnight when CI runs in the 00:00–00:12
+  // +07 window and the recall silently drops out of "today" (the recalls 0→0 flake on #833's first run
+  // at 00:0x +07). The SLA-band check has already consumed the backdate; the overdue/all-day check
+  // rides SLA-LATE, which keeps its 20-min age.
+  await pg.query(`UPDATE dine_in_order_items SET fired_at = now() WHERE id = ${kdId('SLA-WARN')}`);
   const recalled = await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-WARN')}`, sales1, { action: 'recall' });
   ok('POS-4 recall: ready→queued transition succeeds', recalled.json.kds_status === 'queued', `${recalled.status} ${recalled.json.kds_status}`);
   await inj('PATCH', `/api/restaurant/kds/items/${kdId('SLA-OK')}`, sales1, { action: 'serve' });
