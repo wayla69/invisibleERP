@@ -87,6 +87,27 @@ export class RecommendationService {
       .map((x) => x.s);
   }
 
+  // "สั่งคู่กับ…" upsell (F6): dishes most often ordered in the SAME order as anything in `skus`, ranked by
+  // co-occurrence, excluding the basket itself + anything already suggested. Read-only over dine-in history.
+  async coPurchase(skus: string[], count = 4): Promise<string[]> {
+    const basket = new Set(skus.filter(Boolean));
+    if (!basket.size) return [];
+    const db = this.db;
+    // orders (last 60d) that contain at least one basket item → their OTHER items, counted
+    const rows = await db
+      .select({ orderId: dineInOrderItems.orderId, sku: dineInOrderItems.itemId })
+      .from(dineInOrderItems)
+      .where(and(isNotNull(dineInOrderItems.itemId), eq(dineInOrderItems.isBuffet, false), ne(dineInOrderItems.kdsStatus, 'voided'), gte(dineInOrderItems.createdAt, this.since(60))));
+    const byOrder = new Map<number, Set<string>>();
+    for (const r of rows) { if (!r.sku) continue; const k = Number(r.orderId); (byOrder.get(k) ?? byOrder.set(k, new Set()).get(k)!).add(r.sku); }
+    const co = new Map<string, number>();
+    for (const items of byOrder.values()) {
+      if (![...basket].some((s) => items.has(s))) continue;         // order must include a basket item
+      for (const s of items) if (!basket.has(s)) co.set(s, (co.get(s) ?? 0) + 1);
+    }
+    return [...co.entries()].sort((a, b) => b[1] - a[1]).slice(0, count).map(([s]) => s);
+  }
+
   private async nameToSku(): Promise<Map<string, string>> {
     const rows = await this.db.select({ sku: menuItems.sku, name: menuItems.name, nameEn: menuItems.nameEn }).from(menuItems).where(eq(menuItems.active, true));
     const m = new Map<string, string>();

@@ -1,9 +1,10 @@
 import { Inject, Injectable, UnauthorizedException, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, ne, inArray, desc } from 'drizzle-orm';
+import { eq, and, ne, inArray, desc, sql } from 'drizzle-orm';
 import QRCode from 'qrcode';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { diningTables, tableSessions, dineInOrders, buffetPackages, payments, qrSettings } from '../../database/schema';
+import { diningTables, tableSessions, dineInOrders, buffetPackages, payments, qrSettings, posMembers } from '../../database/schema';
 import { PaymentService } from '../payments/payments.service';
+import { MemberService } from '../loyalty/member.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { RealtimeScope } from './realtime.scope';
@@ -12,6 +13,7 @@ import { DineInService } from './dine-in.service';
 import { MenuService } from '../menu/menu.service';
 import { BuffetService } from './buffet.service';
 import { RecommendationService, type RecommendMode } from './recommendation.service';
+import { ServiceRequestService } from './service-request.service';
 import { verifyTableToken, verifyRotatingTableToken, type TableClaim } from './qr-token.util';
 import { rateLimit } from './rate-limit.util';
 import { verifyInboundWebhook } from '../../common/webhook-auth';
@@ -21,6 +23,7 @@ import type { PublicOrderDto, CreateOrderDto, AddItemsDto } from './dto';
 
 const LIVE: NonNullable<typeof tableSessions.$inferSelect.status>[] = ['open', 'bill_requested', 'paying'];
 const diner = (tenantId: number): JwtUser => ({ username: 'diner:qr', role: 'Sales', customerName: null, tenantId, permissions: [] });
+const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 
 @Injectable()
 export class QrService {
@@ -32,6 +35,8 @@ export class QrService {
     private readonly menuSvc: MenuService,
     private readonly buffet: BuffetService,
     private readonly recommend: RecommendationService,
+    private readonly serviceReq: ServiceRequestService,
+    private readonly member: MemberService,
     private readonly payments: PaymentService,
     private readonly idem: WebhookIdempotencyService,
   ) {}
@@ -128,8 +133,10 @@ export class QrService {
         expired: expMs ? Date.now() > expMs : false,
       };
     }
+    const [mem] = session.memberId ? await dbx.select({ name: posMembers.name, code: posMembers.memberCode }).from(posMembers).where(eq(posMembers.id, Number(session.memberId))).limit(1) : [];
     return {
       table_no: table?.tableNo ?? null, session_status: session.status, order_mode: session.orderMode, buffet,
+      member: mem ? { name: mem.name, member_code: mem.code } : null,
       order: order ? { order_no: order.order_no, status: order.status, waited_min: order.waited_min, ready_in_min: order.ready_in_min, items: order.items } : null,
       bill: order ? { subtotal: order.subtotal, vat: order.vat, total: order.total, settled: session.status === 'closed' } : null,
     };
@@ -139,6 +146,13 @@ export class QrService {
     const dbx = this.db;
     const [s] = await dbx.select().from(tableSessions).where(eq(tableSessions.id, sessionId)).limit(1);
     return s;
+  }
+
+  // sum of the sale-money captured against a sale so far (split pay-your-share, F2) — excludes tips.
+  private async capturedForSale(saleNo: string): Promise<number> {
+    const [row] = await this.db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments)
+      .where(and(eq(payments.saleNo, saleNo), eq(payments.status, 'Captured')));
+    return round2(n(row?.v));
   }
 
   // diner sees the buffet tiers offered (before choosing a mode)
@@ -244,6 +258,38 @@ export class QrService {
     return o;
   }
 
+  // "สั่งคู่กับ…" upsell (F6): given the diner's current basket SKUs, return the SKUs most often ordered
+  // alongside them (co-purchase). The diner UI already has the menu, so we return SKUs it renders itself.
+  async suggestions(token: string, skus: string[]) {
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, async () => ({ skus: await this.recommend.coPurchase(skus ?? [], 4) }));
+  }
+
+  // diner links a loyalty member to the table (F3): enter a member code or phone → the session carries the
+  // member so the QR-settled sale earns points. Idempotent (re-link overwrites). Returns the member name.
+  async linkMember(token: string, codeOrPhone: string) {
+    this.throttle(token, 'member', 8);
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, async () => {
+      const u = diner(claim.tenantId);
+      const q = /^\d{9,10}$/.test(codeOrPhone.trim()) ? { phone: codeOrPhone.trim() } : { code: codeOrPhone.trim() };
+      let m: any;
+      try { m = await this.member.lookup(q, u); } catch { m = null; }
+      if (!m?.id) throw new NotFoundException({ code: 'MEMBER_NOT_FOUND', message: 'Member not found', messageTh: 'ไม่พบสมาชิก' });
+      await this.db.update(tableSessions).set({ memberId: Number(m.id) }).where(eq(tableSessions.id, claim.sessionId));
+      const existing = await this.openOrderForSession(claim.sessionId);
+      if (existing) await this.db.update(dineInOrders).set({ memberId: Number(m.id) }).where(eq(dineInOrders.id, existing.id));
+      return { member_id: Number(m.id), member_code: m.member_code ?? null, name: m.name ?? null };
+    });
+  }
+
+  // diner taps เรียกพนักงาน / ขอน้ำ / ขอช้อนส้อม / ขอบิล — raise a service request to the floor board (F1)
+  async call(token: string, type: string, note?: string) {
+    this.throttle(token, 'call', 10);   // anti-abuse: cap service-call bursts per session
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, () => this.serviceReq.create(claim, type, note));
+  }
+
   async requestBill(token: string) {
     const { claim } = await this.resolve(token);
     return this.scope.run(claim.tenantId, async () => {
@@ -276,6 +322,54 @@ export class QrService {
       // their banking app and we settle out-of-band; without it (dev), the UI offers a simulate button.
       const qrImage = tender.gateway_ref ? await QRCode.toDataURL(String(tender.gateway_ref), { margin: 1, width: 320 }) : null;
       return { payment_no: tender.payment_no, status: tender.status, gateway_ref: tender.gateway_ref, qr_payload: tender.qr_payload ?? null, qr_image: qrImage, mock_settle: !webhookSecret(), total };
+    });
+  }
+
+  // Split pay-your-share (F2): pay ONE share of the bill via PromptPay. Multiple diners each call this;
+  // shares tender against the SAME sale and the order finalises only once the captured total covers the
+  // bill (coverage-aware settle below). `amount` omitted ⇒ pay the whole remaining balance.
+  async payShare(token: string, amount?: number) {
+    this.throttle(token, 'pay', 12);
+    const { claim } = await this.resolve(token);
+    return this.scope.run(claim.tenantId, async () => {
+      const dbx = this.db;
+      const u = diner(claim.tenantId);
+      const o = await this.openOrderForSession(claim.sessionId);
+      if (!o) throw new BadRequestException({ code: 'NO_OPEN_ORDER', message: 'No order to pay', messageTh: 'ยังไม่มีรายการให้ชำระ' });
+      await this.buffet.applyOvertime(o.orderNo, u);
+      const [fresh] = await dbx.select({ total: dineInOrders.total }).from(dineInOrders).where(eq(dineInOrders.id, o.id)).limit(1);
+      const total = n(fresh?.total) > 0 ? n(fresh!.total) : (await this.dineIn.requestBill(o.orderNo, u)).total;
+      if (!(total > 0)) throw new BadRequestException({ code: 'EMPTY_BILL', message: 'Bill is zero', messageTh: 'ยอดบิลเป็นศูนย์' });
+      const session = await this.loadSession(claim.sessionId);
+      const saleNo = session?.saleNo || o.saleNo || await this.dineIn.mintSaleNo(claim.tenantId);
+      const paid = await this.capturedForSale(saleNo);
+      const remaining = round2(total - paid);
+      if (remaining <= 0) return { fully_paid: true, total, paid_so_far: paid, remaining: 0 };
+      const share = round2(Math.min(n(amount) > 0 ? n(amount) : remaining, remaining));
+      if (!(share > 0)) throw new BadRequestException({ code: 'EMPTY_BILL', message: 'Nothing left to pay', messageTh: 'ไม่มียอดค้างชำระ' });
+      const tender: any = await this.payments.recordTender({ sale_no: saleNo, tenant_id: claim.tenantId, method: 'PromptPay', amount: share, currency: 'THB', gateway: 'promptpay' }, u);
+      await dbx.update(tableSessions).set({ status: 'paying', saleNo }).where(eq(tableSessions.id, claim.sessionId));
+      await dbx.update(diningTables).set({ status: 'paying', updatedAt: new Date() }).where(eq(diningTables.id, claim.tableId));
+      const qrImage = tender.gateway_ref ? await QRCode.toDataURL(String(tender.gateway_ref), { margin: 1, width: 320 }) : null;
+      return { payment_no: tender.payment_no, status: tender.status, gateway_ref: tender.gateway_ref, qr_image: qrImage, mock_settle: !webhookSecret(), total, share, paid_so_far: paid, remaining };
+    });
+  }
+
+  // split progress for the diner UI — tolerates a just-closed session (like paymentStatus) so it can show
+  // "fully paid" after the final share finalises + closes the table.
+  async splitStatus(token: string) {
+    const claim = verifyTableToken(token);
+    if (!claim) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
+    return this.scope.run(claim.tenantId, async () => {
+      const dbx = this.db;
+      const [session] = await dbx.select().from(tableSessions).where(and(eq(tableSessions.id, claim.sessionId), eq(tableSessions.publicToken, token))).limit(1);
+      if (!session) throw new UnauthorizedException({ code: 'BAD_TOKEN', message: 'Invalid table token', messageTh: 'โทเคนโต๊ะไม่ถูกต้อง' });
+      const [o] = await dbx.select({ total: dineInOrders.total, status: dineInOrders.status, saleNo: dineInOrders.saleNo }).from(dineInOrders).where(and(eq(dineInOrders.sessionId, claim.sessionId), ne(dineInOrders.status, 'cancelled'))).orderBy(desc(dineInOrders.id)).limit(1);
+      const saleNo = session.saleNo || o?.saleNo || undefined;
+      const total = o ? n(o.total) : 0;
+      const settled = session.status === 'closed' || ['paid', 'closed'].includes(String(o?.status));
+      const paid = saleNo ? await this.capturedForSale(saleNo) : 0;
+      return { total: round2(total), paid_so_far: round2(paid), remaining: settled ? 0 : round2(Math.max(0, total - paid)), settled };
     });
   }
 
@@ -354,7 +448,14 @@ export class QrService {
     }
     if (['paid', 'closed'].includes(String(o.status))) return { payment_status: settled.status, sale_no: saleNo, paid: true, already: true };
     if (!saleNo) throw new BadRequestException({ code: 'NO_SALE', message: 'No provisional sale; call /pay first', messageTh: 'กรุณาเริ่มชำระเงินก่อน' });
-    const built = await this.dineIn.buildSale(o, saleNo, 0, u);
+    // Split pay-your-share (F2): finalise ONLY once the captured tenders cover the bill. A single full-amount
+    // pay() tenders the whole total, so this is transparent for the non-split flow (captured == total → finalise).
+    const total = n(o.total);
+    const captured = await this.capturedForSale(saleNo);
+    if (captured + 0.01 < total) return { payment_status: settled.status, sale_no: saleNo, paid: false, total: round2(total), paid_so_far: captured, remaining: round2(total - captured) };
+    // F3: earn loyalty points for the member linked to this table session (no GL footprint — points sub-ledger).
+    const memberId = sessionRow?.memberId ?? (await this.loadSession(claim.sessionId))?.memberId ?? o?.memberId;
+    const built = await this.dineIn.buildSale(o, saleNo, 0, u, memberId ? { memberId: Number(memberId) } : undefined);
     const invNo = await this.dineIn.markPaidAndInvoice(o, saleNo, u);
     return { payment_status: settled.status, sale_no: saleNo, total: built.total, journal_no: built.journal_no, tax_invoice_no: invNo, paid: true };
   }

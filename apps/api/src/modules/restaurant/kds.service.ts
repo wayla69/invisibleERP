@@ -32,9 +32,47 @@ export class KdsService {
     @Optional() private readonly guests?: GuestProfileService, // consent-gated allergy flags on tickets
   ) {}
 
+  // Prep-time auto-learn (F5): the rolling average COMPLETION time (fired → served) per menu SKU over the
+  // trailing window, with ≥3 samples so a single outlier can't skew it. Used as the prep estimate that
+  // drives the SLA colours + ETA, so the board gets more accurate the more the kitchen cooks.
+  private async learnedPrepMap(days = 14, minSamples = 3): Promise<Map<string, number>> {
+    const since = new Date(Date.now() - days * 86_400_000);
+    const rows = await this.db.select({ sku: dineInOrderItems.itemId, firedAt: dineInOrderItems.firedAt, servedAt: dineInOrderItems.servedAt })
+      .from(dineInOrderItems)
+      .where(and(eq(dineInOrderItems.kdsStatus, 'served'), isNotNull(dineInOrderItems.itemId), isNotNull(dineInOrderItems.firedAt), isNotNull(dineInOrderItems.servedAt), gte(dineInOrderItems.servedAt, since)));
+    const acc = new Map<string, { sum: number; n: number }>();
+    for (const r of rows) {
+      if (!r.sku || !r.firedAt || !r.servedAt) continue;
+      const mins = (new Date(r.servedAt).getTime() - new Date(r.firedAt).getTime()) / 60000;
+      if (mins <= 0 || mins > 240) continue; // ignore zero/degenerate and absurd (>4h) samples
+      const e = acc.get(r.sku) ?? { sum: 0, n: 0 }; e.sum += mins; e.n += 1; acc.set(r.sku, e);
+    }
+    const out = new Map<string, number>();
+    for (const [sku, e] of acc) if (e.n >= minSamples) out.set(sku, Math.max(1, Math.round(e.sum / e.n)));
+    return out;
+  }
+
+  // Manager view: learned average completion time per dish (+ sample count) — the "prep-time learning" report.
+  async prepTimes(_user: JwtUser) {
+    const rows = await this.db.select({ sku: dineInOrderItems.itemId, name: dineInOrderItems.name, firedAt: dineInOrderItems.firedAt, servedAt: dineInOrderItems.servedAt })
+      .from(dineInOrderItems)
+      .where(and(eq(dineInOrderItems.kdsStatus, 'served'), isNotNull(dineInOrderItems.itemId), isNotNull(dineInOrderItems.firedAt), isNotNull(dineInOrderItems.servedAt), gte(dineInOrderItems.servedAt, new Date(Date.now() - 14 * 86_400_000))));
+    const acc = new Map<string, { name: string; sum: number; n: number }>();
+    for (const r of rows) {
+      if (!r.sku || !r.firedAt || !r.servedAt) continue;
+      const mins = (new Date(r.servedAt).getTime() - new Date(r.firedAt).getTime()) / 60000;
+      if (mins <= 0 || mins > 240) continue;
+      const e = acc.get(r.sku) ?? { name: r.name, sum: 0, n: 0 }; e.sum += mins; e.n += 1; acc.set(r.sku, e);
+    }
+    const dishes = [...acc.entries()].map(([sku, e]) => ({ sku, name: e.name, avg_prep_min: Math.round((e.sum / e.n) * 10) / 10, samples: e.n }))
+      .sort((a, b) => b.avg_prep_min - a.avg_prep_min);
+    return { dishes, generated_at: new Date().toISOString() };
+  }
+
   // active kitchen items grouped by station, oldest-fired first (cook next), excl served/voided
   async feed(_user: JwtUser) {
     const db = this.db;
+    const learned = await this.learnedPrepMap(); // F5: prefer the learned completion time as the prep estimate
     const rows = await db.select({
       itemId: dineInOrderItems.id, sku: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
@@ -68,14 +106,14 @@ export class KdsService {
       const sid = Number(r.stationId);
       if (!stations.has(sid)) stations.set(sid, { station_id: sid, station_code: r.stationCode, station_name: r.stationName, items: [] });
       const fired = r.firedAt ? new Date(r.firedAt).getTime() : now;
-      const prep = r.estPrep ?? r.stationPrep ?? 10;
+      const prep = (r.sku && learned.get(r.sku)) || r.estPrep || r.stationPrep || 10; // F5: learned → snapshot → station default
       const elapsedMin = Math.floor((now - fired) / 60000);
       waitSum += elapsedMin;
       const stuck = elapsedMin >= stuckMin; // hard aging alarm: hung this long since firing → needs a human
       if (stuck) stuckCount += 1;
       stations.get(sid).items.push({
         item_id: Number(r.itemId), sku: r.sku ?? null, order_no: r.orderNo, table_label: r.tableNo ?? null, table_id: r.tableId != null ? Number(r.tableId) : null,
-        name: r.name, qty: n(r.qty),
+        station_code: r.stationCode, station_name: r.stationName, name: r.name, qty: n(r.qty),
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
         is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1, priority: Number(r.kdsPriority) || 0,
         elapsed_min: elapsedMin, prep_min: prep, remaining_min: Math.max(0, prep - elapsedMin),
@@ -209,6 +247,33 @@ export class KdsService {
       return b;
     });
     return { stations, generated_at: new Date().toISOString() };
+  }
+
+  // Course-pacing helper (F8): for orders that fire course-by-course, suggest firing the NEXT held course
+  // once the current fired course is plated (nothing still cooking) — so the kitchen paces multi-course
+  // tables without the floor watching each ticket. Returns one nudge per order that's ready to advance.
+  async pacing(_user: JwtUser) {
+    const db = this.db;
+    const rows = await db.select({
+      orderId: dineInOrders.id, orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo,
+      course: dineInOrderItems.course, kdsStatus: dineInOrderItems.kdsStatus,
+    }).from(dineInOrderItems)
+      .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
+      .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
+      .where(inArray(dineInOrderItems.kdsStatus, ['new', 'queued', 'preparing', 'ready', 'served']));
+    const orders = new Map<number, { orderNo: string; tableNo: string | null; firedMax: number; heldMin: number | null; cooking: boolean }>();
+    for (const r of rows) {
+      const o = orders.get(Number(r.orderId)) ?? { orderNo: r.orderNo, tableNo: r.tableNo ?? null, firedMax: 0, heldMin: null, cooking: false };
+      const course = r.course ?? 1;
+      if (r.kdsStatus === 'new') o.heldMin = o.heldMin == null ? course : Math.min(o.heldMin, course);
+      else { o.firedMax = Math.max(o.firedMax, course); if (r.kdsStatus === 'queued' || r.kdsStatus === 'preparing') o.cooking = true; }
+      orders.set(Number(r.orderId), o);
+    }
+    const nudges = [...orders.values()]
+      // a held course exists beyond what's fired, and the current fired course is fully plated (not cooking)
+      .filter((o) => o.heldMin != null && o.heldMin > o.firedMax && o.firedMax > 0 && !o.cooking)
+      .map((o) => ({ order_no: o.orderNo, table_label: o.tableNo, next_course: o.heldMin as number, current_course: o.firedMax }));
+    return { nudges, generated_at: new Date().toISOString() };
   }
 
   async listStations(_user: JwtUser) {

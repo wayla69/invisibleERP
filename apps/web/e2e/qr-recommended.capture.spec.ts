@@ -72,6 +72,22 @@ test('diner menu: recommended row, category chips, list⇄grid toggle, image zoo
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
+test('diner service row: call-staff sheet + member link', async ({ page }) => {
+  await stubMenu(page);
+  await page.goto('/qr/e2e-token');
+  await expect(page.getByText('โต๊ะ 7')).toBeVisible();
+  // F1 + F3 controls render
+  await expect(page.getByRole('button', { name: 'เรียกพนักงาน' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ผูกสมาชิก' })).toBeVisible();
+  // open the call sheet → service options
+  await page.getByRole('button', { name: 'เรียกพนักงาน' }).click();
+  await expect(page.getByRole('button', { name: 'ขอน้ำ' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ขอเช็คบิล' })).toBeVisible();
+  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/qr-call-staff.png', fullPage: true });
+  await page.getByRole('button', { name: 'ขอน้ำ' }).click();   // fires POST /call, closes sheet
+  await expect(page.getByText('แจ้งพนักงานแล้ว')).toBeVisible();
+});
+
 test('diner order tab: fire-lot grouping with send-time + served swap', async ({ page }) => {
   await page.route('**/api/qr/**', async (route) => {
     const url = route.request().url();

@@ -14,6 +14,7 @@ import { ReservationService, type CreateReservationDto, type ListReservationsDto
 import { GuestProfileService, type UpsertDiningProfileDto, type AddCompanionDto } from './guest-profile.service';
 import { TipService, type DistributeTipsDto } from './tip.service';
 import { QrService } from './qr.service';
+import { ServiceRequestService } from './service-request.service';
 import { mintRotatingTableToken } from './qr-token.util';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
@@ -101,7 +102,16 @@ export class RestaurantController {
     private readonly guests: GuestProfileService,
     private readonly tips: TipService,
     private readonly qr: QrService,
+    private readonly serviceReq: ServiceRequestService,
   ) {}
+
+  // ── Diner service requests (F1): the floor board lists/acknowledges/clears "call staff" pings. ──
+  @Get('service-requests') @Permissions('pos', 'order_mgt', 'exec')
+  listServiceRequests(@CurrentUser() u: JwtUser) { return this.serviceReq.list(u); }
+  @Post('service-requests/:id/ack') @Permissions('pos', 'order_mgt', 'exec')
+  ackServiceRequest(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.serviceReq.ack(+id, u); }
+  @Post('service-requests/:id/done') @Permissions('pos', 'order_mgt', 'exec')
+  doneServiceRequest(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.serviceReq.done(+id, u); }
 
   // ── Public-QR-ordering controls (SOX-ICFR #3). Staff-managed; the diner endpoints live in QrController. ──
   @Get('qr-settings') @Permissions('order_mgt', 'exec', 'pos')
@@ -233,6 +243,8 @@ export class RestaurantController {
   // Start a whole ticket: accept every queued line of an order at once (queued → preparing) so a station
   // can take a table's order in one tap instead of card-by-card.
   @Post('kds/start') startOrder(@Body(new ZodValidationPipe(z.object({ order_no: z.string().min(1) }))) b: { order_no: string }, @CurrentUser() u: JwtUser) { return this.dineIn.startOrder(b.order_no, u); }
+  @Get('kds/prep-times') @Permissions('pos', 'order_mgt', 'exec') kdsPrepTimes(@CurrentUser() u: JwtUser) { return this.kds.prepTimes(u); }   // F5: learned avg completion per dish
+  @Get('kds/pacing') kdsPacing(@CurrentUser() u: JwtUser) { return this.kds.pacing(u); }                                                     // F8: fire-next-course nudges
   @Get('kds/stations') stations(@CurrentUser() u: JwtUser) { return this.kds.listStations(u); }
 
   // ── buffet packages / tiers (Phase 2) — read for POS/floor, manage for master-data roles (SoD) ──

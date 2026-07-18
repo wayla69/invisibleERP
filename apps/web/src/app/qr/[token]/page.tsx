@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, LayoutGrid, List, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Sparkles, Star, Timer, Utensils, X, ZoomIn } from 'lucide-react';
+import { BellRing, CheckCircle2, Clock, LayoutGrid, List, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Sparkles, Split, Star, Timer, UserRound, Users, Utensils, X, ZoomIn } from 'lucide-react';
 import { publicApi } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -18,9 +18,11 @@ type Item = { item_id: number; name: string; qty: number; kds_status: string; st
 type Buffet = { package_name: string | null; pax: number | null; expires_at: string | null; minutes_left: number | null; expired: boolean };
 type Status = {
   table_no: string | null; session_status: string; order_mode: 'a_la_carte' | 'buffet'; buffet: Buffet | null;
+  member?: { name: string | null; member_code: string | null } | null;
   order: { order_no: string; status: string; waited_min: number; ready_in_min: number; items: Item[] } | null;
   bill: { subtotal: number; vat: number; total: number; settled: boolean } | null;
 };
+type SplitStatus = { total: number; paid_so_far: number; remaining: number; settled: boolean };
 type Option = { option_id: number; name: string; price_delta: number; is_default: boolean };
 type Group = { group_id: number; code: string; name: string; min_select: number; max_select: number; required: boolean; options: Option[] };
 type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; is_recommended?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
@@ -55,9 +57,17 @@ export default function DinerPage() {
   const [picker, setPicker] = useState<MenuItem | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [buffetOpen, setBuffetOpen] = useState(false);
-  const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean } | null>(null);
+  const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean; share?: number } | null>(null);
   const [paid, setPaid] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [callOpen, setCallOpen] = useState(false);          // F1 call-staff sheet
+  const [called, setCalled] = useState('');                 // last call confirmation
+  const [memberOpen, setMemberOpen] = useState(false);      // F3 member-link sheet
+  const [memberCode, setMemberCode] = useState('');
+  const [splitMode, setSplitMode] = useState(false);        // F2 split pay-your-share
+  const [split, setSplit] = useState<SplitStatus | null>(null);
+  const [shareAmt, setShareAmt] = useState('');
+  const [suggestSkus, setSuggestSkus] = useState<string[]>([]); // F6 upsell co-purchase SKUs
   // show the English name when the diner picks EN (falls back to the Thai name)
   const nm = useCallback((o: { name: string; name_en?: string | null }) => (lang === 'en' ? (o.name_en || o.name) : o.name), [lang]);
   // item status: translate via the stable kds_status code; fall back to the server's Thai label
@@ -89,6 +99,15 @@ export default function DinerPage() {
     if (!menu) publicApi<Menu>(`/api/qr/t/${token}/menu`).then(setMenu).catch((e) => setErr(String((e as Error).message)));
     if (!tiers) publicApi<{ tiers: Tier[] }>(`/api/qr/t/${token}/buffet/tiers`).then((r) => setTiers(r.tiers)).catch(() => setTiers([]));
   }, [tab, menu, tiers, token]);
+
+  // F6: when the basket changes (and the cart is open), fetch "สั่งคู่กับ…" co-purchase SKUs
+  useEffect(() => {
+    if (!cartOpen || cart.length === 0) { setSuggestSkus([]); return; }
+    let cancelled = false;
+    publicApi<{ skus: string[] }>(`/api/qr/t/${token}/suggestions`, { method: 'POST', body: JSON.stringify({ skus: cart.map((c) => c.sku) }) })
+      .then((r) => { if (!cancelled) setSuggestSkus(r.skus ?? []); }).catch(() => { if (!cancelled) setSuggestSkus([]); });
+    return () => { cancelled = true; };
+  }, [cartOpen, cart, token]);
 
   const cartCount = cart.reduce((a, c) => a + c.qty, 0);
   const cartTotal = cart.reduce((a, c) => a + c.unitPrice * c.qty, 0);
@@ -189,7 +208,16 @@ export default function DinerPage() {
 
   const doBill = async () => { setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/bill`, { method: 'POST' }); await load(); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
   const doPay = async () => { setBusy(true); try { setPay(await publicApi(`/api/qr/t/${token}/pay`, { method: 'POST' })); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
-  const doConfirm = async () => { if (!pay) return; setBusy(true); try { await publicApi(`/api/qr/t/${token}/confirm`, { method: 'POST', body: JSON.stringify({ payment_no: pay.payment_no }) }); setPaid(true); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+  // confirm a (mock) payment. For split shares the server reports paid:false until the bill is covered.
+  const doConfirm = async () => { if (!pay) return; setBusy(true); try { const r = await publicApi<{ paid?: boolean }>(`/api/qr/t/${token}/confirm`, { method: 'POST', body: JSON.stringify({ payment_no: pay.payment_no }) }); if (r.paid !== false) setPaid(true); else { setPay(null); await loadSplit(); } } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+
+  // F1 — call staff / request service
+  const doCall = async (type: string) => { setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/call`, { method: 'POST', body: JSON.stringify({ type }) }); setCalled(type); setCallOpen(false); setTimeout(() => setCalled(''), 4000); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+  // F3 — link a loyalty member to the table
+  const doLinkMember = async () => { if (!memberCode.trim()) return; setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/member`, { method: 'POST', body: JSON.stringify({ code: memberCode.trim() }) }); setMemberOpen(false); setMemberCode(''); await load(); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+  // F2 — split pay-your-share
+  const loadSplit = useCallback(async () => { try { setSplit(await publicApi<SplitStatus>(`/api/qr/t/${token}/split`)); } catch { /* ignore */ } }, [token]);
+  const doPayShare = async (amount?: number) => { setBusy(true); setErr(''); try { const r = await publicApi<{ payment_no: string; gateway_ref: string; qr_image: string | null; mock_settle: boolean; total: number; share: number; remaining: number; fully_paid?: boolean }>(`/api/qr/t/${token}/split/pay`, { method: 'POST', body: amount ? JSON.stringify({ amount }) : '{}' }); if (r.fully_paid) { setPaid(true); return; } setPay({ payment_no: r.payment_no, gateway_ref: r.gateway_ref, total: r.total, qr_image: r.qr_image, mock_settle: r.mock_settle, share: r.share }); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
 
   if (paid)
     return (
@@ -205,6 +233,8 @@ export default function DinerPage() {
   const allItems = menu ? [...menu.categories.flatMap((c) => c.items), ...menu.uncategorized] : [];
   const menuCats = menu ? menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []) : [];
   const recommended = allItems.filter((it) => it.is_recommended && orderable(it));
+  const cartSkus = new Set(cart.map((c) => c.sku));
+  const suggestions = allItems.filter((it) => suggestSkus.includes(it.sku) && orderable(it) && !cartSkus.has(it.sku)).slice(0, 4);
   const shownCats = catFilter === 'all' ? menuCats : catFilter === 'rec' ? [] : menuCats.filter((c) => c.id === catFilter);
   const dishes = st?.order?.items.filter((i) => !i.charge) ?? [];
   const chargeLines = st?.order?.items.filter((i) => i.charge) ?? [];
@@ -232,6 +262,17 @@ export default function DinerPage() {
         </button>
       </div>
       {err && <p className="mb-3 text-sm text-destructive">{err}</p>}
+
+      {/* service row: call staff (F1) + member link (F3) */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => setCallOpen(true)}><BellRing className="size-4" /> {t('pub.qr.call_staff')}</Button>
+        {st?.member ? (
+          <Badge variant="secondary" className="gap-1"><UserRound className="size-3.5" /> {st.member.name || st.member.member_code}</Badge>
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => setMemberOpen(true)}><UserRound className="size-4" /> {t('pub.qr.link_member')}</Button>
+        )}
+        {called && <span className="text-xs text-success">✓ {t('pub.qr.called')}</span>}
+      </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'menu' | 'order')}>
         <TabsList className="mb-3 grid w-full grid-cols-2">
@@ -372,16 +413,41 @@ export default function DinerPage() {
                       <ReceiptText className="size-5" /> {t('pub.qr.request_bill')}
                     </Button>
                   )}
-                  {st.session_status === 'bill_requested' && (
-                    <Button onClick={doPay} disabled={busy} className="h-12 w-full text-base">
-                      <Smartphone className="size-5" /> {t('pub.qr.pay_promptpay')}
-                    </Button>
+                  {st.session_status === 'bill_requested' && !splitMode && (
+                    <div className="grid gap-2">
+                      <Button onClick={doPay} disabled={busy} className="h-12 w-full text-base">
+                        <Smartphone className="size-5" /> {t('pub.qr.pay_promptpay')}
+                      </Button>
+                      <Button onClick={() => { setSplitMode(true); loadSplit(); }} disabled={busy} variant="outline" className="h-12 w-full text-base">
+                        <Split className="size-5" /> {t('pub.qr.split_pay')}
+                      </Button>
+                    </div>
+                  )}
+                  {st.session_status === 'bill_requested' && splitMode && (
+                    <Card className="gap-3 p-4">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-1.5 font-medium"><Users className="size-4" /> {t('pub.qr.split_pay')}</span>
+                        <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setSplitMode(false)}>{t('pub.qr.split_back')}</button>
+                      </div>
+                      {split && (
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>{t('pub.qr.split_paid', { amt: baht(split.paid_so_far) })}</span>
+                          <span className="font-semibold text-primary">{t('pub.qr.split_remaining', { amt: baht(split.remaining) })}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <input type="number" inputMode="decimal" min={1} value={shareAmt} onChange={(e) => setShareAmt(e.target.value)}
+                          placeholder={t('pub.qr.split_amount_ph')} className="h-11 w-full rounded-lg border bg-background px-3 text-sm" />
+                        <Button onClick={() => doPayShare(Number(shareAmt) || undefined)} disabled={busy || !shareAmt} className="h-11 shrink-0">{t('pub.qr.split_pay_this')}</Button>
+                      </div>
+                      <Button onClick={() => doPayShare()} disabled={busy} variant="outline" className="h-11 w-full">{t('pub.qr.split_pay_rest')}</Button>
+                    </Card>
                   )}
                 </>
               )}
               {pay && (
                 <Card className="items-center gap-3 p-5 text-center">
-                  <div className="font-medium">{t('pub.qr.scan_to_pay', { amt: baht(pay.total) })}</div>
+                  <div className="font-medium">{t('pub.qr.scan_to_pay', { amt: baht(pay.share ?? pay.total) })}{pay.share ? <span className="ml-1 text-xs text-muted-foreground">({t('pub.qr.split_your_share')})</span> : null}</div>
                   {pay.qr_image ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={pay.qr_image} alt="PromptPay QR" className="size-48 rounded-xl border bg-white p-2" />
@@ -421,9 +487,35 @@ export default function DinerPage() {
         </div>
       )}
 
+      {/* F1 call-staff sheet */}
+      <Dialog open={callOpen} onOpenChange={setCallOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{t('pub.qr.call_staff')}</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-2">
+            {(['waiter', 'water', 'cutlery', 'bill'] as const).map((ty) => (
+              <Button key={ty} variant="outline" className="h-14" disabled={busy} onClick={() => doCall(ty)}>{t(`pub.qr.call_${ty}`)}</Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* F3 member-link sheet */}
+      <Dialog open={memberOpen} onOpenChange={setMemberOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{t('pub.qr.link_member')}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('pub.qr.link_member_hint')}</p>
+          <input value={memberCode} onChange={(e) => setMemberCode(e.target.value)} placeholder={t('pub.qr.member_code_ph')}
+            className="h-12 w-full rounded-lg border bg-background px-3 text-base" />
+          <DialogFooter>
+            <Button onClick={doLinkMember} disabled={busy || !memberCode.trim()} className="h-12 w-full">{t('pub.qr.link_member')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {zoomImg && <Lightbox img={zoomImg} onClose={() => setZoomImg(null)} />}
       {picker && <ModifierPicker item={picker} buffet={isBuffet} onClose={() => setPicker(null)} onAdd={(line) => { addToCart(line); setPicker(null); }} />}
-      <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder} />
+      <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder}
+        suggestions={suggestions} nm={nm} onAddSuggestion={(it) => onItemTap(it)} />
       {buffetOpen && tiers && <BuffetStartDialog tiers={tiers} defaultPax={2} busy={busy} onClose={() => setBuffetOpen(false)} onStart={startBuffet} />}
     </main>
   );
@@ -537,8 +629,9 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
 }
 
 // ── cart review + submit ──
-function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, onSubmit }: {
+function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, onSubmit, suggestions, nm, onAddSuggestion }: {
   open: boolean; onOpenChange: (o: boolean) => void; cart: CartLine[]; setCart: (f: (c: CartLine[]) => CartLine[]) => void; total: number; buffet: boolean; busy: boolean; onSubmit: () => void;
+  suggestions: MenuItem[]; nm: (o: { name: string; name_en?: string | null }) => string; onAddSuggestion: (it: MenuItem) => void;
 }) {
   const { t } = useLang();
   const setQty = (key: string, delta: number) =>
@@ -566,6 +659,20 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {/* F6 upsell: "สั่งคู่กับ…" co-purchase suggestions */}
+        {suggestions.length > 0 && (
+          <div className="border-t pt-2">
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Sparkles className="size-3.5" /> {t('pub.qr.upsell_title')}</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {suggestions.map((it) => (
+                <button key={it.id} type="button" onClick={() => onAddSuggestion(it)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-sm active:scale-95">
+                  <Plus className="size-3.5 text-primary" /> {nm(it)} <span className="text-xs text-muted-foreground tabular">{buffet ? '' : baht(it.price)}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         <DialogFooter>

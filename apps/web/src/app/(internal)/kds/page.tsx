@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlarmClock, Ban, ChefHat, Maximize, ScanLine, Smartphone, Timer, Utensils, Volume2, VolumeX, Wifi, WifiOff, Undo2, BellRing, Gauge, ZoomIn } from 'lucide-react';
+import { AlarmClock, Ban, ChefHat, Maximize, ScanLine, Smartphone, Timer, Utensils, Volume2, VolumeX, Wifi, WifiOff, Undo2, BellRing, Gauge, X, ZoomIn } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -17,10 +17,11 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type Sla = 'ok' | 'warn' | 'late';
-type KdsItem = { item_id: number; sku?: string | null; order_no: string; table_label: string | null; table_id: number | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; fired_at?: string | null; elapsed_min: number; prep_min: number; sla?: Sla; stuck?: boolean; priority?: number; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
+type KdsItem = { item_id: number; sku?: string | null; station_code?: string; station_name?: string; order_no: string; table_label: string | null; table_id: number | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; fired_at?: string | null; elapsed_min: number; prep_min: number; sla?: Sla; stuck?: boolean; priority?: number; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
 type Summary = { active_count: number; avg_wait_min: number; served_today: number; avg_prep_today_min: number };
 type Feed = { stations: Station[]; stuck_count?: number; stuck_minutes?: number; summary?: Summary };
+type Pacing = { nudges: { order_no: string; table_label: string | null; next_course: number; current_course: number }[] };
 type Group = 'station' | 'table' | 'time' | 'priority';
 type ExpoItem = { item_id: number; name: string; qty: number; station_name: string; course: number; ready_min: number };
 type ExpoTicket = { order_id: number; order_no: string; table_label: string | null; ready_items: ExpoItem[]; ready_count: number; pending_count: number; all_ready: boolean; oldest_ready_min: number };
@@ -49,6 +50,7 @@ export default function KdsPage() {
   const [view, setView] = useState<'board' | 'expo' | 'load'>('board');
   const [group, setGroup] = useState<Group>('station');   // board grouping: station / table / time / priority
   const [scan, setScan] = useState('');
+  const [stationFilter, setStationFilter] = useState<string>('all'); // F4: station-scoped terminal (per device)
   // Live via SSE: another terminal advancing an item refreshes every view instantly. Polling stays as a
   // 15s fallback for when the stream is down (vs 3s before — the realtime push carries the load now).
   const { connected } = useRealtime((e) => {
@@ -58,6 +60,10 @@ export default function KdsPage() {
   const feed = useQuery<Feed>({ queryKey: ['kds'], queryFn: () => api('/api/restaurant/kds/feed'), refetchInterval: poll, enabled: view === 'board' });
   const expo = useQuery<{ tickets: ExpoTicket[]; ready_orders: number }>({ queryKey: ['kds-expo'], queryFn: () => api('/api/restaurant/kds/expo'), refetchInterval: poll, enabled: view === 'expo' });
   const load = useQuery<{ stations: LoadStation[] }>({ queryKey: ['kds-load'], queryFn: () => api('/api/restaurant/kds/load'), refetchInterval: poll, enabled: view === 'load' });
+  const pacing = useQuery<Pacing>({ queryKey: ['kds-pacing'], queryFn: () => api('/api/restaurant/kds/pacing'), refetchInterval: poll, enabled: view === 'board' }); // F8
+  // F4: persist the station-scoped filter per device
+  useEffect(() => { const s = typeof window !== 'undefined' ? localStorage.getItem('kds.station') : null; if (s) setStationFilter(s); }, []);
+  useEffect(() => { if (typeof window !== 'undefined') localStorage.setItem('kds.station', stationFilter); }, [stationFilter]);
   const invalidate = () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('kds') });
   const act = useMutation({
     mutationFn: ({ id, action }: { id: number; action: string }) => api(`/api/restaurant/kds/items/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
@@ -107,9 +113,19 @@ export default function KdsPage() {
     onError: (e: Error) => notifyError(e.message),
   });
   const toggleFull = () => { const el = rootRef.current; if (!el) return; if (document.fullscreenElement) document.exitFullscreen?.(); else el.requestFullscreen?.().catch(() => {}); };
+  // F7: void a line from the KDS with a reason (dropped/spoiled), audited
+  const voidItem = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => api(`/api/restaurant/kds/items/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'void', reason }) }),
+    onSuccess: () => { notifySuccess(t('mx.kds_voided_ok')); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const onVoid = (it: KdsItem) => { const reason = window.prompt(t('mx.kds_void_reason')); if (reason !== null) voidItem.mutate({ id: it.item_id, reason: reason || undefined }); };
 
-  // flatten the station feed for the table/time/priority groupings
-  const allItems: KdsItem[] = (feed.data?.stations ?? []).flatMap((s) => s.items);
+  // F4: station-scoped view — the available stations come from the feed; filter the board to one station.
+  const allStations = feed.data?.stations ?? [];
+  const stationOptions = allStations.map((s) => ({ code: s.station_code, name: s.station_name }));
+  const shownStations = stationFilter === 'all' ? allStations : allStations.filter((s) => s.station_code === stationFilter);
+  const allItems: KdsItem[] = shownStations.flatMap((s) => s.items);
   const stuckCount = feed.data?.stuck_count ?? 0;
   const stuckMin = feed.data?.stuck_minutes ?? 10;
   const summary = feed.data?.summary;
@@ -168,6 +184,14 @@ export default function KdsPage() {
                 <TabsTrigger value="priority"><BellRing className="size-4" /> {t('mx.kds_group_priority')}</TabsTrigger>
               </TabsList>
             </Tabs>
+            {/* F4: station-scoped terminal picker (persisted per device) */}
+            {stationOptions.length > 1 && (
+              <select value={stationFilter} onChange={(e) => setStationFilter(e.target.value)} aria-label={t('mx.kds_station_filter')}
+                className="h-9 rounded-md border bg-card px-2 text-sm">
+                <option value="all">{t('mx.kds_station_all')}</option>
+                {stationOptions.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </select>
+            )}
             <form className="ml-auto flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); onScan(); }}>
               <div className="relative">
                 <ScanLine className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -176,6 +200,18 @@ export default function KdsPage() {
               <Button type="submit" variant="outline" size="sm" disabled={!scan.trim() || serve.isPending}>{t('mx.kds_scan_serve')}</Button>
             </form>
           </div>
+
+          {/* F8: course-pacing nudges — fire the next held course once the current is plated */}
+          {(pacing.data?.nudges?.length ?? 0) > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border-2 border-primary bg-primary/10 px-3 py-2 text-sm text-primary">
+              <BellRing className="size-4 shrink-0" />
+              {(pacing.data?.nudges ?? []).map((nd) => (
+                <span key={nd.order_no} className="rounded-md bg-card px-2 py-0.5 font-medium">
+                  {t('mx.kds_pace_fire', { table: nd.table_label ?? nd.order_no, course: nd.next_course })}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* live throughput summary (real-time, recomputed each poll) */}
           {summary && (
@@ -200,14 +236,14 @@ export default function KdsPage() {
               <p className="text-sm text-muted-foreground">{t('mx.kds_no_orders')}</p>
             ) : group === 'station' ? (
               <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-                {feed.data.stations.map((st) => (
+                {shownStations.map((st) => (
                   <Card key={st.station_id} className="gap-3 p-3">
                     <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
                       <ChefHat className="size-5 text-primary" /> {st.station_name}
                       <span className="text-sm font-normal text-muted-foreground">({st.items.length})</span>
                     </h3>
                     <div className="grid gap-2">
-                      {st.items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} />)}
+                      {st.items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} onVoid={onVoid} />)}
                       {st.items.length === 0 && <span className="text-sm text-muted-foreground">{t('mx.kds_empty_station')}</span>}
                     </div>
                   </Card>
@@ -227,14 +263,14 @@ export default function KdsPage() {
                         <Button variant="outline" size="sm" disabled={serve.isPending || !items.some((i) => i.kds_status === 'ready')} onClick={() => serve.mutate(items[0].order_no)}>{t('mx.kds_serve_ticket')}</Button>
                       </div>
                     </div>
-                    <div className="grid gap-2">{items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} />)}</div>
+                    <div className="grid gap-2">{items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} onVoid={onVoid} />)}</div>
                   </Card>
                 ))}
               </div>
             ) : (
               // time (oldest lot first) or priority (highest first) — one flat, wrapping grid
               <div className="grid items-start gap-2 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-                {[...allItems].sort(group === 'time' ? byTime : byPriority).map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} />)}
+                {[...allItems].sort(group === 'time' ? byTime : byPriority).map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} onVoid={onVoid} />)}
               </div>
             ))}
           </StateView>
@@ -374,11 +410,12 @@ function groupByTable(items: KdsItem[]): [string, KdsItem[]][] {
 }
 
 // one kitchen line card — SLA aging colour, stuck alarm, food-priority + course/buffet/diner badges, actions.
-function ItemCard({ it, t, act, onEightySix }: { it: KdsItem; t: (k: string, v?: Record<string, string | number>) => string; act: { isPending: boolean; mutate: (v: { id: number; action: string }) => void }; onEightySix?: (sku: string) => void }) {
+function ItemCard({ it, t, act, onEightySix, onVoid }: { it: KdsItem; t: (k: string, v?: Record<string, string | number>) => string; act: { isPending: boolean; mutate: (v: { id: number; action: string }) => void }; onEightySix?: (sku: string) => void; onVoid?: (it: KdsItem) => void }) {
   const nxt = NEXT[it.kds_status];
   const u = URGENCY[slaOf(it)];
   const canRecall = it.kds_status === 'preparing' || it.kds_status === 'ready';
   const canEightySix = !!it.sku && !!onEightySix;
+  const canVoid = !!onVoid && it.kds_status !== 'served';
   return (
     <div className={cn('rounded-lg border-2 bg-card p-2', it.stuck ? 'border-destructive ring-2 ring-destructive/40' : u.border)}>
       <div className="flex items-baseline justify-between gap-2">
@@ -407,7 +444,7 @@ function ItemCard({ it, t, act, onEightySix }: { it: KdsItem; t: (k: string, v?:
           ⚠️ {(it.guest_allergies?.length ?? 0) > 0 ? `${t('px.gp_allergies')}: ${(it.guest_allergies ?? []).join(', ')}` : ''}{(it.guest_allergies?.length ?? 0) > 0 && it.guest_dietary ? ' · ' : ''}{it.guest_dietary ?? ''}
         </div>
       )}
-      {(nxt || canRecall || canEightySix) && (
+      {(nxt || canRecall || canEightySix || canVoid) && (
         <div className="mt-1.5 flex gap-1.5">
           {nxt && (
             <Button className="flex-1" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
@@ -422,6 +459,11 @@ function ItemCard({ it, t, act, onEightySix }: { it: KdsItem; t: (k: string, v?:
           {canEightySix && (
             <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => onEightySix!(it.sku!)} aria-label={t('mx.kds_86')} title={t('mx.kds_86')}>
               <Ban className="size-4" />
+            </Button>
+          )}
+          {canVoid && (
+            <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => onVoid!(it)} aria-label={t('mx.kds_void')} title={t('mx.kds_void')}>
+              <X className="size-4" />
             </Button>
           )}
         </div>

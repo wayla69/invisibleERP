@@ -2864,6 +2864,20 @@
       "when": 2023820000374,
       "tag": "0435_qr_recommend_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 410,
+      "version": "7",
+      "when": 2023820000375,
+      "tag": "0436_service_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 411,
+      "version": "7",
+      "when": 2023820000376,
+      "tag": "0437_session_member",
+      "breakpoints": true
     }
   ]
 }
