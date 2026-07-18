@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { serviceCases, caseEmailMessages } from '../../database/schema/service-cases';
 import { docCountersTenant } from '../../database/schema/system';
 import { tenants } from '../../database/schema/tenants';
@@ -231,6 +231,10 @@ export class ServiceCasesService {
 
   // ── Email-to-Case webhook: a customer email → threaded onto its case, or a NEW case. ──
   async handleInbound(tenantCode: string, secret: string | undefined, payload: CaseInboundEmail, sig?: { rawBody?: Buffer | string; signature?: string; timestamp?: string }) {
+    // @NoTx email-to-case webhook (@Public): resolve tenant by code on the base pool, then every read/write is
+    // scoped EXPLICITLY by the resolved tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY)
+    // permits the base-pool access.
+    return runGlobalDb('service-cases:inbound', async () => {
     const [t] = await this.db.select({ id: tenants.id }).from(tenants).where(eq(tenants.code, tenantCode)).limit(1);
     if (!t) throw new UnauthorizedException({ code: 'UNKNOWN_TENANT', message: 'Unknown tenant code', messageTh: 'ไม่พบรหัสบริษัท' });
     const tenantId = Number(t.id);
@@ -275,6 +279,7 @@ export class ServiceCasesService {
     }).returning();
     await this.logMessage(tenantId, Number(created!.id), from, subject, bodyPreview, newToken, msgId);
     return { received: true, created: true, case_id: Number(created!.id), case_no: caseNo, matched_by: 'new_case' };
+    });
   }
 
   // Match precedence: (1) per-case thread token; (2) sender address → their most-recent OPEN case. Nothing ⇒ null.

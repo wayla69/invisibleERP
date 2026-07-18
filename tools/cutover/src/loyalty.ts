@@ -16,7 +16,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy, runGlobalDb} from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
@@ -312,29 +312,32 @@ async function main() {
   // store-hub replay or an integration retry deducted the points again. The guard is now IN the ledger.
   {
     const svc: any = app.get(MemberService);
+    // earnInTx/redeemInTx internally read loyalty config via the proxy (base pool in this direct
+    // harness call); declare it for STRICT_TENANT_PROXY=1.
+    const g = <T>(fn: () => Promise<T>): Promise<T> => runGlobalDb('loyalty:direct', fn);
     const balOf = async (id: number) => Number((await db.select().from(s.posMembers).where(eq(s.posMembers.id, id)))[0].balance);
     const rowsFor = async (ref: string, type: string) =>
       Number(((await pg.query(`SELECT count(*)::int n FROM pos_member_ledger WHERE ref_doc='${ref}' AND txn_type='${type}'`)).rows[0] as any).n);
 
     const before = await balOf(m1);
-    const first = await svc.earnInTx(db, t1, m1, 500, 'SALE-REPLAY-1', 'harness');
+    const first = await g(() => svc.earnInTx(db, t1, m1, 500, 'SALE-REPLAY-1', 'harness'));
     const afterFirst = await balOf(m1);
-    const second = await svc.earnInTx(db, t1, m1, 500, 'SALE-REPLAY-1', 'harness');
+    const second = await g(() => svc.earnInTx(db, t1, m1, 500, 'SALE-REPLAY-1', 'harness'));
     const afterSecond = await balOf(m1);
     ok('LYL-22: replayed EARN awards nothing extra (same points returned, balance unchanged, 1 ledger row)',
       first > 0 && second === first && afterFirst === before + first && afterSecond === afterFirst && (await rowsFor('SALE-REPLAY-1', 'Earn')) === 1,
       JSON.stringify({ first, second, before, afterFirst, afterSecond }));
 
-    const r1 = await svc.redeemInTx(db, t1, m1, 50, 5, 'SALE-REPLAY-2', 'harness');
+    const r1 = await g(() => svc.redeemInTx(db, t1, m1, 50, 5, 'SALE-REPLAY-2', 'harness'));
     const afterR1 = await balOf(m1);
-    const r2 = await svc.redeemInTx(db, t1, m1, 50, 5, 'SALE-REPLAY-2', 'harness');
+    const r2 = await g(() => svc.redeemInTx(db, t1, m1, 50, 5, 'SALE-REPLAY-2', 'harness'));
     const afterR2 = await balOf(m1);
     ok('LYL-22: replayed REDEEM deducts nothing extra (balance unchanged, 1 ledger row)',
       r1 === 50 && r2 === 50 && afterR1 === afterSecond - 50 && afterR2 === afterR1 && (await rowsFor('SALE-REPLAY-2', 'Redeem')) === 1,
       JSON.stringify({ r1, r2, afterR1, afterR2 }));
 
     // a DIFFERENT document for the same member still books normally (the guard is per-document)
-    const r3 = await svc.redeemInTx(db, t1, m1, 10, 1, 'SALE-REPLAY-3', 'harness');
+    const r3 = await g(() => svc.redeemInTx(db, t1, m1, 10, 1, 'SALE-REPLAY-3', 'harness'));
     ok('LYL-22: a different document still books (guard is per source document)', r3 === 10 && (await balOf(m1)) === afterR2 - 10, JSON.stringify({ r3 }));
 
     // hard backstop: the partial unique index rejects a hand-written duplicate row

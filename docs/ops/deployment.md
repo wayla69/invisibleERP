@@ -116,6 +116,16 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 > of reverse proxies in front of the API: without it Fastify's `req.ip` is the proxy's address, so the edge
 > limiter buckets *every* client together — the same knob fixes the spoofable audit IP (L-12).
 
+> **Tenant-isolation hardening — enable `STRICT_TENANT_PROXY` (SOX-ICFR audit #2; default OFF, enforce-ready).**
+> The app-layer fail-closed proxy (`tenancy-model.md` §1ter) turns a base-pool query issued with no tenant
+> context into a loud `503 TENANT_CONTEXT_MISSING` instead of a silent cross-tenant read. Every base-pool
+> path is now wrapped (all `@NoTx` routes at the interceptor + the direct-call entry points) and the full
+> harness suite is green with `=1`. **Rollout, one stage at a time:** (1) set `STRICT_TENANT_PROXY=warn` on
+> every API service and confirm no `[tenant-proxy] base-pool …` lines appear in the logs under real traffic;
+> (2) set `=1` in **staging** and soak; (3) set `=1` in **prod**. It is per-process and stateless — no Redis,
+> no coupling to replica count — so the three modes can be flipped independently per environment. There is no
+> data migration and rollback is just clearing the var.
+
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.
   Two queue-pressure guards against the ~20-concurrent-job account limit (both root-caused from the
@@ -170,6 +180,7 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 | 1.8 | 2026-07-10 | Platform | §5: `ci.yml` per-ref `concurrency` group (cancel superseded PR runs; main keeps in-flight + newest pending) — fixes the 2026-07-10 Actions queue freeze (26 runs / ~2,000 jobs backlogged, 0 in progress). |
 | 1.9 | 2026-07-10 | Platform | §5: harness matrix sharded ~89 jobs → 11 domain shards (balanced by measured runtime; per-harness log groups + full-shard run-through on failure preserved) — a full CI run is now ~18 jobs and fits one ~20-job concurrency wave; branch-protection required checks must reference the shard names. |
 | 1.10 | 2026-07-17 | Platform | §5: the shard runner retries a harness ONCE on a native crash signal (exit ≥128, e.g. 139 SIGSEGV) — a rare non-deterministic PGlite/`node:sqlite` segfault at boot that previously needed a manual shard re-run; a real assertion failure (exit 1) is never retried. Node stays pinned to 22 (node:sqlite requires ≥22, so a downgrade is not viable). |
+| 1.11 | 2026-07-17 | Platform / Security | §4: `STRICT_TENANT_PROXY` (SOX-ICFR audit #2) is now enforce-ready — added the staged `warn` → `1` (staging) → `1` (prod) rollout note. Every base-pool read path is wrapped (all `@NoTx` routes at the `TenantTxInterceptor` choke point + the direct-call service entry points) and the full harness suite passes with `=1`. Per-process/stateless; no Redis, no migration, rollback = clear the var. See `tenancy-model.md` §1ter. |
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |

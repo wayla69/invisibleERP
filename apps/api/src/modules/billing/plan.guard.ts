@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Inject, 
 import { Reflector } from '@nestjs/core';
 import { eq, desc } from 'drizzle-orm';
 import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, type Permission, type SuiteKey } from '@ierp/shared';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { subscriptions, plans } from '../../database/schema';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { PLAN_FEATURE_KEY } from './plan-feature.decorator';
@@ -87,8 +87,10 @@ export class PlanGuard implements CanActivate {
     if (!feature && required.length === 0 && !reqSuite) return true;
 
     let row: { features: unknown; status: string | null; trialEndsAt: Date | null; currentPeriodEnd: Date | null; planCode: string | null } | undefined;
+    const tid = user.tenantId; // narrowed to number by the guard above; captured so the closure keeps the narrowing
     try {
-      [row] = await this.db
+      // Runs in a guard (pre-tenant tx) → base-pool read, explicit tenant filter. Global for STRICT_TENANT_PROXY.
+      [row] = await runGlobalDb('plan-guard:subscription', () => this.db
         .select({
           features: plans.features,
           status: subscriptions.status,
@@ -98,9 +100,9 @@ export class PlanGuard implements CanActivate {
         })
         .from(subscriptions)
         .leftJoin(plans, eq(subscriptions.planCode, plans.code))
-        .where(eq(subscriptions.tenantId, user.tenantId))
+        .where(eq(subscriptions.tenantId, tid))
         .orderBy(desc(subscriptions.createdAt))
-        .limit(1);
+        .limit(1));
     } catch (e) {
       // Infra error → fail OPEN (never lock out a paying tenant over a DB blip).
       this.logger.warn(`plan check DB error (fail-open) tenant=${user.tenantId}: ${(e as Error)?.message ?? e}`);
@@ -187,13 +189,13 @@ export class PlanGuard implements CanActivate {
   // Legacy feature check (used only in default off-mode) — verbatim pre-1.2 semantics, incl. fail-open.
   private async legacyFeatureCheck(tenantId: number, feature: string): Promise<boolean> {
     try {
-      const [row] = await this.db
+      const [row] = await runGlobalDb('plan-guard:legacy-feature', () => this.db
         .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt })
         .from(subscriptions)
         .leftJoin(plans, eq(subscriptions.planCode, plans.code))
         .where(eq(subscriptions.tenantId, tenantId))
         .orderBy(desc(subscriptions.createdAt))
-        .limit(1);
+        .limit(1));
       if (!row) return true;
       if (row.status === 'Trialing') {
         if (row.trialEndsAt && Date.now() > new Date(row.trialEndsAt).getTime()) {
