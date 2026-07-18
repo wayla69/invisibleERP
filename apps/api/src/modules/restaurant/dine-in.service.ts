@@ -4,7 +4,7 @@ import { eq, and, inArray, desc, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
   dineInOrders, dineInOrderItems, kitchenStations, diningTables, tableSessions,
-  custPosSales, custPosItems, tenants,
+  custPosSales, custPosItems, tenants, qrSettings,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { TaxService } from '../tax/tax.service';
@@ -88,10 +88,11 @@ export class DineInService {
       // freeform line → use the provided name/unit_price as before.
       let name = it.name, unitPrice = it.unit_price, stationCode = it.station_code;
       let prep = it.est_prep_minutes, mods: any = it.modifiers ?? null, itemRef = it.item_id ?? null;
+      let kdsPriority = 0;   // food-prioritisation — snapshot the menu item's priority onto the kitchen line
       if (it.sku != null || it.menu_item_id != null) {
         const r = await this.menu.resolveLine({ sku: it.sku, item_id: it.menu_item_id, qty: n(it.qty), modifier_option_ids: it.modifier_option_ids, notes: it.notes }, user);
         name = r.name; unitPrice = r.unit_price; stationCode = it.station_code ?? r.station_code ?? undefined;
-        prep = it.est_prep_minutes ?? r.prep_minutes ?? undefined; mods = r.modifiers; itemRef = r.sku;
+        prep = it.est_prep_minutes ?? r.prep_minutes ?? undefined; mods = r.modifiers; itemRef = r.sku; kdsPriority = r.kds_priority ?? 0;
       }
       // buffet food still routes to the kitchen (station + prep), but is billed at ฿0 — the per-pax buffet
       // charge covers it. The 86/modifier rules above still apply.
@@ -102,7 +103,7 @@ export class DineInService {
         tenantId, orderId, stationId: Number(st!.id), itemId: itemRef, name: name!,
         qty: String(n(it.qty)), unitPrice: fx(effUnit, 2), amount: fx(amount, 2),
         modifiers: mods, notes: it.notes ?? null, kdsStatus: 'new', isBuffet: buffet,
-        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as { course?: number }).course ?? 1,
+        buffetPackageId: buffet ? (opts?.buffetPackageId ?? null) : null, course: (it as { course?: number }).course ?? 1, kdsPriority,
         seat: it.seat ?? null,   // seat-level ordering (POS-9)
         estPrepMinutes: prep ?? null, createdBy: user.username,
       });
@@ -283,9 +284,52 @@ export class DineInService {
     let zoneId: number | null = null;
     if (o.tableId) { const [tbl] = await db.select({ zoneId: diningTables.zoneId }).from(diningTables).where(eq(diningTables.id, o.tableId)).limit(1); zoneId = tbl?.zoneId ?? null; }
     await db.update(dineInOrders).set({ status: 'paid', saleNo, zoneId, paidAt: now, closedAt: now }).where(eq(dineInOrders.id, o.id));
-    if (o.tableId) await db.update(diningTables).set({ status: 'cleaning', updatedAt: now }).where(eq(diningTables.id, o.tableId));
+    // Close the table on payment. auto_close_on_paid (0434) frees it straight to 'available' so the table
+    // can be reused the instant the bill clears; otherwise it holds in 'cleaning' until staff clear it.
+    if (o.tableId) await db.update(diningTables).set({ status: (await this.autoCloseOnPaid()) ? 'available' : 'cleaning', updatedAt: now }).where(eq(diningTables.id, o.tableId));
     if (o.sessionId) await db.update(tableSessions).set({ status: 'closed', closedAt: now, saleNo }).where(eq(tableSessions.id, o.sessionId));
     return this.issueAbbreviated(saleNo, user);
+  }
+
+  // Per-tenant QR/close setting (0434). Assumes we are inside scope.run(tenantId) / the request tenant tx.
+  private async autoCloseOnPaid(): Promise<boolean> {
+    const [row] = await this.db.select({ v: qrSettings.autoCloseOnPaid }).from(qrSettings).limit(1);
+    return row?.v === true;
+  }
+
+  // KDS "serve the whole ticket" — scan the order QR (or tap Served on the expo card) to mark EVERY ready
+  // line of an order as served in one go, so a finished ticket never lingers on the pass. Only lines that
+  // are actually 'ready' flip; queued/preparing lines are left for the station. Idempotent (0 ready → noop).
+  async serveOrder(orderNo: string, user: JwtUser) {
+    const db = this.db;
+    const o = await this.loadOrder(orderNo);
+    const now = new Date();
+    const served = await db.update(dineInOrderItems)
+      .set({ kdsStatus: 'served', servedAt: now, updatedAt: now })
+      .where(and(eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'ready')))
+      .returning({ id: dineInOrderItems.id });
+    if (served.length) {
+      const status = await this.recomputeOrderStatus(Number(o.id));
+      this.realtime?.publish({ type: 'kds_item', tenant_id: user.tenantId ?? null, order_id: Number(o.id), kds_status: 'served', order_status: status, at: now.toISOString() });
+    }
+    return { order_no: orderNo, served: served.length };
+  }
+
+  // KDS "start the whole ticket" — accept every queued line of an order at once (queued → preparing).
+  // Idempotent (0 queued → noop); lines already preparing/ready/served are left alone.
+  async startOrder(orderNo: string, user: JwtUser) {
+    const db = this.db;
+    const o = await this.loadOrder(orderNo);
+    const now = new Date();
+    const started = await db.update(dineInOrderItems)
+      .set({ kdsStatus: 'preparing', startedAt: now, updatedAt: now })
+      .where(and(eq(dineInOrderItems.orderId, Number(o.id)), eq(dineInOrderItems.kdsStatus, 'queued')))
+      .returning({ id: dineInOrderItems.id });
+    if (started.length) {
+      const status = await this.recomputeOrderStatus(Number(o.id));
+      this.realtime?.publish({ type: 'kds_item', tenant_id: user.tenantId ?? null, order_id: Number(o.id), kds_status: 'preparing', order_status: status, at: now.toISOString() });
+    }
+    return { order_no: orderNo, started: started.length };
   }
 
   // idempotent abbreviated tax invoice for a sale (VAT-unregistered tenant → null, no slip).
@@ -378,7 +422,7 @@ export class DineInService {
       id: dineInOrderItems.id, itemId: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty, unitPrice: dineInOrderItems.unitPrice,
       amount: dineInOrderItems.amount, kdsStatus: dineInOrderItems.kdsStatus, stationId: dineInOrderItems.stationId, isBuffet: dineInOrderItems.isBuffet, course: dineInOrderItems.course, seat: dineInOrderItems.seat,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, firedAt: dineInOrderItems.firedAt,
-      startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, estPrep: dineInOrderItems.estPrepMinutes,
+      startedAt: dineInOrderItems.startedAt, readyAt: dineInOrderItems.readyAt, servedAt: dineInOrderItems.servedAt, estPrep: dineInOrderItems.estPrepMinutes,
     }).from(dineInOrderItems).where(eq(dineInOrderItems.orderId, Number(o.id))).orderBy(dineInOrderItems.id);
     const now = Date.now();
     const statusTh: Record<string, string> = { new: 'รับออเดอร์', queued: 'รอคิว', preparing: 'กำลังปรุง', ready: 'พร้อมเสิร์ฟ', served: 'เสิร์ฟแล้ว', voided: 'ยกเลิก' };
@@ -389,7 +433,11 @@ export class DineInService {
       const base = i.startedAt ? Math.floor((now - new Date(i.startedAt).getTime()) / 60000) : elapsedMin;
       const remainingMin = ['ready', 'served', 'voided'].includes(i.kdsStatus) ? 0 : Math.max(0, prep - base);
       const charge = i.itemId === '__buffet_charge__' || i.itemId === '__buffet_overtime__';
-      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, seat: i.seat ?? null, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep };
+      // wait shown to the diner: for a still-cooking line it is time since the line FIRED (the lot clock),
+      // frozen once the dish is served. served_at drives the "เสิร์ฟแล้ว" swap; fired_at labels the lot (hh:mm).
+      const servedMs = i.servedAt ? new Date(i.servedAt).getTime() : null;
+      const waitMin = fired ? Math.floor(((['served', 'voided'].includes(i.kdsStatus) && servedMs ? servedMs : now) - fired) / 60000) : 0;
+      return { item_id: Number(i.id), name: i.name, qty: n(i.qty), unit_price: n(i.unitPrice), amount: n(i.amount), kds_status: i.kdsStatus, status_th: statusTh[i.kdsStatus], is_buffet: i.isBuffet, course: i.course ?? 1, seat: i.seat ?? null, charge, modifiers: i.modifiers ?? [], notes: i.notes, elapsed_min: elapsedMin, remaining_min: remainingMin, prep_min: prep, fired_at: i.firedAt ?? null, served_at: i.servedAt ?? null, wait_min: Math.max(0, waitMin) };
     });
     const waitedMin = o.firedAt ? Math.floor((now - new Date(o.firedAt).getTime()) / 60000) : 0;
     const readyInMin = Math.max(0, ...viewItems.filter((v: any) => !['served', 'voided'].includes(v.kds_status)).map((v: any) => v.remaining_min), 0);

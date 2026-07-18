@@ -129,6 +129,8 @@ export const dineInOrderItems = pgTable('dine_in_order_items', {
   isBuffet: boolean('is_buffet').notNull().default(false),  // buffet food line (priced ฿0, still hits KDS)
   buffetPackageId: bigint('buffet_package_id', { mode: 'number' }).references(() => buffetPackages.id), // tier this line belongs to (food + charge/overtime) → per-tier behaviour analytics
   course: integer('course').notNull().default(1),           // KDS course number — fired course-by-course
+  kdsPriority: integer('kds_priority').notNull().default(0), // food-prioritisation (0434): higher plates out first within one fire lot; snapshot from the menu item
+
   seat: integer('seat'),                                     // seat-level ordering (POS-9): which guest seat ordered this line (NULL = shared/table); order/fire/split per seat
   kdsStatus: kdsItemStatusEnum('kds_status').notNull().default('new'),
   estPrepMinutes: integer('est_prep_minutes'),

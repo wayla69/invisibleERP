@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Timer, Utensils } from 'lucide-react';
+import { CheckCircle2, Clock, LayoutGrid, List, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Sparkles, Star, Timer, Utensils, X, ZoomIn } from 'lucide-react';
 import { publicApi } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { baht } from '@/lib/format';
 
 // ── types (mirror the public QR endpoints) ──
-type Item = { item_id: number; name: string; qty: number; kds_status: string; status_th: string; amount: number; is_buffet: boolean; charge: boolean };
+type Item = { item_id: number; name: string; qty: number; kds_status: string; status_th: string; amount: number; is_buffet: boolean; charge: boolean; fired_at?: string | null; served_at?: string | null; wait_min?: number; course?: number };
 type Buffet = { package_name: string | null; pax: number | null; expires_at: string | null; minutes_left: number | null; expired: boolean };
 type Status = {
   table_no: string | null; session_status: string; order_mode: 'a_la_carte' | 'buffet'; buffet: Buffet | null;
@@ -23,7 +23,7 @@ type Status = {
 };
 type Option = { option_id: number; name: string; price_delta: number; is_default: boolean };
 type Group = { group_id: number; code: string; name: string; min_select: number; max_select: number; required: boolean; options: Option[] };
-type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
+type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; is_recommended?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
 type Category = { id: number; code: string; name: string; items: MenuItem[] };
 type Menu = { categories: Category[]; uncategorized: MenuItem[]; item_count: number };
 type Tier = { id: number; code: string; name: string; name_en: string | null; price_per_pax: number; time_limit_min: number; overtime_fee_per_pax: number };
@@ -49,6 +49,9 @@ export default function DinerPage() {
   const [tiers, setTiers] = useState<Tier[] | null>(null);
   const [err, setErr] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [catFilter, setCatFilter] = useState<number | 'all' | 'rec'>('all');   // diner menu category filter (0434)
+  const [menuView, setMenuView] = useState<'list' | 'grid'>('list');           // list / grid ordering layout
+  const [zoomImg, setZoomImg] = useState<{ src: string; name: string } | null>(null); // image lightbox
   const [picker, setPicker] = useState<MenuItem | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [buffetOpen, setBuffetOpen] = useState(false);
@@ -103,6 +106,69 @@ export default function DinerPage() {
     if (it.modifier_groups.length) { setPicker(it); return; }
     addToCart({ key: `${it.sku}`, sku: it.sku, name: it.name, qty: 1, unitPrice: isBuffet ? 0 : it.price, optionIds: [], optionLabels: [] });
   };
+  // tap the thumbnail → open the zoom lightbox (without triggering the card's add-to-cart)
+  const openZoom = (e: React.MouseEvent, it: MenuItem) => { e.stopPropagation(); if (it.image_url) setZoomImg({ src: it.image_url, name: nm(it) }); };
+
+  // one tappable LIST card — shared by the recommended row and the per-category lists
+  const renderItem = (it: MenuItem) => (
+    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
+      className={cn('flex items-center justify-between rounded-xl border bg-card p-3 text-left transition active:scale-[0.99]', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
+      <div className="flex min-w-0 items-center gap-3">
+        {it.image_url && (
+          <span role="button" tabIndex={-1} onClick={(e) => openZoom(e, it)} className="group relative size-16 shrink-0 overflow-hidden rounded-lg" aria-label={t('pub.qr.zoom')}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={it.image_url} alt="" className="size-16 object-cover" />
+            <span className="absolute inset-0 grid place-items-center bg-black/0 text-white/0 transition group-active:bg-black/30 group-active:text-white"><ZoomIn className="size-5" /></span>
+          </span>
+        )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            {it.is_recommended && <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label={t('pub.qr.recommended')} />}
+            <span className="truncate">{nm(it)}</span>
+            {!it.is_available && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.sold_out')}</Badge>}
+            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.not_selling')}</Badge>}
+          </div>
+          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
+        </div>
+      </div>
+      <div className="ml-3 flex shrink-0 items-center gap-2">
+        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
+        {orderable(it) && <span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
+      </div>
+    </button>
+  );
+
+  // one GRID tile — image-forward, two per row on the phone; tap the tile to add, tap the ⛶ to zoom
+  const renderTile = (it: MenuItem) => (
+    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
+      className={cn('flex flex-col overflow-hidden rounded-xl border bg-card text-left transition active:scale-[0.99]', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
+      <div className="relative aspect-square w-full bg-muted">
+        {it.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={it.image_url} alt="" className="size-full object-cover" />
+        ) : (
+          <span className="grid size-full place-items-center text-muted-foreground"><Utensils className="size-8" /></span>
+        )}
+        {it.is_recommended && <span className="absolute left-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-amber-400 text-white shadow"><Star className="size-3.5 fill-current" /></span>}
+        {it.image_url && (
+          <span role="button" tabIndex={-1} onClick={(e) => openZoom(e, it)} aria-label={t('pub.qr.zoom')}
+            className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm active:bg-black/70"><ZoomIn className="size-4" /></span>
+        )}
+        {!it.is_available && <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[11px] font-medium text-white">{t('pub.qr.sold_out')}</span>}
+        {it.is_available && it.available_now === false && <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[11px] font-medium text-white">{t('pub.qr.not_selling')}</span>}
+      </div>
+      <div className="flex items-center justify-between gap-1 p-2">
+        <span className="min-w-0 truncate text-sm font-medium">{nm(it)}</span>
+        <span className="shrink-0 text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
+      </div>
+    </button>
+  );
+
+  // render a list of dishes in the current layout
+  const renderDishes = (items: MenuItem[]) =>
+    menuView === 'grid'
+      ? <div className="grid grid-cols-2 gap-2">{items.map(renderTile)}</div>
+      : <div className="grid gap-2">{items.map(renderItem)}</div>;
 
   const submitOrder = async () => {
     if (!cart.length) return;
@@ -137,8 +203,19 @@ export default function DinerPage() {
     );
 
   const allItems = menu ? [...menu.categories.flatMap((c) => c.items), ...menu.uncategorized] : [];
+  const menuCats = menu ? menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []) : [];
+  const recommended = allItems.filter((it) => it.is_recommended && orderable(it));
+  const shownCats = catFilter === 'all' ? menuCats : catFilter === 'rec' ? [] : menuCats.filter((c) => c.id === catFilter);
   const dishes = st?.order?.items.filter((i) => !i.charge) ?? [];
   const chargeLines = st?.order?.items.filter((i) => i.charge) ?? [];
+  // group the diner's dishes into fire "lots" (one lot = items sent to the kitchen together), oldest first;
+  // un-fired lines fall into a trailing "pending" lot.
+  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok' });
+  const lots: [string, Item[]][] = (() => {
+    const map = new Map<string, Item[]>();
+    for (const it of dishes) { const k = it.fired_at ?? '__pending'; (map.get(k) ?? map.set(k, []).get(k)!).push(it); }
+    return [...map.entries()].sort((a, b) => (a[0] === '__pending' ? 1 : b[0] === '__pending' ? -1 : a[0].localeCompare(b[0])));
+  })();
   const canStartBuffet = !isBuffet && !hasOrder && (tiers?.length ?? 0) > 0;
 
   return (
@@ -185,35 +262,43 @@ export default function DinerPage() {
           ) : allItems.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('pub.qr.menu_empty')}</p>
           ) : (
-            menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []).map((c) => (
-              <section key={c.id} className="mb-4">
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
-                <div className="grid gap-2">
-                  {c.items.map((it) => (
-                    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
-                      className={cn('flex items-center justify-between rounded-lg border bg-card p-3 text-left transition', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
-                      <div className="flex min-w-0 items-center gap-3">
-                        {it.image_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={it.image_url} alt="" className="size-14 shrink-0 rounded-lg object-cover" />
-                        )}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
-                            {!it.is_available && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.sold_out')}</Badge>}
-                            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.not_selling')}</Badge>}
-                          </div>
-                          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
-                        </div>
-                      </div>
-                      <div className="ml-3 flex shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
-                        {orderable(it) && <span className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
-                      </div>
-                    </button>
+            <>
+              {/* sticky toolbar — scrollable category chips + a list/grid layout toggle */}
+              <div className="sticky top-0 z-10 -mx-4 mb-3 flex items-center gap-2 bg-muted/30 px-4 py-2">
+                <div className="flex flex-1 gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <FilterChip active={catFilter === 'all'} onClick={() => setCatFilter('all')}>{t('pub.qr.cat_all')}</FilterChip>
+                  {recommended.length > 0 && (
+                    <FilterChip active={catFilter === 'rec'} onClick={() => setCatFilter('rec')}>
+                      <Star className="size-3.5 fill-current" /> {t('pub.qr.recommended')}
+                    </FilterChip>
+                  )}
+                  {menuCats.map((c) => (
+                    <FilterChip key={c.id} active={catFilter === c.id} onClick={() => setCatFilter(c.id)}>{c.name}</FilterChip>
                   ))}
                 </div>
-              </section>
-            ))
+                <button type="button" onClick={() => setMenuView((v) => (v === 'list' ? 'grid' : 'list'))}
+                  className="grid size-9 shrink-0 place-items-center rounded-full border bg-card active:scale-95" aria-label={t('pub.qr.view_toggle')}>
+                  {menuView === 'list' ? <LayoutGrid className="size-4" /> : <List className="size-4" />}
+                </button>
+              </div>
+
+              {/* recommended row — surfaced first when viewing all, or as the sole list when filtered to it */}
+              {recommended.length > 0 && (catFilter === 'all' || catFilter === 'rec') && (
+                <section className="mb-4">
+                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400">
+                    <Sparkles className="size-4" /> {t('pub.qr.recommended_section')}
+                  </h3>
+                  {renderDishes(recommended)}
+                </section>
+              )}
+
+              {shownCats.map((c) => (
+                <section key={c.id} className="mb-4">
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
+                  {renderDishes(c.items)}
+                </section>
+              ))}
+            </>
           )}
         </TabsContent>
 
@@ -234,15 +319,38 @@ export default function DinerPage() {
                   </div>
                 )}
                 {dishes.length === 0 && <p className="text-sm text-muted-foreground">{t('pub.qr.no_dishes')}</p>}
-                <div className="divide-y">
-                  {dishes.map((it) => (
-                    <div key={it.item_id} className="flex items-center justify-between py-1.5">
-                      <span className="text-sm">{it.qty}× {it.name}</span>
-                      <span className={cn('text-xs font-semibold', ITEM_COLOR[it.kds_status] ?? 'text-muted-foreground')}>
-                        {stLabel(it)}
-                      </span>
-                    </div>
-                  ))}
+                <div className="space-y-2.5">
+                  {lots.map(([key, items]) => {
+                    const pending = key === '__pending';
+                    const allServed = !pending && items.every((i) => i.kds_status === 'served');
+                    const wait = Math.max(0, ...items.filter((i) => i.kds_status !== 'served').map((i) => i.wait_min ?? 0), 0);
+                    return (
+                      <div key={key} className="rounded-lg border bg-muted/20 p-2.5">
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="flex items-center gap-1 font-medium text-muted-foreground">
+                            <Clock className="size-3.5" /> {pending ? t('pub.qr.lot_pending') : t('pub.qr.lot_at', { time: fmtTime(key) })}
+                          </span>
+                          {!pending && (
+                            <span className={cn('font-semibold', allServed ? 'text-success' : 'text-warning-foreground dark:text-warning')}>
+                              {allServed ? t('pub.qr.lot_all_served') : t('pub.qr.lot_waiting', { n: wait })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="divide-y">
+                          {items.map((it) => (
+                            <div key={it.item_id} className="flex items-center justify-between py-1.5">
+                              <span className="text-sm">{it.qty}× {it.name}</span>
+                              {it.kds_status === 'served' ? (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-success"><CheckCircle2 className="size-3.5" /> {t('pub.qr.st_served')}</span>
+                              ) : (
+                                <span className={cn('text-xs font-semibold', ITEM_COLOR[it.kds_status] ?? 'text-muted-foreground')}>{stLabel(it)}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </Card>
 
@@ -313,10 +421,40 @@ export default function DinerPage() {
         </div>
       )}
 
+      {zoomImg && <Lightbox img={zoomImg} onClose={() => setZoomImg(null)} />}
       {picker && <ModifierPicker item={picker} buffet={isBuffet} onClose={() => setPicker(null)} onAdd={(line) => { addToCart(line); setPicker(null); }} />}
       <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder} />
       {buffetOpen && tiers && <BuffetStartDialog tiers={tiers} defaultPax={2} busy={busy} onClose={() => setBuffetOpen(false)} onStart={startBuffet} />}
     </main>
+  );
+}
+
+// full-screen image lightbox — tap to toggle 1× / 2.5× zoom, tap ✕ (or backdrop) to close
+function Lightbox({ img, onClose }: { img: { src: string; name: string }; onClose: () => void }) {
+  const [zoom, setZoom] = useState(false);
+  return (
+    <div role="dialog" aria-modal="true" onClick={onClose}
+      className="fixed inset-0 z-50 flex flex-col bg-black/90 p-3">
+      <div className="flex items-center justify-between text-white">
+        <span className="truncate text-sm font-medium">{img.name}</span>
+        <button type="button" onClick={onClose} aria-label="close" className="grid size-9 place-items-center rounded-full bg-white/10 active:bg-white/20"><X className="size-5" /></button>
+      </div>
+      <div className="flex flex-1 items-center justify-center overflow-auto">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img.src} alt={img.name} onClick={(e) => { e.stopPropagation(); setZoom((z) => !z); }}
+          className={cn('max-h-full max-w-full rounded-lg object-contain transition-transform duration-200', zoom ? 'scale-[2.5] cursor-zoom-out' : 'cursor-zoom-in')} />
+      </div>
+    </div>
+  );
+}
+
+// diner menu category filter chip
+function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={cn('inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition', active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:border-primary/50')}>
+      {children}
+    </button>
   );
 }
 
