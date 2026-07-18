@@ -897,10 +897,14 @@ async function main() {
   // ── B2 document-AI intake (Platform Phase 16) ──
   const docEx = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9001\nDate 2026-06-15\nSubtotal 1,401.87\nVAT 98.13\nGrand Total 1,500.00' });
   ok('Doc-AI: extracts invoice no / amount / date (regex fallback)', (docEx.status === 200 || docEx.status === 201) && docEx.json.fields?.invoice_no === 'INV-9001' && Number(docEx.json.fields?.amount) === 1500 && docEx.json.fields?.invoice_date === '2026-06-15', `${JSON.stringify(docEx.json.fields ?? {})}`);
+  ok('Doc-AI: rules path returns lines:[] (deterministic path never invents lines) + THB default', Array.isArray(docEx.json.fields?.lines) && docEx.json.fields.lines.length === 0 && docEx.json.fields?.currency === 'THB', `lines=${JSON.stringify(docEx.json.fields?.lines)} cur=${docEx.json.fields?.currency}`);
+  const docUsd = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9002\nGrand Total USD 1,500.00' });
+  ok('Doc-AI: rules path detects a non-THB currency (USD)', docUsd.json.fields?.currency === 'USD' && docUsd.json.fields?.invoice_no === 'INV-9002', `cur=${docUsd.json.fields?.currency}`);
   // image/PDF extraction endpoint (Quick Capture preview + LINE channel, docs/34) — extract-only, no GL.
   const docPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   const docImg = await inj('POST', '/api/doc-ai/extract-document', token, { file_name: 'bill.png', data_url: docPng });
   ok('Doc-AI: extract-document accepts an image (no key → honest empty draft, source none)', (docImg.status === 200 || docImg.status === 201) && docImg.json.source === 'none' && docImg.json.fields && 'invoice_no' in docImg.json.fields, JSON.stringify({ st: docImg.status, src: docImg.json.source }));
+  ok('Doc-AI: extract-document honest-empty draft carries lines:[]', Array.isArray(docImg.json.fields?.lines) && docImg.json.fields.lines.length === 0, `lines=${JSON.stringify(docImg.json.fields?.lines)}`);
   const docBad = await inj('POST', '/api/doc-ai/extract-document', token, { data_url: `data:text/plain;base64,${Buffer.from('x').toString('base64')}` });
   ok('Doc-AI: extract-document rejects non-image/PDF (400 UNSUPPORTED_FILE_TYPE)', docBad.status === 400 && docBad.json.error?.code === 'UNSUPPORTED_FILE_TYPE', JSON.stringify({ st: docBad.status, code: docBad.json.error?.code }));
 
