@@ -43,6 +43,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "@zxing/library": "^0.22.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.7.4",
     "@types/react": "^19.0.0",

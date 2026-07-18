@@ -571,6 +571,72 @@ async function main() {
     capPost.status === 403 && capFull.status === 403,
     JSON.stringify({ post: capPost.status, full: capFull.status }));
 
+  // (f) Vision LINE ITEMS (0432) — scripted LLM client (the ai-eval seam): an image upload extracts
+  // normalized lines that are STORED + returned on the intake, and posting still runs the UNCHANGED
+  // header-level 3-way match (lines are reviewer detail, never match input). Ordered LAST + restored in
+  // a finally: a leaked fake key would flip every keyless `source none` assertion above on a re-order.
+  {
+    const { setLlmClientForTests } = require('../../../apps/api/dist/common/llm-client');
+    const poL = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+    const poLNo = poL.json.po_no as string;
+    await inj('PATCH', `/api/procurement/pos/${poLNo}/approve`, admin, { approve: true });
+    await inj('POST', '/api/procurement/grs', admin, { po_no: poLNo, items: [{ item_id: 'X', received_qty: 10 }] });
+    process.env.ANTHROPIC_API_KEY = 'fake-key-harness';
+    try {
+      setLlmClientForTests({
+        async create() {
+          return { content: [{ type: 'text', text: '```json\n' + JSON.stringify({
+            vendor_name: 'V1 Supplies Co Ltd', vendor_tax_id: null, invoice_no: 'IV-9300',
+            invoice_date: '2569-07-01', amount: '1,000.00', currency: 'thb', po_no: poLNo,
+            lines: [
+              { description: 'Widget X (box)', qty: 6, unit_price: 100, amount: 600 },
+              { description: 'Widget X (loose)', qty: '4', unit_price: '100.00', amount: 400 },
+            ],
+          }) + '\n```' }] };
+        },
+        stream() { throw new Error('not used'); },
+      });
+      const upF = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'inv-9300.png', data_url: png1x1 });
+      ok('Vision upload: normalized lines stored on the intake (ai source, BE date → CE, qty strings → numbers)',
+        upF.json.extract_source === 'ai' && upF.json.invoice_date === '2026-07-01' && Array.isArray(upF.json.lines) && upF.json.lines.length === 2
+          && upF.json.lines[1].qty === 4 && upF.json.lines[1].unit_price === 100 && upF.json.currency === 'THB',
+        JSON.stringify({ src: upF.json.extract_source, d: upF.json.invoice_date, lines: upF.json.lines?.length, q: upF.json.lines?.[1]?.qty }));
+      const postF = await inj('POST', `/api/procurement/ap-intake/${upF.json.intake_no}/post`, admin, {});
+      ok('Vision lines do NOT perturb the match: posting runs the unchanged header-level 3-way match → matched/payable',
+        postF.json.status === 'Posted' && postF.json.match_status === 'matched' && truthy(postF.json.payable) && postF.json.lines?.length === 2,
+        JSON.stringify({ st: postF.json.status, m: postF.json.match_status, pay: postF.json.payable }));
+    } finally {
+      setLlmClientForTests(null);
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  }
+
+  // (g) Vendor tax-id BLIND INDEX (0433): the mapper looks the 13-digit tax id up via tax_id_bidx first
+  // (equality on the HMAC blind index), self-heals the column from the decrypt-and-scan fallback, and
+  // re-verifies every index hit against the decrypted value so a STALE index can only miss, never mis-map.
+  {
+    const { blindIndex } = require('../../../apps/api/dist/database/encrypted-column');
+    const TAXID = '0123456789012';
+    const [vtx] = await db.insert(s.vendors).values({ name: 'VTX Trading Co', isSupplier: true, approvalStatus: 'approved', blocklisted: false, taxId: TAXID }).returning({ id: s.vendors.id });
+    const poT = await inj('POST', '/api/procurement/pos', admin, { vendor_id: Number(vtx.id), items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+    await inj('PATCH', `/api/procurement/pos/${poT.json.po_no}/approve`, admin, { approve: true });
+
+    // First map: no bidx yet → decrypted-scan path resolves the vendor AND self-heals the index.
+    const in1 = await inj('POST', '/api/procurement/ap-intake', admin, { text: `VTX Trading Co\nTax ID ${TAXID}\nGrand Total 1,000.00` });
+    const [healed] = await db.select({ bidx: s.vendors.taxIdBidx }).from(s.vendors).where(eq(s.vendors.id, vtx.id));
+    ok('Tax-id map: scan fallback resolves the vendor + SELF-HEALS tax_id_bidx (= blindIndex(digits))',
+      in1.json.map_method === 'vendor_tax_id' && in1.json.po_no === poT.json.po_no && healed.bidx === blindIndex(TAXID),
+      JSON.stringify({ method: in1.json.map_method, po: in1.json.po_no, healed: healed.bidx === blindIndex(TAXID) }));
+
+    // Stale-index safety: plant the SAME bidx on a decoy vendor whose real tax id differs — the index
+    // hit fails decrypted re-verification, so the mapper still resolves the true vendor.
+    const [decoy] = await db.insert(s.vendors).values({ name: 'Decoy Ltd', isSupplier: true, approvalStatus: 'approved', blocklisted: false, taxId: '9999999999999', taxIdBidx: blindIndex(TAXID) }).returning({ id: s.vendors.id });
+    const in2 = await inj('POST', '/api/procurement/ap-intake', admin, { text: `VTX Trading Co\nTax ID ${TAXID}\nGrand Total 1,000.00` });
+    ok('Tax-id map: a stale/planted blind index can only MISS, never mis-map (decrypted re-verification)',
+      in2.json.map_method === 'vendor_tax_id' && in2.json.po_no === poT.json.po_no && in2.json.vendor_name === 'VTX Trading Co',
+      JSON.stringify({ method: in2.json.map_method, vendor: in2.json.vendor_name, decoy: Number(decoy.id) }));
+  }
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

@@ -11,6 +11,7 @@ import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { FinanceService } from '../finance/finance.service';
 import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
 import { parseInvoiceDataUrl } from '../../common/invoice-doc';
+import { blindIndex } from '../../database/encrypted-column';
 
 // AP invoice intake (EXP-10): scanned/pasted vendor invoice → doc-ai extraction → PO auto-map →
 // post AP bill → automated 3-way match. Automates the path TO payment-ready only — the disbursement
@@ -94,6 +95,8 @@ export class ApIntakeService {
       vendorId: map.vendorId ?? null, vendorName: map.vendorName, vendorTaxId: fields.vendor_tax_id ?? null,
       invoiceNo: fields.invoice_no ?? null, invoiceDate: fields.invoice_date ?? null,
       amount: amount > 0 ? String(amount) : null, currency: fields.currency ?? 'THB', extractSource: source,
+      // Vision line items (already normalized/bounded by doc-ai) — reviewer detail, not match input.
+      lines: Array.isArray(fields.lines) && fields.lines.length ? fields.lines : null,
       poNo: map.poNo, mapMethod: map.method, mapConfidence: String(map.confidence), candidates: map.candidates,
       dupOf, fileName: inp.file?.name ?? null, fileMime: inp.file?.mime ?? null, fileRef, status, createdBy: user.username,
     });
@@ -164,7 +167,8 @@ export class ApIntakeService {
       amount: n(it.amount), tenant_id: it.tenantId ?? undefined, idempotency_key: `apintake:${it.intakeNo}`,
       remarks: `AP intake ${it.intakeNo}${poNo ? ` → ${poNo}` : ''}`,
     }, user);
-    // PO-based → run the 3-way match now (header amount match when the scan has no line detail).
+    // PO-based → run the 3-way match now — deliberately HEADER-level (third arg undefined): extracted
+    // vision lines carry no internal item_id, so they are reviewer detail only, never match input.
     // Non-PO (utilities/services) posts unmatched and stays payable per the fail-open EXP-01 policy.
     let matchRes: any = null;
     if (poNo) matchRes = await this.matchSvc.match(bill.txn_no, poNo, undefined, user);
@@ -200,13 +204,30 @@ export class ApIntakeService {
         return { poNo: po.poNo, method: 'po_number', confidence: 100, vendorId: po.vendorId != null ? Number(po.vendorId) : null, vendorName: inp.vendorName ?? po.vendorName ?? null, candidates: [] as PoCandidate[] };
       }
     }
-    // Vendor by 13-digit tax id — the master tax_id is encrypted at rest, so compare decrypted values in
-    // app code (same pattern as the ghost-vendor detector; ciphertext never collides in SQL).
+    // Vendor by 13-digit tax id. The master tax_id is encrypted at rest (random-IV ciphertext never
+    // collides in SQL), so the primary lookup is the tax_id_bidx BLIND INDEX (0433, digits-only
+    // blindIndex) — every hit re-verified against the decrypted value (a vendor whose tax id changed
+    // leaves a stale index behind; verification means it can only miss, never mis-map). A miss falls
+    // back to the bounded decrypt-and-scan (ghost-vendor-detector pattern), which SELF-HEALS the index
+    // best-effort — so legacy rows and every writer (bulk import, MDM-01 change, merge) converge onto
+    // the indexed path without a decrypting backfill.
     let vendorId: number | null = null; let vendorName = inp.vendorName;
     if (inp.vendorTaxId) {
-      const vrows = await db.select({ id: vendors.id, name: vendors.name, taxId: vendors.taxId }).from(vendors).where(eq(vendors.active, true)).limit(500);
       const want = inp.vendorTaxId.replace(/\D/g, '');
-      const hit = vrows.find((v: any) => String(v.taxId ?? '').replace(/\D/g, '') === want);
+      const bidx = blindIndex(want);
+      let hit: { id: unknown; name: string | null; taxId: string | null } | undefined;
+      if (bidx) {
+        const [byIdx] = await db.select({ id: vendors.id, name: vendors.name, taxId: vendors.taxId }).from(vendors)
+          .where(and(eq(vendors.active, true), eq(vendors.taxIdBidx, bidx))).limit(1);
+        if (byIdx && String(byIdx.taxId ?? '').replace(/\D/g, '') === want) hit = byIdx;
+      }
+      if (!hit) {
+        const vrows = await db.select({ id: vendors.id, name: vendors.name, taxId: vendors.taxId }).from(vendors).where(eq(vendors.active, true)).limit(500);
+        hit = vrows.find((v: any) => String(v.taxId ?? '').replace(/\D/g, '') === want);
+        if (hit && bidx) {
+          try { await db.update(vendors).set({ taxIdBidx: bidx }).where(eq(vendors.id, Number(hit.id))); } catch { /* index heal is best-effort */ }
+        }
+      }
       if (hit) { vendorId = Number(hit.id); vendorName = hit.name; }
     }
     const open = await db.select().from(purchaseOrders).where(inArray(purchaseOrders.status, [...MAPPABLE_PO_STATUS])).orderBy(desc(purchaseOrders.id)).limit(200);
@@ -263,7 +284,7 @@ export class ApIntakeService {
       intake_no: r.intakeNo, status: r.status, extract_source: r.extractSource,
       vendor_id: r.vendorId != null ? Number(r.vendorId) : null, vendor_name: r.vendorName, vendor_tax_id: r.vendorTaxId,
       invoice_no: r.invoiceNo, invoice_date: r.invoiceDate, amount: r.amount != null ? n(r.amount) : null, currency: r.currency,
-      po_no: r.poNo, map_method: r.mapMethod, map_confidence: n(r.mapConfidence), candidates: r.candidates ?? [],
+      po_no: r.poNo, map_method: r.mapMethod, map_confidence: n(r.mapConfidence), candidates: r.candidates ?? [], lines: r.lines ?? [],
       dup_of: r.dupOf, file_name: r.fileName, file_mime: r.fileMime, has_file: r.fileRef != null,
       txn_no: r.txnNo, match_status: r.matchStatus, payable: r.payable,
       created_by: r.createdBy, created_at: r.createdAt, posted_by: r.postedBy, posted_at: r.postedAt,

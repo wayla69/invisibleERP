@@ -20,7 +20,10 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
-import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS, parseQrPayload, scanCodeId } from '@ierp/shared';
+import { PERMISSIONS, PERM_GROUPS, DEFAULT_ROLE_PERMISSIONS, MODULE_KEYS, parseQrPayload, scanCodeId, unwrapQrUrl } from '@ierp/shared';
+// The web app keeps a deliberate local mirror of the payload helpers (apps/web/src/lib/qr.ts — "kept
+// local so web has no extra workspace dep"); imported here relatively to lock the two copies together.
+import { parseQrPayload as webParseQrPayload, scanCodeId as webScanCodeId, unwrapQrUrl as webUnwrapQrUrl } from '../../../apps/web/src/lib/qr';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
 const grpOf = (k: string) => Object.entries(PERM_GROUPS).find(([, ks]) => (ks as string[]).includes(k))?.[0] ?? null;
@@ -313,6 +316,42 @@ async function main() {
   ok('create asset_verification_exceptions subscription', (sub.status === 200 || sub.status === 201) && sub.json.id != null, `status=${sub.status}`);
   const runRep = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, token);
   ok('run exception report → success + summary counts the exception', (runRep.status === 200 || runRep.status === 201) && runRep.json.status === 'success' && /not verified/.test(runRep.json.summary ?? ''), `status=${runRep.json.status} sum=${runRep.json.summary}`);
+
+  // ── 3f. QR PAYLOAD HELPERS — pure-function checks + shared↔web mirror parity ──────────
+  // Every carrier a scanned code arrives as: raw payload, ASSET_ID tag, bare code, deep-link URL
+  // (?d=/&code=/#payload=), '+'-as-space, malformed % sequences, empty input.
+  {
+    const p = parseQrPayload('ITEM_ID:P001|DESC:Rice 5kg|UOM:BAG|PRICE:120|CAT:Dry');
+    ok('parseQrPayload raw item payload', p.ITEM_ID === 'P001' && p.DESC === 'Rice 5kg' && p.UOM === 'BAG' && p.PRICE === '120' && p.CAT === 'Dry', JSON.stringify(p));
+    ok('scanCodeId prefers ITEM_ID', scanCodeId('ITEM_ID:P001|DESC:x') === 'P001');
+    ok('scanCodeId falls back to ASSET_ID', scanCodeId('ASSET_ID:FA-9|DESC:x') === 'FA-9');
+    ok('scanCodeId treats a bare code as an item id', scanCodeId('8850001234570') === '8850001234570');
+    ok('scanCodeId empty/null-ish input → undefined', scanCodeId('') === undefined && scanCodeId(null) === undefined && scanCodeId(undefined) === undefined);
+    ok('unwrapQrUrl ?d= deep link', unwrapQrUrl('https://x/q?d=ITEM_ID%3AA%7CDESC%3AApple') === 'ITEM_ID:A|DESC:Apple');
+    ok('unwrapQrUrl &code= param', unwrapQrUrl('https://x/p?x=1&code=ITEM_ID%3AB') === 'ITEM_ID:B');
+    ok('unwrapQrUrl #payload= fragment', unwrapQrUrl('https://x/p#payload=ITEM_ID%3AC') === 'ITEM_ID:C');
+    ok('unwrapQrUrl decodes + as space', unwrapQrUrl('/q?d=ITEM_ID%3AA%7CDESC%3AGreen+Tea').includes('DESC:Green Tea'));
+    ok('unwrapQrUrl malformed % falls back to the raw param', unwrapQrUrl('/q?d=100%zz') === '100%zz');
+    ok('unwrapQrUrl non-URL text passes through', unwrapQrUrl('ITEM_ID:A|DESC:x') === 'ITEM_ID:A|DESC:x');
+
+    const MIRROR_INPUTS: (string | null | undefined)[] = [
+      'ITEM_ID:P001|DESC:Rice 5kg|UOM:BAG|PRICE:120|CAT:Dry',
+      'ASSET_ID:FA-9|DESC:Fridge|LOC:Kitchen',
+      '8850001234570',
+      'https://x/q?d=ITEM_ID%3AA%7CDESC%3AApple',
+      'https://x/p?x=1&code=ITEM_ID%3AB',
+      'https://x/p#payload=ITEM_ID%3AC',
+      '/q?d=ITEM_ID%3AA%7CDESC%3AGreen+Tea',
+      '/q?d=100%zz',
+      '  ITEM_ID:T |DESC: spaced ',
+      '', null, undefined,
+    ];
+    const mirrorOk = MIRROR_INPUTS.every((i) =>
+      JSON.stringify(parseQrPayload(i)) === JSON.stringify(webParseQrPayload(i)) &&
+      scanCodeId(i) === webScanCodeId(i) &&
+      unwrapQrUrl(i) === webUnwrapQrUrl(i));
+    ok('web qr.ts mirror stays byte-identical to @ierp/shared over all carriers', mirrorOk);
+  }
 
   await app.close();
   await pg.close();

@@ -14,9 +14,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { createFrameDecoder, cameraScanSupported } from '@/lib/qr-decode';
 import { useLang } from '@/lib/i18n';
 
-// `torch` is a real, widely-shipped camera constraint/capability that the DOM lib types don't include yet.
+// `torch`/`zoom` are real, widely-shipped camera constraints/capabilities that the DOM lib types don't include yet.
 interface TorchConstraintSet extends MediaTrackConstraintSet { torch?: boolean }
+interface ZoomConstraintSet extends MediaTrackConstraintSet { zoom?: number }
 type TorchCapabilities = MediaTrackCapabilities & { torch?: boolean };
+type ZoomCapabilities = MediaTrackCapabilities & { zoom?: { min: number; max: number; step?: number } };
 
 // Short confirmation beep + haptic tick on a successful read (best-effort; silently no-ops if unavailable).
 function feedback() {
@@ -57,6 +59,8 @@ export function QrScanButton({
   const [error, setError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
+  const [zoomCaps, setZoomCaps] = useState<{ min: number; max: number; step?: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
   const [count, setCount] = useState(0);
   const [last, setLast] = useState('');
 
@@ -89,11 +93,20 @@ export function QrScanButton({
     } catch { /* torch not controllable */ }
   }, [torchOn]);
 
+  const applyZoom = useCallback(async (next: number) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    setZoom(next);
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: next }] as ZoomConstraintSet[] });
+    } catch { /* zoom not controllable */ }
+  }, []);
+
   // Camera + decode loop while the dialog is open; torn down on close/unmount.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setError(null); setCount(0); setLast(''); setTorchOn(false); setHasTorch(false);
+    setError(null); setCount(0); setLast(''); setTorchOn(false); setHasTorch(false); setZoomCaps(null);
     lastHitRef.current = { code: '', at: 0 };
 
     (async () => {
@@ -115,8 +128,12 @@ export function QrScanButton({
       if (cancelled) { stream.getTracks().forEach((tr) => tr.stop()); return; }
       streamRef.current = stream;
       try {
-        const caps = stream.getVideoTracks()[0]?.getCapabilities?.() as TorchCapabilities | undefined;
+        const caps = stream.getVideoTracks()[0]?.getCapabilities?.() as (TorchCapabilities & ZoomCapabilities) | undefined;
         setHasTorch(!!caps?.torch);
+        if (caps?.zoom && typeof caps.zoom.min === 'number' && typeof caps.zoom.max === 'number' && caps.zoom.max > caps.zoom.min) {
+          setZoomCaps({ min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step });
+          setZoom(caps.zoom.min);
+        }
       } catch { /* capabilities unsupported */ }
 
       const v = videoRef.current;
@@ -126,17 +143,23 @@ export function QrScanButton({
 
       const canvas = canvasRef.current ?? document.createElement('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      let misses = 0; // consecutive frames with no code at 640px — every ~15th miss retries at full resolution
 
       const tick = async () => {
         if (cancelled || !videoRef.current || !ctx) return;
         const vid = videoRef.current;
         if (vid.readyState >= 2 && vid.videoWidth) {
           // Downscale the longer side to ~640px — plenty for decoding, much faster for the JS fallback.
-          const scale = Math.min(1, 640 / Math.max(vid.videoWidth, vid.videoHeight));
+          // Small/far codes can be unresolvable at 640px, so after ~15 straight misses decode one
+          // full-resolution frame (capped at 1920) before falling back to the fast path.
+          const fullRes = misses >= 15;
+          const target = fullRes ? 1920 : 640;
+          const scale = Math.min(1, target / Math.max(vid.videoWidth, vid.videoHeight));
           canvas.width = Math.round(vid.videoWidth * scale);
           canvas.height = Math.round(vid.videoHeight * scale);
           ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
           const raw = await decoder.decode(canvas);
+          misses = raw ? 0 : fullRes ? 0 : misses + 1;
           if (raw && !cancelled) {
             const now = Date.now();
             const dup = raw === lastHitRef.current.code && now - lastHitRef.current.at < 1500;
@@ -185,6 +208,19 @@ export function QrScanButton({
               <Button type="button" size="icon" variant={torchOn ? 'default' : 'secondary'} className="absolute bottom-2 right-2 opacity-90" onClick={toggleTorch} title={t('qr.scan_torch')} aria-label={t('qr.scan_torch')}>
                 <Flashlight className="size-4" />
               </Button>
+            )}
+            {zoomCaps && (
+              <input
+                type="range"
+                className="absolute bottom-3 left-2 w-28 opacity-90 sm:w-36"
+                min={zoomCaps.min}
+                max={zoomCaps.max}
+                step={zoomCaps.step ?? (zoomCaps.max - zoomCaps.min) / 20}
+                value={zoom}
+                onChange={(e) => applyZoom(Number(e.target.value))}
+                title={t('qr.scan_zoom')}
+                aria-label={t('qr.scan_zoom')}
+              />
             )}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

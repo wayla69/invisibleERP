@@ -625,13 +625,18 @@ payable is an accounting act).
 1. Go to **Procurement** → **สแกนใบแจ้งหนี้จับคู่ PO** (`/procurement/ap-intake`).
 2. Either **attach the invoice file directly** — press **แนบรูป / PDF** and pick a
    photo (PNG/JPEG/WebP) or a PDF — or paste the invoice text into the box.
-   A digital PDF is read from its text layer immediately; a photo/scan is read by
-   AI (if AI is not configured, the intake queues for review with the file attached
-   so you can map and key it manually). The uploaded file is kept on the intake —
-   open it any time from the **เอกสารต้นฉบับ** link on the result card.
+   A digital PDF is read from its text layer immediately — but only when that text
+   layer is actually **readable**: a PDF whose embedded Thai font produces garbled
+   text (common with older CID fonts) is treated like a photo instead of
+   mis-reading the garbage. A photo/scan is read by AI (if AI is not configured,
+   the intake queues for review with the file attached so you can map and key it
+   manually). The uploaded file is kept on the intake — open it any time from the
+   **เอกสารต้นฉบับ** link on the result card.
 3. Choose one of two buttons:
    - **ดึงข้อมูล + จับคู่ PO** — extracts the vendor, tax ID, invoice number, date,
-     amount and any **PO number printed on the document**, then auto-maps the PO.
+     amount, **currency** (a foreign-currency invoice such as USD is recognized —
+     no marker means THB; dates printed in พ.ศ. are converted automatically) and
+     any **PO number printed on the document**, then auto-maps the PO.
      You review the result before booking.
    - **อัตโนมัติทั้งหมด** — does all of the above **and** books the AP bill and runs
      the 3-way match in one step (needs `creditors`). It only auto-books a document
@@ -642,7 +647,11 @@ payable is an accounting act).
    **dropdown** next to the map button (choose **พิมพ์เลขเอกสารเอง…** to key one), to map it —
    then press **บันทึกบิล + จับคู่ 3 ทาง**.
 5. Check the result: the intake shows the booked bill number (AP-), the match
-   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked).
+   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked). When AI read the
+   document, the **line items** it found (description, qty, unit price, amount)
+   are listed on the result card for your review — if the sum of the lines
+   doesn't match the bill total, a warning asks you to check the source document.
+   The lines are informational: matching stays at the bill-total level.
 
 **Expected result:** a *matched* intake is immediately **payment-ready** — AP can
 request payment as usual. Payment itself is **never** automated: it still goes

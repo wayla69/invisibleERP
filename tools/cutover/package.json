@@ -26,6 +26,7 @@
     "loadtest": "tsx src/loadtest.ts",
     "dr-gameday": "tsx src/dr-gameday.ts",
     "ai-eval": "tsx src/ai-eval.ts",
+    "doc-ai-live-eval": "tsx src/doc-ai-live-eval.ts",
     "onboarding": "tsx src/onboarding.ts",
     "sme": "tsx src/sme.ts",
     "opening-balances": "tsx src/opening-balances.ts",
@@ -185,6 +186,7 @@
     "@types/node": "^22.7.4",
     "@xmldom/xmldom": "0.8.13",
     "pdf-lib": "^1.17.1",
+    "playwright-core": "^1.48.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3",
     "xml-crypto": "6.1.2"

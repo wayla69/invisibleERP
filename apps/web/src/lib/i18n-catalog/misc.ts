@@ -12,6 +12,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'qr.scan_unsupported': { th: 'เบราว์เซอร์นี้ไม่รองรับการสแกนด้วยกล้อง', en: 'This browser does not support camera scanning' },
   'qr.scan_no_camera': { th: 'ไม่พบกล้องบนอุปกรณ์นี้', en: 'No camera found on this device' },
   'qr.scan_torch': { th: 'ไฟฉาย', en: 'Torch' },
+  'qr.scan_zoom': { th: 'ซูม', en: 'Zoom' },
   'qr.scan_done': { th: 'เสร็จสิ้น', en: 'Done' },
   'qr.scan_count': { th: 'สแกนแล้ว {n} รายการ', en: 'Scanned {n}' },
   'qr.offline': { th: 'ออฟไลน์', en: 'Offline' },
