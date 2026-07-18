@@ -376,6 +376,56 @@ async function main() {
   ok('0435 86-from-KDS: the 86\'d dish is blocked at diner order (400 ITEM_UNAVAILABLE)', ord86b.status === 400 && ord86b.json.error?.code === 'ITEM_UNAVAILABLE', `${ord86b.status} ${ord86b.json.error?.code}`);
   await inj('PATCH', '/api/menu/items/RMID/availability', sales1, { available: true }); // reset
 
+  // ── F1 call-staff · F3 member link · F6 upsell · F8 pacing · F5 prep-times · F2 split pay-your-share ──
+  const tblF = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6F' });
+  const fTok = (await inj('POST', `/api/restaurant/tables/${tblF.json.id}/open`, sales1, {})).json.public_token;
+  // F1: diner calls staff → floor board → ack → done
+  const call1 = await inj('POST', `/api/qr/t/${fTok}/call`, undefined, { type: 'water' });
+  ok('F1 call-staff: diner raises a service request', (call1.status === 200 || call1.status === 201) && call1.json.type === 'water' && call1.json.status === 'open', `${call1.status}`);
+  const srList = await inj('GET', '/api/restaurant/service-requests', sales1);
+  const sr = (srList.json.requests ?? []).find((r: any) => r.id === call1.json.id);
+  ok('F1 call-staff: request shows on the floor board with the table', !!sr && sr.table_no === 'A6F' && srList.json.open_count >= 1, JSON.stringify(sr ?? {}).slice(0, 80));
+  const dupCall = await inj('POST', `/api/qr/t/${fTok}/call`, undefined, { type: 'water' });
+  ok('F1 call-staff: identical open request de-duplicated', dupCall.json.deduped === true, `${dupCall.json.deduped}`);
+  await inj('POST', `/api/restaurant/service-requests/${call1.json.id}/ack`, sales1);
+  const done1 = await inj('POST', `/api/restaurant/service-requests/${call1.json.id}/done`, sales1);
+  ok('F1 call-staff: staff ack + clear the request', done1.json.status === 'done', `${done1.json.status}`);
+  // F3: link a member → status surfaces it
+  await db.insert(s.posMembers).values({ tenantId: t1, memberCode: 'M-QR1', name: 'คุณสมาชิก' }).onConflictDoNothing();
+  const linkM = await inj('POST', `/api/qr/t/${fTok}/member`, undefined, { code: 'M-QR1' });
+  ok('F3 member-link: diner links a member to the table', (linkM.status === 200 || linkM.status === 201) && linkM.json.name === 'คุณสมาชิก', `${linkM.status}`);
+  const stM = await inj('GET', `/api/qr/t/${fTok}`, undefined);
+  ok('F3 member-link: diner status surfaces the linked member', stM.json.member?.name === 'คุณสมาชิก', JSON.stringify(stM.json.member ?? {}));
+  // F6: upsell suggestions (RHI/RMID/RLO were ordered together earlier)
+  const sug = await inj('POST', `/api/qr/t/${fTok}/suggestions`, undefined, { skus: ['RHI'] });
+  ok('F6 upsell: co-purchase suggestions returned for the basket', Array.isArray(sug.json.skus) && sug.json.skus.includes('RMID'), JSON.stringify(sug.json.skus));
+  // F8: 2-course order — fire+serve course 1 → pacing nudges course 2
+  const tblC2 = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6C2' });
+  const ordC2 = await inj('POST', '/api/restaurant/orders', sales1, { table_id: tblC2.json.id, items: [{ sku: 'RHI', qty: 1, course: 1 }, { sku: 'RMID', qty: 1, course: 2 }] });
+  await inj('POST', `/api/restaurant/orders/${ordC2.json.order_no}/fire?course=1`, sales1);
+  const c1item = ordC2.json.items.find((i: any) => i.name === 'จานยอดนิยมกำไรดี');
+  for (const a of ['start', 'ready', 'serve']) await inj('PATCH', `/api/restaurant/kds/items/${c1item.item_id}`, sales1, { action: a });
+  const pacing = await inj('GET', '/api/restaurant/kds/pacing', sales1);
+  const nudge = (pacing.json.nudges ?? []).find((nd: any) => nd.order_no === ordC2.json.order_no);
+  ok('F8 pacing: suggests firing the next held course once the current is plated', !!nudge && nudge.next_course === 2, JSON.stringify(nudge ?? {}));
+  // F5: learned prep-time report endpoint
+  const prep = await inj('GET', '/api/restaurant/kds/prep-times', sales1);
+  ok('F5 prep-times: learned per-dish completion report returns', prep.status === 200 && Array.isArray(prep.json.dishes), `${prep.status}`);
+  // F2: split pay-your-share — pay a partial share (not finalized), then the rest (finalized)
+  const tblSp = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A6SP' });
+  const spTok = (await inj('POST', `/api/restaurant/tables/${tblSp.json.id}/open`, sales1, {})).json.public_token;
+  await inj('POST', `/api/qr/t/${spTok}/order`, undefined, { items: [{ sku: 'AL01', qty: 1 }] }); // 120 → 128.4 incl VAT
+  await inj('POST', `/api/qr/t/${spTok}/bill`, undefined);
+  const half = await inj('POST', `/api/qr/t/${spTok}/split/pay`, undefined, { amount: 60 });
+  ok('F2 split: a partial share creates a PromptPay tender', (half.status === 200 || half.status === 201) && half.json.share === 60 && half.json.remaining > 0, `${half.status} ${JSON.stringify(half.json).slice(0, 80)}`);
+  const conf1 = await inj('POST', `/api/qr/t/${spTok}/confirm`, undefined, { payment_no: half.json.payment_no });
+  ok('F2 split: first share settles but the bill is NOT finalized (partial)', conf1.json.paid === false && conf1.json.remaining > 0, JSON.stringify(conf1.json).slice(0, 90));
+  const rest = await inj('POST', `/api/qr/t/${spTok}/split/pay`, undefined, {});
+  const conf2 = await inj('POST', `/api/qr/t/${spTok}/confirm`, undefined, { payment_no: rest.json.payment_no });
+  ok('F2 split: the final share covers the bill → sale finalized', conf2.json.paid === true && /^SALE-/.test(conf2.json.sale_no ?? ''), JSON.stringify(conf2.json).slice(0, 90));
+  const splitSt = await inj('GET', `/api/qr/t/${spTok}/split`, undefined);
+  ok('F2 split: status shows settled + zero remaining', splitSt.json.settled === true && splitSt.json.remaining === 0, JSON.stringify(splitSt.json));
+
   // ── staff-initiated buffet (from POS/floor) ──
   const tblSb = await inj('POST', '/api/restaurant/tables', sales1, { table_no: 'A7', seats: 4 });
   const sbStart = await inj('POST', `/api/restaurant/tables/${tblSb.json.id}/buffet`, sales1, { package_id: pkg.json.id, pax: 2 });

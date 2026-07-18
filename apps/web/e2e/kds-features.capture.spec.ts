@@ -41,6 +41,7 @@ async function boot(page: Page) {
     if (url.includes('/api/restaurant/kds/serve') && method === 'POST') { served = true; return json({ order_no: 'DIN-B', served: 1 }); }
     if (url.includes('/api/restaurant/kds/start') && method === 'POST') return json({ order_no: 'DIN-A', started: 2 });
     if (url.includes('/availability') && method === 'PATCH') { eightySixed = true; return json({ sku: 'D-CHA', is_available: false }); }
+    if (url.includes('/api/restaurant/kds/pacing')) return json({ nudges: [{ order_no: 'DIN-A', table_label: '5', next_course: 2, current_course: 1 }] });
     if (url.includes('/api/restaurant/kds/feed')) return json(FEED);
     return json({});
   });
@@ -61,6 +62,10 @@ test('KDS board: grouping tabs, priority badge, stuck alarm, serve-whole-ticket'
   await expect(page.getByRole('tab', { name: 'ตามเวลา' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'ตามลำดับความสำคัญ' })).toBeVisible();
 
+  // F8 pacing nudge banner + F4 station filter + F7 void button
+  await expect(page.getByText(/ส่งคอร์ส 2 ได้/)).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'เลือกสถานี' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ยกเลิกรายการ' }).first()).toBeVisible();
   // live summary strip + ergonomics controls (sound / big text / fullscreen)
   await expect(page.getByText(/กำลังทำ 3/)).toBeVisible();
   await expect(page.getByText(/เฉลี่ย\/จานวันนี้ 9/)).toBeVisible();

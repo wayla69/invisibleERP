@@ -40,7 +40,10 @@ export default function TablesPage() {
   const [qrCfgOpen, setQrCfgOpen] = useState(false);
   // Live via SSE: a table freed/occupied/fired on another terminal updates this board at once; polling
   // drops to a 20s fallback while the stream is connected.
-  const { connected } = useRealtime((e) => { if (e.type === 'table' || e.type === 'kds_item') qc.invalidateQueries({ queryKey: ['tables-status'] }); });
+  const { connected } = useRealtime((e) => {
+    if (e.type === 'table' || e.type === 'kds_item') qc.invalidateQueries({ queryKey: ['tables-status'] });
+    if (e.type === 'service_request') qc.invalidateQueries({ queryKey: ['service-requests'] });
+  });
   const board = useQuery<{ tables: TableRow[] }>({ queryKey: ['tables-status'], queryFn: () => api('/api/restaurant/tables/status'), refetchInterval: connected ? 20000 : 4000 });
   const zonesQ = useQuery<{ zones: ZoneRow[] }>({ queryKey: ['floor-zones'], queryFn: () => api('/api/restaurant/zones') });
   const [sel, setSel] = useState<number | null>(null);
@@ -70,6 +73,7 @@ export default function TablesPage() {
         }
       />
       {qrCfgOpen && <QrSettingsDialog onClose={() => setQrCfgOpen(false)} />}
+      <ServiceRequests refetch={connected ? 12000 : 5000} />
       <Tabs
         tabs={[
           { key: 'board', label: t('px.tbl_tab_board'), content: <Board tables={tables} zones={zones} q={board} onSelect={setSel} sel={sel} onOrder={setOrderTable} /> },
@@ -88,6 +92,39 @@ export default function TablesPage() {
         />
       )}
     </div>
+  );
+}
+
+type SvcReq = { id: number; type: string; note: string | null; status: string; table_no: string | null; waiting_min: number };
+
+// F1: diner service-request board — open "call staff" pings, newest first, acknowledge + clear. Realtime-fed.
+function ServiceRequests({ refetch }: { refetch: number }) {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<{ requests: SvcReq[]; open_count: number }>({ queryKey: ['service-requests'], queryFn: () => api('/api/restaurant/service-requests'), refetchInterval: refetch });
+  const act = useMutation({
+    mutationFn: ({ id, to }: { id: number; to: 'ack' | 'done' }) => api(`/api/restaurant/service-requests/${id}/${to}`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['service-requests'] }),
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const open = (q.data?.requests ?? []).filter((r) => r.status !== 'done');
+  if (open.length === 0) return null;
+  const label = (ty: string) => t(`px.tbl_svc_${ty}`, undefined) === `px.tbl_svc_${ty}` ? ty : t(`px.tbl_svc_${ty}`);
+  return (
+    <Card className="mt-4 gap-2 border-2 border-primary/50 p-3">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-primary">🔔 {t('px.tbl_svc_title')} <Badge variant="warning">{open.length}</Badge></h3>
+      <div className="flex flex-wrap gap-2">
+        {open.map((r) => (
+          <div key={r.id} className={cn('flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm', r.status === 'ack' ? 'bg-muted/40' : 'bg-warning/10')}>
+            <span className="font-medium">{t('px.tbl_table_label', { no: r.table_no ?? '?' })}</span>
+            <span>{label(r.type)}</span>
+            <span className="text-xs text-muted-foreground">{t('px.tbl_svc_wait', { n: r.waiting_min })}</span>
+            {r.status === 'open' && <Button size="sm" variant="outline" className="h-7" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, to: 'ack' })}>{t('px.tbl_svc_ack')}</Button>}
+            <Button size="sm" className="h-7" disabled={act.isPending} onClick={() => act.mutate({ id: r.id, to: 'done' })}>{t('px.tbl_svc_done')}</Button>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

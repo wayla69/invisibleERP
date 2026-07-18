@@ -1,7 +1,7 @@
 // Restaurant / F&B POS: kitchen stations + KDS, floor-plan tables + zones, table sessions
 // (public QR diner sessions), dine-in orders + items (kitchen tickets). Every table carries
 // tenant_id so the 0002 RLS loop (re-run in 0006) scopes them automatically.
-import { pgTable, bigserial, bigint, text, numeric, integer, timestamp, boolean, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, numeric, integer, timestamp, boolean, jsonb, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { dineInOrderStatusEnum, kdsItemStatusEnum, tableStatusEnum, tableSessionStatusEnum, orderChannelEnum, fulfillmentTypeEnum, fulfillmentStatusEnum, orderModeEnum, reservationStatusEnum } from './enums';
 import { posMembers } from './loyalty-members';
@@ -69,6 +69,7 @@ export const tableSessions = pgTable('table_sessions', {
   closedAt: timestamp('closed_at', { withTimezone: true }),
   openedBy: text('opened_by'),
   saleNo: text('sale_no'),
+  memberId: bigint('member_id', { mode: 'number' }),   // loyalty member linked at the table (F3) → QR sale earns points
   notes: text('notes'),
   // ── buffet (Phase 2): a session runs in one mode; buffet fields set when a tier is started ──
   orderMode: orderModeEnum('order_mode').notNull().default('a_la_carte'),
@@ -232,6 +233,24 @@ export const tipDistributionLines = pgTable('tip_distribution_lines', {
   share: numeric('share', { precision: 9, scale: 6 }).notNull().default('0'),  // fraction of the pool
   amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
 });
+
+// ── Diner service requests (call staff / water / cutlery / bill) — QR → floor board (migration 0436) ──
+export const serviceRequests = pgTable('service_requests', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  sessionId: bigint('session_id', { mode: 'number' }).references(() => tableSessions.id),
+  tableId: bigint('table_id', { mode: 'number' }).references(() => diningTables.id),
+  type: text('type').notNull(),                       // waiter | water | cutlery | bill | custom
+  note: text('note'),
+  status: text('status').notNull().default('open'),   // open | ack | done
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  ackedBy: text('acked_by'),
+  ackedAt: timestamp('acked_at', { withTimezone: true }),
+  doneAt: timestamp('done_at', { withTimezone: true }),
+}, (t) => ({ byTenant: index('idx_service_requests_tenant').on(t.tenantId, t.status, t.createdAt) }));
+
+export type ServiceRequest = typeof serviceRequests.$inferSelect;
 
 export type DiningTable = typeof diningTables.$inferSelect;
 export type TableReservation = typeof tableReservations.$inferSelect;
