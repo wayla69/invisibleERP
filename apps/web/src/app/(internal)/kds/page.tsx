@@ -26,6 +26,8 @@ type Group = 'station' | 'table' | 'time' | 'priority';
 type ExpoItem = { item_id: number; name: string; qty: number; station_name: string; course: number; ready_min: number };
 type ExpoTicket = { order_id: number; order_no: string; table_label: string | null; ready_items: ExpoItem[]; ready_count: number; pending_count: number; all_ready: boolean; oldest_ready_min: number };
 type LoadStation = { station_id: number; station_code: string; station_name: string; active: number; queued: number; preparing: number; ready: number; overdue: number; avg_elapsed_min: number; oldest_min: number; bumped_today: number; recalls_today: number; all_day: { name: string; qty: number }[] };
+type PrepDish = { sku: string; name: string; avg_prep_min: number; samples: number };
+type PrepTimes = { dishes: PrepDish[]; generated_at: string };
 
 const NEXT: Record<string, { action: string; label: string }> = {
   queued: { action: 'start', label: 'mx.kds_start' },
@@ -47,7 +49,7 @@ const slaOf = (it: { sla?: Sla; elapsed_min: number; prep_min: number }): Sla =>
 export default function KdsPage() {
   const { t } = useLang();
   const qc = useQueryClient();
-  const [view, setView] = useState<'board' | 'expo' | 'load'>('board');
+  const [view, setView] = useState<'board' | 'expo' | 'load' | 'prep'>('board');
   const [group, setGroup] = useState<Group>('station');   // board grouping: station / table / time / priority
   const [scan, setScan] = useState('');
   const [stationFilter, setStationFilter] = useState<string>('all'); // F4: station-scoped terminal (per device)
@@ -61,6 +63,8 @@ export default function KdsPage() {
   const expo = useQuery<{ tickets: ExpoTicket[]; ready_orders: number }>({ queryKey: ['kds-expo'], queryFn: () => api('/api/restaurant/kds/expo'), refetchInterval: poll, enabled: view === 'expo' });
   const load = useQuery<{ stations: LoadStation[] }>({ queryKey: ['kds-load'], queryFn: () => api('/api/restaurant/kds/load'), refetchInterval: poll, enabled: view === 'load' });
   const pacing = useQuery<Pacing>({ queryKey: ['kds-pacing'], queryFn: () => api('/api/restaurant/kds/pacing'), refetchInterval: poll, enabled: view === 'board' }); // F8
+  // F5: learned average cook time per dish — a manager report, refreshed on view (no need to poll a 14-day rollup).
+  const prep = useQuery<PrepTimes>({ queryKey: ['kds-prep'], queryFn: () => api('/api/restaurant/kds/prep-times'), enabled: view === 'prep' });
   // F4: persist the station-scoped filter per device
   useEffect(() => { const s = typeof window !== 'undefined' ? localStorage.getItem('kds.station') : null; if (s) setStationFilter(s); }, []);
   useEffect(() => { if (typeof window !== 'undefined') localStorage.setItem('kds.station', stationFilter); }, [stationFilter]);
@@ -148,7 +152,7 @@ export default function KdsPage() {
     <div ref={rootRef} className="bg-background">
       <PageHeader
         title={t('mx.kds_title')}
-        description={view === 'expo' ? t('mx.kds_expo_desc') : view === 'load' ? t('mx.kds_load_desc') : t('mx.kds_desc')}
+        description={view === 'expo' ? t('mx.kds_expo_desc') : view === 'load' ? t('mx.kds_load_desc') : view === 'prep' ? t('mx.kds_prep_desc') : t('mx.kds_desc')}
         actions={
           <div className="flex items-center gap-2">
             <Button variant={soundOn ? 'default' : 'outline'} size="icon" onClick={() => setSoundOn((s) => { if (!s) beep('new'); return !s; })} aria-label={t('mx.kds_sound')} title={t('mx.kds_sound')}>
@@ -168,6 +172,7 @@ export default function KdsPage() {
           <TabsTrigger value="board"><ChefHat className="size-4" /> {t('mx.kds_view_board')}</TabsTrigger>
           <TabsTrigger value="expo"><BellRing className="size-4" /> {t('mx.kds_view_expo')}</TabsTrigger>
           <TabsTrigger value="load"><Gauge className="size-4" /> {t('mx.kds_view_load')}</TabsTrigger>
+          <TabsTrigger value="prep"><Timer className="size-4" /> {t('mx.kds_view_prep')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -388,8 +393,62 @@ export default function KdsPage() {
           ))}
         </StateView>
       )}
+
+      {/* ── Prep times (F5): learned average cook time per dish — feeds the KDS ETA/SLA ── */}
+      {view === 'prep' && (
+        <StateView q={prep}>
+          {prep.data && (prep.data.dishes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('mx.kds_prep_none')}</p>
+          ) : (
+            <>
+              <div className="space-y-2 sm:hidden">
+                {prep.data.dishes.map((d) => (
+                  <Card key={d.sku} className="flex-row items-center justify-between gap-2 p-3">
+                    <span className="min-w-0 truncate font-medium">{d.name}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <Badge variant="secondary" className="tabular text-[11px]">{d.samples}×</Badge>
+                      <span className="tabular font-bold">{d.avg_prep_min}′</span>
+                    </span>
+                  </Card>
+                ))}
+              </div>
+              <div className="hidden sm:block">
+                <Card className="overflow-hidden p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">{t('mx.kds_prep_dish')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('mx.kds_prep_avg')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('mx.kds_prep_samples')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prep.data.dishes.map((d) => (
+                          <tr key={d.sku} className="border-b last:border-0">
+                            <td className="px-3 py-2 font-medium">{d.name}</td>
+                            <td className="px-3 py-2 text-right tabular font-semibold">{d.avg_prep_min}′</td>
+                            <td className="px-3 py-2 text-right tabular text-muted-foreground">{d.samples}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">{t('mx.kds_prep_updated', { time: fmtTime(prep.data.generated_at) })}</p>
+            </>
+          ))}
+        </StateView>
+      )}
     </div>
   );
+}
+
+// local hh:mm for the report's "updated at" stamp (business locale rendering left to the browser)
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 // same-lot rule: oldest fire time first; within one lot the higher food-priority plates out first.
