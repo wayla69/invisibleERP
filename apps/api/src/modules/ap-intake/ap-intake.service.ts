@@ -94,6 +94,8 @@ export class ApIntakeService {
       vendorId: map.vendorId ?? null, vendorName: map.vendorName, vendorTaxId: fields.vendor_tax_id ?? null,
       invoiceNo: fields.invoice_no ?? null, invoiceDate: fields.invoice_date ?? null,
       amount: amount > 0 ? String(amount) : null, currency: fields.currency ?? 'THB', extractSource: source,
+      // Vision line items (already normalized/bounded by doc-ai) — reviewer detail, not match input.
+      lines: Array.isArray(fields.lines) && fields.lines.length ? fields.lines : null,
       poNo: map.poNo, mapMethod: map.method, mapConfidence: String(map.confidence), candidates: map.candidates,
       dupOf, fileName: inp.file?.name ?? null, fileMime: inp.file?.mime ?? null, fileRef, status, createdBy: user.username,
     });
@@ -164,7 +166,8 @@ export class ApIntakeService {
       amount: n(it.amount), tenant_id: it.tenantId ?? undefined, idempotency_key: `apintake:${it.intakeNo}`,
       remarks: `AP intake ${it.intakeNo}${poNo ? ` → ${poNo}` : ''}`,
     }, user);
-    // PO-based → run the 3-way match now (header amount match when the scan has no line detail).
+    // PO-based → run the 3-way match now — deliberately HEADER-level (third arg undefined): extracted
+    // vision lines carry no internal item_id, so they are reviewer detail only, never match input.
     // Non-PO (utilities/services) posts unmatched and stays payable per the fail-open EXP-01 policy.
     let matchRes: any = null;
     if (poNo) matchRes = await this.matchSvc.match(bill.txn_no, poNo, undefined, user);
@@ -263,7 +266,7 @@ export class ApIntakeService {
       intake_no: r.intakeNo, status: r.status, extract_source: r.extractSource,
       vendor_id: r.vendorId != null ? Number(r.vendorId) : null, vendor_name: r.vendorName, vendor_tax_id: r.vendorTaxId,
       invoice_no: r.invoiceNo, invoice_date: r.invoiceDate, amount: r.amount != null ? n(r.amount) : null, currency: r.currency,
-      po_no: r.poNo, map_method: r.mapMethod, map_confidence: n(r.mapConfidence), candidates: r.candidates ?? [],
+      po_no: r.poNo, map_method: r.mapMethod, map_confidence: n(r.mapConfidence), candidates: r.candidates ?? [], lines: r.lines ?? [],
       dup_of: r.dupOf, file_name: r.fileName, file_mime: r.fileMime, has_file: r.fileRef != null,
       txn_no: r.txnNo, match_status: r.matchStatus, payable: r.payable,
       created_by: r.createdBy, created_at: r.createdAt, posted_by: r.postedBy, posted_at: r.postedAt,

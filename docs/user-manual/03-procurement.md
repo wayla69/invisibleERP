@@ -647,7 +647,11 @@ payable is an accounting act).
    **dropdown** next to the map button (choose **พิมพ์เลขเอกสารเอง…** to key one), to map it —
    then press **บันทึกบิล + จับคู่ 3 ทาง**.
 5. Check the result: the intake shows the booked bill number (AP-), the match
-   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked).
+   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked). When AI read the
+   document, the **line items** it found (description, qty, unit price, amount)
+   are listed on the result card for your review — if the sum of the lines
+   doesn't match the bill total, a warning asks you to check the source document.
+   The lines are informational: matching stays at the bill-total level.
 
 **Expected result:** a *matched* intake is immediately **payment-ready** — AP can
 request payment as usual. Payment itself is **never** automated: it still goes

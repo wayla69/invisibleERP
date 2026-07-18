@@ -138,6 +138,9 @@ export const apInvoiceIntakes = pgTable('ap_invoice_intakes', {
   mapMethod: text('map_method'), // po_number | vendor_tax_id | vendor_amount | manual
   mapConfidence: numeric('map_confidence', { precision: 5, scale: 2 }), // 0–100
   candidates: jsonb('candidates'), // scored PO candidates surfaced for human review
+  // Extracted line items (vision; 0432) — review/bill-draft detail ONLY, never fed to the 3-way match
+  // (vision lines carry no internal item_id; EXP-10 stays a header-level match by design).
+  lines: jsonb('lines'),
   dupOf: text('dup_of'), // earlier intake carrying the same vendor invoice no (duplicate-payment guard)
   // upload channel: the scanned source document (image/PDF). file_ref is `objstore:<key>` when the
   // object store is configured, else the inline data: URL (object-storage.ts fallback pattern).
