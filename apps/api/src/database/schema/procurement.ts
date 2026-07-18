@@ -25,6 +25,10 @@ export const vendors = pgTable('vendors', {
   // legacy-plaintext passthrough). NOT queried by value in SQL — the ghost-vendor detector
   // (controls.service.ts) groups decrypted values in app code, since random-IV ciphertext never collides.
   taxId: encryptedText('tax_id'),
+  // Blind index over the DIGITS-ONLY tax id (encrypted-column.ts blindIndex, 0433) — equality lookups
+  // only (AP-intake vendor mapping). Self-healed by the mapper's fallback scan; every index hit is
+  // re-verified against the decrypted tax_id, so a stale value can never mis-map a vendor.
+  taxIdBidx: text('tax_id_bidx'),
   paymentTerms: text('payment_terms').default('Cash'),
   leadTimeDays: integer('lead_time_days').default(3),
   rating: numeric('rating').default('3.0'),

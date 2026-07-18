@@ -11,6 +11,7 @@ import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { FinanceService } from '../finance/finance.service';
 import { putObject, objectUrl, isObjectRef } from '../../common/object-storage';
 import { parseInvoiceDataUrl } from '../../common/invoice-doc';
+import { blindIndex } from '../../database/encrypted-column';
 
 // AP invoice intake (EXP-10): scanned/pasted vendor invoice → doc-ai extraction → PO auto-map →
 // post AP bill → automated 3-way match. Automates the path TO payment-ready only — the disbursement
@@ -203,13 +204,30 @@ export class ApIntakeService {
         return { poNo: po.poNo, method: 'po_number', confidence: 100, vendorId: po.vendorId != null ? Number(po.vendorId) : null, vendorName: inp.vendorName ?? po.vendorName ?? null, candidates: [] as PoCandidate[] };
       }
     }
-    // Vendor by 13-digit tax id — the master tax_id is encrypted at rest, so compare decrypted values in
-    // app code (same pattern as the ghost-vendor detector; ciphertext never collides in SQL).
+    // Vendor by 13-digit tax id. The master tax_id is encrypted at rest (random-IV ciphertext never
+    // collides in SQL), so the primary lookup is the tax_id_bidx BLIND INDEX (0433, digits-only
+    // blindIndex) — every hit re-verified against the decrypted value (a vendor whose tax id changed
+    // leaves a stale index behind; verification means it can only miss, never mis-map). A miss falls
+    // back to the bounded decrypt-and-scan (ghost-vendor-detector pattern), which SELF-HEALS the index
+    // best-effort — so legacy rows and every writer (bulk import, MDM-01 change, merge) converge onto
+    // the indexed path without a decrypting backfill.
     let vendorId: number | null = null; let vendorName = inp.vendorName;
     if (inp.vendorTaxId) {
-      const vrows = await db.select({ id: vendors.id, name: vendors.name, taxId: vendors.taxId }).from(vendors).where(eq(vendors.active, true)).limit(500);
       const want = inp.vendorTaxId.replace(/\D/g, '');
-      const hit = vrows.find((v: any) => String(v.taxId ?? '').replace(/\D/g, '') === want);
+      const bidx = blindIndex(want);
+      let hit: { id: unknown; name: string | null; taxId: string | null } | undefined;
+      if (bidx) {
+        const [byIdx] = await db.select({ id: vendors.id, name: vendors.name, taxId: vendors.taxId }).from(vendors)
+          .where(and(eq(vendors.active, true), eq(vendors.taxIdBidx, bidx))).limit(1);
+        if (byIdx && String(byIdx.taxId ?? '').replace(/\D/g, '') === want) hit = byIdx;
+      }
+      if (!hit) {
+        const vrows = await db.select({ id: vendors.id, name: vendors.name, taxId: vendors.taxId }).from(vendors).where(eq(vendors.active, true)).limit(500);
+        hit = vrows.find((v: any) => String(v.taxId ?? '').replace(/\D/g, '') === want);
+        if (hit && bidx) {
+          try { await db.update(vendors).set({ taxIdBidx: bidx }).where(eq(vendors.id, Number(hit.id))); } catch { /* index heal is best-effort */ }
+        }
+      }
       if (hit) { vendorId = Number(hit.id); vendorName = hit.name; }
     }
     const open = await db.select().from(purchaseOrders).where(inArray(purchaseOrders.status, [...MAPPABLE_PO_STATUS])).orderBy(desc(purchaseOrders.id)).limit(200);

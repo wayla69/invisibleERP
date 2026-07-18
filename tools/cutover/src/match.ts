@@ -611,6 +611,32 @@ async function main() {
     }
   }
 
+  // (g) Vendor tax-id BLIND INDEX (0433): the mapper looks the 13-digit tax id up via tax_id_bidx first
+  // (equality on the HMAC blind index), self-heals the column from the decrypt-and-scan fallback, and
+  // re-verifies every index hit against the decrypted value so a STALE index can only miss, never mis-map.
+  {
+    const { blindIndex } = require('../../../apps/api/dist/database/encrypted-column');
+    const TAXID = '0123456789012';
+    const [vtx] = await db.insert(s.vendors).values({ name: 'VTX Trading Co', isSupplier: true, approvalStatus: 'approved', blocklisted: false, taxId: TAXID }).returning({ id: s.vendors.id });
+    const poT = await inj('POST', '/api/procurement/pos', admin, { vendor_id: Number(vtx.id), items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+    await inj('PATCH', `/api/procurement/pos/${poT.json.po_no}/approve`, admin, { approve: true });
+
+    // First map: no bidx yet → decrypted-scan path resolves the vendor AND self-heals the index.
+    const in1 = await inj('POST', '/api/procurement/ap-intake', admin, { text: `VTX Trading Co\nTax ID ${TAXID}\nGrand Total 1,000.00` });
+    const [healed] = await db.select({ bidx: s.vendors.taxIdBidx }).from(s.vendors).where(eq(s.vendors.id, vtx.id));
+    ok('Tax-id map: scan fallback resolves the vendor + SELF-HEALS tax_id_bidx (= blindIndex(digits))',
+      in1.json.map_method === 'vendor_tax_id' && in1.json.po_no === poT.json.po_no && healed.bidx === blindIndex(TAXID),
+      JSON.stringify({ method: in1.json.map_method, po: in1.json.po_no, healed: healed.bidx === blindIndex(TAXID) }));
+
+    // Stale-index safety: plant the SAME bidx on a decoy vendor whose real tax id differs — the index
+    // hit fails decrypted re-verification, so the mapper still resolves the true vendor.
+    const [decoy] = await db.insert(s.vendors).values({ name: 'Decoy Ltd', isSupplier: true, approvalStatus: 'approved', blocklisted: false, taxId: '9999999999999', taxIdBidx: blindIndex(TAXID) }).returning({ id: s.vendors.id });
+    const in2 = await inj('POST', '/api/procurement/ap-intake', admin, { text: `VTX Trading Co\nTax ID ${TAXID}\nGrand Total 1,000.00` });
+    ok('Tax-id map: a stale/planted blind index can only MISS, never mis-map (decrypted re-verification)',
+      in2.json.map_method === 'vendor_tax_id' && in2.json.po_no === poT.json.po_no && in2.json.vendor_name === 'VTX Trading Co',
+      JSON.stringify({ method: in2.json.map_method, vendor: in2.json.vendor_name, decoy: Number(decoy.id) }));
+  }
+
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
