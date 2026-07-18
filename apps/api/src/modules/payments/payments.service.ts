@@ -475,6 +475,30 @@ export class PaymentService {
     return { payment_no: paymentNo, status: 'Captured' };
   }
 
+  // GET /api/payments/pending-settlement — #3 reconciliation worklist for UNCONFIRMED tenders.
+  // An async tender (PromptPay/QR, a card AUTHORIZATION, a transfer) is captured **Pending/Authorized**
+  // until settlement is confirmed — by the inbound PSP webhook, an acquirer callback, or a manager pressing
+  // settle. Until then the money LOOKS collected but is not confirmed. This tenant-scoped read surfaces
+  // every such tender (oldest first, with its age) so nothing sits in limbo — a detective reconciliation
+  // surface mirroring the void/refund exception report (strengthens POS-08). `older_than_min` narrows to
+  // only the stale ones worth chasing. Read-only: posts no GL, adds no authority. Tenant-scoped EXPLICITLY
+  // (an HQ/Admin bypass caller would otherwise see other stores' unconfirmed tenders).
+  async pendingSettlement(opts: { older_than_min?: number; limit?: number }, user: JwtUser) {
+    const db = this.db;
+    const conds: any[] = [sql`${payments.status}::text IN ('Pending','Authorized')`];
+    if (user.tenantId != null) conds.push(eq(payments.tenantId, user.tenantId));
+    const rows = await db.select({ paymentNo: payments.paymentNo, saleNo: payments.saleNo, method: payments.method, amount: payments.amount, currency: payments.currency, gateway: payments.gateway, status: payments.status, createdAt: payments.createdAt })
+      .from(payments).where(and(...conds)).orderBy(payments.createdAt).limit(opts.limit ?? 200);
+    const now = Date.now();
+    const mapped = rows.map((r: any) => ({
+      payment_no: r.paymentNo, sale_no: r.saleNo, method: r.method, amount: n(r.amount), currency: r.currency,
+      gateway: r.gateway, status: r.status, created_at: r.createdAt,
+      age_minutes: r.createdAt ? Math.round((now - new Date(r.createdAt).getTime()) / 60000) : null,
+    }));
+    const pending = opts.older_than_min != null ? mapped.filter((r) => (r.age_minutes ?? 0) >= opts.older_than_min!) : mapped;
+    return { pending, count: pending.length, total_unconfirmed: round2(pending.reduce((a: number, r: any) => a + r.amount, 0)) };
+  }
+
   // ── Till sessions / drawer cash / X-Z reports — extracted to TillSessionService (god-service ratchet
   // round; ctor-body plain class). The tender/refund lifecycle stays on this facade. ──
   async openTill(dto: OpenTillDto, user: JwtUser) { return this.tills.openTill(dto, user); }

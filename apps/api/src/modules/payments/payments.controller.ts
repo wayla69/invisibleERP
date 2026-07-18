@@ -110,6 +110,13 @@ export class PaymentsController {
     return this.svc.settle(no, u);
   }
 
+  // #3 pending-settlement reconciliation worklist — async tenders (QR/PromptPay/card-auth) not yet confirmed
+  // Captured, so an unconfirmed taking never sits in limbo. Detective read; any POS/finance duty may view.
+  @Get('pending-settlement') @Permissions('pos_sell', 'pos_till', 'ar', 'exec', 'fin_report')
+  pendingSettlement(@Query('older_than_min') older: string | undefined, @Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.pendingSettlement({ older_than_min: older != null ? Math.max(0, Number(older) || 0) : undefined, limit: limit != null ? Math.min(500, Math.max(1, parseInt(limit, 10) || 200)) : undefined }, u);
+  }
+
   @Post('till/open') @Permissions('pos_till', 'ar')
   openTill(@Body(new ZodValidationPipe(OpenTillBody)) b: OpenTillDto, @CurrentUser() u: JwtUser) {
     return this.svc.openTill(b, u);
