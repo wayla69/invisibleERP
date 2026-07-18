@@ -54,8 +54,14 @@ export class PortalPosService {
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
   // opts.saleDate (offline sync) books the sale + its GL on the original offline day, not today.
-  async createSale(dto: PortalSaleDto, user: JwtUser, opts?: { saleDate?: string; branchId?: number }) {
-    const t = await this.portal.tenantId(user);
+  // docs/52 Phase 1b — this same generic engine now backs the INTERNAL register's non-restaurant checkout:
+  //   • opts.tenant lets an internal caller (whose customerName is not the tenant CODE, so portal.tenantId
+  //     can't resolve it) pass the already-resolved tenant explicitly; default = the portal resolution
+  //     (unchanged for portal callers).
+  //   • opts.revenueEvent selects the revenue posting-event (SALE.GOODS/SALE.SERVICE per the business-type
+  //     profile); default 'SALE.FOOD' → byte-identical GL to the prior behaviour (all three default to 4000).
+  async createSale(dto: PortalSaleDto, user: JwtUser, opts?: { saleDate?: string; branchId?: number; tenant?: { id: number; code: string }; revenueEvent?: string }) {
+    const t = opts?.tenant ?? await this.portal.tenantId(user);
     const db = this.db;
     if (!dto.items?.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No items', messageTh: 'ไม่มีรายการสินค้า' });
 
@@ -193,8 +199,11 @@ export class PortalPosService {
       );
       // docs/43 PR-6: revenue/service-charge/rounding legs follow the tenant posting-rules (batched,
       // cached read); cash/VAT legs stay pinned/widen-gated.
-      const povr = await this.ledger.postingOverridesMany(['SALE.FOOD', 'SVC.CHARGE', 'POS.ROUNDING'], t.id);
-      const pRev = povr['SALE.FOOD']?.revenue ?? postingDefault('SALE.FOOD', 'revenue');
+      // revenue posts under the business-type profile's event (SALE.GOODS/SALE.SERVICE for a generic POS),
+      // default SALE.FOOD — all three default to 4000, so the GL is unchanged unless a tenant remaps via GL-24.
+      const revEvent = opts?.revenueEvent ?? 'SALE.FOOD';
+      const povr = await this.ledger.postingOverridesMany([revEvent, 'SVC.CHARGE', 'POS.ROUNDING'], t.id);
+      const pRev = povr[revEvent]?.revenue ?? postingDefault(revEvent, 'revenue');
       const pSvc = povr['SVC.CHARGE']?.service_charge_income ?? postingDefault('SVC.CHARGE', 'service_charge_income');
       const pRnd = povr['POS.ROUNDING']?.rounding ?? postingDefault('POS.ROUNDING', 'rounding');
       je = await this.ledger.postEntry({

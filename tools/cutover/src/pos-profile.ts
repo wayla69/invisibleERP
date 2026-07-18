@@ -21,6 +21,7 @@ import { AppModule } from '../../../apps/api/dist/app.module';
 import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
+import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -55,12 +56,16 @@ async function main() {
     { username: 'cashier', passwordHash: await pw.hash('pw1'), role: 'Cashier', tenantId: await tid('SHOP') },
     { username: 'wh', passwordHash: await pw.hash('pw1'), role: 'Warehouse', tenantId: await tid('SHOP') },
   ]).onConflictDoNothing();
+  // Phase 1b: stock for the retail shop so a generic sale can decrement it; loyalty off (no earn noise).
+  await db.insert(s.loyaltyConfig).values({ id: 1, enabled: false, pointsPerBaht: '0' }).onConflictDoNothing();
+  await db.insert(s.customerInventory).values({ tenantId: await tid('SHOP'), itemId: 'SKU1', itemDescription: 'สินค้า', uom: 'ชิ้น', currentStock: '10', reorderPoint: '2', reorderQty: '10' }).onConflictDoNothing();
 
   const ref = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DRIZZLE).useValue(tenantAwareProxy(db)).compile();
   const app = ref.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   app.useGlobalFilters(new AllExceptionsFilter());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
+  await app.get(LedgerService).seedChartOfAccounts();
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
@@ -113,6 +118,25 @@ async function main() {
   //    app booting proves SALE.GOODS/SALE.SERVICE are registered — assert both surface via a profile). ──
   ok('SALE.GOODS + SALE.SERVICE are live posting events (app booted with the invariant)',
     shop.revenue_event === 'SALE.GOODS' && svc.revenue_event === 'SALE.SERVICE', 'booted');
+
+  // ── Phase 1b: the retail shop rings a GENERIC sale via POST /api/pos/sales ──
+  const shopToken = await login('u_SHOP');
+  const gsale = await inj('POST', '/api/pos/sales', shopToken, { items: [{ item_id: 'SKU1', qty: 2, unit_price: 100 }] });
+  ok('generic sale → SALE- created + tender recorded (total 214 incl. VAT)',
+    (gsale.status === 200 || gsale.status === 201) && /^SALE-/.test(gsale.json.sale_no ?? '') && Math.abs(Number(gsale.json.total) - 214) < 0.01 && !!gsale.json.payment_no,
+    JSON.stringify({ s: gsale.status, sale: gsale.json.sale_no, total: gsale.json.total }));
+  const shopId = await tid('SHOP');
+  const dio = (await pg.query(`SELECT count(*)::int AS c FROM dine_in_orders WHERE tenant_id=${shopId}`)).rows[0].c as number;
+  ok('generic sale creates NO dine_in_orders (skips the restaurant path entirely)', dio === 0, `dine_in_orders=${dio}`);
+  const gl = (await pg.query(`SELECT account_code, credit FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source='POS' AND je.source_ref='${gsale.json.sale_no}'`)).rows as any[];
+  const rev = gl.filter((l: any) => l.account_code === '4000').reduce((a: number, l: any) => a + Number(l.credit || 0), 0);
+  const vat = gl.filter((l: any) => l.account_code === '2100').reduce((a: number, l: any) => a + Number(l.credit || 0), 0);
+  ok('generic sale posts revenue 200 → 4000 (SALE.GOODS default) + VAT 14 → 2100',
+    Math.abs(rev - 200) < 0.01 && Math.abs(vat - 14) < 0.01, JSON.stringify(gl));
+  const stk = (await pg.query(`SELECT current_stock FROM customer_inventory WHERE tenant_id=${shopId} AND item_id='SKU1'`)).rows[0]?.current_stock;
+  ok('generic sale decremented stock 10 → 8', Math.abs(Number(stk) - 8) < 0.01, `stock=${stk}`);
+  const whSale = await inj('POST', '/api/pos/sales', await login('wh'), { items: [{ item_id: 'SKU1', qty: 1, unit_price: 50 }] });
+  ok('non-selling role (Warehouse) cannot ring a generic sale → 403', whSale.status === 403, `${whSale.status}`);
 
   console.log('\n── docs/52 Phase 1 — business-type POS profile (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
