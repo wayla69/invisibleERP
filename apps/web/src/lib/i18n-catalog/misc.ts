@@ -744,6 +744,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.kds_view_board': { th: 'จอครัว', en: 'Board' },
   'mx.kds_view_expo': { th: 'จุดส่งอาหาร', en: 'Expo' },
   'mx.kds_view_load': { th: 'ภาระสถานี', en: 'Station load' },
+  'mx.kds_view_prep': { th: 'เวลาทำเฉลี่ย', en: 'Prep times' },
   'mx.kds_recall': { th: 'เรียกคืน', en: 'Recall' },
   'mx.kds_group_station': { th: 'ตามสถานี', en: 'By station' },
   'mx.kds_group_table': { th: 'ตามโต๊ะ', en: 'By table' },
@@ -789,6 +790,13 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mx.kds_col_bumped': { th: 'เสิร์ฟวันนี้', en: 'Bumped' },
   'mx.kds_col_recalls': { th: 'เรียกคืนวันนี้', en: 'Recalls' },
   'mx.kds_allday': { th: 'ยอดรวมทั้งวัน', en: 'All-day' },
+  // F5 prep-time learning report (GET /kds/prep-times) — the rolling fired→served average the KDS uses for ETA/SLA.
+  'mx.kds_prep_desc': { th: 'เวลาทำจริงเฉลี่ยต่อเมนู (ย้อนหลัง 14 วัน) — ระบบใช้ค่านี้ประเมินเวลาและสีเตือน SLA บนจอครัวอัตโนมัติ', en: 'Actual average cook time per dish (last 14 days) — the KDS uses this to set each ticket’s ETA & SLA colour automatically' },
+  'mx.kds_prep_none': { th: 'ยังมีข้อมูลไม่พอ — ต้องเสิร์ฟเมนูนั้นอย่างน้อย 3 ครั้งจึงจะเรียนรู้เวลาได้', en: 'Not enough data yet — a dish needs at least 3 served tickets before its time is learned' },
+  'mx.kds_prep_dish': { th: 'เมนู', en: 'Dish' },
+  'mx.kds_prep_avg': { th: 'เฉลี่ย (นาที)', en: 'Avg (min)' },
+  'mx.kds_prep_samples': { th: 'จำนวนครั้ง', en: 'Samples' },
+  'mx.kds_prep_updated': { th: 'อัปเดตเมื่อ {time} น.', en: 'Updated {time}' },
   // ── Tax-invoice register bulk actions (multi-select download / e-Tax email) ──
   'taxbulk.select_all': { th: 'เลือกทั้งหมด', en: 'Select all' },
   'taxbulk.selected_n': { th: 'เลือก {n} รายการ', en: '{n} selected' },

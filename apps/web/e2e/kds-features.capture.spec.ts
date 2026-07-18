@@ -42,6 +42,10 @@ async function boot(page: Page) {
     if (url.includes('/api/restaurant/kds/start') && method === 'POST') return json({ order_no: 'DIN-A', started: 2 });
     if (url.includes('/availability') && method === 'PATCH') { eightySixed = true; return json({ sku: 'D-CHA', is_available: false }); }
     if (url.includes('/api/restaurant/kds/pacing')) return json({ nudges: [{ order_no: 'DIN-A', table_label: '5', next_course: 2, current_course: 1 }] });
+    if (url.includes('/api/restaurant/kds/prep-times')) return json({ dishes: [
+      { sku: 'F-STEAK', name: 'สเต๊กเนื้อ', avg_prep_min: 13.4, samples: 8 },
+      { sku: 'F-SALAD', name: 'สลัดผัก', avg_prep_min: 4.2, samples: 5 },
+    ], generated_at: '2026-07-18T04:30:00Z' });
     if (url.includes('/api/restaurant/kds/feed')) return json(FEED);
     return json({});
   });
@@ -103,4 +107,13 @@ test('KDS board: grouping tabs, priority badge, stuck alarm, serve-whole-ticket'
   // priority grouping keeps the highest-priority dish first
   await page.getByRole('tab', { name: 'ตามลำดับความสำคัญ' }).click();
   await expect(page.getByText('สเต๊กเนื้อ')).toBeVisible();
+
+  // F5 prep-time report: the "เวลาทำเฉลี่ย" view lists the learned avg per dish + sample count
+  await page.getByRole('tab', { name: 'เวลาทำเฉลี่ย' }).click();
+  await expect(page.getByRole('columnheader', { name: 'เฉลี่ย (นาที)' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'จำนวนครั้ง' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'สเต๊กเนื้อ' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '13.4′' })).toBeVisible();
+  await expect(page.getByText(/อัปเดตเมื่อ/)).toBeVisible();
+  await page.screenshot({ path: (process.env.SHOT_DIR ?? 'test-results') + '/kds-prep-times.png', fullPage: true });
 });
