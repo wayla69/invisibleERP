@@ -142,7 +142,10 @@ transferring and counting.
      barcodes** (EAN/UPC, Code-128, Code-39, ITF), so an existing product barcode
      scans too, not just our printed QR tags. On a successful read you get a short
      **beep + vibrate**; if your phone has a camera light, a **torch** button
-     appears to toggle it for dim aisles. In a scan session the camera stays open
+     appears to toggle it for dim aisles, and on cameras that support it a **zoom
+     slider** (bottom-left of the preview) helps resolve small or far-away labels —
+     the scanner also automatically retries at full camera resolution when a code
+     isn't found after a moment. In a scan session the camera stays open
      for **continuous scanning** — rattle through many items, each added
      automatically — with a running count and a **Done** button to close.
    - **Hardware scanner** — a USB/Bluetooth wedge scanner types the code into the
