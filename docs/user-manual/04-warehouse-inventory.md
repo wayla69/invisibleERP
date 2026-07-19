@@ -158,6 +158,19 @@ genealogy for recall evidence.
 > it's received with a lot. A normal (non-lot-tracked) item is unaffected — it
 > sells exactly as before with no lot prompt.
 
+> **Serial / IMEI tracking (electronics).** Mark an item **ติดตามซีเรียล/IMEI
+> (Serial-tracked)** on `/setup/items` when each unit has a unique serial or IMEI
+> (phones, appliances, tools). Register the serials you have in stock in the
+> **ซีเรียล / IMEI (Serial units)** panel — paste or type the numbers (comma or
+> space separated) and press **เพิ่มเข้าสต๊อก**; the panel shows how many are
+> **InStock** vs **Sold**. When the cashier sells the item, they scan/enter the
+> **specific serial** for each unit — that exact unit is marked **Sold** against
+> the sale, so warranty, returns and theft-recovery can look it up later. Selling
+> a serial that is **already sold** or **not on file** is refused, and a
+> serial-tracked line **must** name a serial for every unit sold. Registering
+> serials requires a setup / warehouse duty (a sell-only cashier can ring the
+> sale but can't add stock serials).
+
 **Error messages:**
 
 - **LOT_NOT_HELD** — you tried to release a lot that is not currently on hold.

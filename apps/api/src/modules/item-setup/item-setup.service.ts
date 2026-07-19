@@ -40,6 +40,7 @@ export interface ItemProfileDto {
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
   is_lot_tracked?: boolean; // docs/52 Phase 3a — sell only from a real, non-expired, non-held lot (FEFO at POS)
+  is_serial_tracked?: boolean; // docs/52 Phase 3b — sell as a specific serial/IMEI unit
 }
 export interface WarehouseAccountsDto {
   location_name?: string | null; zone?: string | null; type?: string | null;
@@ -168,7 +169,7 @@ export class ItemSetupService {
       unitPrice: num(dto.unit_price), temperatureType: dto.temperature_type, buId: dto.bu_id, supplyType: dto.supply_type ?? undefined,
       minStock: num(dto.min_stock), maxStock: num(dto.max_stock), avgDailyUsage: num(dto.avg_daily_usage), leadTimeDays: num(dto.lead_time_days),
       minOrderQty: num(dto.min_order_qty), orderMultiple: num(dto.order_multiple), orderCost: num(dto.order_cost), holdingCost: num(dto.holding_cost),
-      isFixedAsset: dto.is_fixed_asset, defaultAssetCategoryId: dto.default_asset_category_id, isLotTracked: dto.is_lot_tracked,
+      isFixedAsset: dto.is_fixed_asset, defaultAssetCategoryId: dto.default_asset_category_id, isLotTracked: dto.is_lot_tracked, isSerialTracked: dto.is_serial_tracked,
     }).where(eq(items.itemId, itemId)).returning();
     if (!row) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: `Item ${itemId} not found`, messageTh: 'ไม่พบสินค้า' });
     return shapeItem(row);
@@ -446,6 +447,7 @@ function shapeItem(i: any) {
     min_order_qty: n(i.minOrderQty), order_multiple: n(i.orderMultiple), order_cost: n(i.orderCost), holding_cost: n(i.holdingCost),
     is_fixed_asset: i.isFixedAsset === true, default_asset_category_id: i.defaultAssetCategoryId != null ? Number(i.defaultAssetCategoryId) : null,
     is_lot_tracked: i.isLotTracked === true,
+    is_serial_tracked: i.isSerialTracked === true,
     status: i.status ?? 'active', superseded_by: i.supersededBy != null ? Number(i.supersededBy) : null,
     merged_into: i.mergedInto != null ? Number(i.mergedInto) : null,
   };
