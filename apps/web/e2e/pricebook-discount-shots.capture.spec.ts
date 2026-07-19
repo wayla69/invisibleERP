@@ -39,6 +39,19 @@ async function boot(page: Page) {
       });
     }
     if (url.includes('/api/pricing/rules')) return json({ rules: [] });
+    if (url.includes('/api/branches')) {
+      return json({ branches: [
+        { id: 1, code: 'HQ', name: 'สำนักงานใหญ่' },
+        { id: 3, code: 'CTW', name: 'เซ็นทรัลเวิลด์' },
+        { id: 4, code: 'SLM', name: 'สีลม' },
+      ], count: 3 });
+    }
+    if (url.includes('/api/procurement/catalog')) {
+      return json({ items: [
+        { item_id: 'SKU-1001', item_description: 'กาแฟอาราบิก้า 250g', uom: 'ถุง', unit_price: 185 },
+        { item_id: 'SKU-1002', item_description: 'กาแฟโรบัสต้า 250g', uom: 'ถุง', unit_price: 145 },
+      ] });
+    }
 
     // Phase 4b — discount authority
     if (url.includes('/api/pos/discount-settings')) return json({ maxLinePct: 10, maxBillPct: 20 });
