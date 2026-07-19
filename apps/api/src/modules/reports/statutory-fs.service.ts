@@ -4,6 +4,8 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { fsReportDefinitions } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { LedgerService } from '../ledger/ledger.service';
+import { resolveBsGroup, resolveIsGroup } from '../ledger/ledger-statement-sections';
+import { THAI_DBD_DEFS } from './thai-dbd-fs';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const dayBefore = (ymd: string) => { const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
@@ -24,6 +26,8 @@ export interface FsGroup {
   accounts?: string[];          // explicit account codes
   prefixes?: string[];          // account-code startsWith
   types?: string[];             // account_type in (Asset|Liability|Equity|Revenue|Expense)
+  bsGroups?: string[];          // resolved balance-sheet section (current_asset|noncurrent_asset|…|equity)
+  isGroups?: string[];          // resolved income-statement section (revenue|cogs|selling_admin|…|tax)
   sumOf?: { key: string; factor: number }[]; // computed subtotal over other group keys
   showAccounts?: boolean;       // emit per-account child rows under the group
 }
@@ -59,13 +63,25 @@ export class StatutoryFsService {
     const rows = await this.db.select().from(fsReportDefinitions)
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(asc(fsReportDefinitions.statementType), asc(fsReportDefinitions.code));
-    return { definitions: rows.map((r: any) => this.shapeDef(r)), count: rows.length };
+    const tenantDefs = rows.map((r: any) => this.shapeDef(r));
+    // Surface the built-in Thai DBD/TFRS defaults too (so they are discoverable + renderable out of the box),
+    // unless the tenant has authored its own definition of the same code (which overrides it).
+    const authored = new Set(tenantDefs.map((d) => d.code));
+    const builtins = Object.values(THAI_DBD_DEFS)
+      .filter((d) => !authored.has(d.code) && (!statementType || d.statementType === statementType))
+      .map((d) => ({ code: d.code, name: d.name, statement_type: d.statementType, config: d.config, active: true, created_by: 'system', is_default: true }));
+    const definitions = [...tenantDefs, ...builtins].sort((a, b) => a.statement_type.localeCompare(b.statement_type) || a.code.localeCompare(b.code));
+    return { definitions, count: definitions.length };
   }
 
   async getDefinition(code: string) {
     const [row] = await this.db.select().from(fsReportDefinitions).where(eq(fsReportDefinitions.code, code)).limit(1);
-    if (!row) throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
-    return this.shapeDef(row);
+    if (row) return this.shapeDef(row);
+    // Fall back to a built-in Thai DBD/TFRS default so the standard statements render out of the box; a
+    // tenant that authors its own definition of the same code (the DB row above) overrides it.
+    const def = THAI_DBD_DEFS[code];
+    if (def) return { code: def.code, name: def.name, statement_type: def.statementType, config: def.config, active: true, created_by: 'system', is_default: true };
+    throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
   }
 
   async upsertDefinition(dto: { code: string; name: string; statement_type: string; config: FsBuilderConfig | FsNotesConfig; active?: boolean }, createdBy: string) {
@@ -145,6 +161,14 @@ export class StatutoryFsService {
     if (g.accounts && g.accounts.includes(r.account_code)) return true;
     if (g.prefixes && g.prefixes.some((p) => r.account_code.startsWith(p))) return true;
     if (g.types && r.account_type && g.types.includes(r.account_type)) return true;
+    // Select by the account's RESOLVED statement section (canonical default map / type fallback) so a
+    // layout can bind whole งบดุล / งบกำไรขาดทุน sections without enumerating every code — the same
+    // classification the quick balanceSheet/incomeStatement use, so the rendered subtotals tie to them.
+    if (g.bsGroups || g.isGroups) {
+      const a = { code: r.account_code, type: r.account_type ?? '' };
+      if (g.bsGroups) { const bs = resolveBsGroup(a); if (bs && g.bsGroups.includes(bs)) return true; }
+      if (g.isGroups) { const is = resolveIsGroup(a); if (is && g.isGroups.includes(is)) return true; }
+    }
     return false;
   }
   private accountRows(g: FsGroup, rows: NetRow[], priorRows: NetRow[] | null): any[] {
