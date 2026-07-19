@@ -31,6 +31,7 @@ type Profile = {
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
   is_lot_tracked?: boolean; // docs/52 Phase 3a — FEFO lot capture at the POS
   is_serial_tracked?: boolean; // docs/52 Phase 3b — serial/IMEI capture at the POS
+  min_age?: number | null; // docs/52 Phase 3c — minimum buyer age (0 = unrestricted)
   status?: string; superseded_by?: number | null;
 };
 
@@ -57,7 +58,7 @@ export default function ItemPostingSetupPage() {
 
   const save = useMutation({
     mutationFn: () => {
-      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null, is_lot_tracked: !!form!.is_lot_tracked, is_serial_tracked: !!form!.is_serial_tracked };
+      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null, is_lot_tracked: !!form!.is_lot_tracked, is_serial_tracked: !!form!.is_serial_tracked, min_age: Number(form!.min_age) || 0 };
       for (const k of ['revenue_account', 'cogs_account', 'inventory_account', 'valuation_account', 'vat_code', 'wht_income_type', 'default_location_id', ...TEXT_FIELDS] as const) p[k] = (form as any)[k] ? (form as any)[k] : null;
       for (const k of NUM_FIELDS) p[k] = (form as any)[k] ?? null;
       return api(`/api/item-setup/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify(p) });
@@ -247,6 +248,10 @@ export default function ItemPostingSetupPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {/* docs/52 Phase 3c — age-restricted: the POS blocks the sale until the buyer's age is verified. */}
+              <Field label="อายุขั้นต่ำผู้ซื้อ (Min buyer age — 0 = none, e.g. 20 for alcohol/tobacco)">
+                <Input type="number" min="0" max="120" step="1" value={form.min_age ?? 0} onChange={(e) => setForm((f) => f && ({ ...f, min_age: e.target.value === '' ? 0 : Number(e.target.value) }))} />
+              </Field>
             </div>
             <div>
               <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>

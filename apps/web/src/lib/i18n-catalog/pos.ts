@@ -650,6 +650,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'px.reg_disp_thanks': { th: 'ขอบคุณค่ะ/ครับ', en: 'Thank you' },
   'px.reg_err_offline_dinein': { th: 'ออฟไลน์: โหมดโต๊ะ/ครัวต้องออนไลน์ — ปลดโต๊ะแล้วใช้โหมดขายเร็ว', en: 'Offline: table/kitchen mode requires a connection — detach the table and use quick-sale mode' },
   'px.reg_err_offline_voucher': { th: 'ออฟไลน์: คูปองต้องตรวจสอบ/ตัดใช้ที่เซิร์ฟเวอร์ — เอาคูปองออกหรือรอกลับมาออนไลน์', en: 'Offline: vouchers must be validated and redeemed server-side — remove the voucher or wait to reconnect' },
+  'px.reg_age_confirm': { th: 'รายการนี้มีสินค้าจำกัดอายุ (เช่น เหล้า/บุหรี่) — ยืนยันว่าได้ตรวจบัตรประชาชนและลูกค้าอายุถึงเกณฑ์แล้ว?', en: 'This sale has an age-restricted item (e.g. alcohol/tobacco) — confirm you checked the buyer’s ID and they meet the minimum age?' },
   'px.reg_err_print': { th: 'พิมพ์ใบเสร็จไม่สำเร็จ — {msg}', en: 'Failed to print receipt — {msg}' },
   'px.reg_held_bills': { th: 'บิลที่พักไว้', en: 'Held bills' },
   'px.reg_held_ok': { th: 'พักบิลแล้ว · {hold_no}', en: 'Bill held · {hold_no}' },

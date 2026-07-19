@@ -154,14 +154,24 @@ export default function RegisterPage() {
       if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
       const genericItems = lines.map((l) => ({ item_id: l.sku, item_description: l.name, qty: l.qty, unit_price: l.unit_price, discount_pct: l.discount_pct || undefined, modifier_option_ids: l.modifier_option_ids }));
       const genericDiscount = discountPct > 0 ? Math.round(cartTotals(lines).sub * discountPct) / 100 : undefined;
+      // docs/52 Phase 6a split tenders + 3c age gate. The generic sale posts once; if the server refuses on
+      // AGE_VERIFICATION_REQUIRED (the cart has an age-restricted item), the cashier confirms they checked the
+      // buyer's ID and we retry ONCE with age_ack — a serial/lot/expired refusal still surfaces as-is.
+      const postGeneric = (ageAck: boolean) => api<{ sale_no: string; total: number }>('/api/pos/sales', {
+        method: 'POST',
+        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(ageAck ? { age_ack: true } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
+      });
       let gsale: { sale_no: string; total: number };
       try {
-        gsale = await api<{ sale_no: string; total: number }>('/api/pos/sales', {
-          method: 'POST',
-          // docs/52 Phase 6a — split payment: forward the tenders[] on the generic path (restaurant checkout,
-          // below, doesn't support split yet). Absent → single-tender payment_method (unchanged).
-          body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
-        });
+        try {
+          gsale = await postGeneric(false);
+        } catch (ae) {
+          if ((ae as Error & { code?: string }).code === 'AGE_VERIFICATION_REQUIRED'
+            && typeof window !== 'undefined'
+            && window.confirm(t('px.reg_age_confirm'))) {
+            gsale = await postGeneric(true);
+          } else throw ae;
+        }
       } catch (e) {
         // network died mid-checkout while the browser still reports online → queue the sale offline instead
         // of erroring at the cashier (mirrors the restaurant path). HTTP errors (validation etc.) surface.
