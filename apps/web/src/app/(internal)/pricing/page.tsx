@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calculator, Plus, Tag, Trash2, BookOpen } from 'lucide-react';
@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const sel = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
@@ -176,11 +177,74 @@ function Rules() {
 // docs/52 Phase 4a — price books: a governed base-price list by customer tier / branch. Maker-checker (staged
 // PendingApproval, activated by a different user — same G6/SoD gate as price rules). The register reads only
 // active, approved books at the till.
-interface PBEntry { item_id: string; unit_price: string; min_qty: string }
+interface PBEntry { item_id: string; unit_price: string; min_qty: string; base?: number }
+interface CatItem { item_id: string; item_description: string | null; uom: string | null; unit_price: number }
+interface BranchRow { id: number; name: string; code: string }
+
+/**
+ * Item typeahead — searches the procurement catalog (debounced) and reports both the chosen code and its
+ * current base price so the caller can show the delta. Prevents typing an item code that doesn't exist.
+ */
+function ItemCombo({ value, onPick, placeholder }: { value: string; onPick: (item: CatItem) => void; placeholder: string }) {
+  const { t } = useLang();
+  const [q, setQ] = useState(value);
+  const [debounced, setDebounced] = useState('');
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setQ(value); }, [value]);
+  useEffect(() => { const id = setTimeout(() => setDebounced(q.trim()), 250); return () => clearTimeout(id); }, [q]);
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+  const search = useQuery<{ items: CatItem[] }>({
+    queryKey: ['pb-item-search', debounced],
+    queryFn: () => api(`/api/procurement/catalog?limit=8&q=${encodeURIComponent(debounced)}`),
+    enabled: open && debounced.length > 0,
+  });
+  const results = search.data?.items ?? [];
+  return (
+    <div ref={boxRef} className="relative">
+      <Input
+        placeholder={placeholder}
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        autoComplete="off"
+      />
+      {open && debounced.length > 0 && (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
+          {search.isLoading && <p className="px-2 py-1.5 text-xs text-muted-foreground">{t('hx.common.saving')}</p>}
+          {!search.isLoading && results.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">{t('hx.pb.item_no_match')}</p>}
+          {results.map((it) => (
+            <button
+              key={it.item_id}
+              type="button"
+              className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+              onClick={() => { onPick(it); setQ(it.item_id); setOpen(false); }}
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{it.item_description || it.item_id}</span>
+                <span className="block truncate text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</span>
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">{t('hx.pb.base_price')} {baht(it.unit_price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 function Books() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['price-books'], queryFn: () => api('/api/pricing/books') });
+  const branchesQ = useQuery<{ branches: BranchRow[] }>({ queryKey: ['branches'], queryFn: () => api('/api/branches'), staleTime: 5 * 60_000 });
+  const branchName = (id: number | null | undefined) => branchesQ.data?.branches.find((b) => b.id === id)?.name;
+  // tiers already in use across the tenant's books — offered as autocomplete so the same tier is spelled
+  // consistently (pricing resolution matches the exact string).
+  const knownTiers: string[] = Array.from(new Set((q.data?.books ?? []).map((b: any) => b.tier).filter(Boolean))) as string[];
   const empty = { name: '', tier: '', branch_id: '', priority: '100', valid_from: '', valid_to: '' };
   const [f, setF] = useState<any>(empty);
   const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
@@ -215,10 +279,17 @@ function Books() {
               <Input id="pb-name" placeholder={t('hx.pb.name_ph')} value={f.name} onChange={(e) => set({ name: e.target.value })} required />
             </Field>
             <Field label={t('hx.pb.f_tier')} htmlFor="pb-tier" hint={t('hx.pb.tier_ph')}>
-              <Input id="pb-tier" value={f.tier} onChange={(e) => set({ tier: e.target.value })} />
+              <Input id="pb-tier" list="pb-tier-options" value={f.tier} onChange={(e) => set({ tier: e.target.value })} autoComplete="off" />
+              <datalist id="pb-tier-options">{knownTiers.map((tv) => <option key={tv} value={tv} />)}</datalist>
             </Field>
             <Field label={t('hx.pb.f_branch')} htmlFor="pb-branch" hint={t('hx.pb.branch_ph')}>
-              <Input id="pb-branch" type="number" inputMode="numeric" value={f.branch_id} onChange={(e) => set({ branch_id: e.target.value })} />
+              <Select value={f.branch_id || 'all'} onValueChange={(v) => set({ branch_id: v === 'all' ? '' : v })}>
+                <SelectTrigger id="pb-branch" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('hx.pb.any')}</SelectItem>
+                  {(branchesQ.data?.branches ?? []).map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </Field>
             <Field label={t('hx.pb.f_priority')} htmlFor="pb-priority" hint={t('hx.pb.priority_hint')}>
               <Input id="pb-priority" type="number" inputMode="numeric" placeholder="100" value={f.priority} onChange={(e) => set({ priority: e.target.value })} />
@@ -236,11 +307,18 @@ function Books() {
               <span>{t('hx.pb.f_item')}</span><span className="text-right">{t('hx.pb.f_price')}</span><span className="text-right">{t('hx.pb.f_minqty')}</span><span className="w-9" />
             </div>
             {entries.map((e, i) => (
-              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-center">
-                <Input className="col-span-2 sm:col-span-1" placeholder={t('hx.pb.f_item')} value={e.item_id} onChange={(ev) => setEntry(i, { item_id: ev.target.value })} />
-                <Input type="number" inputMode="decimal" step="0.01" className="text-right" placeholder="0" value={e.unit_price} onChange={(ev) => setEntry(i, { unit_price: ev.target.value })} />
+              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-start">
+                <div className="col-span-2 sm:col-span-1">
+                  <ItemCombo value={e.item_id} placeholder={t('hx.pb.f_item')} onPick={(it) => setEntry(i, { item_id: it.item_id, base: it.unit_price, unit_price: e.unit_price || String(it.unit_price) })} />
+                </div>
+                <div>
+                  <Input type="number" inputMode="decimal" step="0.01" className="text-right" placeholder="0" value={e.unit_price} onChange={(ev) => setEntry(i, { unit_price: ev.target.value })} />
+                  {e.base != null && e.unit_price !== '' && Number(e.unit_price) !== e.base && (
+                    <p className="mt-1 text-right text-xs text-muted-foreground">{t('hx.pb.base_price')} {baht(e.base)}</p>
+                  )}
+                </div>
                 <Input type="number" inputMode="numeric" min={1} className="text-right" placeholder="1" value={e.min_qty} onChange={(ev) => setEntry(i, { min_qty: ev.target.value })} />
-                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pb.f_item')} disabled={entries.length === 1} onClick={() => setEntries((es) => es.filter((_, j) => j !== i))}><Trash2 className="size-4" /></Button>
+                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive sm:mt-0.5" aria-label={t('hx.pb.f_item')} disabled={entries.length === 1} onClick={() => setEntries((es) => es.filter((_, j) => j !== i))}><Trash2 className="size-4" /></Button>
               </div>
             ))}
             <Button size="sm" variant="outline" onClick={() => setEntries((es) => [...es, { item_id: '', unit_price: '', min_qty: '1' }])}><Plus className="size-4" /> {t('hx.pb.add_row')}</Button>
@@ -262,7 +340,7 @@ function Books() {
             columns={[
               { key: 'name', label: t('hx.pb.col_name') },
               { key: 'tier', label: t('hx.pb.col_tier'), render: (r: any) => r.tier || <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
-              { key: 'branch_id', label: t('hx.pb.col_branch'), render: (r: any) => r.branch_id != null ? `#${r.branch_id}` : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'branch_id', label: t('hx.pb.col_branch'), render: (r: any) => r.branch_id != null ? (branchName(r.branch_id) ?? `#${r.branch_id}`) : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
               { key: 'priority', label: t('hx.pb.f_priority'), align: 'right', render: (r: any) => <span className="tabular">{r.priority}</span> },
               // G6 (SoD R10): a staged (PendingApproval) book is inactive until a DIFFERENT user activates it.
               { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'
