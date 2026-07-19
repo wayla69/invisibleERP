@@ -99,6 +99,7 @@
     "cashreport": "tsx src/cashreport.ts",
     "pos-discount": "tsx src/pos-discount.ts",
     "pos-profile": "tsx src/pos-profile.ts",
+    "item-service": "tsx src/item-service.ts",
     "pricing": "tsx src/pricing.ts",
     "returns": "tsx src/returns.ts",
     "bankrec": "tsx src/bankrec.ts",

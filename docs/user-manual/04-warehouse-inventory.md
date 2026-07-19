@@ -13,6 +13,14 @@ expiry, locations / bins, mobile scanning, and cycle counts / stocktakes.
 **Screen:** `/inventory` · **Required permission:** `warehouse` (also `dashboard`
 / `planner` for read access)
 
+> **Goods vs. service items (universal POS).** On the item setup screen
+> (`/setup/items`) an item can be marked **ประเภทอุปทาน (supply type)** = *goods*
+> (the default — a stocked product) or *service* (a haircut, a consultation, a
+> service fee). A **service item is not stocked**: selling it at the POS records
+> the sale and the revenue but **does not reduce inventory** and posts **no cost
+> of goods** — its revenue books to the service-revenue account. A regular
+> **goods** item is unchanged (selling it reduces stock as before).
+
 1. Go to **Inventory** (`/inventory`).
 2. Search for an item (**ค้นหา** by Item ID or name — typing is debounced, and the
    list stays on screen while it refreshes), or toggle **เฉพาะสต๊อกต่ำ** to show

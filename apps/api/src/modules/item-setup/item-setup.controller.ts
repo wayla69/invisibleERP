@@ -34,6 +34,7 @@ const ItemProfileBody = z.object({
   barcode: z.string().trim().max(64).nullish(), uom: z.string().trim().max(20).nullish(), base_uom: z.string().trim().max(20).nullish(),
   conversion_factor: z.number().positive().nullish(), unit_price: z.number().nonnegative().nullish(),
   temperature_type: z.string().trim().max(30).nullish(), bu_id: z.string().trim().max(30).nullish(),
+  supply_type: z.enum(['goods', 'service']).nullish(), // docs/52 Phase 2a — service items sell with no stock move / no COGS
   min_stock: z.number().nonnegative().nullish(), max_stock: z.number().nonnegative().nullish(),
   avg_daily_usage: z.number().nonnegative().nullish(), lead_time_days: z.number().nonnegative().nullish(),
   min_order_qty: z.number().nonnegative().nullish(), order_multiple: z.number().nonnegative().nullish(),
