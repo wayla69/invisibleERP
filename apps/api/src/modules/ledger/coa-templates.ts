@@ -166,6 +166,13 @@ const MANUFACTURING: CoaTemplateRow[] = [
   { code: '5500', name: 'Purchase Price Variance', nameTh: 'ผลต่างราคาซื้อ' },
   { code: '2380', name: 'Manufacturing Costs Applied', nameTh: 'ค่าใช้จ่ายการผลิตรอปันส่วน' },
   { code: '5810', name: 'Scrap / Rework Loss', nameTh: 'ผลขาดทุนของเสีย/แก้ไขงาน' },
+  // Sub-accounts — WIP and COGS by cost element (materials / labor / overhead).
+  { code: '125001', name: 'WIP — Direct Materials', nameTh: 'งานระหว่างทำ — วัตถุดิบทางตรง' },
+  { code: '125002', name: 'WIP — Direct Labor', nameTh: 'งานระหว่างทำ — ค่าแรงทางตรง' },
+  { code: '125003', name: 'WIP — Manufacturing Overhead', nameTh: 'งานระหว่างทำ — ค่าโสหุ้ยการผลิต' },
+  { code: '500001', name: 'COGS — Direct Materials', nameTh: 'ต้นทุนขาย — วัตถุดิบทางตรง' },
+  { code: '500002', name: 'COGS — Direct Labor', nameTh: 'ต้นทุนขาย — ค่าแรงทางตรง' },
+  { code: '500003', name: 'COGS — Manufacturing Overhead', nameTh: 'ต้นทุนขาย — ค่าโสหุ้ยการผลิต' },
 ];
 
 // Construction / contracting: CIP, project WIP, contract asset/liability, retention both sides, progress revenue.
@@ -180,6 +187,15 @@ const CONSTRUCTION: CoaTemplateRow[] = [
   { code: '2410', name: 'Contract Liability / Deferred Revenue', nameTh: 'หนี้สินตามสัญญา' },
   { code: '4200', name: 'Construction / Project Revenue', nameTh: 'รายได้งานก่อสร้าง' },
   { code: '5800', name: 'Cost of Construction Work', nameTh: 'ต้นทุนงานก่อสร้าง' },
+  // Sub-accounts — WIP by trade phase + cost of work by resource.
+  { code: '126001', name: 'WIP — Earthwork', nameTh: 'งานระหว่างก่อสร้าง — งานดิน' },
+  { code: '126002', name: 'WIP — Structure', nameTh: 'งานระหว่างก่อสร้าง — งานโครงสร้าง' },
+  { code: '126003', name: 'WIP — Architectural / Finishing', nameTh: 'งานระหว่างก่อสร้าง — งานสถาปัตย์/ตกแต่ง' },
+  { code: '126004', name: 'WIP — MEP / Systems', nameTh: 'งานระหว่างก่อสร้าง — งานระบบ' },
+  { code: '580001', name: 'Cost of Work — Labor', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าแรง' },
+  { code: '580002', name: 'Cost of Work — Materials', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าวัสดุ' },
+  { code: '580003', name: 'Cost of Work — Subcontractor', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าผู้รับเหมาช่วง' },
+  { code: '580004', name: 'Cost of Work — Equipment / Plant', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าเครื่องจักร' },
 ];
 
 // E-commerce: merchandise inventory, online sales, delivery & card surcharge income, gift cards, loyalty.
@@ -206,6 +222,13 @@ const HOSPITALITY: CoaTemplateRow[] = [
   { code: '2300', name: 'Tips Payable', nameTh: 'ทิปพนักงานค้างจ่าย' },
   { code: '5000', name: 'Cost of Food & Beverage', nameTh: 'ต้นทุนอาหารและเครื่องดื่ม' },
   { code: '5300', name: 'Recipe Ingredient COGS', nameTh: 'ต้นทุนวัตถุดิบตามสูตร' },
+  // Sub-accounts — revenue by department (rooms / F&B) + F&B cost by kind.
+  { code: '430001', name: 'Room Revenue', nameTh: 'รายได้ค่าห้องพัก' },
+  { code: '430002', name: 'Other Service Revenue (spa/laundry)', nameTh: 'รายได้บริการอื่น (สปา/ซักรีด)' },
+  { code: '400001', name: 'Food Sales', nameTh: 'รายได้อาหาร' },
+  { code: '400002', name: 'Beverage Sales', nameTh: 'รายได้เครื่องดื่ม' },
+  { code: '500011', name: 'Cost of Food', nameTh: 'ต้นทุนอาหาร' },
+  { code: '500012', name: 'Cost of Beverage', nameTh: 'ต้นทุนเครื่องดื่ม' },
 ];
 
 // Healthcare / clinic: medical-service revenue, drug & supplies inventory, prepaid packages, bad debt.
@@ -229,6 +252,11 @@ const PROFESSIONAL: CoaTemplateRow[] = [
   { code: '2400', name: 'Unearned Revenue', nameTh: 'รายได้รับล่วงหน้า' },
   { code: '5800', name: 'Cost of Services', nameTh: 'ต้นทุนงานบริการ' },
   { code: '1180', name: 'Employee Advances', nameTh: 'เงินทดรองจ่ายพนักงาน' },
+  // Sub-accounts — unbilled WIP + cost of services by kind (staff time / disbursements).
+  { code: '126010', name: 'Unbilled WIP — Staff Time', nameTh: 'งานระหว่างทำ — ค่าแรงวิชาชีพ' },
+  { code: '126011', name: 'Unbilled WIP — Disbursements', nameTh: 'งานระหว่างทำ — ค่าใช้จ่ายทดรองตามงาน' },
+  { code: '580010', name: 'Cost of Services — Staff Time', nameTh: 'ต้นทุนงานบริการ — ค่าแรง' },
+  { code: '580011', name: 'Cost of Services — Disbursements', nameTh: 'ต้นทุนงานบริการ — ค่าใช้จ่ายทดรอง' },
 ];
 
 // Agriculture: produce/supplies inventory, growing crops (biological WIP), harvested goods, produce sales.
