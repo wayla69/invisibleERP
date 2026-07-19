@@ -12,7 +12,7 @@
 
 import type { FsBuilderConfig, FsGroup } from './statutory-fs.service';
 
-export interface IndustryFsDef { name: string; statementType: 'pl'; config: FsBuilderConfig }
+export interface IndustryFsDef { name: string; statementType: 'pl' | 'bs'; config: FsBuilderConfig }
 
 // The shared multi-step tail from gross profit → net profit (identical to the generic DBD-PL tail, so the
 // bottom line reconciles to incomeStatement.net_income). `grossKey` is the subtotal it builds on.
@@ -88,9 +88,104 @@ const NONPROFIT_PL: FsBuilderConfig = {
   ],
 };
 
-export const INDUSTRY_FS_DEFS: Record<string, { pl?: IndustryFsDef }> = {
+// ───────────────── Per-industry default statutory Balance Sheet layouts (FIN-4, P7) ─────────────────
+// The generic DBD-BS (thai-dbd-fs.ts) already sections every account current/non-current asset · liability ·
+// equity. These bespoke defaults exist only for industries whose STATEMENT STRUCTURE genuinely differs:
+//   • nonprofit    — a Statement of Financial Position with NET ASSETS split with/without donor restrictions
+//                    (ASC 958 / Thai NPO practice) instead of share capital + retained earnings
+//   • agriculture  — biological assets surfaced as a distinct statutory line (TAS 41)
+//   • construction — contract work-in-progress (contract assets) surfaced as a distinct current-asset line
+//   • real estate  — property inventory under development surfaced as a distinct non-current line
+// getDefinition('DBD-BS') resolves the caller's / requested industry to one of these; everything else keeps
+// the generic DBD-BS. Every layout TIES OUT: total assets == total liabilities + equity(+net assets), the
+// same identity the generic balance sheet holds (the current-period result folds into equity/unrestricted).
+
+// The standard liabilities + equity tail shared by the asset-side-only variants (agriculture/construction/
+// real estate keep the generic equity presentation; only the asset section is re-shaped).
+function bsLiabilitiesEquityTail(): FsGroup[] {
+  return [
+    { key: 'current_liabilities', label: 'Current liabilities', labelTh: 'หนี้สินหมุนเวียน', level: 0, normalSide: 'credit', bsGroups: ['current_liability'], showAccounts: true },
+    { key: 'noncurrent_liabilities', label: 'Non-current liabilities', labelTh: 'หนี้สินไม่หมุนเวียน', level: 0, normalSide: 'credit', bsGroups: ['noncurrent_liability'], showAccounts: true },
+    { key: 'equity_accounts', label: 'Share capital & reserves', labelTh: 'ทุนและสำรอง', level: 1, normalSide: 'credit', bsGroups: ['equity'], showAccounts: true },
+    { key: 'result_for_period', label: 'Retained earnings / result for the period', labelTh: 'กำไร(ขาดทุน)สะสมและผลประกอบการงวดปัจจุบัน', level: 1, normalSide: 'credit', types: ['Revenue', 'Expense'] },
+    { key: 'total_equity', label: 'Total equity', labelTh: 'รวมส่วนของผู้ถือหุ้น', level: 0, sumOf: [{ key: 'equity_accounts', factor: 1 }, { key: 'result_for_period', factor: 1 }] },
+    { key: 'total_liab_equity', label: 'Total liabilities and equity', labelTh: 'รวมหนี้สินและส่วนของผู้ถือหุ้น', level: 0, sumOf: [{ key: 'current_liabilities', factor: 1 }, { key: 'noncurrent_liabilities', factor: 1 }, { key: 'total_equity', factor: 1 }] },
+  ];
+}
+
+// NONPROFIT — Statement of Financial Position. Assets & liabilities as usual, but the residual is NET ASSETS
+// split WITH vs WITHOUT donor restrictions (310011 restricted; everything else + the period surplus is
+// unrestricted). `_all_equity` is a hidden helper so "without restrictions" = all equity + result − restricted.
+const NONPROFIT_BS: FsBuilderConfig = {
+  groups: [
+    { key: 'current_assets', label: 'Current assets', labelTh: 'สินทรัพย์หมุนเวียน', level: 0, normalSide: 'debit', bsGroups: ['current_asset'], showAccounts: true },
+    { key: 'noncurrent_assets', label: 'Non-current assets', labelTh: 'สินทรัพย์ไม่หมุนเวียน', level: 0, normalSide: 'debit', bsGroups: ['noncurrent_asset'], showAccounts: true },
+    { key: 'total_assets', label: 'Total assets', labelTh: 'รวมสินทรัพย์', level: 0, sumOf: [{ key: 'current_assets', factor: 1 }, { key: 'noncurrent_assets', factor: 1 }] },
+    { key: 'current_liabilities', label: 'Current liabilities', labelTh: 'หนี้สินหมุนเวียน', level: 0, normalSide: 'credit', bsGroups: ['current_liability'], showAccounts: true },
+    { key: 'noncurrent_liabilities', label: 'Non-current liabilities', labelTh: 'หนี้สินไม่หมุนเวียน', level: 0, normalSide: 'credit', bsGroups: ['noncurrent_liability'], showAccounts: true },
+    { key: 'total_liabilities', label: 'Total liabilities', labelTh: 'รวมหนี้สิน', level: 0, sumOf: [{ key: 'current_liabilities', factor: 1 }, { key: 'noncurrent_liabilities', factor: 1 }] },
+    { key: '_all_equity', label: '(all equity)', level: 0, normalSide: 'credit', bsGroups: ['equity'], hidden: true },
+    { key: '_result', label: '(result)', level: 0, normalSide: 'credit', types: ['Revenue', 'Expense'], hidden: true },
+    { key: 'na_restricted', label: 'Net assets with donor restrictions', labelTh: 'สินทรัพย์สุทธิที่มีข้อจำกัด', level: 1, normalSide: 'credit', accounts: ['310011'], showAccounts: true },
+    { key: 'na_unrestricted', label: 'Net assets without donor restrictions', labelTh: 'สินทรัพย์สุทธิที่ไม่มีข้อจำกัด', level: 1, sumOf: [{ key: '_all_equity', factor: 1 }, { key: '_result', factor: 1 }, { key: 'na_restricted', factor: -1 }] },
+    { key: 'total_net_assets', label: 'Total net assets', labelTh: 'รวมสินทรัพย์สุทธิ', level: 0, sumOf: [{ key: 'na_unrestricted', factor: 1 }, { key: 'na_restricted', factor: 1 }] },
+    { key: 'total_liab_net_assets', label: 'Total liabilities and net assets', labelTh: 'รวมหนี้สินและสินทรัพย์สุทธิ', level: 0, sumOf: [{ key: 'total_liabilities', factor: 1 }, { key: 'total_net_assets', factor: 1 }] },
+  ],
+};
+
+// AGRICULTURE — biological assets (125010/125011, current) as a distinct TAS-41 line; "_all_current" is a
+// hidden helper so "other current assets" = all current − biological, and the section total still ties.
+const AGRICULTURE_BS: FsBuilderConfig = {
+  groups: [
+    { key: '_all_current', label: '(all current)', level: 0, normalSide: 'debit', bsGroups: ['current_asset'], hidden: true },
+    { key: 'biological_assets', label: 'Biological assets (TAS 41)', labelTh: 'สินทรัพย์ชีวภาพ (TAS 41)', level: 1, normalSide: 'debit', prefixes: ['1250'], showAccounts: true },
+    { key: 'other_current_assets', label: 'Other current assets', labelTh: 'สินทรัพย์หมุนเวียนอื่น', level: 1, sumOf: [{ key: '_all_current', factor: 1 }, { key: 'biological_assets', factor: -1 }] },
+    { key: 'current_assets', label: 'Total current assets', labelTh: 'รวมสินทรัพย์หมุนเวียน', level: 0, sumOf: [{ key: 'biological_assets', factor: 1 }, { key: 'other_current_assets', factor: 1 }] },
+    { key: 'noncurrent_assets', label: 'Non-current assets', labelTh: 'สินทรัพย์ไม่หมุนเวียน', level: 0, normalSide: 'debit', bsGroups: ['noncurrent_asset'], showAccounts: true },
+    { key: 'total_assets', label: 'Total assets', labelTh: 'รวมสินทรัพย์', level: 0, sumOf: [{ key: 'current_assets', factor: 1 }, { key: 'noncurrent_assets', factor: 1 }] },
+    ...bsLiabilitiesEquityTail(),
+  ],
+};
+
+// CONSTRUCTION — contract work-in-progress (126xxx, current) surfaced as "contract assets"; symmetric to
+// agriculture's biological-asset carve-out.
+const CONSTRUCTION_BS: FsBuilderConfig = {
+  groups: [
+    { key: '_all_current', label: '(all current)', level: 0, normalSide: 'debit', bsGroups: ['current_asset'], hidden: true },
+    { key: 'contract_wip', label: 'Construction work in progress (contract assets)', labelTh: 'งานระหว่างก่อสร้าง (สินทรัพย์ตามสัญญา)', level: 1, normalSide: 'debit', prefixes: ['1260'], showAccounts: true },
+    { key: 'other_current_assets', label: 'Other current assets', labelTh: 'สินทรัพย์หมุนเวียนอื่น', level: 1, sumOf: [{ key: '_all_current', factor: 1 }, { key: 'contract_wip', factor: -1 }] },
+    { key: 'current_assets', label: 'Total current assets', labelTh: 'รวมสินทรัพย์หมุนเวียน', level: 0, sumOf: [{ key: 'contract_wip', factor: 1 }, { key: 'other_current_assets', factor: 1 }] },
+    { key: 'noncurrent_assets', label: 'Non-current assets', labelTh: 'สินทรัพย์ไม่หมุนเวียน', level: 0, normalSide: 'debit', bsGroups: ['noncurrent_asset'], showAccounts: true },
+    { key: 'total_assets', label: 'Total assets', labelTh: 'รวมสินทรัพย์', level: 0, sumOf: [{ key: 'current_assets', factor: 1 }, { key: 'noncurrent_assets', factor: 1 }] },
+    ...bsLiabilitiesEquityTail(),
+  ],
+};
+
+// REAL ESTATE — property inventory under development (152xxx, NON-current) surfaced as a distinct line within
+// non-current assets; "_all_noncurrent" is the hidden helper for the residual.
+const REALESTATE_BS: FsBuilderConfig = {
+  groups: [
+    { key: 'current_assets', label: 'Current assets', labelTh: 'สินทรัพย์หมุนเวียน', level: 0, normalSide: 'debit', bsGroups: ['current_asset'], showAccounts: true },
+    { key: '_all_noncurrent', label: '(all non-current)', level: 0, normalSide: 'debit', bsGroups: ['noncurrent_asset'], hidden: true },
+    { key: 'property_inventory', label: 'Property inventory under development', labelTh: 'อสังหาริมทรัพย์ระหว่างพัฒนา', level: 1, normalSide: 'debit', prefixes: ['1520'], showAccounts: true },
+    { key: 'other_noncurrent_assets', label: 'Other non-current assets', labelTh: 'สินทรัพย์ไม่หมุนเวียนอื่น', level: 1, sumOf: [{ key: '_all_noncurrent', factor: 1 }, { key: 'property_inventory', factor: -1 }] },
+    { key: 'noncurrent_assets', label: 'Total non-current assets', labelTh: 'รวมสินทรัพย์ไม่หมุนเวียน', level: 0, sumOf: [{ key: 'property_inventory', factor: 1 }, { key: 'other_noncurrent_assets', factor: 1 }] },
+    { key: 'total_assets', label: 'Total assets', labelTh: 'รวมสินทรัพย์', level: 0, sumOf: [{ key: 'current_assets', factor: 1 }, { key: 'noncurrent_assets', factor: 1 }] },
+    ...bsLiabilitiesEquityTail(),
+  ],
+};
+
+export const INDUSTRY_FS_DEFS: Record<string, { pl?: IndustryFsDef; bs?: IndustryFsDef }> = {
   manufacturing: { pl: { name: 'งบกำไรขาดทุน — การผลิต (DBD/TFRS)', statementType: 'pl', config: MANUFACTURING_PL } },
-  construction: { pl: { name: 'งบกำไรขาดทุน — งานก่อสร้าง (DBD/TFRS)', statementType: 'pl', config: CONSTRUCTION_PL } },
+  construction: {
+    pl: { name: 'งบกำไรขาดทุน — งานก่อสร้าง (DBD/TFRS)', statementType: 'pl', config: CONSTRUCTION_PL },
+    bs: { name: 'งบแสดงฐานะการเงิน — งานก่อสร้าง (DBD/TFRS)', statementType: 'bs', config: CONSTRUCTION_BS },
+  },
   hospitality: { pl: { name: 'งบกำไรขาดทุน — โรงแรม/บริการ (DBD/TFRS)', statementType: 'pl', config: HOSPITALITY_PL } },
-  nonprofit: { pl: { name: 'งบแสดงกิจกรรม (Statement of Activities)', statementType: 'pl', config: NONPROFIT_PL } },
+  nonprofit: {
+    pl: { name: 'งบแสดงกิจกรรม (Statement of Activities)', statementType: 'pl', config: NONPROFIT_PL },
+    bs: { name: 'งบแสดงฐานะการเงิน (Statement of Financial Position)', statementType: 'bs', config: NONPROFIT_BS },
+  },
+  agriculture: { bs: { name: 'งบแสดงฐานะการเงิน — เกษตร (TAS 41)', statementType: 'bs', config: AGRICULTURE_BS } },
+  realestate: { bs: { name: 'งบแสดงฐานะการเงิน — อสังหาริมทรัพย์ (DBD/TFRS)', statementType: 'bs', config: REALESTATE_BS } },
 };
