@@ -83,7 +83,11 @@ export class StatutoryFsService {
     return (row?.industry as string | null) ?? null;
   }
 
-  async getDefinition(code: string) {
+  // `industryOverride` (P6, viewer-selectable) picks WHICH industry's bespoke DBD-PL layout to render,
+  // overriding the tenant's own industry: an explicit industry key → that layout; 'generic' → force the
+  // standard multi-step P&L; empty/undefined → auto-resolve from the tenant's own industry. It only steers
+  // the built-in DBD-PL fallback — the numbers still come from the caller's own GL, so every layout ties out.
+  async getDefinition(code: string, industryOverride?: string | null) {
     const [row] = await this.db.select().from(fsReportDefinitions).where(eq(fsReportDefinitions.code, code)).limit(1);
     if (row) return this.shapeDef(row);
     // Fall back to a built-in Thai DBD/TFRS default so the standard statements render out of the box; a
@@ -94,15 +98,32 @@ export class StatutoryFsService {
       let config = def.config;
       // P6: some industries have a genuinely different P&L SHAPE (nonprofit Statement of Activities,
       // manufacturing COGS-by-element, construction cost-of-work, hospitality departmental). Resolve the
-      // caller's industry to its bespoke DBD-PL layout; everything else keeps the generic multi-step P&L.
+      // requested industry (or the caller's own) to its bespoke DBD-PL layout; everything else keeps the
+      // generic multi-step P&L.
       if (code === 'DBD-PL') {
-        const ind = await this.tenantIndustry();
+        const ind = industryOverride === 'generic' ? null
+          : (industryOverride || await this.tenantIndustry());
         const ic = ind ? INDUSTRY_FS_DEFS[ind]?.pl : undefined;
         if (ic) { name = ic.name; config = ic.config; }
       }
       return { code: def.code, name, statement_type: def.statementType, config, active: true, created_by: 'system', is_default: true };
     }
     throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
+  }
+
+  // The industry P&L layouts a viewer can pick between for the built-in DBD-PL, plus the tenant's own
+  // industry (so the UI can default the selector to it). Read-only metadata; no GL access.
+  async industryPlLayouts() {
+    const own = await this.tenantIndustry();
+    const layouts = Object.entries(INDUSTRY_FS_DEFS)
+      .filter(([, v]) => v.pl)
+      .map(([industry, v]) => ({ industry, name: v.pl!.name }));
+    return {
+      own_industry: own,
+      own_has_layout: !!(own && INDUSTRY_FS_DEFS[own]?.pl),
+      generic_name: THAI_DBD_DEFS['DBD-PL']?.name ?? 'DBD-PL',
+      layouts,
+    };
   }
 
   async upsertDefinition(dto: { code: string; name: string; statement_type: string; config: FsBuilderConfig | FsNotesConfig; active?: boolean }, createdBy: string) {
@@ -140,8 +161,8 @@ export class StatutoryFsService {
   // Renders a configured P&L (statement_type 'pl') or balance sheet ('bs') with buyer-defined subtotals /
   // row groups, plus a comparative (prior-period / budget) column — the reusable layout layer the notes,
   // SOCE and DBD exports all ride on. Numbers come from LedgerService.perAccountNet (the canonical engine).
-  async renderStatement(code: string, params: { asOf?: string; from?: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null }) {
-    const def = await this.getDefinition(code);
+  async renderStatement(code: string, params: { asOf?: string; from?: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null; industry?: string | null }) {
+    const def = await this.getDefinition(code, params.industry ?? null);
     if (def.statement_type !== 'pl' && def.statement_type !== 'bs') {
       throw new BadRequestException({ code: 'FS_NOT_RENDERABLE', message: `render supports statement_type pl|bs (got ${def.statement_type})`, messageTh: 'รองรับเฉพาะงบกำไรขาดทุน/งบแสดงฐานะการเงิน' });
     }
@@ -176,6 +197,7 @@ export class StatutoryFsService {
     return {
       code: def.code, name: def.name, statement_type: def.statement_type, ledger: ledger ?? 'LEADING',
       as_of: params.asOf, from: isPl ? params.from : null,
+      industry: params.industry ?? null,
       comparative, prior_as_of: params.priorAsOf ?? null, prior_from: isPl ? (params.priorFrom ?? null) : null,
       rows: built,
     };

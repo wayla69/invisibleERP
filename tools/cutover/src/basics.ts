@@ -1267,6 +1267,25 @@ async function main() {
     genPl.rows?.some((r: any) => r.key === 'gross_profit') && genPl.rows?.some((r: any) => r.key === 'net_profit') && !genPl.rows?.some((r: any) => r.key === 'change_in_net_assets'),
     JSON.stringify((genPl.rows ?? []).map((r: any) => r.key)));
 
+  // P6b — the statutory P&L viewer lets a user pick WHICH industry layout to render, overriding their own
+  // industry. A generic tenant can view the manufacturing COGS-by-element shape, or force the standard
+  // multi-step P&L; the numbers are still the tenant's OWN GL so the bottom line ties to net income either way.
+  const genIs = (await inj('GET', `/api/ledger/income-statement?from=${fsFromP6}&to=${asOfP3}`, genTok)).json;
+  const genAsMfg = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}&industry=manufacturing`, genTok)).json;
+  ok('P6b: industry=manufacturing renders the COGS-by-element shape for ANY tenant + still ties to net income',
+    genAsMfg.rows?.some((r: any) => r.key === 'cogs_dm') && genAsMfg.rows?.some((r: any) => r.key === 'cogs_moh') && genAsMfg.industry === 'manufacturing' && near(rowKey(genAsMfg.rows, 'net_profit'), genIs.net_income),
+    `hasDM=${genAsMfg.rows?.some((r: any) => r.key === 'cogs_dm')} ind=${genAsMfg.industry} np=${rowKey(genAsMfg.rows, 'net_profit')} ni=${genIs.net_income}`);
+  // A specialised tenant (construction) can force the GENERIC multi-step shape via industry=generic.
+  const conForceGen = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}&industry=generic`, conTok)).json;
+  ok('P6b: industry=generic forces the standard multi-step P&L even for a specialised (construction) tenant',
+    conForceGen.rows?.some((r: any) => r.key === 'gross_profit') && !conForceGen.rows?.some((r: any) => r.key === 'cw_labor'),
+    JSON.stringify((conForceGen.rows ?? []).map((r: any) => r.key)));
+  // The layouts catalog surfaces the four bespoke shapes + the caller's own industry (so the UI can default).
+  const layoutsCat = (await inj('GET', '/api/reports/fs/industry-layouts', conTok)).json;
+  ok('P6b: /industry-layouts lists the bespoke shapes + echoes the caller’s own industry',
+    layoutsCat.own_industry === 'construction' && layoutsCat.own_has_layout === true && Array.isArray(layoutsCat.layouts) && layoutsCat.layouts.some((l: any) => l.industry === 'manufacturing') && layoutsCat.layouts.some((l: any) => l.industry === 'nonprofit'),
+    `own=${layoutsCat.own_industry} hasLayout=${layoutsCat.own_has_layout} n=${layoutsCat.layouts?.length}`);
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.

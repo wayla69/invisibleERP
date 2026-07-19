@@ -69,6 +69,8 @@ export class StatutoryFsController {
   }
 
   // ── Rendered statement (P&L / BS with buyer row-groups + comparative column) ──
+  // `industry` (P6) picks which industry's bespoke DBD-PL layout to render, overriding the tenant's own —
+  // 'generic' forces the standard multi-step P&L, empty auto-resolves from the tenant's industry.
   @Get('render/:code')
   render(
     @Param('code') code: string,
@@ -77,8 +79,15 @@ export class StatutoryFsController {
     @Query('prior_as_of') priorAsOf?: string,
     @Query('prior_from') priorFrom?: string,
     @Query('ledger') ledger?: string,
+    @Query('industry') industry?: string,
   ) {
-    return this.svc.renderStatement(code, { asOf, from, priorAsOf, priorFrom, ledger: ledger || null });
+    return this.svc.renderStatement(code, { asOf, from, priorAsOf, priorFrom, ledger: ledger || null, industry: industry || null });
+  }
+
+  // ── Industry P&L layouts a viewer can pick between for the built-in DBD-PL ──
+  @Get('industry-layouts')
+  industryLayouts() {
+    return this.svc.industryPlLayouts();
   }
 
   // ── Statement of changes in equity (roll-forward) ──
