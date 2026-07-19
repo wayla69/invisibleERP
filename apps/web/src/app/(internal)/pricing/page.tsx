@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calculator, Plus, Tag, Trash2, BookOpen } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { baht } from '@/lib/format';
+import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 const sel = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
@@ -247,6 +248,16 @@ function Books() {
   const knownTiers: string[] = Array.from(new Set((q.data?.books ?? []).map((b: any) => b.tier).filter(Boolean))) as string[];
   const empty = { name: '', tier: '', branch_id: '', priority: '100', valid_from: '', valid_to: '' };
   const [f, setF] = useState<any>(empty);
+  const [dlgOpen, setDlgOpen] = useState(false);
+  // Whether an APPROVED book is actually in effect right now (vs scheduled for the future or expired) — the
+  // status badge alone can't tell them apart, so a future-dated active book looks live when it isn't.
+  const windowState = (r: any): 'live' | 'scheduled' | 'expired' | null => {
+    if (r.status !== 'Active' || !r.active) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (r.valid_from && r.valid_from > today) return 'scheduled';
+    if (r.valid_to && r.valid_to < today) return 'expired';
+    return 'live';
+  };
   const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
   const [entries, setEntries] = useState<PBEntry[]>([{ item_id: '', unit_price: '', min_qty: '1' }]);
   const setEntry = (i: number, p: Partial<PBEntry>) => setEntries((es) => es.map((e, j) => (j === i ? { ...e, ...p } : e)));
@@ -258,7 +269,7 @@ function Books() {
       const created: any = await api('/api/pricing/books', { method: 'POST', body: JSON.stringify({ name: f.name, tier: f.tier || null, branch_id: f.branch_id ? Number(f.branch_id) : null, priority: Number(f.priority) || 100, valid_from: f.valid_from || null, valid_to: f.valid_to || null }) });
       await api(`/api/pricing/books/${created.id}/entries`, { method: 'POST', body: JSON.stringify({ entries: validEntries() }) });
     },
-    onSuccess: () => { notifySuccess(t('hx.pb.saved_pending')); setF(empty); setEntries([{ item_id: '', unit_price: '', min_qty: '1' }]); qc.invalidateQueries({ queryKey: ['price-books'] }); },
+    onSuccess: () => { notifySuccess(t('hx.pb.saved_pending')); setF(empty); setEntries([{ item_id: '', unit_price: '', min_qty: '1' }]); setDlgOpen(false); qc.invalidateQueries({ queryKey: ['price-books'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const del = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['price-books'] }) });
@@ -268,12 +279,15 @@ function Books() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t('hx.pb.add_title')}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">{t('hx.pb.desc')}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{t('hx.pb.desc')}</p>
+        <Dialog open={dlgOpen} onOpenChange={setDlgOpen}>
+          <DialogTrigger asChild>
+            <Button><Plus className="size-4" /> {t('hx.pb.new_btn')}</Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+            <DialogHeader><DialogTitle>{t('hx.pb.add_title')}</DialogTitle></DialogHeader>
+            <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label={<>{t('hx.pb.f_name')} <span className="text-destructive">*</span></>} htmlFor="pb-name" className="sm:col-span-2 lg:col-span-1">
               <Input id="pb-name" placeholder={t('hx.pb.name_ph')} value={f.name} onChange={(e) => set({ name: e.target.value })} required />
@@ -329,8 +343,10 @@ function Books() {
             </Button>
             {!canSave && !save.isPending && <span className="text-xs text-muted-foreground">{t('hx.pb.name_required')}</span>}
           </div>
-        </CardContent>
-      </Card>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
       <StateView q={q}>
         {q.data && (
           <DataTable
@@ -342,11 +358,27 @@ function Books() {
               { key: 'tier', label: t('hx.pb.col_tier'), render: (r: any) => r.tier || <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
               { key: 'branch_id', label: t('hx.pb.col_branch'), render: (r: any) => r.branch_id != null ? (branchName(r.branch_id) ?? `#${r.branch_id}`) : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
               { key: 'priority', label: t('hx.pb.f_priority'), align: 'right', render: (r: any) => <span className="tabular">{r.priority}</span> },
+              { key: 'validity', label: t('hx.pb.col_validity'), sortable: false, render: (r: any) => (r.valid_from || r.valid_to)
+                ? <span className="whitespace-nowrap text-sm">{r.valid_from ? thaiDate(r.valid_from) : '—'} – {r.valid_to ? thaiDate(r.valid_to) : '—'}</span>
+                : <span className="text-muted-foreground">{t('hx.pb.always')}</span> },
               // G6 (SoD R10): a staged (PendingApproval) book is inactive until a DIFFERENT user activates it.
-              { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'
-                ? <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>
-                : r.status === 'Rejected' ? <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>
-                : <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('hx.pr.st_active') : t('hx.pr.st_inactive')}</Badge> },
+              // For an Active book we also show whether it's actually in effect NOW vs scheduled/expired.
+              { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => {
+                if (r.status === 'PendingApproval') return <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>;
+                if (r.status === 'Rejected') return <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>;
+                const w = windowState(r);
+                if (w === 'live') return <Badge variant="success">{t('hx.pb.st_live')}</Badge>;
+                if (w === 'scheduled') return <Badge variant="secondary">{t('hx.pb.st_scheduled')}</Badge>;
+                if (w === 'expired') return <Badge variant="secondary">{t('hx.pb.st_expired')}</Badge>;
+                return <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('hx.pr.st_active') : t('hx.pr.st_inactive')}</Badge>;
+              } },
+              // Maker/checker trail (SoD R10) — who staged it and who approved it, for auditability at a glance.
+              { key: 'trail', label: t('hx.pb.col_trail'), sortable: false, render: (r: any) => (
+                <div className="text-xs leading-tight text-muted-foreground">
+                  <div>{t('hx.pb.maker')}: <span className="text-foreground">{r.created_by || '—'}</span></div>
+                  <div>{t('hx.pb.checker')}: <span className="text-foreground">{r.approved_by || '—'}</span>{r.approved_at ? ` · ${thaiDate(r.approved_at)}` : ''}</div>
+                </div>
+              ) },
               { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pr.del_rule_aria', { name: r.name })} disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
             ]}
           />

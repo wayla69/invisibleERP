@@ -155,6 +155,6 @@ export class PriceBookService {
 
 function specificity(b: any): number { return (b.tier != null ? 1 : 0) + (b.branchId != null ? 1 : 0); }
 function mapBook(b: any) {
-  return { id: b.id, name: b.name, tier: b.tier ?? null, branch_id: b.branchId != null ? Number(b.branchId) : null, currency: b.currency ?? 'THB', priority: b.priority ?? 100, active: !!b.active, status: b.status ?? 'PendingApproval', valid_from: b.validFrom ?? null, valid_to: b.validTo ?? null, created_by: b.createdBy ?? null, approved_by: b.approvedBy ?? null };
+  return { id: b.id, name: b.name, tier: b.tier ?? null, branch_id: b.branchId != null ? Number(b.branchId) : null, currency: b.currency ?? 'THB', priority: b.priority ?? 100, active: !!b.active, status: b.status ?? 'PendingApproval', valid_from: b.validFrom ?? null, valid_to: b.validTo ?? null, created_by: b.createdBy ?? null, approved_by: b.approvedBy ?? null, created_at: b.createdAt ?? null, approved_at: b.approvedAt ?? null };
 }
 function mapEntry(e: any) { return { item_id: e.itemId, unit_price: n(e.unitPrice), min_qty: Number(e.minQty ?? 1) }; }
