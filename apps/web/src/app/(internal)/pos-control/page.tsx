@@ -45,9 +45,72 @@ export default function PosControlPage() {
       <Tabs tabs={[
         { key: 'held', label: t('px.ctrl_tab_held'), content: <Held /> },
         { key: 'override', label: t('px.ctrl_tab_override'), content: <Overrides /> },
+        { key: 'discount', label: t('px.ctrl_tab_discount'), content: <DiscountAuthority /> },
         { key: 'reasons', label: t('px.ctrl_tab_reasons'), content: <ReasonCodes /> },
         { key: 'audit', label: t('px.ctrl_tab_audit'), content: <AuditLog /> },
       ]} />
+    </div>
+  );
+}
+
+// docs/52 Phase 4b — discount authority: set the cashier discount caps + issue a supervisor authorization
+// code (OVR-…) for an over-cap discount. Both maintained by the supervisor duty (pos_refund/exec).
+function DiscountAuthority() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const caps = useQuery<{ maxLinePct: number | null; maxBillPct: number | null }>({ queryKey: ['pos-discount-settings'], queryFn: () => api('/api/pos/discount-settings') });
+  const [line, setLine] = useState('');
+  const [bill, setBill] = useState('');
+  // hydrate the inputs once the current caps load
+  const capsData = caps.data;
+  const [seeded, setSeeded] = useState(false);
+  if (capsData && !seeded) { setSeeded(true); setLine(capsData.maxLinePct != null ? String(capsData.maxLinePct) : ''); setBill(capsData.maxBillPct != null ? String(capsData.maxBillPct) : ''); }
+  const saveCaps = useMutation({
+    mutationFn: () => api('/api/pos/discount-settings', { method: 'PUT', body: JSON.stringify({ max_line_discount_pct: line === '' ? null : Number(line), max_bill_discount_pct: bill === '' ? null : Number(bill) }) }),
+    onSuccess: () => { notifySuccess(t('px.disc_caps_saved')); qc.invalidateQueries({ queryKey: ['pos-discount-settings'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const [maxPct, setMaxPct] = useState('');
+  const [reason, setReason] = useState('');
+  const authorize = useMutation({
+    mutationFn: () => api<{ override_no: string }>('/api/pos/discount-authorize', { method: 'POST', body: JSON.stringify({ max_pct: Number(maxPct), reason: reason || undefined }) }),
+    onSuccess: (r) => { notifySuccess(t('px.disc_auth_issued', { no: r.override_no })); setMaxPct(''); setReason(''); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle className="text-base">{t('px.disc_caps_title')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{t('px.disc_caps_desc')}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={t('px.disc_cap_line')} htmlFor="dc-line">
+              <Input id="dc-line" type="number" inputMode="decimal" min={0} max={100} placeholder="—" value={line} onChange={(e) => setLine(e.target.value)} />
+            </Field>
+            <Field label={t('px.disc_cap_bill')} htmlFor="dc-bill">
+              <Input id="dc-bill" type="number" inputMode="decimal" min={0} max={100} placeholder="—" value={bill} onChange={(e) => setBill(e.target.value)} />
+            </Field>
+          </div>
+          <Button disabled={saveCaps.isPending} onClick={() => saveCaps.mutate()}>{saveCaps.isPending ? t('hx.common.saving') : t('px.disc_caps_save')}</Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-base">{t('px.disc_auth_title')}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{t('px.disc_auth_desc')}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={t('px.disc_auth_maxpct')} htmlFor="da-pct">
+              <Input id="da-pct" type="number" inputMode="decimal" min={0} max={100} placeholder="0" value={maxPct} onChange={(e) => setMaxPct(e.target.value)} />
+            </Field>
+            <Field label={t('px.disc_auth_reason')} htmlFor="da-reason">
+              <Input id="da-reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+          </div>
+          <Button disabled={!maxPct || Number(maxPct) <= 0 || authorize.isPending} onClick={() => authorize.mutate()}>
+            <ShieldCheck className="size-4" /> {authorize.isPending ? t('hx.common.saving') : t('px.disc_auth_btn')}
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

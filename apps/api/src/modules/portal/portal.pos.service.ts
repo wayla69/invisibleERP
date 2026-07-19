@@ -23,6 +23,7 @@ import { LockingService } from '../pos/scale/locking.service';
 import { LotsService } from '../lots/lots.service';
 import { SerialsService } from '../serials/serials.service';
 import { PriceBookService } from '../pricing/price-book.service';
+import { PosControlService } from '../pos/control/pos-control.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[]; lot_no?: string; serial_nos?: string[] }[];
@@ -49,6 +50,10 @@ export interface PortalSaleDto {
   // a tier (or the branch) has an active, approved book pricing an item, that governed price OVERRIDES the
   // line's client-supplied unit_price. ABSENT (and no branch book) ⇒ the client price stands (byte-identical).
   price_tier?: string;
+  // docs/52 Phase 4b — discount authority: when a manual line/bill discount exceeds the tenant's configured
+  // cap, the sale must reference a supervisor's discount authorization (an OVR- number from
+  // POST /api/pos/discount-authorize). ABSENT caps (the default) ⇒ no gate ⇒ byte-identical.
+  discount_approval_no?: string;
 }
 
 // docs/52 Phase 6a — map a tender method label to its GL posting event. Each TENDER.* event defaults its
@@ -92,6 +97,7 @@ export class PortalPosService {
     @Optional() private readonly lots?: LotsService,  // docs/52 Phase 3a — FEFO lot capture for lot-tracked items
     @Optional() private readonly serials?: SerialsService,  // docs/52 Phase 3b — serial/IMEI capture for serial-tracked items
     @Optional() private readonly priceBooks?: PriceBookService,  // docs/52 Phase 4a — governed tier/branch base price
+    @Optional() private readonly posControl?: PosControlService,  // docs/52 Phase 4b — over-cap discount authority
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -227,6 +233,26 @@ export class PortalPosService {
         throw new BadRequestException({ code: 'TENDER_MISMATCH', message: `Tenders apply ${applied} but the sale total is ${total}`, messageTh: `ยอดชำระรวม (${applied}) ไม่ตรงกับยอดที่ต้องชำระ (${total})` });
     }
 
+    // docs/52 Phase 4b — discount authority: a MANUAL line/bill discount above the tenant's configured cap
+    // requires a supervisor's authorization (SoD R08). Both caps NULL (the default) ⇒ no gate ⇒ byte-identical.
+    // The gate is on the manual discounts (`items[].discount_pct`, `discount`), not the pricing-engine discount.
+    let discountConsume: { overrideNo: string; requestedPct: number } | null = null;
+    if (this.posControl) {
+      const caps = await this.posControl.getDiscountSettings(t.id);
+      if (caps.maxLinePct != null || caps.maxBillPct != null) {
+        const maxLinePct = dto.items.reduce((m, it) => Math.max(m, n(it.discount_pct)), 0);
+        const billPct = subtotal > 0 ? (n(dto.discount) / subtotal) * 100 : 0;
+        const lineOver = caps.maxLinePct != null && maxLinePct > caps.maxLinePct + 1e-6;
+        const billOver = caps.maxBillPct != null && billPct > caps.maxBillPct + 1e-6;
+        if (lineOver || billOver) {
+          const requestedPct = Math.max(lineOver ? maxLinePct : 0, billOver ? billPct : 0);
+          if (!dto.discount_approval_no)
+            throw new BadRequestException({ code: 'DISCOUNT_APPROVAL_REQUIRED', message: `A ${requestedPct.toFixed(2)}% discount exceeds the cap (line ${caps.maxLinePct ?? '—'}% / bill ${caps.maxBillPct ?? '—'}%) — a supervisor must authorize it`, messageTh: `ส่วนลด ${requestedPct.toFixed(2)}% เกินเพดานที่กำหนด — ต้องให้หัวหน้าอนุมัติก่อน` });
+          discountConsume = { overrideNo: dto.discount_approval_no, requestedPct };
+        }
+      }
+    }
+
     // SALE- number, collision-safe: the second-precision stamp can clash for rapid sales → retry on a
     // bumped second until cust_pos_sales.sale_no (UNIQUE) is free.
     let saleNo = this.docNo.nextTenantStamped('SALE', t.code);
@@ -251,6 +277,11 @@ export class PortalPosService {
         taxAmount: fx(vat, 2), total: fx(total, 2), serviceCharge: fx(serviceCharge, 2), paymentMethod: dto.payment_method ?? 'Cash',
         pointsUsed: '0', pointsEarned: String(pointsEarned), status: 'Completed', notes: dto.notes ?? null, ageVerified, createdBy: user.username,
       }).returning({ id: custPosSales.id });
+
+      // docs/52 Phase 4b — consume the supervisor discount authorization inside the sale tx (fail-closed +
+      // single-use), so a rolled-back sale never burns it and a concurrent sale can't reuse it (SoD R08).
+      if (this.posControl && discountConsume)
+        await this.posControl.consumeDiscountApproval(tx, { tenantId: t.id, user, overrideNo: discountConsume.overrideNo, requestedPct: discountConsume.requestedPct, saleNo });
 
       // docs/52 Phase 3a — resolve the lot(s) for each lot-tracked line BEFORE writing the sale lines, so the
       // line carries the consumed lot and the sale fails fast (whole request rolls back) on an expired / held /
