@@ -2899,6 +2899,13 @@
       "when": 2023820000379,
       "tag": "0440_item_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 415,
+      "version": "7",
+      "when": 2023820000380,
+      "tag": "0441_kit_component_qty",
+      "breakpoints": true
     }
   ]
 }

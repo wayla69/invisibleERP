@@ -34,7 +34,7 @@ const ItemProfileBody = z.object({
   barcode: z.string().trim().max(64).nullish(), uom: z.string().trim().max(20).nullish(), base_uom: z.string().trim().max(20).nullish(),
   conversion_factor: z.number().positive().nullish(), unit_price: z.number().nonnegative().nullish(),
   temperature_type: z.string().trim().max(30).nullish(), bu_id: z.string().trim().max(30).nullish(),
-  supply_type: z.enum(['goods', 'service']).nullish(), // docs/52 Phase 2a — service items sell with no stock move / no COGS
+  supply_type: z.enum(['goods', 'service', 'non_inventory']).nullish(), // docs/52 Phase 2a/2c — service & non-inventory sell with no stock move / no COGS
   min_stock: z.number().nonnegative().nullish(), max_stock: z.number().nonnegative().nullish(),
   avg_daily_usage: z.number().nonnegative().nullish(), lead_time_days: z.number().nonnegative().nullish(),
   min_order_qty: z.number().nonnegative().nullish(), order_multiple: z.number().nonnegative().nullish(),
@@ -49,7 +49,8 @@ const WarehouseBody = z.object({
 });
 // Item relationships + lifecycle (master-data audit Phase 10).
 const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
-const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), note: z.string().optional() });
+// qty (docs/52 Phase 2c) — components consumed per kit sold; only meaningful for rel_type='kit_component'.
+const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), qty: z.number().positive().max(100000).optional(), note: z.string().optional() });
 // docs/52 Phase 2b — generate a variant matrix under a parent item from axes (Size, Color, …).
 const GenerateVariantsBody = z.object({
   axes: z.array(z.object({ axis: z.string().trim().min(1).max(40), values: z.array(z.string().trim().min(1).max(40)).min(1).max(50) })).min(1).max(4),

@@ -29,6 +29,21 @@ expiry, locations / bins, mobile scanning, and cycle counts / stocktakes.
 > barcode** at the till and count it separately. Re-generating after adding a new
 > colour only creates the new cells (nothing is duplicated).
 
+> **Kits / bundles (sell one, deduct many).** On `/setup/items`, load the bundle
+> item (e.g. a gift set) and use the **ชุดสินค้า / ส่วนประกอบ (Kit / bundle
+> components)** panel to list what it contains: enter each **component item ID**
+> and its **quantity per kit**, then **เพิ่ม (Add)**. Selling the bundle at the
+> POS charges the **bundle's own price** as one line, but **reduces the stock of
+> each component** (and books their cost of goods) — the bundle item itself is not
+> stocked. Selling two bundles deducts twice the components, and so on. An item
+> with **no** components listed sells normally (its own stock is reduced).
+
+> **Non-inventory items (fees & charges).** Mark an item's **supply type** as
+> *non-inventory* for a line that isn't a physical product — a **delivery fee**,
+> **gift-wrap** or a **printed-on-demand** charge. It sells and posts revenue like
+> a normal sale line but **moves no stock and books no cost of goods** (its
+> revenue books to the sales-revenue account, not the service account).
+
 1. Go to **Inventory** (`/inventory`).
 2. Search for an item (**ค้นหา** by Item ID or name — typing is debounced, and the
    list stays on screen while it refreshes), or toggle **เฉพาะสต๊อกต่ำ** to show

@@ -101,6 +101,7 @@
     "pos-profile": "tsx src/pos-profile.ts",
     "item-service": "tsx src/item-service.ts",
     "item-variants": "tsx src/item-variants.ts",
+    "item-kit": "tsx src/item-kit.ts",
     "pricing": "tsx src/pricing.ts",
     "returns": "tsx src/returns.ts",
     "bankrec": "tsx src/bankrec.ts",

@@ -35,7 +35,7 @@ export interface ItemProfileDto {
   // scan-to-add, MRP lot-sizing, FA-10 capital routing) but had no maintenance surface on this screen.
   barcode?: string | null; uom?: string | null; base_uom?: string | null; conversion_factor?: number | null;
   unit_price?: number | null; temperature_type?: string | null; bu_id?: string | null;
-  supply_type?: string | null; // 'goods' | 'service' — a service item sells with no stock move / no COGS (docs/52 Phase 2a)
+  supply_type?: string | null; // 'goods' | 'service' | 'non_inventory' — service/non-inventory sell with no stock move / no COGS (docs/52 Phase 2a/2c)
   min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
@@ -237,14 +237,17 @@ export class ItemSetupService {
     return shapeItem(row);
   }
 
-  async addItemRelationship(itemId: string, dto: { to_item_id: string; rel_type: string; note?: string }, user: JwtUser) {
+  async addItemRelationship(itemId: string, dto: { to_item_id: string; rel_type: string; qty?: number; note?: string }, user: JwtUser) {
     const from = await this.itemRow(itemId);
     if (dto.to_item_id === itemId) throw new BadRequestException({ code: 'SELF_RELATION', message: 'An item cannot relate to itself', messageTh: 'สินค้าไม่สามารถเชื่อมโยงกับตัวเองได้' });
     const to = await this.itemRow(dto.to_item_id);
+    // Phase 2c: a kit_component row carries the per-component quantity consumed per kit sold; the advisory
+    // rel types (substitute/complement/…) ignore it (stored as the default 1).
+    const qty = dto.rel_type === 'kit_component' ? Math.max(0.001, Number(dto.qty ?? 1)) : 1;
     try {
       const [row] = await this.db.insert(itemRelationships).values({
         tenantId: user.tenantId ?? null, fromItemId: Number(from.id), toItemId: Number(to.id),
-        relType: dto.rel_type, note: dto.note ?? null, createdBy: user.username,
+        relType: dto.rel_type, qty: String(qty), note: dto.note ?? null, createdBy: user.username,
       }).returning();
       return shapeItemRel(row, { item_id: to.itemId, description: to.itemDescription ?? null }, 'outgoing');
     } catch (e) {
@@ -448,5 +451,5 @@ function shapeItem(i: any) {
 
 function shapeItemRel(r: any, other: { item_id: string; description: string | null }, direction: 'outgoing' | 'incoming') {
   // `party` shape mirrors the customer/vendor relationships so the shared web section renders it uniformly.
-  return { id: Number(r.id), rel_type: r.relType, direction, party: { item_id: other.item_id, name: other.description || other.item_id }, note: r.note ?? null, created_by: r.createdBy, created_at: r.createdAt };
+  return { id: Number(r.id), rel_type: r.relType, direction, qty: Number(r.qty ?? 1), party: { item_id: other.item_id, name: other.description || other.item_id }, note: r.note ?? null, created_by: r.createdBy, created_at: r.createdAt };
 }
