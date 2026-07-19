@@ -41,6 +41,7 @@ const ItemProfileBody = z.object({
   order_cost: z.number().nonnegative().nullish(), holding_cost: z.number().nonnegative().nullish(),
   is_fixed_asset: z.boolean().optional(), default_asset_category_id: z.number().int().nullish(),
   is_lot_tracked: z.boolean().optional(), // docs/52 Phase 3a — FEFO lot capture at the POS for this item
+  is_serial_tracked: z.boolean().optional(), // docs/52 Phase 3b — serial/IMEI capture at the POS for this item
 });
 const WarehouseBody = z.object({
   location_name: z.string().trim().max(200).nullish(), zone: z.string().trim().max(50).nullish(),

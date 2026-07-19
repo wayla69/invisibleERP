@@ -81,6 +81,7 @@ export const custPosItems = pgTable('cust_pos_items', {
   isCustom: boolean('is_custom').default(false),
   lotNo: text('lot_no'),                 // docs/52 Phase 3a — lot the line consumed (FEFO at sell time; null = untracked)
   expiryDate: date('expiry_date'),       // docs/52 Phase 3a — the consumed lot's expiry (recall/traceability)
+  serialNo: text('serial_no'),           // docs/52 Phase 3b — serial/IMEI the line consumed (null = not serial-tracked)
 }, (t) => ({
   bySale: index('idx_cpi_sale').on(t.saleId), // sale ⋈ items join key
 }));

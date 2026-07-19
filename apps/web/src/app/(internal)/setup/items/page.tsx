@@ -30,6 +30,7 @@ type Profile = {
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
   is_lot_tracked?: boolean; // docs/52 Phase 3a — FEFO lot capture at the POS
+  is_serial_tracked?: boolean; // docs/52 Phase 3b — serial/IMEI capture at the POS
   status?: string; superseded_by?: number | null;
 };
 
@@ -56,7 +57,7 @@ export default function ItemPostingSetupPage() {
 
   const save = useMutation({
     mutationFn: () => {
-      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null, is_lot_tracked: !!form!.is_lot_tracked };
+      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null, is_lot_tracked: !!form!.is_lot_tracked, is_serial_tracked: !!form!.is_serial_tracked };
       for (const k of ['revenue_account', 'cogs_account', 'inventory_account', 'valuation_account', 'vat_code', 'wht_income_type', 'default_location_id', ...TEXT_FIELDS] as const) p[k] = (form as any)[k] ? (form as any)[k] : null;
       for (const k of NUM_FIELDS) p[k] = (form as any)[k] ?? null;
       return api(`/api/item-setup/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify(p) });
@@ -235,6 +236,17 @@ export default function ItemPostingSetupPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {/* docs/52 Phase 3b — serial-tracked: the POS sells this item as a specific serial/IMEI unit. */}
+              <div className="grid gap-2">
+                <Label>ติดตามซีเรียล/IMEI (Serial-tracked at POS)</Label>
+                <Select value={form.is_serial_tracked ? '1' : '0'} onValueChange={(v) => setForm((f) => f && ({ ...f, is_serial_tracked: v === '1' }))}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t('st.sitm_no')}</SelectItem>
+                    <SelectItem value="1">{t('st.sitm_yes')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div>
               <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>
@@ -267,6 +279,7 @@ export default function ItemPostingSetupPage() {
             <ScheduledChangesSection entity="item" entityKey={itemId} fields={['unit_price', 'status']} />
             <VariantsSection itemId={itemId} />
             <KitSection itemId={itemId} />
+            {form.is_serial_tracked && <SerialsSection itemId={itemId} />}
           </Card>
         )}
 
@@ -365,6 +378,45 @@ function KitSection({ itemId }: { itemId: string }) {
               <span className="text-muted-foreground">{c.party.name}</span>
               <span className="ml-auto">× {c.qty}</span>
               <Button size="sm" variant="ghost" disabled={del.isPending} onClick={() => del.mutate(c.id)}>ลบ</Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// docs/52 Phase 3b — register serial/IMEI units into stock for a serial-tracked item and see what's in stock
+// vs sold. The POS then sells a specific in-stock serial (marking it Sold).
+interface SerialRow { serial_no: string; status: string; sale_no: string | null }
+function SerialsSection({ itemId }: { itemId: string }) {
+  const qc = useQueryClient();
+  const [raw, setRaw] = useState('');
+  const q = useQuery<{ item_id: string; count: number; serials: SerialRow[] }>({ queryKey: ['item-serials', itemId], queryFn: () => api(`/api/serials/items/${encodeURIComponent(itemId)}`) });
+  const add = useMutation({
+    mutationFn: () => {
+      const serials = raw.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+      return api(`/api/serials/items/${encodeURIComponent(itemId)}`, { method: 'POST', body: JSON.stringify({ serials }) });
+    },
+    onSuccess: (r: any) => { notifySuccess(`เพิ่มซีเรียล ${r.added} หมายเลข (Added ${r.added})`); setRaw(''); qc.invalidateQueries({ queryKey: ['item-serials', itemId] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const serials = q.data?.serials ?? [];
+  const inStock = serials.filter((s) => s.status === 'InStock').length;
+  return (
+    <div className="grid gap-2 border-t pt-4">
+      <Label className="text-sm font-semibold">ซีเรียล / IMEI (Serial units) — {inStock} in stock / {serials.length} total</Label>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Input className="sm:col-span-3" value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="Serial/IMEI numbers (comma or space separated)" />
+        <Button size="sm" disabled={add.isPending || !raw.trim()} onClick={() => add.mutate()}>เพิ่มเข้าสต๊อก (Add)</Button>
+      </div>
+      {serials.length > 0 && (
+        <div className="mt-1 grid gap-1 text-sm">
+          {serials.slice(0, 50).map((sn) => (
+            <div key={sn.serial_no} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1">
+              <span className="font-mono text-xs">{sn.serial_no}</span>
+              <span className={`ml-auto text-xs ${sn.status === 'InStock' ? 'text-success' : 'text-muted-foreground'}`}>{sn.status}</span>
+              {sn.sale_no && <span className="font-mono text-xs text-muted-foreground">{sn.sale_no}</span>}
             </div>
           ))}
         </div>

@@ -21,9 +21,10 @@ import { PricingService } from '../pricing/pricing.service';
 import { JournalService } from '../pos/fiscal/journal.service';
 import { LockingService } from '../pos/scale/locking.service';
 import { LotsService } from '../lots/lots.service';
+import { SerialsService } from '../serials/serials.service';
 
 export interface PortalSaleDto {
-  items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[]; lot_no?: string }[];
+  items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[]; lot_no?: string; serial_nos?: string[] }[];
   discount?: number;
   payment_method?: string;
   notes?: string;
@@ -69,6 +70,7 @@ export class PortalPosService {
     @Optional() private readonly locking?: LockingService,  // wiring: auto-86 recompute after stock decrement
     @Optional() private readonly usage?: UsageMeterService,  // 1.5 — meter one billable POS transaction per sale
     @Optional() private readonly lots?: LotsService,  // docs/52 Phase 3a — FEFO lot capture for lot-tracked items
+    @Optional() private readonly serials?: SerialsService,  // docs/52 Phase 3b — serial/IMEI capture for serial-tracked items
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -104,11 +106,14 @@ export class PortalPosService {
     // 'service' line (e.g. a haircut, a consultation) is NOT a stocked good: it skips the inventory/COGS
     // moves below and its revenue posts to the service revenue event. Goods-only sales are unchanged.
     const itemIds = [...new Set(lines.map((l) => String(l.item_id)))];
-    const masterRows = itemIds.length ? await db.select({ id: items.id, itemId: items.itemId, supplyType: items.supplyType, isLotTracked: items.isLotTracked }).from(items).where(inArray(items.itemId, itemIds)) : [];
+    const masterRows = itemIds.length ? await db.select({ id: items.id, itemId: items.itemId, supplyType: items.supplyType, isLotTracked: items.isLotTracked, isSerialTracked: items.isSerialTracked }).from(items).where(inArray(items.itemId, itemIds)) : [];
     const supplyByItem = new Map<string, string>(masterRows.map((r: any) => [String(r.itemId), String(r.supplyType ?? 'goods')]));
     // docs/52 Phase 3a — a lot-tracked item sells only from a real, non-expired, non-held lot (FEFO). Non-tracked
     // items (the default) capture no lot → byte-identical. Service/non_inventory lines are never lot-tracked.
     const lotTracked = new Set<string>(masterRows.filter((r: any) => r.isLotTracked).map((r: any) => String(r.itemId)));
+    // docs/52 Phase 3b — a serial-tracked item sells as specific serial/IMEI unit(s); the line must carry one
+    // in-stock serial per unit. Non-tracked items capture no serial → byte-identical.
+    const serialTracked = new Set<string>(masterRows.filter((r: any) => r.isSerialTracked).map((r: any) => String(r.itemId)));
     const isSvc = (l: { item_id: string }) => supplyByItem.get(String(l.item_id)) === 'service';
     // docs/52 Phase 2c — a 'service' OR 'non_inventory' line moves no stock and books no COGS; the only
     // difference is revenue routing (service → SALE.SERVICE via isSvc; non-inventory → the goods event).
@@ -202,19 +207,28 @@ export class PortalPosService {
       // missing lot. FEFO by default; an explicit `lot_no` overrides. Non-tracked lines resolve to no lot.
       const lotByLine: (string | null)[] = new Array(lines.length).fill(null);
       const lotExpiryByLine: (string | null)[] = new Array(lines.length).fill(null);
+      const serialByLine: (string | null)[] = new Array(lines.length).fill(null);
       for (const [i, l] of lines.entries()) {
-        if (!lotTracked.has(String(l.item_id))) continue;
-        if (!this.lots) throw new BadRequestException({ code: 'LOT_TRACKING_UNAVAILABLE', message: 'Lot tracking is not available', messageTh: 'ระบบล็อตไม่พร้อมใช้งาน' });
-        const alloc = await this.lots.consumeForSale(tx, { itemId: String(l.item_id), qty: n(l.qty), refDoc: saleNo, bizToday: today, explicitLot: l.lot_no, createdBy: user.username });
-        const first = alloc[0];
-        if (first) { lotByLine[i] = first.lot_no; lotExpiryByLine[i] = first.expiry; }
+        if (lotTracked.has(String(l.item_id))) {
+          if (!this.lots) throw new BadRequestException({ code: 'LOT_TRACKING_UNAVAILABLE', message: 'Lot tracking is not available', messageTh: 'ระบบล็อตไม่พร้อมใช้งาน' });
+          const alloc = await this.lots.consumeForSale(tx, { itemId: String(l.item_id), qty: n(l.qty), refDoc: saleNo, bizToday: today, explicitLot: l.lot_no, createdBy: user.username });
+          const first = alloc[0];
+          if (first) { lotByLine[i] = first.lot_no; lotExpiryByLine[i] = first.expiry; }
+        }
+        // docs/52 Phase 3b — a serial-tracked line consumes the exact serial/IMEI unit(s) it names (one per unit);
+        // the sale fails closed (whole request rolls back) on a missing / already-sold / count-mismatched serial.
+        if (serialTracked.has(String(l.item_id))) {
+          if (!this.serials) throw new BadRequestException({ code: 'SERIAL_TRACKING_UNAVAILABLE', message: 'Serial tracking is not available', messageTh: 'ระบบซีเรียลไม่พร้อมใช้งาน' });
+          const used = await this.serials.consumeForSale(tx, { tenantId: t.id, itemId: String(l.item_id), serialNos: l.serial_nos ?? [], qty: n(l.qty), saleNo, createdBy: user.username });
+          serialByLine[i] = used[0] ?? null;
+        }
       }
 
       await tx.insert(custPosItems).values(lines.map((l, i) => ({
         saleId: Number(h.id), itemId: l.item_id, itemDescription: l.item_description ?? null,
         qty: String(n(l.qty)), uom: l.uom ?? null, unitPrice: fx(l.unit_price, 2),
         discountPct: String(n(l.discount_pct)), amount: fx(l.amount, 2), isCustom: false,
-        lotNo: lotByLine[i], expiryDate: lotExpiryByLine[i],
+        lotNo: lotByLine[i], expiryDate: lotExpiryByLine[i], serialNo: serialByLine[i],
       })));
 
       // decrement customer inventory (MAX(0,...)) + stock log. Phase 2c: extracted per-physical-quantity so a
