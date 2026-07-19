@@ -20,6 +20,7 @@ const SaleBody = z.object({
     qty: z.number().positive(), unit_price: z.number().nonnegative(),
     uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
     modifier_option_ids: z.array(z.number().int()).optional(),
+    lot_no: z.string().trim().max(64).optional(), // docs/52 Phase 3a — explicit lot for a lot-tracked item (else FEFO)
   })).min(1),
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),
@@ -31,6 +32,14 @@ const SaleBody = z.object({
   service_min_party: z.number().int().positive().optional(),
   rounding: z.number().nonnegative().optional(),
   branch_id: z.number().int().positive().optional(),
+  // docs/52 Phase 6a — split payment: settle one sale across several tenders (must sum to the total).
+  tenders: z.array(z.object({
+    method: z.string().min(1),
+    amount: z.number().positive(),
+    gateway: z.string().optional(),
+    cash_tendered: z.number().nonnegative().optional(),
+    reference: z.string().max(120).optional(),
+  })).min(1).max(10).optional(),
 });
 
 const AddInventoryBody = z.object({

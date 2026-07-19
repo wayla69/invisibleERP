@@ -146,6 +146,18 @@ genealogy for recall evidence.
 > stop picking. Only a user with the inventory-control duty can hold or release a
 > lot; anyone with `lots`/`warehouse` can run the trace.
 
+> **Selling a lot-tracked item at the POS (FEFO).** On the item setup screen
+> (`/setup/items`) an item can be marked **ติดตามล็อต/วันหมดอายุ (Lot-tracked)**.
+> A lot-tracked item can be sold **only from a real lot** — when the cashier rings
+> it, the POS automatically picks the **soonest-to-expire** lot (FEFO) that is
+> **not expired and not on hold**, stamps that lot number + expiry on the sale
+> line, and records the draw against the lot ledger (so the sale shows up in the
+> lot's forward **recall trace**). If the only stock left is **expired** or **on
+> hold**, the sale is **refused** at the till (you can't sell expired or recalled
+> stock), and if a lot-tracked item has **no lot on hand** it can't be sold until
+> it's received with a lot. A normal (non-lot-tracked) item is unaffected — it
+> sells exactly as before with no lot prompt.
+
 **Error messages:**
 
 - **LOT_NOT_HELD** — you tried to release a lot that is not currently on hold.

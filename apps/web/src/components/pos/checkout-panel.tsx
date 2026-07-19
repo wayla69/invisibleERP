@@ -38,7 +38,7 @@ export function CheckoutPanel({
   lines, onSettle, onReprint, onSendReceipt, onClose, onFinish, serviceChargePct = 0,
 }: {
   lines: CartLine[];
-  onSettle: (p: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string }) => Promise<SettleResult>;
+  onSettle: (p: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[] }) => Promise<SettleResult>;
   onReprint: (saleNo: string) => Promise<void>;
   // email/sms need a typed recipient; 'line' resolves the member from the sale server-side (no `to`).
   onSendReceipt: (saleNo: string, channel: 'email' | 'sms' | 'line', to?: string) => Promise<void>;
@@ -59,6 +59,10 @@ export function CheckoutPanel({
   const [voucherInfo, setVoucherInfo] = useState<VoucherPreview | null>(null);
   const [voucherBusy, setVoucherBusy] = useState(false);
   const [lineBusy, setLineBusy] = useState(false);
+  // docs/52 Phase 6a — split payment: settle one sale across several tenders. Default OFF (single-method flow
+  // unchanged). When on, the tender rows must sum EXACTLY to the total before the sale can be settled.
+  const [splitOn, setSplitOn] = useState(false);
+  const [splitRows, setSplitRows] = useState<{ method: Method; amount: string }[]>([{ method: 'Cash', amount: '' }, { method: 'Card', amount: '' }]);
 
   const base = useMemo(() => cartTotals(lines, discountPct, serviceChargePct), [lines, discountPct, serviceChargePct]);
   // Mirror the server: the voucher competes for the order-discount slot (best wins, no stacking).
@@ -98,10 +102,15 @@ export function CheckoutPanel({
   });
 
   const append = (d: string) => setCash((c) => (c === '0' ? d : c + d).slice(0, 9));
+  // Phase 6a split-payment tallies: the legs must sum to the (server-authoritative) total before settling.
+  const splitSum = round2(splitRows.reduce((a, r) => a + (Number(r.amount) || 0), 0));
+  const splitRemaining = round2(tot.total - splitSum);
+  const splitValid = !splitOn || (Math.abs(splitRemaining) < 0.005 && splitRows.every((r) => Number(r.amount) > 0));
   const settle = async () => {
     setBusy(true);
     try {
-      const r = await onSettle({ method, discountPct, cashReceived: cashNum ?? undefined, voucherCode: voucherInfo?.valid ? voucherInfo.code : undefined });
+      const tenders = splitOn ? splitRows.map((r) => ({ method: r.method, amount: round2(Number(r.amount)) })) : undefined;
+      const r = await onSettle({ method, discountPct, cashReceived: cashNum ?? undefined, voucherCode: voucherInfo?.valid ? voucherInfo.code : undefined, tenders });
       setResult(r);
     } catch (e) {
       notifyError((e as Error).message);
@@ -206,6 +215,44 @@ export function CheckoutPanel({
                   <m.icon className="size-5" /> {methodLabel(m.id)}
                 </button>
               ))}
+            </div>
+
+            {/* docs/52 Phase 6a — split payment (แยกชำระ): pay one sale with several tenders. Off by default. */}
+            <div className="rounded-lg border px-3 py-2 text-sm">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">แยกชำระหลายช่องทาง (Split payment)</span>
+                <input type="checkbox" className="size-4" checked={splitOn} onChange={(e) => setSplitOn(e.target.checked)} />
+              </label>
+              {splitOn && (
+                <div className="mt-2 grid gap-2">
+                  {splitRows.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <select
+                        className="h-8 flex-1 rounded-md border bg-background px-2 text-sm"
+                        value={row.method}
+                        onChange={(e) => setSplitRows((rs) => rs.map((r, j) => (j === i ? { ...r, method: e.target.value as Method } : r)))}
+                      >
+                        {METHODS.map((m) => <option key={m.id} value={m.id}>{methodLabel(m.id)}</option>)}
+                      </select>
+                      <Input
+                        type="number" min={0} step="any" inputMode="decimal"
+                        className="h-8 w-28 tabular text-right"
+                        value={row.amount}
+                        onChange={(e) => setSplitRows((rs) => rs.map((r, j) => (j === i ? { ...r, amount: e.target.value } : r)))}
+                      />
+                      {splitRows.length > 1 && (
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setSplitRows((rs) => rs.filter((_, j) => j !== i))} aria-label="remove tender"><X className="size-4" /></Button>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between">
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setSplitRows((rs) => [...rs, { method: 'Cash', amount: '' }])}>+ เพิ่มช่องทาง (Add)</Button>
+                    <span className={cn('tabular', Math.abs(splitRemaining) < 0.005 ? 'text-success' : 'text-warning')}>
+                      คงเหลือ (Remaining): {baht(splitRemaining)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
@@ -313,7 +360,7 @@ export function CheckoutPanel({
 
         <div className="flex items-center justify-between gap-2 border-t pt-3">
           <Button variant="outline" onClick={onClose}><ArrowLeft className="size-4" /> {t('px.chk_back_to_cart')}</Button>
-          <Button className="h-11 px-6 text-base" disabled={busy || cashShort} onClick={settle}>
+          <Button className="h-11 px-6 text-base" disabled={busy || cashShort || !splitValid} onClick={settle}>
             {busy ? t('px.chk_saving') : t('px.chk_confirm_pay', { amount: baht(tot.total) })}
           </Button>
         </div>

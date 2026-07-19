@@ -29,6 +29,7 @@ type Profile = {
   min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
+  is_lot_tracked?: boolean; // docs/52 Phase 3a — FEFO lot capture at the POS
   status?: string; superseded_by?: number | null;
 };
 
@@ -55,7 +56,7 @@ export default function ItemPostingSetupPage() {
 
   const save = useMutation({
     mutationFn: () => {
-      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null };
+      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null, is_lot_tracked: !!form!.is_lot_tracked };
       for (const k of ['revenue_account', 'cogs_account', 'inventory_account', 'valuation_account', 'vat_code', 'wht_income_type', 'default_location_id', ...TEXT_FIELDS] as const) p[k] = (form as any)[k] ? (form as any)[k] : null;
       for (const k of NUM_FIELDS) p[k] = (form as any)[k] ?? null;
       return api(`/api/item-setup/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify(p) });
@@ -223,6 +224,17 @@ export default function ItemPostingSetupPage() {
                   </Select>
                 </div>
               )}
+              {/* docs/52 Phase 3a — lot-tracked: the POS sells this item only from a real, non-expired, non-held lot (FEFO). */}
+              <div className="grid gap-2">
+                <Label>ติดตามล็อต/วันหมดอายุ (Lot-tracked — FEFO at POS)</Label>
+                <Select value={form.is_lot_tracked ? '1' : '0'} onValueChange={(v) => setForm((f) => f && ({ ...f, is_lot_tracked: v === '1' }))}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t('st.sitm_no')}</SelectItem>
+                    <SelectItem value="1">{t('st.sitm_yes')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div>
               <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>

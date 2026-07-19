@@ -102,6 +102,8 @@
     "item-service": "tsx src/item-service.ts",
     "item-variants": "tsx src/item-variants.ts",
     "item-kit": "tsx src/item-kit.ts",
+    "pos-split": "tsx src/pos-split.ts",
+    "pos-lot": "tsx src/pos-lot.ts",
     "pricing": "tsx src/pricing.ts",
     "returns": "tsx src/returns.ts",
     "bankrec": "tsx src/bankrec.ts",
