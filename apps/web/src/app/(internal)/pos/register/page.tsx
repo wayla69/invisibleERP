@@ -158,24 +158,30 @@ export default function RegisterPage() {
       if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
       const genericItems = lines.map((l) => ({ item_id: l.sku, item_description: l.name, qty: l.qty, unit_price: l.unit_price, discount_pct: l.discount_pct || undefined, modifier_option_ids: l.modifier_option_ids }));
       const genericDiscount = discountPct > 0 ? Math.round(cartTotals(lines).sub * discountPct) / 100 : undefined;
-      // docs/52 Phase 6a split tenders + 3c age gate. The generic sale posts once; if the server refuses on
-      // AGE_VERIFICATION_REQUIRED (the cart has an age-restricted item), the cashier confirms they checked the
-      // buyer's ID and we retry ONCE with age_ack — a serial/lot/expired refusal still surfaces as-is.
-      const postGeneric = (ageAck: boolean) => api<{ sale_no: string; total: number }>('/api/pos/sales', {
+      // docs/52 Phase 6a split tenders + 3c age gate + 4b discount authority. The generic sale posts once; the
+      // server may refuse on AGE_VERIFICATION_REQUIRED (an age-restricted item — cashier confirms ID) or on
+      // DISCOUNT_APPROVAL_REQUIRED (a discount over the cap — cashier enters the supervisor's OVR- code); we
+      // retry with the extra field. A serial/lot/expired refusal still surfaces as-is.
+      const postGeneric = (ageAck: boolean, approvalNo?: string) => api<{ sale_no: string; total: number }>('/api/pos/sales', {
         method: 'POST',
-        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(priceTier ? { price_tier: priceTier } : {}), ...(ageAck ? { age_ack: true } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
+        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(priceTier ? { price_tier: priceTier } : {}), ...(ageAck ? { age_ack: true } : {}), ...(approvalNo ? { discount_approval_no: approvalNo } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
       });
       let gsale: { sale_no: string; total: number };
       try {
-        try {
-          gsale = await postGeneric(false);
-        } catch (ae) {
-          if ((ae as Error & { code?: string }).code === 'AGE_VERIFICATION_REQUIRED'
-            && typeof window !== 'undefined'
-            && window.confirm(t('px.reg_age_confirm'))) {
-            gsale = await postGeneric(true);
-          } else throw ae;
+        let ageAck = false; let approvalNo: string | undefined; let attemptSale: { sale_no: string; total: number } | undefined;
+        for (let i = 0; i < 3 && !attemptSale; i++) {
+          try { attemptSale = await postGeneric(ageAck, approvalNo); }
+          catch (re) {
+            const code = (re as Error & { code?: string }).code;
+            if (code === 'AGE_VERIFICATION_REQUIRED' && !ageAck && typeof window !== 'undefined' && window.confirm(t('px.reg_age_confirm'))) { ageAck = true; continue; }
+            if (code === 'DISCOUNT_APPROVAL_REQUIRED' && !approvalNo && typeof window !== 'undefined') {
+              const entered = window.prompt(t('px.reg_discount_approval_prompt'));
+              if (entered && entered.trim()) { approvalNo = entered.trim(); continue; }
+            }
+            throw re;
+          }
         }
+        gsale = attemptSale!;
       } catch (e) {
         // network died mid-checkout while the browser still reports online → queue the sale offline instead
         // of erroring at the cashier (mirrors the restaurant path). HTTP errors (validation etc.) surface.
