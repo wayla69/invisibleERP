@@ -2934,6 +2934,20 @@
       "when": 2023820000384,
       "tag": "0445_pos_serial_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 420,
+      "version": "7",
+      "when": 2023820000385,
+      "tag": "0446_pos_age_restricted",
+      "breakpoints": true
+    },
+    {
+      "idx": 421,
+      "version": "7",
+      "when": 2023820000386,
+      "tag": "0447_pos_price_books",
+      "breakpoints": true
     }
   ]
 }

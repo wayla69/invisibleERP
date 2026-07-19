@@ -33,6 +33,9 @@ const SaleBody = z.object({
   service_min_party: z.number().int().positive().optional(),
   rounding: z.number().nonnegative().optional(),
   branch_id: z.number().int().positive().optional(),
+  // docs/52 Phase 3c — age-restricted gate: cashier attests ID checked, or a customer birthdate proves age.
+  age_ack: z.boolean().optional(),
+  customer_birthdate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   // docs/52 Phase 6a — split payment: settle one sale across several tenders (must sum to the total).
   tenders: z.array(z.object({
     method: z.string().min(1),
@@ -41,6 +44,8 @@ const SaleBody = z.object({
     cash_tendered: z.number().nonnegative().optional(),
     reference: z.string().max(120).optional(),
   })).min(1).max(10).optional(),
+  // docs/52 Phase 4a — price books: the customer price tier for this sale (governed base price by tier/branch).
+  price_tier: z.string().max(60).optional(),
 });
 
 const AddInventoryBody = z.object({

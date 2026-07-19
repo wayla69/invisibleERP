@@ -11,6 +11,7 @@ export const items = pgTable('items', {
   supplyType: text('supply_type').notNull().default('goods'),   // 'goods' | 'service' — VAT tax-point class (5.1, ม.78 vs 78/1). Inert until 5.1b.
   isLotTracked: boolean('is_lot_tracked').notNull().default(false), // docs/52 Phase 3a — sells only from a real, non-expired, non-held lot (FEFO at POS); shared master, no RLS loop
   isSerialTracked: boolean('is_serial_tracked').notNull().default(false), // docs/52 Phase 3b — sold as a specific serial/IMEI unit (InStock → Sold); shared master, no RLS loop
+  minAge: integer('min_age').notNull().default(0), // docs/52 Phase 3c — minimum buyer age (alcohol/tobacco 20; 0 = unrestricted); shared master, no RLS loop
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),

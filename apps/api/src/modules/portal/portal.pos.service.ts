@@ -22,6 +22,7 @@ import { JournalService } from '../pos/fiscal/journal.service';
 import { LockingService } from '../pos/scale/locking.service';
 import { LotsService } from '../lots/lots.service';
 import { SerialsService } from '../serials/serials.service';
+import { PriceBookService } from '../pricing/price-book.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[]; lot_no?: string; serial_nos?: string[] }[];
@@ -35,10 +36,19 @@ export interface PortalSaleDto {
   service_min_party?: number;   // B4: party threshold for service charge (default 6)
   rounding?: number;            // B4: satang rounding step (0 = disabled) → acct 4900
   branch_id?: number;           // multi-branch: tag the sale to an outlet (must belong to this tenant)
+  // docs/52 Phase 3c — age-restricted gate: when the cart contains an age-restricted item (min_age > 0) the
+  // sale must be age-verified — the cashier attests they checked ID (`age_ack`) OR a `customer_birthdate`
+  // (YYYY-MM-DD) proves the buyer meets the highest required age. Absent an age-restricted item, both are ignored.
+  age_ack?: boolean;
+  customer_birthdate?: string;
   // docs/52 Phase 6a — split payment: settle one sale with several tenders (cash + card + QR + voucher …).
   // Each leg's `amount` is what it APPLIES to the sale; the legs must sum EXACTLY to the total. A cash leg may
   // carry `cash_tendered` > amount to record change (mirrors #1). ABSENT ⇒ the single-tender path (unchanged).
   tenders?: { method: string; amount: number; gateway?: string; cash_tendered?: number; reference?: string }[];
+  // docs/52 Phase 4a — price books: the customer PRICE TIER for this sale (retail|wholesale|vip|member…). When
+  // a tier (or the branch) has an active, approved book pricing an item, that governed price OVERRIDES the
+  // line's client-supplied unit_price. ABSENT (and no branch book) ⇒ the client price stands (byte-identical).
+  price_tier?: string;
 }
 
 // docs/52 Phase 6a — map a tender method label to its GL posting event. Each TENDER.* event defaults its
@@ -53,6 +63,16 @@ export function tenderEvent(method: string): string {
   return 'TENDER.OTHER';
 }
 const isCashMethod = (method: string): boolean => /cash|เงินสด/.test((method || '').toLowerCase());
+
+// docs/52 Phase 3c — full years between a birthdate and the sale (business) date, both 'YYYY-MM-DD'.
+function ageOnDate(birthdate: string, onDate: string): number {
+  const bp = birthdate.slice(0, 10).split('-'); const op = onDate.slice(0, 10).split('-');
+  const by = +(bp[0] ?? 0), bm = +(bp[1] ?? 0), bd = +(bp[2] ?? 0);
+  const oy = +(op[0] ?? 0), om = +(op[1] ?? 0), od = +(op[2] ?? 0);
+  let age = oy - by;
+  if (om < bm || (om === bm && od < bd)) age -= 1;
+  return age;
+}
 
 @Injectable()
 export class PortalPosService {
@@ -71,6 +91,7 @@ export class PortalPosService {
     @Optional() private readonly usage?: UsageMeterService,  // 1.5 — meter one billable POS transaction per sale
     @Optional() private readonly lots?: LotsService,  // docs/52 Phase 3a — FEFO lot capture for lot-tracked items
     @Optional() private readonly serials?: SerialsService,  // docs/52 Phase 3b — serial/IMEI capture for serial-tracked items
+    @Optional() private readonly priceBooks?: PriceBookService,  // docs/52 Phase 4a — governed tier/branch base price
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -95,7 +116,19 @@ export class PortalPosService {
       if (!br) throw new BadRequestException({ code: 'BRANCH_NOT_FOUND', message: `Branch ${branchId} not found for this tenant`, messageTh: 'ไม่พบสาขาของร้านนี้' });
     }
 
-    const lines = dto.items.map((it) => {
+    // docs/52 Phase 4a — price books: resolve a GOVERNED base price per line by the sale's customer tier +
+    // branch BEFORE any discount. When an active, approved book prices the item, its price OVERRIDES the
+    // client-supplied unit_price (an auditable basis, not a number typed at the till). No matching book ⇒ the
+    // client price stands ⇒ byte-identical. Only consulted when a tier or branch is in play (default path skips it).
+    let saleItems = dto.items;
+    if (this.priceBooks && (dto.price_tier || branchId != null)) {
+      const qtyByItem = new Map<string, number>();
+      for (const it of dto.items) qtyByItem.set(String(it.item_id), (qtyByItem.get(String(it.item_id)) ?? 0) + n(it.qty));
+      const booked = await this.priceBooks.resolvePriceMany(t.id, dto.items.map((it) => String(it.item_id)), { tier: dto.price_tier ?? null, branchId, at: opts?.saleDate, qtyByItem });
+      if (booked.size) saleItems = dto.items.map((it) => { const b = booked.get(String(it.item_id)); return b ? { ...it, unit_price: b.unit_price } : it; });
+    }
+
+    const lines = saleItems.map((it) => {
       const gross = n(it.qty) * n(it.unit_price);
       const lineDisc = gross * (n(it.discount_pct) / 100);
       return { ...it, amount: roundCurrency(gross - lineDisc, 'THB') };
@@ -106,7 +139,7 @@ export class PortalPosService {
     // 'service' line (e.g. a haircut, a consultation) is NOT a stocked good: it skips the inventory/COGS
     // moves below and its revenue posts to the service revenue event. Goods-only sales are unchanged.
     const itemIds = [...new Set(lines.map((l) => String(l.item_id)))];
-    const masterRows = itemIds.length ? await db.select({ id: items.id, itemId: items.itemId, supplyType: items.supplyType, isLotTracked: items.isLotTracked, isSerialTracked: items.isSerialTracked }).from(items).where(inArray(items.itemId, itemIds)) : [];
+    const masterRows = itemIds.length ? await db.select({ id: items.id, itemId: items.itemId, supplyType: items.supplyType, isLotTracked: items.isLotTracked, isSerialTracked: items.isSerialTracked, minAge: items.minAge }).from(items).where(inArray(items.itemId, itemIds)) : [];
     const supplyByItem = new Map<string, string>(masterRows.map((r: any) => [String(r.itemId), String(r.supplyType ?? 'goods')]));
     // docs/52 Phase 3a — a lot-tracked item sells only from a real, non-expired, non-held lot (FEFO). Non-tracked
     // items (the default) capture no lot → byte-identical. Service/non_inventory lines are never lot-tracked.
@@ -114,6 +147,23 @@ export class PortalPosService {
     // docs/52 Phase 3b — a serial-tracked item sells as specific serial/IMEI unit(s); the line must carry one
     // in-stock serial per unit. Non-tracked items capture no serial → byte-identical.
     const serialTracked = new Set<string>(masterRows.filter((r: any) => r.isSerialTracked).map((r: any) => String(r.itemId)));
+    // docs/52 Phase 3c — age-restricted gate. The required age is the HIGHEST min_age across the cart (0 =
+    // unrestricted). When > 0 the sale must be age-verified BEFORE anything is persisted: a `customer_birthdate`
+    // proves the buyer meets it, or the cashier attests (`age_ack`) they checked ID — else the sale is refused.
+    const requiredAge = masterRows.reduce((m: number, r: any) => Math.max(m, Number(r.minAge) || 0), 0);
+    let ageVerified = false;
+    if (requiredAge > 0) {
+      const bizDate = opts?.saleDate ?? ymd();
+      if (dto.customer_birthdate) {
+        const age = ageOnDate(String(dto.customer_birthdate), bizDate);
+        if (age < requiredAge) throw new BadRequestException({ code: 'AGE_BELOW_MINIMUM', message: `Customer age ${age} is under the required minimum ${requiredAge}`, messageTh: `ลูกค้าอายุ ${age} ปี ต่ำกว่าเกณฑ์ ${requiredAge} ปี` });
+        ageVerified = true;
+      } else if (dto.age_ack === true) {
+        ageVerified = true;
+      } else {
+        throw new BadRequestException({ code: 'AGE_VERIFICATION_REQUIRED', message: `This sale contains an age-restricted item (min age ${requiredAge}) — verify the buyer's age`, messageTh: `รายการนี้มีสินค้าจำกัดอายุ (ขั้นต่ำ ${requiredAge} ปี) — ต้องยืนยันอายุผู้ซื้อ` });
+      }
+    }
     const isSvc = (l: { item_id: string }) => supplyByItem.get(String(l.item_id)) === 'service';
     // docs/52 Phase 2c — a 'service' OR 'non_inventory' line moves no stock and books no COGS; the only
     // difference is revenue routing (service → SALE.SERVICE via isSvc; non-inventory → the goods event).
@@ -199,7 +249,7 @@ export class PortalPosService {
       const [h] = await tx.insert(custPosSales).values({
         saleNo, saleDate: today, tenantId: t.id, branchId, subtotal: fx(subtotal, 2), discount: fx(discount, 2),
         taxAmount: fx(vat, 2), total: fx(total, 2), serviceCharge: fx(serviceCharge, 2), paymentMethod: dto.payment_method ?? 'Cash',
-        pointsUsed: '0', pointsEarned: String(pointsEarned), status: 'Completed', notes: dto.notes ?? null, createdBy: user.username,
+        pointsUsed: '0', pointsEarned: String(pointsEarned), status: 'Completed', notes: dto.notes ?? null, ageVerified, createdBy: user.username,
       }).returning({ id: custPosSales.id });
 
       // docs/52 Phase 3a — resolve the lot(s) for each lot-tracked line BEFORE writing the sale lines, so the
