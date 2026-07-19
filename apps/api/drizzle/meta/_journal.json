@@ -2948,6 +2948,13 @@
       "when": 2023820000386,
       "tag": "0447_pos_price_books",
       "breakpoints": true
+    },
+    {
+      "idx": 422,
+      "version": "7",
+      "when": 2023820000387,
+      "tag": "0448_pos_discount_authority",
+      "breakpoints": true
     }
   ]
 }
