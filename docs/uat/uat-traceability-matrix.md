@@ -1,6 +1,6 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v7.62 · *v7.62: F5 prep-time report UI (no migration; operational — no new control) — maps UAT-O2C-559: the learned prep-time report (`GET /api/restaurant/kds/prep-times`, fired→served 14-day avg + sample count per dish) is surfaced on `/kds` as the fourth view-switcher tab **เวลาทำเฉลี่ย** (renders TH+EN; the figure the board already times ETA/SLA against; ≥3 samples to appear) (REST-08). ToE Playwright `kds-features.capture.spec.ts` (restaurant harness endpoint coverage unchanged); PN-20 rev 3.25; manual 01 v0.64; UAT-02 v0.97.* ·
+**Status: DRAFT v7.63 · *v7.63: maps UAT-GL-212..216 (chart expansion → 142 accounts + งบดุล/งบกำไรขาดทุน section binding `bs_group`/`is_group`, migration 0438, GL-11/GL-27 — no new control), UAT-O2C-560 + UAT-P2P-153 (customer/vendor Thai postal-code → เขต/แขวง address autofill), and UAT-ADM-172..173 (business types 5→17 with a CoA template + SME nav profile each, and the B3 starter kit + E1 industry packs covering all 17 types). Coverage tally unchanged (see the reconciliation-pending note). ToE `coa-change.test.ts` · `statement-sections.test.ts` · `pure-utils.test.ts` · `basics.ts` 460 · `onboarding.ts` 157; golden re-pinned 588.* · *v7.62: F5 prep-time report UI (no migration; operational — no new control) — maps UAT-O2C-559: the learned prep-time report (`GET /api/restaurant/kds/prep-times`, fired→served 14-day avg + sample count per dish) is surfaced on `/kds` as the fourth view-switcher tab **เวลาทำเฉลี่ย** (renders TH+EN; the figure the board already times ETA/SLA against; ≥3 samples to appear) (REST-08). ToE Playwright `kds-features.capture.spec.ts` (restaurant harness endpoint coverage unchanged); PN-20 rev 3.25; manual 01 v0.64; UAT-02 v0.97.* ·
 **Status: DRAFT v7.61 · *v7.61: QR/KDS impact wave F1–F8 (migrations `0436`/`0437`; operational — no new control) — maps UAT-O2C-546..558: F1 diner call-staff / service requests (`service_requests` table, realtime floor board `GET/POST /api/restaurant/service-requests`); F2 split pay-your-share (coverage-aware `settleAndFinalize`, `/split/pay` + `/split`); F3 member-link at the table (`table_sessions.member_id` → QR sale earns points, no GL); F6 co-purchase upsell (`/suggestions`); F4 station-scoped KDS terminal (feed `station_code`); F5 prep-time auto-learn (`/kds/prep-times`); F7 void-from-KDS with reason; F8 course-pacing (`/kds/pacing`) (REST-08 / REST-04 / REST-03). ToE `restaurant.ts` 207→220; PN-20 rev 3.24; manual 01 v0.63; UAT-02 v0.96.* ·
 **Status: DRAFT v7.60 · *v7.60: Kitchen-display ergonomics (no migration; operational — no new control) — maps UAT-O2C-544..545: the KDS `feed` carries each line's menu `sku` (inline **86/ของหมด** → `PATCH /api/menu/items/:sku/availability`, diner order then blocked `ITEM_UNAVAILABLE`) + a live `summary` (active_count / avg_wait_min / served_today / avg_prep_today_min, business-day fire→served); sound cue, big-text and fullscreen are client display aids. ToE `restaurant.ts` 205→207; PN-20 rev 3.23; manual 01 v0.62; UAT-02 v0.95.* ·
 **Status: DRAFT v7.59 · *v7.59: Diner menu depth + recommendation strategies (migration `0435`; operational — no new control) — maps UAT-O2C-539..543: per-tenant `recommend_mode` (`manual`/`behavior`/`popular_low_cost`, RecommendationService) overrides the diner-menu `is_recommended` set — behaviour = member-attributed dine-in history + curated favourites, popular_low_cost = best-seller × margin (REST-08); the public order view adds `fired_at`/`wait_min`/`served_at` so dishes group into fire lots (hh:mm) with a served swap; KDS `POST /api/restaurant/kds/start` accepts a whole ticket. Menu photos/zoom/grid are UI. ToE `restaurant.ts` 200→205; PN-20 rev 3.22; manual 01 v0.61; UAT-02 v0.94.* ·
@@ -602,6 +602,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-489 | CRM-18 a project can raise only one renewal (idempotent) | CRM-18 | 18 §7.20, rev 0.23 (pipeline.ts) |
 | UAT-O2C-490 | CRM-18 raising clears the gap | CRM-18 | 18 §7.20, rev 0.23 (pipeline.ts) |
 | UAT-O2C-491 | CRM-18 a delivered project with no CRM account can't raise | CRM-18 | 18 §7.20, rev 0.23 (pipeline.ts) |
+| UAT-O2C-560 | Customer address postal-code → เขต/แขวง autofill | Feature (Thai address autofill; no control) | 01 (customer master) |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -864,6 +865,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-113 | Lot hold quarantines — excluded from FEFO + WMS wave allocation | INV-18 | 03 §7 (15), §9 (15) (`lot-trace.ts`) |
 | UAT-INV-114 | Release re-enables the lot; non-held release rejected (`LOT_NOT_HELD`) | INV-18 | 03 §7 (15) (`lot-trace.ts`) |
 | UAT-INV-115 | Trace an unknown lot rejected (`LOT_NOT_FOUND`) | INV-18 | 03 §7 (15) (`lot-trace.ts`) |
+| UAT-P2P-153 | Vendor address postal-code → เขต/แขวง autofill | Feature (Thai address autofill; no control) | 02 (vendor master) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
@@ -1219,6 +1221,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
 | UAT-PAY-024 | Approver inbox lists pending expense claims (tenant-scoped) | Feature (ESS), ITGC-AC-03 | 25 §7 |
 | UAT-UI-ESS-02 | Expense approval screen — approve/reject + self-block (UI) | Feature (ESS UI), ITGC-AC-09 | 25 §7 |
+| UAT-GL-212 | Sub-account create + `PARENT_TYPE_MISMATCH`/`PARENT_SELF` + 4–6-digit codes | GL-11, GL-27 | 04 §7 step 15 |
+| UAT-GL-213 | Expanded canonical chart (~34 accounts, now 142) | GL-11 (no new control) | 04 §7 (rev 2.39–2.40) |
+| UAT-GL-214 | Balance sheet binds accounts to งบดุล sections (`bs_group`) | GL-11, GL-07 | 04 §7 (rev 2.40) |
+| UAT-GL-215 | Income statement binds accounts to งบกำไรขาดทุน sections (`is_group`) | GL-11 | 04 §7 (rev 2.40) |
+| UAT-GL-216 | Per-account statement-section binding overrides the default | GL-11 | 04 §7 (rev 2.40) |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`
 
@@ -1546,6 +1553,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-QC-002 | Raise an NCR with no financial disposition → `status='open'` (`NCR-*`) | QC-01 | 15 §7 (13) (`quality-ncr.ts`) |
 | UAT-QC-003 | Promote a failed `quality_inspection` into an NCR (ref to GR, `pending_disposition`) | QC-01 | 15 §7 (13) (`quality-ncr.ts`) |
 | UAT-QC-004 | Propose scrap → parks `pending_disposition`; no GL posted yet | QC-01 | 15 §7 (13) (`quality-ncr.ts`) |
+| UAT-ADM-172 | Business types expanded 5→17 (CoA template + SME nav profile per industry) | GL-10 (no new control); docs/51 B1 | 04 §7 step 15; PN-30 |
+| UAT-ADM-173 | Starter kit + industry packs cover all 17 business types | (no control — tenant-scoped sample data); docs/51 B3, E1 | PN-30 §4 |
 | UAT-QC-005 | Raiser self-dispositions → 403 `SOD_SELF_APPROVAL` (maker-checker) | QC-01 (SoD raiser≠approver, R21) | 15 §9 (`quality-ncr.ts`) |
 | UAT-QC-006 | Distinct `quality_approve` user dispositions scrap → `dispositioned`, write-off 50, `entry_no` JE-*, Dr 5810 / Cr 1200, TB balanced | QC-01 / GL-01 | 15 §7 (13), §9 (`quality-ncr.ts`) |
 | UAT-QC-007 | Reject a proposed disposition → NCR returns to `open`, no GL | QC-01 | 15 §9 (`quality-ncr.ts`) |
