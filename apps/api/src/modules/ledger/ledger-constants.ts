@@ -11,7 +11,15 @@ export const LEDGERS: { code: string; name: string; gaap: string; isLeading: boo
 ];
 
 // minimal Chart of Accounts (code, name, type)
-export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense' }[] = [
+// P3 (industry depth): a canonical account may declare a `parentCode` (a sub-account under a canonical
+// parent, 6-digit) and/or an explicit statement-section binding (`bsGroup`/`isGroup`/`isCurrent`) when the
+// default classification map would not place it correctly (e.g. a COGS sub-account under a cost parent).
+// Sub-accounts are canonical (postable + reported) but curated per industry by the CoA templates.
+export type CoaSeedRow = {
+  code: string; name: string; type: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+  parentCode?: string; bsGroup?: string; isGroup?: string; isCurrent?: boolean;
+};
+export const COA: CoaSeedRow[] = [
   { code: '1000', name: 'Cash', type: 'Asset' },
   { code: '1100', name: 'Accounts Receivable', type: 'Asset' },
   { code: '1200', name: 'Inventory', type: 'Asset' },
@@ -189,6 +197,39 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '5750', name: 'Entertainment Expense', type: 'Expense' },        // ค่ารับรอง (Thai — capped deductibility)
   { code: '5760', name: 'Donation Expense', type: 'Expense' },             // เงินบริจาค
   { code: '5870', name: 'Other Expenses', type: 'Expense' },               // ค่าใช้จ่ายอื่น
+
+  // ─────────── P3 industry-depth sub-accounts (canonical superset; curated per industry by the CoA templates) ───────────
+  // CONSTRUCTION — work-in-progress by trade phase (under 1260) + cost of work by resource (under 5800).
+  { code: '126001', name: 'WIP — Earthwork', type: 'Asset', parentCode: '1260' },                 // งานระหว่างก่อสร้าง — งานดิน
+  { code: '126002', name: 'WIP — Structure', type: 'Asset', parentCode: '1260' },                 // งานโครงสร้าง
+  { code: '126003', name: 'WIP — Architectural / Finishing', type: 'Asset', parentCode: '1260' }, // งานสถาปัตย์/ตกแต่ง
+  { code: '126004', name: 'WIP — MEP / Systems', type: 'Asset', parentCode: '1260' },             // งานระบบ
+  { code: '580001', name: 'Cost of Work — Labor', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },        // ค่าแรง
+  { code: '580002', name: 'Cost of Work — Materials', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },    // ค่าวัสดุ
+  { code: '580003', name: 'Cost of Work — Subcontractor', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },// ค่าผู้รับเหมาช่วง
+  { code: '580004', name: 'Cost of Work — Equipment / Plant', type: 'Expense', parentCode: '5800', isGroup: 'cogs' }, // ค่าเครื่องจักร
+
+  // MANUFACTURING — WIP by cost element (under 1250) + COGS by cost element (under 5000).
+  { code: '125001', name: 'WIP — Direct Materials', type: 'Asset', parentCode: '1250' },   // งานระหว่างทำ — วัตถุดิบทางตรง
+  { code: '125002', name: 'WIP — Direct Labor', type: 'Asset', parentCode: '1250' },       // ค่าแรงทางตรง
+  { code: '125003', name: 'WIP — Manufacturing Overhead', type: 'Asset', parentCode: '1250' }, // ค่าโสหุ้ยการผลิต
+  { code: '500001', name: 'COGS — Direct Materials', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ต้นทุนขาย — วัตถุดิบทางตรง
+  { code: '500002', name: 'COGS — Direct Labor', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },     // ค่าแรงทางตรง
+  { code: '500003', name: 'COGS — Manufacturing Overhead', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ค่าโสหุ้ยการผลิต
+
+  // HOSPITALITY — revenue by department (room under 4300; F&B under 4000) + F&B cost by kind (under 5000).
+  { code: '430001', name: 'Room Revenue', type: 'Revenue', parentCode: '4300' },            // รายได้ค่าห้องพัก
+  { code: '430002', name: 'Other Service Revenue (spa/laundry)', type: 'Revenue', parentCode: '4300' }, // รายได้บริการอื่น
+  { code: '400001', name: 'Food Sales', type: 'Revenue', parentCode: '4000' },              // รายได้อาหาร
+  { code: '400002', name: 'Beverage Sales', type: 'Revenue', parentCode: '4000' },          // รายได้เครื่องดื่ม
+  { code: '500011', name: 'Cost of Food', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },     // ต้นทุนอาหาร
+  { code: '500012', name: 'Cost of Beverage', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ต้นทุนเครื่องดื่ม
+
+  // PROFESSIONAL SERVICES — unbilled WIP by engagement kind (under 1260) + cost of services by kind (under 5800).
+  { code: '126010', name: 'Unbilled WIP — Staff Time', type: 'Asset', parentCode: '1260' },        // งานระหว่างทำ — ค่าแรงวิชาชีพ
+  { code: '126011', name: 'Unbilled WIP — Disbursements', type: 'Asset', parentCode: '1260' },     // ค่าใช้จ่ายทดรองตามงาน
+  { code: '580010', name: 'Cost of Services — Staff Time', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },     // ต้นทุนบริการ — ค่าแรง
+  { code: '580011', name: 'Cost of Services — Disbursements', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },  // ต้นทุนบริการ — ค่าใช้จ่ายทดรอง
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────

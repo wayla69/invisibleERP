@@ -162,16 +162,20 @@ export class LedgerService implements OnModuleInit {
     // P2: present the chart in class → statement-section order (not raw code) — computed, no stored column.
     canon.sort((a, b) => coaSortOrder(a) - coaSortOrder(b) || String(a.code).localeCompare(String(b.code)));
     const typeOf = new Map<string, string>(canon.map((a) => [a.code, a.type] as const));
+    const canonByCode = new Map<string, any>(canon.map((a) => [a.code, a] as const));
     const rows: CoaTemplateRow[] =
       key === 'general' ? canon.map((a) => ({ code: a.code, name: a.name, nameTh: '' })) : COA_TEMPLATES[key];
-    const values = rows.map((r, i) => ({
+    const values = rows.map((r) => ({
       tenantId,
       accountCode: r.code,
       displayName: r.name,
       displayNameTh: r.nameTh || null,
       groupLabel: typeOf.get(r.code) ?? null,
       active: true,
-      sortOrder: i,
+      // P2/P3: seed the initial display order from the canonical class → statement-section → parent key so
+      // the industry chart also lists in accountant order with sub-accounts nested under their parent (a
+      // tenant can still re-order later via the GL-11 dialog). Falls back to the account's own metadata.
+      sortOrder: coaSortOrder(canonByCode.get(r.code) ?? { code: r.code, type: typeOf.get(r.code) ?? 'Asset' }),
     }));
     if (values.length) {
       await db.insert(tenantAccounts).values(values).onConflictDoNothing({ target: [tenantAccounts.tenantId, tenantAccounts.accountCode] });

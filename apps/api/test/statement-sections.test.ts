@@ -91,6 +91,23 @@ describe('canonical CoA classification + ordering audit (P2)', () => {
     expect(g('4000')).toBe('revenue');
   });
 
+  it('P3 sub-accounts classify by their own binding / parent inheritance, and nest under the parent', () => {
+    const find = (code: string) => COA.find((x) => x.code === code)!;
+    // A COGS sub-account (explicit is_group) rolls into cost of sales, not the selling_admin type-fallback.
+    expect(resolveIsGroup(find('500001'))).toBe('cogs');      // COGS — Direct Materials (parent 5000)
+    expect(resolveIsGroup(find('580001'))).toBe('cogs');      // Cost of Work — Labor (parent 5800)
+    // A WIP sub-account inherits its parent's balance-sheet section (current asset).
+    expect(resolveBsGroup(find('126001'))).toBe('current_asset');   // WIP — Earthwork (parent 1260)
+    expect(resolveBsGroup(find('125001'))).toBe('current_asset');   // WIP — Direct Materials (parent 1250)
+    // Parent inheritance works even without an explicit column (unmapped code + parentCode → parent's map).
+    expect(resolveIsGroup({ code: '999999', type: 'Expense', parentCode: '5000' })).toBe('cogs');
+    // A sub-account sorts immediately after its parent (nested), not at the end of the section.
+    const sorted = [...COA].sort((a, b) => coaSortOrder(a) - coaSortOrder(b));
+    const pi = sorted.findIndex((a) => a.code === '1260');
+    expect(sorted[pi + 1]?.code).toBe('126001');
+    expect(sorted[pi + 2]?.code).toBe('126002');
+  });
+
   it('orders the chart by class → section → code, not by raw code', () => {
     const sorted = [...COA].sort((a, b) => coaSortOrder(a) - coaSortOrder(b));
     const rank: Record<string, number> = { Asset: 1, Liability: 2, Equity: 3, Revenue: 4, Expense: 5 };

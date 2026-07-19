@@ -60,18 +60,18 @@ const IS_CLASSIFY: Record<string, IsGroup> = {
   '5950': 'tax', '5960': 'tax',
 };
 
-interface AccountLike { code: string; type: string; bsGroup?: string | null; isGroup?: string | null; isCurrent?: boolean | null }
+interface AccountLike { code: string; type: string; bsGroup?: string | null; isGroup?: string | null; isCurrent?: boolean | null; parentCode?: string | null }
 
 /** Resolve an account's Balance-Sheet section (own column → canonical default → type + is_current fallback). */
 export function resolveBsGroup(a: AccountLike): BsGroup | null {
   if (a.bsGroup && (BS_GROUPS as string[]).includes(a.bsGroup)) return a.bsGroup as BsGroup;
   if (a.type === 'Equity') return 'equity';
   if (a.type === 'Asset') {
-    if (a.isCurrent === false || NONCURRENT_ASSET_CODES.has(a.code)) return 'noncurrent_asset';
+    if (a.isCurrent === false || NONCURRENT_ASSET_CODES.has(a.code) || (a.parentCode ? NONCURRENT_ASSET_CODES.has(a.parentCode) : false)) return 'noncurrent_asset';
     return 'current_asset';
   }
   if (a.type === 'Liability') {
-    if (a.isCurrent === false || NONCURRENT_LIABILITY_CODES.has(a.code)) return 'noncurrent_liability';
+    if (a.isCurrent === false || NONCURRENT_LIABILITY_CODES.has(a.code) || (a.parentCode ? NONCURRENT_LIABILITY_CODES.has(a.parentCode) : false)) return 'noncurrent_liability';
     return 'current_liability';
   }
   return null; // Revenue/Expense are not on the balance sheet
@@ -80,7 +80,7 @@ export function resolveBsGroup(a: AccountLike): BsGroup | null {
 /** Resolve an account's Income-Statement section (own column → canonical default → type fallback). */
 export function resolveIsGroup(a: AccountLike): IsGroup | null {
   if (a.isGroup && (IS_GROUPS as string[]).includes(a.isGroup)) return a.isGroup as IsGroup;
-  const def = IS_CLASSIFY[a.code];
+  const def = IS_CLASSIFY[a.code] ?? (a.parentCode ? IS_CLASSIFY[a.parentCode] : undefined); // a sub-account inherits its parent's section
   if (def) return def;
   if (a.type === 'Revenue') return 'revenue';
   if (a.type === 'Expense') return 'selling_admin';
@@ -102,12 +102,17 @@ const TYPE_RANK: Record<string, number> = { Asset: 1, Liability: 2, Equity: 3, R
 const BS_RANK: Record<BsGroup, number> = { current_asset: 1, noncurrent_asset: 2, current_liability: 3, noncurrent_liability: 4, equity: 5 };
 const IS_RANK: Record<IsGroup, number> = { revenue: 1, cogs: 2, selling_admin: 3, other_income: 4, other_expense: 5, finance_cost: 6, tax: 7 };
 
-/** Stable presentational sort key: class → statement section → numeric code. Independent of code hygiene. */
+/** Stable presentational sort key: class → statement section → (parent, then child) so a sub-account nests
+ *  directly under its canonical parent. Independent of code hygiene. */
 export function coaSortOrder(a: AccountLike): number {
   const t = TYPE_RANK[a.type] ?? 9;
   const bs = resolveBsGroup(a);
   const is = resolveIsGroup(a);
   const sub = bs ? BS_RANK[bs] : is ? IS_RANK[is] : 0;
-  const num = Number.parseInt(a.code, 10) || 0; // canonical codes are 4-digit (< 1e6 even for a 6-digit sub-account)
-  return t * 100_000_000 + sub * 1_000_000 + num;
+  // A sub-account sorts by its PARENT's number, then its own trailing suffix, so 126001/126002 nest right
+  // under 1260 (rather than at the end of the section). A top-level account sorts by its own number, suffix 0.
+  const parent = a.parentCode ? Number.parseInt(a.parentCode, 10) || 0 : 0;
+  const base = parent || (Number.parseInt(a.code, 10) || 0);         // ≤ 9999 for canonical parents
+  const childSeq = a.parentCode ? (Number.parseInt(a.code.slice(a.parentCode.length), 10) || 0) : 0; // ≤ 99
+  return t * 1_000_000_000_000 + sub * 100_000_000 + base * 100 + childSeq;
 }

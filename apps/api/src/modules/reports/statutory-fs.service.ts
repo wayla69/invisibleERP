@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { fsReportDefinitions } from '../../database/schema';
+import { fsReportDefinitions, accounts } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { LedgerService } from '../ledger/ledger.service';
 import { resolveBsGroup, resolveIsGroup } from '../ledger/ledger-statement-sections';
@@ -45,7 +45,7 @@ export interface FsNoteDef {
 }
 export interface FsNotesConfig { notes?: FsNoteDef[] }
 
-type NetRow = { account_code: string; account_name: string | null; account_type: string | null; net: number };
+type NetRow = { account_code: string; account_name: string | null; account_type: string | null; net: number; bs_group?: string | null; is_group?: string | null; parent_code?: string | null };
 
 @Injectable()
 export class StatutoryFsService {
@@ -131,12 +131,24 @@ export class StatutoryFsService {
 
     // Presentation over the PRIMARY statement: the builder pulls the same numbers the canonical
     // income-statement / balance-sheet read (no source exclusion) so a rendered subtotal always ties to it.
-    const cur = await this.ledger.perAccountNet(params.asOf, isPl ? params.from : null, ledger);
+    let cur = await this.ledger.perAccountNet(params.asOf, isPl ? params.from : null, ledger) as NetRow[];
     let prior: NetRow[] | null = null;
     let comparative = false;
     if (params.priorAsOf) {
       comparative = true;
-      prior = await this.ledger.perAccountNet(params.priorAsOf, isPl ? (params.priorFrom ?? null) : null, ledger);
+      prior = await this.ledger.perAccountNet(params.priorAsOf, isPl ? (params.priorFrom ?? null) : null, ledger) as NetRow[];
+    }
+    // Enrich each row with its own statement-section binding + parent (P3): a sub-account (own is_group/
+    // bs_group set, or inherited from its canonical parent) then rolls into the correct statutory line
+    // instead of the type fallback — so an industry chart's WIP-by-phase / COGS-by-element groups correctly.
+    const codes = [...new Set([...cur, ...(prior ?? [])].map((r) => r.account_code))];
+    if (codes.length) {
+      const metaRows = await this.db.select({ code: accounts.code, bs: accounts.bsGroup, is: accounts.isGroup, parent: accounts.parentCode })
+        .from(accounts).where(inArray(accounts.code, codes));
+      const metaMap = new Map(metaRows.map((m: any) => [m.code, m]));
+      const enrich = (rows: NetRow[]) => rows.map((r) => { const m = metaMap.get(r.account_code); return m ? { ...r, bs_group: m.bs, is_group: m.is, parent_code: m.parent } : r; });
+      cur = enrich(cur);
+      if (prior) prior = enrich(prior);
     }
     const groups = (def.config as FsBuilderConfig).groups ?? [];
     const built = this.buildGroups(groups, cur, prior);
@@ -165,7 +177,7 @@ export class StatutoryFsService {
     // layout can bind whole งบดุล / งบกำไรขาดทุน sections without enumerating every code — the same
     // classification the quick balanceSheet/incomeStatement use, so the rendered subtotals tie to them.
     if (g.bsGroups || g.isGroups) {
-      const a = { code: r.account_code, type: r.account_type ?? '' };
+      const a = { code: r.account_code, type: r.account_type ?? '', bsGroup: r.bs_group, isGroup: r.is_group, parentCode: r.parent_code };
       if (g.bsGroups) { const bs = resolveBsGroup(a); if (bs && g.bsGroups.includes(bs)) return true; }
       if (g.isGroups) { const is = resolveIsGroup(a); if (is && g.isGroups.includes(is)) return true; }
     }

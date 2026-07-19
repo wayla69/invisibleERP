@@ -1192,6 +1192,41 @@ async function main() {
     genAcc.accounts?.some((a: any) => a.code === '4300') && genAcc.accounts?.some((a: any) => a.code === '5300') && genAcc.count === restoAll.count,
     `n=${genAcc.count} src=${genAcc.source}`);
 
+  // P3 — real per-industry structure: an industry chart curates canonical SUB-accounts (postable, reported)
+  // under a parent; a restaurant chart never shows them (byte-identical to before); a sub-account posts and
+  // rolls into the correct statutory statement line; and it nests directly under its parent in the listing.
+  const sgCon = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'Con Co', tenant_code: 'CONCO', admin_username: 'con_admin', admin_password: 'con1234567', email: 'a@con.example', industry: 'construction',
+  });
+  ok('P3: signup with industry=construction succeeds', (sgCon.status === 200 || sgCon.status === 201) && sgCon.json?.industry === 'construction', `st=${sgCon.status}`);
+  const conTok = (await inj('POST', '/api/login', undefined, { username: 'con_admin', password: 'con1234567' })).json.token;
+  const conAcc = (await inj('GET', '/api/ledger/accounts', conTok)).json;
+  const conCodes = new Set((conAcc.accounts ?? []).map((a: any) => a.code));
+  ok('P3: construction chart curates WIP-by-phase + cost-by-resource sub-accounts (126001..126004, 580001..580004)',
+    ['126001', '126002', '126003', '126004', '580001', '580002', '580003', '580004'].every((c) => conCodes.has(c)),
+    `have=${['126001', '580001', '580004'].filter((c) => conCodes.has(c)).join(',')}`);
+  ok('P3: a restaurant chart does NOT show the construction sub-accounts (per-industry curation)',
+    !restoAcc.accounts?.some((a: any) => a.code === '126001' || a.code === '580001'), 'restaurant clean');
+  // A sub-account nests directly under its canonical parent in the ordered listing.
+  const conList: any[] = conAcc.accounts ?? [];
+  const idxParent = conList.findIndex((a: any) => a.code === '1260');
+  const idxChild1 = conList.findIndex((a: any) => a.code === '126001');
+  ok('P3: sub-account 126001 nests directly under its parent 1260 in the ordered chart',
+    idxParent >= 0 && idxChild1 === idxParent + 1, `parent@${idxParent} child@${idxChild1}`);
+  // The sub-account is a real postable canonical account (passes the GL-21 account-universe guard, not
+  // overlay-only) — a balanced JE to it is accepted (Draft, awaiting maker-checker).
+  const conJe = await inj('POST', '/api/ledger/journal', conTok, { source: 'Manual', memo: 'P3 WIP capitalize', lines: [{ account_code: '126002', debit: 5000 }, { account_code: '1010', credit: 5000 }] });
+  ok('P3: a sub-account (126002) is postable (real canonical account, passes GL-21, not overlay-only)', conJe.status === 201 || conJe.status === 200, `st=${conJe.status} ${JSON.stringify(conJe.json?.error ?? '')}`);
+  // The DBD statutory balance sheet renders + balances for the construction tenant — the industry
+  // sub-accounts (WIP-by-phase under 1260 → current assets, cost-by-resource under 5800 → cogs) integrate
+  // cleanly into the statutory statement (proven metadata-correct by statement-sections.test.ts).
+  const asOfP3 = new Date(Date.now() + Number(process.env.BUSINESS_TZ_OFFSET_MIN ?? 420) * 60_000).toISOString().slice(0, 10);
+  const conBs = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}`, conTok)).json;
+  const conTA = conBs.rows?.find((r: any) => r.key === 'total_assets')?.current;
+  const conTLE = conBs.rows?.find((r: any) => r.key === 'total_liab_equity')?.current;
+  ok('P3: the DBD balance sheet renders + balances for the construction tenant (sub-accounts integrate cleanly)',
+    conBs.rows?.some((r: any) => r.key === 'current_assets') && near(conTA, conTLE), `ta=${conTA} tle=${conTLE}`);
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.
