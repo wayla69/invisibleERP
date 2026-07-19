@@ -251,7 +251,7 @@ export class LedgerReportingService {
     const expense = round4(typeTotal(rows, 'Expense', 'debit') - typeTotal(rows, 'Expense', 'credit'));
     const netIncome = round4(revenue - expense);
     const plLines = rows.filter((r: any) => r.account_type === 'Revenue' || r.account_type === 'Expense');
-    // Section binding (0441): group the lines into the P&L sections (own is_group column → canonical default
+    // Section binding (0442): group the lines into the P&L sections (own is_group column → canonical default
     // → type fallback) and derive a structured statement. Additive — existing callers read revenue/expense.
     const meta = await this.accountClassMeta(db, plLines.map((l: any) => l.account_code));
     const buckets = new Map<IsGroup, { total: number; lines: any[] }>();
@@ -363,7 +363,7 @@ export class LedgerReportingService {
         balance: round4(r.account_type === 'Asset' ? r.debit - r.credit : r.credit - r.debit),
       }))
       .filter((r: any) => Math.abs(r.balance) > 1e-9);
-    // Section binding (0441): group the lines into the five Balance-Sheet sections (own bs_group column →
+    // Section binding (0442): group the lines into the five Balance-Sheet sections (own bs_group column →
     // canonical default → type + is_current fallback). Additive — existing callers read only the totals.
     const meta = await this.accountClassMeta(db, lines.map((l: any) => l.account_code));
     const buckets = new Map<BsGroup, { total: number; lines: any[] }>();

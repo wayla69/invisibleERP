@@ -254,6 +254,7 @@ export default function ItemPostingSetupPage() {
             />
             <ScheduledChangesSection entity="item" entityKey={itemId} fields={['unit_price', 'status']} />
             <VariantsSection itemId={itemId} />
+            <KitSection itemId={itemId} />
           </Card>
         )}
 
@@ -308,6 +309,50 @@ function VariantsSection({ itemId }: { itemId: string }) {
               <span className="font-mono text-xs">{v.item_id}</span>
               <span className="text-muted-foreground">{v.attributes.map((a) => `${a.axis}: ${a.value}`).join(' · ')}</span>
               {v.barcode && <span className="ml-auto font-mono text-xs text-muted-foreground">⏛ {v.barcode}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// docs/52 Phase 2c — kits/bundles: this item is sold as one line, but its components are consumed from stock
+// on sale. Manage the component list (a "bill of materials") with per-component quantities here. Components
+// are stored as outgoing kit_component item_relationships; the POS explodes them at checkout.
+interface KitRow { id: number; rel_type: string; direction: string; qty: number; party: { item_id: string; name: string } }
+function KitSection({ itemId }: { itemId: string }) {
+  const qc = useQueryClient();
+  const [comp, setComp] = useState('');
+  const [qty, setQty] = useState('1');
+  const q = useQuery<{ item_id: string; relationships: KitRow[] }>({ queryKey: ['item-relationships', itemId], queryFn: () => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`) });
+  const components = (q.data?.relationships ?? []).filter((r) => r.direction === 'outgoing' && r.rel_type === 'kit_component');
+  const add = useMutation({
+    mutationFn: () => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`, { method: 'POST', body: JSON.stringify({ to_item_id: comp.trim(), rel_type: 'kit_component', qty: Math.max(0.001, Number(qty) || 1) }) }),
+    onSuccess: () => { notifySuccess('เพิ่มส่วนประกอบชุดสินค้าแล้ว (Component added)'); setComp(''); setQty('1'); qc.invalidateQueries({ queryKey: ['item-relationships', itemId] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const del = useMutation({
+    mutationFn: (relId: number) => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships/${relId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['item-relationships', itemId] }),
+    onError: (e: Error) => notifyError(e.message),
+  });
+  return (
+    <div className="grid gap-2 border-t pt-4">
+      <Label className="text-sm font-semibold">ชุดสินค้า / ส่วนประกอบ (Kit / bundle components)</Label>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Input className="sm:col-span-2" value={comp} onChange={(e) => setComp(e.target.value)} placeholder="Component item_id" />
+        <Input type="number" min="0.001" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty per kit" />
+        <Button size="sm" disabled={add.isPending || !comp.trim()} onClick={() => add.mutate()}>เพิ่ม (Add)</Button>
+      </div>
+      {components.length > 0 && (
+        <div className="mt-1 grid gap-1 text-sm">
+          {components.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1">
+              <span className="font-mono text-xs">{c.party.item_id}</span>
+              <span className="text-muted-foreground">{c.party.name}</span>
+              <span className="ml-auto">× {c.qty}</span>
+              <Button size="sm" variant="ghost" disabled={del.isPending} onClick={() => del.mutate(c.id)}>ลบ</Button>
             </div>
           ))}
         </div>
