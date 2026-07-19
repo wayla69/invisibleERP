@@ -9,6 +9,7 @@ import { assertMakerChecker } from '../../common/control-profile';
 import { LineNotifyService } from '../messaging/line-notify.service';
 import { HcmLeaveService } from './hcm-leave.service';
 import { TimeClockService } from '../pos/labor/timeclock.service';
+import { ScheduleService } from '../pos/labor/schedule.service';
 
 const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -29,7 +30,28 @@ export class HcmService {
     // POS time-clock team roll-up (read-only contract). @Optional so a partial harness still constructs;
     // the team-attendance route degrades to an empty read when the POS labor module isn't wired.
     @Optional() private readonly timeClock?: TimeClockService,
+    // POS shift-schedule adherence (read-only contract). @Optional (same rationale as timeClock).
+    @Optional() private readonly schedule?: ScheduleService,
   ) {}
+
+  // Schedule adherence for the HR/manager view — rostered shifts vs actual clocked hours per employee, with a
+  // variance flag (docs/42 HCM depth). POS labor owns both the schedule and the punches; HCM reads via the
+  // contract and enriches emp_code → name from the HR-owned employees table. Defaults to the last 14 business
+  // days (Asia/Bangkok) when no window is given. Read-only.
+  async scheduleAdherence(user: JwtUser, opts?: { from?: string; to?: string }) {
+    if (!this.schedule) return { from: opts?.from ?? null, to: opts?.to ?? null, employees: [], summary: { employees: 0, scheduled_hours: 0, actual_hours: 0, no_shows: 0, exceptions: 0 }, source: 'pos_schedule', unavailable: true };
+    const bkkNow = new Date(Date.now() + 7 * 3600_000);
+    const to = opts?.to ?? bkkNow.toISOString().slice(0, 10);
+    const from = opts?.from ?? new Date(bkkNow.getTime() - 13 * 86_400_000).toISOString().slice(0, 10);
+    const a = await this.schedule.scheduleAdherence({ from, to }, user);
+    const codes = a.employees.map((e) => e.emp_code).filter((c): c is string => !!c && c !== '(unknown)');
+    const names = new Map<string, string>();
+    if (codes.length) {
+      const rows = await this.db.select({ code: employees.empCode, name: employees.name }).from(employees).where(inArray(employees.empCode, codes));
+      for (const r of rows) { if (r.code) names.set(r.code, r.name ?? ''); }
+    }
+    return { ...a, employees: a.employees.map((e) => ({ ...e, name: names.get(e.emp_code) ?? null })), source: 'pos_schedule' };
+  }
 
   // Team attendance for the HR/manager view — the whole team's clock-in/out rolled up from the POS
   // time-clock (docs/42 HCM depth). POS labor owns the punches; HCM reads via its contract and enriches

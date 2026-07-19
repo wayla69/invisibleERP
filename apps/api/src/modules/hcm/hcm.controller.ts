@@ -25,6 +25,11 @@ export class HcmController {
   @Get('attendance')
   teamAttendance(@Query('date') date: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.teamAttendance(u, { date }); }
 
+  // Schedule adherence — rostered shifts vs actual clocked hours per employee (read-only). Defaults to the
+  // last 14 business days when from/to are omitted.
+  @Get('schedule-adherence')
+  scheduleAdherence(@Query('from') from: string | undefined, @Query('to') to: string | undefined, @CurrentUser() u: JwtUser) { return this.svc.scheduleAdherence(u, { from, to }); }
+
   // Approve a timesheet (maker-checker → posts project labor if it targets a project) — PROJ-04.
   @Post('timesheets/:id/approve')
   approveTimesheet(@Param('id') id: string, @CurrentUser() u: JwtUser, @Body(new ZodValidationPipe(SelfApprovalBody)) b?: SelfApprovalDto) { return this.svc.approveTimesheet(Number(id), u, b?.self_approval_reason); }
