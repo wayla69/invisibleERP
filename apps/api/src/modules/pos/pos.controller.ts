@@ -4,6 +4,9 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { qint } from '../../common/query';
 import { PosService, type CreateOrderDto } from './pos.service';
+import { PosProfileService } from './pos-profile.service';
+import { PosSaleService } from './pos-sale.service';
+import { type PortalSaleDto } from '../portal/portal.pos.service';
 import { ConvertAbbBody, type ConvertAbbDto } from '../tax/documents/dto';
 
 const CreateOrderBody = z.object({
@@ -22,9 +25,43 @@ const UpdateStatusBody = z.object({
   estimated_delivery: z.string().nullish(),
 });
 
+// docs/52 Phase 1b — generic (non-restaurant) sale body. Mirrors the portal SaleBody (the shared engine).
+const PosSaleBody = z.object({
+  items: z.array(z.object({
+    item_id: z.string().min(1), item_description: z.string().optional(),
+    qty: z.number().positive(), unit_price: z.number().nonnegative(),
+    uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
+    modifier_option_ids: z.array(z.number().int()).optional(),
+  })).min(1),
+  discount: z.number().nonnegative().optional(),
+  payment_method: z.string().optional(),
+  notes: z.string().optional(),
+  apply_pricing: z.boolean().optional(),
+  channel: z.string().optional(),
+  party_size: z.number().int().optional(),
+  service_charge_pct: z.number().min(0).max(100).optional(),
+  service_min_party: z.number().int().positive().optional(),
+  rounding: z.number().nonnegative().optional(),
+  branch_id: z.number().int().positive().optional(),
+});
+
 @Controller('api/pos')
 export class PosController {
-  constructor(private readonly svc: PosService) {}
+  constructor(private readonly svc: PosService, private readonly profile: PosProfileService, private readonly saleSvc: PosSaleService) {}
+
+  // docs/52 Phase 1b — generic (non-restaurant) checkout for the internal register: rings a plain retail/
+  // service sale through the shared engine (cust_pos_sales + stock move + VAT + tender), NO dine_in_orders /
+  // KDS / table, revenue under the business-type profile's event. A restaurant tenant keeps the dine-in path.
+  @Post('sales') @Permissions('pos_sell', 'cust_pos', 'ar')
+  genericSale(@Body(new ZodValidationPipe(PosSaleBody)) b: PortalSaleDto, @CurrentUser() u: JwtUser) {
+    return this.saleSvc.createGenericSale(b, u);
+  }
+
+  // docs/52 Phase 1 — the caller's tenant's business-type POS feature profile (tables/KDS/courses/buffet/
+  // recipe_deduction/revenue_event/sale_path), derived from tenants.industry. The register reads this to
+  // hide restaurant surfaces for a retail/services business. Readable by any POS operator.
+  @Get('profile') @Permissions('pos', 'pos_sell', 'pos_till', 'cust_pos', 'order_mgt', 'dashboard')
+  posProfile(@CurrentUser() u: JwtUser) { return this.profile.resolve(u); }
 
   // Read-only shift KPIs — also visible to single-duty POS operators (Cashier/PosSupervisor) for the POS home.
   @Get('summary') @Permissions('pos', 'pos_sell', 'pos_till', 'dashboard')
