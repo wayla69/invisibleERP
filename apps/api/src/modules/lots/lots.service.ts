@@ -92,6 +92,62 @@ export class LotsService {
     };
   }
 
+  // docs/52 Phase 3a — consume lot(s) for a POS sale (FEFO), transaction-aware. A lot-tracked item must sell
+  // from a real, non-expired, non-held lot: picks earliest-expiry first (or an explicit lot), writes a qty_out
+  // lot_ledger row per allocation (so the sold unit appears in the lot's FORWARD genealogy / recall trace), and
+  // returns the allocations. Fail-closed — NO_LOT_AVAILABLE (none), LOT_EXPIRED (only expired), LOT_ON_HOLD
+  // (only held / an explicit held lot), LOT_NOT_FOUND (explicit lot absent), LOT_INSUFFICIENT (not enough).
+  async consumeForSale(tx: any, p: { itemId: string; qty: number; refDoc: string; bizToday: string; explicitLot?: string; createdBy: string }): Promise<{ lot_no: string; qty: number; expiry: string | null }[]> {
+    const db = tx ?? this.db;
+    const rows = await db.select().from(lotLedger)
+      .where(and(eq(lotLedger.itemId, p.itemId), eq(lotLedger.status, 'Active')))
+      .orderBy(asc(lotLedger.expiryDate), asc(lotLedger.id));
+    // held lots (latest hold row per lot = Held) via the same tx so it honours the request's tenant context
+    const holdRows = await db.select({ lotNo: lotHolds.lotNo, status: lotHolds.status, id: lotHolds.id })
+      .from(lotHolds).where(eq(lotHolds.itemId, p.itemId)).orderBy(desc(lotHolds.id));
+    const heldLatest = new Map<string, string>();
+    for (const h of holdRows) if (!heldLatest.has(String(h.lotNo))) heldLatest.set(String(h.lotNo), String(h.status));
+    const held = new Set([...heldLatest.entries()].filter(([, s]) => s === 'Held').map(([l]) => l));
+    // net balance per lot (Σ qty_in − Σ qty_out), preserving earliest-expiry order
+    const byLot = new Map<string, { net: number; expiry: string | null; desc: string | null; uom: string | null; loc: string | null }>();
+    const order: string[] = [];
+    for (const r of rows) {
+      const lot = String(r.lotNo);
+      let cur = byLot.get(lot);
+      if (!cur) { cur = { net: 0, expiry: r.expiryDate ? String(r.expiryDate) : null, desc: r.itemDescription ?? null, uom: r.uom ?? null, loc: r.locationId ?? null }; byLot.set(lot, cur); order.push(lot); }
+      cur.net += n(r.qtyIn) - n(r.qtyOut);
+    }
+    const isExpired = (e: string | null) => e != null && e < p.bizToday;
+    let candidates = order.map((lot) => ({ lot, ...byLot.get(lot)! })).filter((c) => c.net > 1e-9);
+    if (p.explicitLot) {
+      const c = candidates.find((x) => x.lot === p.explicitLot);
+      if (!c) throw new BadRequestException({ code: 'LOT_NOT_FOUND', message: `Lot ${p.explicitLot} not available for ${p.itemId}`, messageTh: `ไม่พบล็อต ${p.explicitLot} ของสินค้านี้` });
+      if (held.has(c.lot)) throw new BadRequestException({ code: 'LOT_ON_HOLD', message: `Lot ${p.explicitLot} is on hold`, messageTh: `ล็อต ${p.explicitLot} ถูกกักกัน` });
+      if (isExpired(c.expiry)) throw new BadRequestException({ code: 'LOT_EXPIRED', message: `Lot ${p.explicitLot} expired ${c.expiry}`, messageTh: `ล็อต ${p.explicitLot} หมดอายุแล้ว` });
+      candidates = [c];
+    } else {
+      candidates = candidates.filter((c) => !held.has(c.lot) && !isExpired(c.expiry));
+    }
+    if (!candidates.length) {
+      const anyPositive = order.some((l) => byLot.get(l)!.net > 1e-9);
+      if (anyPositive) throw new BadRequestException({ code: 'LOT_EXPIRED', message: `Only expired/held lots remain for ${p.itemId}`, messageTh: `เหลือเฉพาะล็อตหมดอายุ/ถูกกักกันสำหรับ ${p.itemId}` });
+      throw new BadRequestException({ code: 'NO_LOT_AVAILABLE', message: `No lot stock for ${p.itemId} — receive it with a lot first`, messageTh: `ไม่มีสต๊อกแบบล็อตสำหรับ ${p.itemId}` });
+    }
+    const total = candidates.reduce((a, c) => a + c.net, 0);
+    if (total + 1e-9 < p.qty) throw new BadRequestException({ code: 'LOT_INSUFFICIENT', message: `Lot stock ${total} < ${p.qty} for ${p.itemId}`, messageTh: `สต๊อกล็อตไม่พอ (${total} < ${p.qty})` });
+    const allocations: { lot_no: string; qty: number; expiry: string | null }[] = [];
+    let need = p.qty;
+    const now = new Date();
+    for (const c of candidates) {
+      if (need <= 1e-9) break;
+      const take = Math.min(need, c.net);
+      await db.insert(lotLedger).values({ lotNo: c.lot, itemId: p.itemId, itemDescription: c.desc, uom: c.uom, locationId: c.loc ?? 'WH-MAIN', qtyIn: '0', qtyOut: String(take), balance: String(c.net - take), expiryDate: c.expiry, status: 'Active', moveDate: now, refDoc: p.refDoc, createdBy: p.createdBy });
+      allocations.push({ lot_no: c.lot, qty: take, expiry: c.expiry });
+      need = Math.round((need - take) * 1000) / 1000;
+    }
+    return allocations;
+  }
+
   // ── HOLD — quarantine a lot (recall / suspect quality). Idempotent: holding an already-Held lot no-ops. ──
   async hold(lotNo: string, dto: { reason?: string; item_id?: string }, user: JwtUser) {
     const db = this.db;

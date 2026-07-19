@@ -9,6 +9,7 @@ export const items = pgTable('items', {
   itemDescription: text('item_description'),
   barcode: text('barcode'),                                     // GTIN/EAN/UPC for hardware scan-to-add (exact match)
   supplyType: text('supply_type').notNull().default('goods'),   // 'goods' | 'service' — VAT tax-point class (5.1, ม.78 vs 78/1). Inert until 5.1b.
+  isLotTracked: boolean('is_lot_tracked').notNull().default(false), // docs/52 Phase 3a — sells only from a real, non-expired, non-held lot (FEFO at POS); shared master, no RLS loop
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),
