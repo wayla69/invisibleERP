@@ -604,7 +604,8 @@ interface FsDef { code: string; name: string; statement_type: string; active: bo
 interface RenderRow { key: string; label?: string; label_th?: string | null; account_name?: string; level: number; is_subtotal?: boolean; current: number; prior?: number }
 interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; industry: string | null; comparative: boolean; rows: RenderRow[] }
 interface IndustryLayout { industry: string; name: string }
-interface IndustryLayoutsResp { own_industry: string | null; own_has_layout: boolean; generic_name: string; layouts: IndustryLayout[] }
+interface IndustryStmtLayouts { generic_name: string; own_has_layout: boolean; layouts: IndustryLayout[] }
+interface IndustryLayoutsResp { own_industry: string | null; statements: Record<string, IndustryStmtLayouts> }
 interface NoteLine { account_code: string; account_name: string; current: number; prior: number | null }
 interface NoteBlock { number: string; title: string; title_th: string | null; policy_text: string | null; lines: NoteLine[]; total: number; prior_total: number | null }
 interface NotesResp { code: string; name: string; as_of?: string; basis: string; comparative: boolean; notes: NoteBlock[] }
@@ -787,8 +788,9 @@ function CustomStatements({ lp }: { lp: string }) {
   const selected = defs.find((d) => d.code === code);
   const isNotes = selected?.statement_type === 'notes';
   const isPl = selected?.statement_type === 'pl';
-  // P6: only the built-in DBD P&L has industry-specific statutory shapes to pick between.
-  const showIndustry = isPl && code === 'DBD-PL';
+  // P6/P7: the built-in DBD P&L and Balance Sheet have industry-specific statutory shapes to pick between.
+  const stmtLayouts = layoutsQ.data?.statements?.[code];
+  const showIndustry = (code === 'DBD-PL' || code === 'DBD-BS') && !!stmtLayouts;
   const layouts = layoutsQ.data;
 
   const priorQs = prior && priorAsOf ? `&prior_as_of=${priorAsOf}${isPl && priorFrom ? `&prior_from=${priorFrom}` : ''}` : '';
@@ -820,24 +822,24 @@ function CustomStatements({ lp }: { lp: string }) {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="grid gap-2">
                   <Label htmlFor="cs-def">{t('fnx.fs.stat.definition')}</Label>
-                  <Select id="cs-def" className="w-auto" value={code} onChange={(e) => { setCode(e.target.value); setRun(null); }}>
+                  <Select id="cs-def" className="w-auto" value={code} onChange={(e) => { setCode(e.target.value); setIndustry(''); setRun(null); }}>
                     <option value="">{t('fnx.fs.stat.pick_definition')}</option>
                     {defs.map((d) => <option key={d.code} value={d.code}>{d.name} ({d.statement_type.toUpperCase()})</option>)}
                   </Select>
                 </div>
                 <div className="grid gap-2"><Label htmlFor="cs-asof">{t('fnx.fs.stat.as_of')}</Label><Input id="cs-asof" type="date" className="max-w-[170px]" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></div>
                 {isPl && <div className="grid gap-2"><Label htmlFor="cs-from">{t('fnx.fs.from')}</Label><Input id="cs-from" type="date" className="max-w-[170px]" value={from} onChange={(e) => setFrom(e.target.value)} /></div>}
-                {showIndustry && (
+                {showIndustry && stmtLayouts && (
                   <div className="grid gap-2">
                     <Label htmlFor="cs-industry">{t('fnx.fs.stat.industry_layout')}</Label>
                     <Select id="cs-industry" className="w-auto" value={industry} onChange={(e) => setIndustry(e.target.value)}>
                       <option value="">
-                        {layouts?.own_has_layout
-                          ? t('fnx.fs.stat.industry_own', { name: layouts.layouts.find((l) => l.industry === layouts.own_industry)?.name ?? layouts.own_industry ?? '' })
+                        {stmtLayouts.own_has_layout
+                          ? t('fnx.fs.stat.industry_own', { name: stmtLayouts.layouts.find((l) => l.industry === layouts?.own_industry)?.name ?? layouts?.own_industry ?? '' })
                           : t('fnx.fs.stat.industry_auto')}
                       </option>
                       <option value="generic">{t('fnx.fs.stat.industry_generic')}</option>
-                      {(layouts?.layouts ?? []).map((l) => <option key={l.industry} value={l.industry}>{l.name}</option>)}
+                      {stmtLayouts.layouts.map((l) => <option key={l.industry} value={l.industry}>{l.name}</option>)}
                     </Select>
                   </div>
                 )}

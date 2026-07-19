@@ -1280,11 +1280,37 @@ async function main() {
   ok('P6b: industry=generic forces the standard multi-step P&L even for a specialised (construction) tenant',
     conForceGen.rows?.some((r: any) => r.key === 'gross_profit') && !conForceGen.rows?.some((r: any) => r.key === 'cw_labor'),
     JSON.stringify((conForceGen.rows ?? []).map((r: any) => r.key)));
-  // The layouts catalog surfaces the four bespoke shapes + the caller's own industry (so the UI can default).
+  // The layouts catalog surfaces the bespoke shapes per statement (DBD-PL / DBD-BS) + the caller's own industry.
   const layoutsCat = (await inj('GET', '/api/reports/fs/industry-layouts', conTok)).json;
-  ok('P6b: /industry-layouts lists the bespoke shapes + echoes the caller’s own industry',
-    layoutsCat.own_industry === 'construction' && layoutsCat.own_has_layout === true && Array.isArray(layoutsCat.layouts) && layoutsCat.layouts.some((l: any) => l.industry === 'manufacturing') && layoutsCat.layouts.some((l: any) => l.industry === 'nonprofit'),
-    `own=${layoutsCat.own_industry} hasLayout=${layoutsCat.own_has_layout} n=${layoutsCat.layouts?.length}`);
+  const plCat = layoutsCat.statements?.['DBD-PL'];
+  const bsCat = layoutsCat.statements?.['DBD-BS'];
+  ok('P6b: /industry-layouts lists the bespoke P&L shapes + echoes the caller’s own industry',
+    layoutsCat.own_industry === 'construction' && plCat?.own_has_layout === true && Array.isArray(plCat?.layouts) && plCat.layouts.some((l: any) => l.industry === 'manufacturing') && plCat.layouts.some((l: any) => l.industry === 'nonprofit'),
+    `own=${layoutsCat.own_industry} plHasLayout=${plCat?.own_has_layout} nPl=${plCat?.layouts?.length}`);
+
+  // P7 — the balance sheet gets the same industry-selectable treatment where the statement SHAPE differs:
+  // nonprofit net-assets-by-restriction, agriculture biological assets, construction contract assets,
+  // real-estate property inventory. Every layout ties out (total assets == total liabilities + equity/net assets).
+  ok('P7: /industry-layouts DBD-BS lists the bespoke balance-sheet shapes (nonprofit/agriculture/construction/realestate)',
+    Array.isArray(bsCat?.layouts) && ['nonprofit', 'agriculture', 'construction', 'realestate'].every((i) => bsCat.layouts.some((l: any) => l.industry === i)) && bsCat.own_has_layout === true,
+    `nBs=${bsCat?.layouts?.length} bsHasLayout=${bsCat?.own_has_layout}`);
+  // A nonprofit tenant's default DBD-BS is a Statement of Financial Position with net assets split by restriction.
+  const npoBsSelf = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}`, npoTok)).json;
+  const npoBsGen = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}&industry=generic`, npoTok)).json;
+  const taRow = (rows: any[]) => rowKey(rows, 'total_assets');
+  ok('P7: nonprofit DBD-BS presents net assets with/without donor restrictions + ties (assets == liab + net assets)',
+    npoBsSelf.rows?.some((r: any) => r.key === 'na_restricted') && npoBsSelf.rows?.some((r: any) => r.key === 'na_unrestricted') && !npoBsSelf.rows?.some((r: any) => r.key === '_all_equity') && near(taRow(npoBsSelf.rows), rowKey(npoBsSelf.rows, 'total_liab_net_assets')),
+    `hasNa=${npoBsSelf.rows?.some((r: any) => r.key === 'na_unrestricted')} hidden=${npoBsSelf.rows?.some((r: any) => r.key === '_all_equity')} ta=${taRow(npoBsSelf.rows)} tlna=${rowKey(npoBsSelf.rows, 'total_liab_net_assets')}`);
+  // The industry override renders ANY BS shape over the caller's own GL; total assets identical to generic (only grouping changes).
+  const conBsAsAgri = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}&industry=agriculture`, conTok)).json;
+  const conBsGen = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}&industry=generic`, conTok)).json;
+  ok('P7: industry=agriculture renders the biological-assets BS for ANY tenant; total assets unchanged vs generic',
+    conBsAsAgri.rows?.some((r: any) => r.key === 'biological_assets') && conBsAsAgri.industry === 'agriculture' && near(taRow(conBsAsAgri.rows), taRow(conBsGen.rows)),
+    `hasBio=${conBsAsAgri.rows?.some((r: any) => r.key === 'biological_assets')} taAgri=${taRow(conBsAsAgri.rows)} taGen=${taRow(conBsGen.rows)}`);
+  // A construction tenant's own default DBD-BS surfaces contract WIP; nonprofit forced to generic drops the net-asset split.
+  ok('P7: construction default DBD-BS surfaces contract-WIP; nonprofit industry=generic keeps the standard equity presentation',
+    (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}`, conTok)).json.rows?.some((r: any) => r.key === 'contract_wip') && npoBsGen.rows?.some((r: any) => r.key === 'total_equity') && !npoBsGen.rows?.some((r: any) => r.key === 'na_restricted'),
+    `conWip=ok npoGenEquity=${npoBsGen.rows?.some((r: any) => r.key === 'total_equity')}`);
 
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590

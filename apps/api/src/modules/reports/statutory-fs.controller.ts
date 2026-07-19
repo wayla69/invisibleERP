@@ -84,10 +84,10 @@ export class StatutoryFsController {
     return this.svc.renderStatement(code, { asOf, from, priorAsOf, priorFrom, ledger: ledger || null, industry: industry || null });
   }
 
-  // ── Industry P&L layouts a viewer can pick between for the built-in DBD-PL ──
+  // ── Industry layouts a viewer can pick between for the built-in DBD-PL / DBD-BS ──
   @Get('industry-layouts')
   industryLayouts() {
-    return this.svc.industryPlLayouts();
+    return this.svc.industryLayouts();
   }
 
   // ── Statement of changes in equity (roll-forward) ──

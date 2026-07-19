@@ -31,6 +31,7 @@ export interface FsGroup {
   isGroups?: string[];          // resolved income-statement section (revenue|cogs|selling_admin|…|tax)
   sumOf?: { key: string; factor: number }[]; // computed subtotal over other group keys
   showAccounts?: boolean;       // emit per-account child rows under the group
+  hidden?: boolean;             // compute the value (so sumOf can reference it) but do NOT emit a row
 }
 export interface FsBuilderConfig { groups?: FsGroup[] }
 export interface FsNoteDef {
@@ -96,14 +97,16 @@ export class StatutoryFsService {
     if (def) {
       let name = def.name;
       let config = def.config;
-      // P6: some industries have a genuinely different P&L SHAPE (nonprofit Statement of Activities,
-      // manufacturing COGS-by-element, construction cost-of-work, hospitality departmental). Resolve the
-      // requested industry (or the caller's own) to its bespoke DBD-PL layout; everything else keeps the
-      // generic multi-step P&L.
-      if (code === 'DBD-PL') {
+      // P6/P7: some industries have a genuinely different statement SHAPE — DBD-PL (nonprofit Statement of
+      // Activities, manufacturing COGS-by-element, construction cost-of-work, hospitality departmental) and
+      // DBD-BS (nonprofit net-assets-by-restriction, agriculture biological assets, construction contract
+      // assets, real-estate property inventory). Resolve the requested industry (or the caller's own) to its
+      // bespoke layout for this statement; everything else keeps the generic DBD default.
+      if (code === 'DBD-PL' || code === 'DBD-BS') {
+        const stmt = code === 'DBD-PL' ? 'pl' : 'bs';
         const ind = industryOverride === 'generic' ? null
           : (industryOverride || await this.tenantIndustry());
-        const ic = ind ? INDUSTRY_FS_DEFS[ind]?.pl : undefined;
+        const ic = ind ? INDUSTRY_FS_DEFS[ind]?.[stmt] : undefined;
         if (ic) { name = ic.name; config = ic.config; }
       }
       return { code: def.code, name, statement_type: def.statementType, config, active: true, created_by: 'system', is_default: true };
@@ -111,18 +114,20 @@ export class StatutoryFsService {
     throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
   }
 
-  // The industry P&L layouts a viewer can pick between for the built-in DBD-PL, plus the tenant's own
-  // industry (so the UI can default the selector to it). Read-only metadata; no GL access.
-  async industryPlLayouts() {
+  // The industry layouts a viewer can pick between for each built-in statement (DBD-PL / DBD-BS), plus the
+  // tenant's own industry (so the UI can default the selector to it). Read-only metadata; no GL access.
+  async industryLayouts() {
     const own = await this.tenantIndustry();
-    const layouts = Object.entries(INDUSTRY_FS_DEFS)
-      .filter(([, v]) => v.pl)
-      .map(([industry, v]) => ({ industry, name: v.pl!.name }));
+    const byStmt = (stmt: 'pl' | 'bs', code: string) => ({
+      generic_name: THAI_DBD_DEFS[code]?.name ?? code,
+      own_has_layout: !!(own && INDUSTRY_FS_DEFS[own]?.[stmt]),
+      layouts: Object.entries(INDUSTRY_FS_DEFS)
+        .filter(([, v]) => v[stmt])
+        .map(([industry, v]) => ({ industry, name: v[stmt]!.name })),
+    });
     return {
       own_industry: own,
-      own_has_layout: !!(own && INDUSTRY_FS_DEFS[own]?.pl),
-      generic_name: THAI_DBD_DEFS['DBD-PL']?.name ?? 'DBD-PL',
-      layouts,
+      statements: { 'DBD-PL': byStmt('pl', 'DBD-PL'), 'DBD-BS': byStmt('bs', 'DBD-BS') },
     };
   }
 
@@ -253,6 +258,10 @@ export class StatutoryFsService {
     }
     const out: any[] = [];
     for (const g of groups) {
+      // A hidden group is a compute-only helper: its value is available to sumOf references above, but it
+      // (and its account rows) never appear in the statement — e.g. an "all equity" total used to derive the
+      // nonprofit net-assets-without-restrictions line by subtraction.
+      if (g.hidden) continue;
       if (g.showAccounts && !g.sumOf) {
         for (const ar of this.accountRows(g, cur, prior)) out.push({ ...ar, level: (g.level ?? 0) + 1, key: `${g.key}:${ar.account_code}` });
       }
