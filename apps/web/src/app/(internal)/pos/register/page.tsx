@@ -50,6 +50,10 @@ export default function RegisterPage() {
   // tables === false. This stays robust to a still-loading, errored, or partial profile response (all of
   // which keep the current restaurant behaviour) rather than flipping generic on any falsy `tables`.
   const restaurant = profileQ.data?.tables !== false;
+  // docs/52 Phase 4a — price books: the active customer tiers the till may pick, so a governed base price
+  // applies at checkout. Non-restaurant (generic) path only; empty ⇒ no tier selector shown.
+  const booksQ = useQuery<{ books: { tier: string | null; active: boolean; status: string }[] }>({ queryKey: ['pos-price-books'], queryFn: () => api('/api/pricing/books') });
+  const priceTiers = useMemo(() => [...new Set((booksQ.data?.books ?? []).filter((b) => b.active && b.status === 'Active' && b.tier).map((b) => String(b.tier)))], [booksQ.data]);
   const favIds = useMemo(() => new Set<number>(prefsQ.data?.pos_fav ?? []), [prefsQ.data]);
   const favMut = useMutation({
     mutationFn: (ids: number[]) => api('/api/user-prefs', { method: 'PUT', body: JSON.stringify({ pos_fav: ids }) }),
@@ -120,7 +124,7 @@ export default function RegisterPage() {
 
   // ── settle: create the order (re-priced + 86-checked server-side), fire kitchen for dine-in, checkout,
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
-  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode, tenders }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[] }): Promise<SettleResult> => {
+  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode, tenders, priceTier }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[]; priceTier?: string }): Promise<SettleResult> => {
     const items = lines.map((l) => ({ sku: l.sku, qty: l.qty, modifier_option_ids: l.modifier_option_ids, notes: l.notes }));
 
     // ── offline path: queue a QUICK (no-table) cash sale, or — for dine-in (POS-6) — capture the order
@@ -159,7 +163,7 @@ export default function RegisterPage() {
       // buyer's ID and we retry ONCE with age_ack — a serial/lot/expired refusal still surfaces as-is.
       const postGeneric = (ageAck: boolean) => api<{ sale_no: string; total: number }>('/api/pos/sales', {
         method: 'POST',
-        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(ageAck ? { age_ack: true } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
+        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(priceTier ? { price_tier: priceTier } : {}), ...(ageAck ? { age_ack: true } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
       });
       let gsale: { sale_no: string; total: number };
       try {
@@ -332,6 +336,7 @@ export default function RegisterPage() {
         <CheckoutPanel
           lines={lines}
           serviceChargePct={serviceChargePct}
+          priceTiers={restaurant ? undefined : priceTiers}
           onSettle={settle}
           onReprint={(saleNo) => tm.printReceipt(saleNo)}
           onSendReceipt={(saleNo, channel, to) => api(`/api/pos/sales/${encodeURIComponent(saleNo)}/receipt/send`, { method: 'POST', body: JSON.stringify({ channel, ...(to ? { to } : {}) }) }).then(() => undefined)}

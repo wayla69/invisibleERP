@@ -22,6 +22,7 @@ import { JournalService } from '../pos/fiscal/journal.service';
 import { LockingService } from '../pos/scale/locking.service';
 import { LotsService } from '../lots/lots.service';
 import { SerialsService } from '../serials/serials.service';
+import { PriceBookService } from '../pricing/price-book.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[]; lot_no?: string; serial_nos?: string[] }[];
@@ -44,6 +45,10 @@ export interface PortalSaleDto {
   // Each leg's `amount` is what it APPLIES to the sale; the legs must sum EXACTLY to the total. A cash leg may
   // carry `cash_tendered` > amount to record change (mirrors #1). ABSENT ⇒ the single-tender path (unchanged).
   tenders?: { method: string; amount: number; gateway?: string; cash_tendered?: number; reference?: string }[];
+  // docs/52 Phase 4a — price books: the customer PRICE TIER for this sale (retail|wholesale|vip|member…). When
+  // a tier (or the branch) has an active, approved book pricing an item, that governed price OVERRIDES the
+  // line's client-supplied unit_price. ABSENT (and no branch book) ⇒ the client price stands (byte-identical).
+  price_tier?: string;
 }
 
 // docs/52 Phase 6a — map a tender method label to its GL posting event. Each TENDER.* event defaults its
@@ -86,6 +91,7 @@ export class PortalPosService {
     @Optional() private readonly usage?: UsageMeterService,  // 1.5 — meter one billable POS transaction per sale
     @Optional() private readonly lots?: LotsService,  // docs/52 Phase 3a — FEFO lot capture for lot-tracked items
     @Optional() private readonly serials?: SerialsService,  // docs/52 Phase 3b — serial/IMEI capture for serial-tracked items
+    @Optional() private readonly priceBooks?: PriceBookService,  // docs/52 Phase 4a — governed tier/branch base price
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -110,7 +116,19 @@ export class PortalPosService {
       if (!br) throw new BadRequestException({ code: 'BRANCH_NOT_FOUND', message: `Branch ${branchId} not found for this tenant`, messageTh: 'ไม่พบสาขาของร้านนี้' });
     }
 
-    const lines = dto.items.map((it) => {
+    // docs/52 Phase 4a — price books: resolve a GOVERNED base price per line by the sale's customer tier +
+    // branch BEFORE any discount. When an active, approved book prices the item, its price OVERRIDES the
+    // client-supplied unit_price (an auditable basis, not a number typed at the till). No matching book ⇒ the
+    // client price stands ⇒ byte-identical. Only consulted when a tier or branch is in play (default path skips it).
+    let saleItems = dto.items;
+    if (this.priceBooks && (dto.price_tier || branchId != null)) {
+      const qtyByItem = new Map<string, number>();
+      for (const it of dto.items) qtyByItem.set(String(it.item_id), (qtyByItem.get(String(it.item_id)) ?? 0) + n(it.qty));
+      const booked = await this.priceBooks.resolvePriceMany(t.id, dto.items.map((it) => String(it.item_id)), { tier: dto.price_tier ?? null, branchId, at: opts?.saleDate, qtyByItem });
+      if (booked.size) saleItems = dto.items.map((it) => { const b = booked.get(String(it.item_id)); return b ? { ...it, unit_price: b.unit_price } : it; });
+    }
+
+    const lines = saleItems.map((it) => {
       const gross = n(it.qty) * n(it.unit_price);
       const lineDisc = gross * (n(it.discount_pct) / 100);
       return { ...it, amount: roundCurrency(gross - lineDisc, 'THB') };

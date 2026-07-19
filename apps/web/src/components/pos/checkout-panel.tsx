@@ -35,16 +35,19 @@ const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 interface VoucherPreview { valid: boolean; code?: string; discount?: number; reason?: string; message?: string; message_th?: string }
 
 export function CheckoutPanel({
-  lines, onSettle, onReprint, onSendReceipt, onClose, onFinish, serviceChargePct = 0,
+  lines, onSettle, onReprint, onSendReceipt, onClose, onFinish, serviceChargePct = 0, priceTiers,
 }: {
   lines: CartLine[];
-  onSettle: (p: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[] }) => Promise<SettleResult>;
+  onSettle: (p: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[]; priceTier?: string }) => Promise<SettleResult>;
   onReprint: (saleNo: string) => Promise<void>;
   // email/sms need a typed recipient; 'line' resolves the member from the sale server-side (no `to`).
   onSendReceipt: (saleNo: string, channel: 'email' | 'sms' | 'line', to?: string) => Promise<void>;
   onClose: () => void;
   onFinish: () => void;
   serviceChargePct?: number; // mirrors the register's service-charge so the tendered total matches the cart
+  // docs/52 Phase 4a — price books: the active customer tiers the cashier may apply (governed base price by
+  // tier). Undefined/empty ⇒ no tier selector (default retail pricing). Server re-prices authoritatively.
+  priceTiers?: string[];
 }) {
   const { t, lang } = useLang();
   const [discountPct, setDiscountPct] = useState(0);
@@ -63,6 +66,8 @@ export function CheckoutPanel({
   // unchanged). When on, the tender rows must sum EXACTLY to the total before the sale can be settled.
   const [splitOn, setSplitOn] = useState(false);
   const [splitRows, setSplitRows] = useState<{ method: Method; amount: string }[]>([{ method: 'Cash', amount: '' }, { method: 'Card', amount: '' }]);
+  // docs/52 Phase 4a — the selected customer price tier (governed base price by tier). '' = default (no tier).
+  const [priceTier, setPriceTier] = useState('');
 
   const base = useMemo(() => cartTotals(lines, discountPct, serviceChargePct), [lines, discountPct, serviceChargePct]);
   // Mirror the server: the voucher competes for the order-discount slot (best wins, no stacking).
@@ -110,7 +115,7 @@ export function CheckoutPanel({
     setBusy(true);
     try {
       const tenders = splitOn ? splitRows.map((r) => ({ method: r.method, amount: round2(Number(r.amount)) })) : undefined;
-      const r = await onSettle({ method, discountPct, cashReceived: cashNum ?? undefined, voucherCode: voucherInfo?.valid ? voucherInfo.code : undefined, tenders });
+      const r = await onSettle({ method, discountPct, cashReceived: cashNum ?? undefined, voucherCode: voucherInfo?.valid ? voucherInfo.code : undefined, tenders, priceTier: priceTier || undefined });
       setResult(r);
     } catch (e) {
       notifyError((e as Error).message);
@@ -255,6 +260,22 @@ export function CheckoutPanel({
               )}
             </div>
 
+            {/* docs/52 Phase 4a — price books: pick the customer price tier (governed base price). The server
+                re-prices authoritatively; shown only when active tier books exist. */}
+            {priceTiers && priceTiers.length > 0 && (
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
+                <span className="text-muted-foreground">{t('px.chk_price_tier')}</span>
+                <select
+                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  value={priceTier}
+                  onChange={(e) => setPriceTier(e.target.value)}
+                  aria-label={t('px.chk_price_tier')}
+                >
+                  <option value="">{t('px.chk_price_tier_none')}</option>
+                  {priceTiers.map((tr) => <option key={tr} value={tr}>{tr}</option>)}
+                </select>
+              </div>
+            )}
             <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
               <span className="text-muted-foreground">{t('px.chk_bill_discount')}</span>
               <Input

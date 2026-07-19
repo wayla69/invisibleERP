@@ -106,6 +106,7 @@
     "pos-lot": "tsx src/pos-lot.ts",
     "pos-serial": "tsx src/pos-serial.ts",
     "pos-age": "tsx src/pos-age.ts",
+    "pos-pricebook": "tsx src/pos-pricebook.ts",
     "pricing": "tsx src/pricing.ts",
     "returns": "tsx src/returns.ts",
     "bankrec": "tsx src/bankrec.ts",

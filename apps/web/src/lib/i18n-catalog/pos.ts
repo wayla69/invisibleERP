@@ -30,6 +30,9 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'px.chk_aria_delete': { th: 'ลบ', en: 'Delete' },
   'px.chk_back_to_cart': { th: 'กลับไปแก้ตะกร้า', en: 'Back to cart' },
   'px.chk_bill_discount': { th: 'ส่วนลดบิล %', en: 'Bill discount %' },
+  // docs/52 Phase 4a — price books: pick the customer price tier (governed base price) at checkout.
+  'px.chk_price_tier': { th: 'ระดับราคา', en: 'Price tier' },
+  'px.chk_price_tier_none': { th: 'ราคาปกติ', en: 'Standard price' },
   'px.chk_cash_received': { th: 'รับเงิน', en: 'Cash received' },
   'px.chk_change': { th: 'เงินทอน', en: 'Change' },
   'px.chk_voucher_ph': { th: 'โค้ดคูปอง / บัตรกำนัล', en: 'Voucher / coupon code' },
