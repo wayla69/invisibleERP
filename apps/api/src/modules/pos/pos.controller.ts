@@ -56,6 +56,8 @@ const PosSaleBody = z.object({
     cash_tendered: z.number().nonnegative().optional(),
     reference: z.string().max(120).optional(),
   })).min(1).max(10).optional(),
+  // docs/52 Phase 4a — price books: the customer price tier for this sale (governed base price by tier/branch).
+  price_tier: z.string().max(60).optional(),
 });
 
 @Controller('api/pos')

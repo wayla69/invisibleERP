@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Plus, Tag, Trash2 } from 'lucide-react';
+import { Calculator, Plus, Tag, Trash2, BookOpen } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
@@ -55,6 +55,7 @@ export default function PricingPage() {
       <PageHeader title={t('hx.pr.title')} description={t('hx.pr.desc')} />
       <Tabs tabs={[
         { key: 'rules', label: t('hx.pr.tab_rules'), content: <Rules /> },
+        { key: 'books', label: t('hx.pb.tab'), content: <Books /> },
         { key: 'quote', label: t('hx.pr.tab_quote'), content: <QuotePreview /> },
         { key: 'combo', label: t('hx.pr.tab_combo'), content: <Combos /> },
       ]} />
@@ -159,6 +160,111 @@ function Rules() {
               { key: 'window', label: t('hx.pr.col_window'), render: (r: any) => r.time_start ? `${r.time_start}–${r.time_end}` : '—' },
               { key: 'stackable', label: t('hx.pr.col_stack'), align: 'center', render: (r: any) => r.stackable ? <Badge>{t('hx.pr.yes')}</Badge> : <span className="text-muted-foreground">—</span> },
               // G6 (SoD R10): a staged (PendingApproval) rule is inactive until a DIFFERENT user activates it.
+              { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'
+                ? <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>
+                : r.status === 'Rejected' ? <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>
+                : <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('hx.pr.st_active') : t('hx.pr.st_inactive')}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pr.del_rule_aria', { name: r.name })} disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
+            ]}
+          />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// docs/52 Phase 4a — price books: a governed base-price list by customer tier / branch. Maker-checker (staged
+// PendingApproval, activated by a different user — same G6/SoD gate as price rules). The register reads only
+// active, approved books at the till.
+interface PBEntry { item_id: string; unit_price: string; min_qty: string }
+function Books() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['price-books'], queryFn: () => api('/api/pricing/books') });
+  const empty = { name: '', tier: '', branch_id: '', priority: '100', valid_from: '', valid_to: '' };
+  const [f, setF] = useState<any>(empty);
+  const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
+  const [entries, setEntries] = useState<PBEntry[]>([{ item_id: '', unit_price: '', min_qty: '1' }]);
+  const setEntry = (i: number, p: Partial<PBEntry>) => setEntries((es) => es.map((e, j) => (j === i ? { ...e, ...p } : e)));
+  const validEntries = () => entries.filter((e) => e.item_id.trim() && e.unit_price !== '').map((e) => ({ item_id: e.item_id.trim(), unit_price: Number(e.unit_price), min_qty: Number(e.min_qty) || 1 }));
+
+  // create the book then set its entries — both stage it PendingApproval (a different user must activate it).
+  const save = useMutation({
+    mutationFn: async () => {
+      const created: any = await api('/api/pricing/books', { method: 'POST', body: JSON.stringify({ name: f.name, tier: f.tier || null, branch_id: f.branch_id ? Number(f.branch_id) : null, priority: Number(f.priority) || 100, valid_from: f.valid_from || null, valid_to: f.valid_to || null }) });
+      await api(`/api/pricing/books/${created.id}/entries`, { method: 'POST', body: JSON.stringify({ entries: validEntries() }) });
+    },
+    onSuccess: () => { notifySuccess(t('hx.pb.saved_pending')); setF(empty); setEntries([{ item_id: '', unit_price: '', min_qty: '1' }]); qc.invalidateQueries({ queryKey: ['price-books'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const del = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['price-books'] }) });
+  const approve = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}/approve`, { method: 'POST' }), onSuccess: () => { notifySuccess(t('hx.pb.activated')); qc.invalidateQueries({ queryKey: ['price-books'] }); }, onError: (e: any) => notifyError(e.message) });
+  const reject = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}/reject`, { method: 'POST', body: JSON.stringify({}) }), onSuccess: () => { notifySuccess(t('hx.pb.rejected')); qc.invalidateQueries({ queryKey: ['price-books'] }); }, onError: (e: any) => notifyError(e.message) });
+  const canSave = !!f.name && validEntries().length > 0 && !save.isPending;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{t('hx.pb.add_title')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{t('hx.pb.desc')}</p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label={<>{t('hx.pb.f_name')} <span className="text-destructive">*</span></>} htmlFor="pb-name" className="sm:col-span-2 lg:col-span-1">
+              <Input id="pb-name" placeholder={t('hx.pb.name_ph')} value={f.name} onChange={(e) => set({ name: e.target.value })} required />
+            </Field>
+            <Field label={t('hx.pb.f_tier')} htmlFor="pb-tier" hint={t('hx.pb.tier_ph')}>
+              <Input id="pb-tier" value={f.tier} onChange={(e) => set({ tier: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_branch')} htmlFor="pb-branch" hint={t('hx.pb.branch_ph')}>
+              <Input id="pb-branch" type="number" inputMode="numeric" value={f.branch_id} onChange={(e) => set({ branch_id: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_priority')} htmlFor="pb-priority" hint={t('hx.pb.priority_hint')}>
+              <Input id="pb-priority" type="number" inputMode="numeric" placeholder="100" value={f.priority} onChange={(e) => set({ priority: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_valid_from')} htmlFor="pb-vf">
+              <Input id="pb-vf" type="date" value={f.valid_from} onChange={(e) => set({ valid_from: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_valid_to')} htmlFor="pb-vt">
+              <Input id="pb-vt" type="date" value={f.valid_to} onChange={(e) => set({ valid_to: e.target.value })} />
+            </Field>
+          </div>
+          <div className="space-y-2">
+            <Label>{t('hx.pb.entries_title')}</Label>
+            <div className="hidden grid-cols-[2fr_1fr_1fr_auto] gap-2 px-1 text-xs font-medium text-muted-foreground sm:grid">
+              <span>{t('hx.pb.f_item')}</span><span className="text-right">{t('hx.pb.f_price')}</span><span className="text-right">{t('hx.pb.f_minqty')}</span><span className="w-9" />
+            </div>
+            {entries.map((e, i) => (
+              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-center">
+                <Input className="col-span-2 sm:col-span-1" placeholder={t('hx.pb.f_item')} value={e.item_id} onChange={(ev) => setEntry(i, { item_id: ev.target.value })} />
+                <Input type="number" inputMode="decimal" step="0.01" className="text-right" placeholder="0" value={e.unit_price} onChange={(ev) => setEntry(i, { unit_price: ev.target.value })} />
+                <Input type="number" inputMode="numeric" min={1} className="text-right" placeholder="1" value={e.min_qty} onChange={(ev) => setEntry(i, { min_qty: ev.target.value })} />
+                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pb.f_item')} disabled={entries.length === 1} onClick={() => setEntries((es) => es.filter((_, j) => j !== i))}><Trash2 className="size-4" /></Button>
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setEntries((es) => [...es, { item_id: '', unit_price: '', min_qty: '1' }])}><Plus className="size-4" /> {t('hx.pb.add_row')}</Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={!canSave} onClick={() => save.mutate()}>
+              <Plus className="size-4" /> {save.isPending ? t('hx.common.saving') : t('hx.pb.save')}
+            </Button>
+            {!canSave && !save.isPending && <span className="text-xs text-muted-foreground">{t('hx.pb.name_required')}</span>}
+          </div>
+        </CardContent>
+      </Card>
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.books}
+            rowKey={(r: any) => r.id}
+            emptyState={{ icon: BookOpen, title: t('hx.pb.empty_title'), description: t('hx.pb.empty_desc') }}
+            columns={[
+              { key: 'name', label: t('hx.pb.col_name') },
+              { key: 'tier', label: t('hx.pb.col_tier'), render: (r: any) => r.tier || <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'branch_id', label: t('hx.pb.col_branch'), render: (r: any) => r.branch_id != null ? `#${r.branch_id}` : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'priority', label: t('hx.pb.f_priority'), align: 'right', render: (r: any) => <span className="tabular">{r.priority}</span> },
+              // G6 (SoD R10): a staged (PendingApproval) book is inactive until a DIFFERENT user activates it.
               { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'
                 ? <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>
                 : r.status === 'Rejected' ? <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>
