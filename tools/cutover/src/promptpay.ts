@@ -105,6 +105,26 @@ async function main() {
   ok('13-digit national-id target → QR contains it + valid CRC',
     p2.includes('02131234567890123') && p2.slice(-4) === crc16ccitt(p2.slice(0, -4)), JSON.stringify({ ok: p2.includes('02131234567890123') }));
 
+  // ── 7. #3 pending-settlement worklist surfaces the unconfirmed PromptPay tender (SALE-PP-1, Pending) ──
+  const pend = await inj('GET', '/api/payments/pending-settlement', admin);
+  const rowPP1 = (pend.json.pending ?? []).find((r: any) => r.sale_no === 'SALE-PP-1');
+  ok('pending-settlement lists the unconfirmed PromptPay tender (with age + running total)',
+    pend.status === 200 && !!rowPP1 && rowPP1.status === 'Pending' && rowPP1.age_minutes != null && pend.json.count >= 1 && pend.json.total_unconfirmed >= 200,
+    JSON.stringify({ count: pend.json.count, total: pend.json.total_unconfirmed }));
+
+  // ── 8. older_than_min excludes a just-created tender (only stale ones are chased) ──
+  const pendOld = await inj('GET', '/api/payments/pending-settlement?older_than_min=999', admin);
+  ok('pending-settlement older_than_min filters out fresh tenders',
+    pendOld.status === 200 && !(pendOld.json.pending ?? []).some((r: any) => r.sale_no === 'SALE-PP-1'),
+    JSON.stringify({ count: pendOld.json.count }));
+
+  // ── 9. settling the tender removes it from the worklist (reconciled) ──
+  const settled = await inj('PATCH', `/api/payments/${pay.json.payment_no}/settle`, admin);
+  const pend2 = await inj('GET', '/api/payments/pending-settlement', admin);
+  ok('settling a pending tender clears it from the worklist',
+    settled.json.status === 'Captured' && !(pend2.json.pending ?? []).some((r: any) => r.sale_no === 'SALE-PP-1'),
+    JSON.stringify({ settled: settled.json.status, cleared: !(pend2.json.pending ?? []).some((r: any) => r.sale_no === 'SALE-PP-1') }));
+
   console.log('\n── C2 — PromptPay end-to-end (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

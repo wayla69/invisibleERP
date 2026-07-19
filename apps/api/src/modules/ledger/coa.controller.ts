@@ -27,7 +27,7 @@ const CreateAccountBody = z.object({
   cfBucket: z.enum(['operating', 'investing', 'financing', 'addback']).optional(),
   cfLabel: z.string().optional(),
   isCurrent: z.boolean().optional(),
-  // 0438: Balance-Sheet / Income-Statement section binding (fallback = canonical default map / type).
+  // 0439: Balance-Sheet / Income-Statement section binding (fallback = canonical default map / type).
   bsGroup: z.enum(['current_asset', 'noncurrent_asset', 'current_liability', 'noncurrent_liability', 'equity']).optional(),
   isGroup: z.enum(['revenue', 'cogs', 'selling_admin', 'other_income', 'other_expense', 'finance_cost', 'tax']).optional(),
 });

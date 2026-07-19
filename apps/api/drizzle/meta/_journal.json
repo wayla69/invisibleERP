@@ -2883,7 +2883,14 @@
       "idx": 412,
       "version": "7",
       "when": 2023820000377,
-      "tag": "0438_accounts_statement_sections",
+      "tag": "0438_pos_change_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 413,
+      "version": "7",
+      "when": 2023820000378,
+      "tag": "0439_accounts_statement_sections",
       "breakpoints": true
     }
   ]

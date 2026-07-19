@@ -20,6 +20,6 @@ import { UsageModule } from '../usage/usage.module';
   imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule, PricingModule, PosFiscalModule, PosScaleModule, UsageModule],
   controllers: [PortalController],
   providers: [PortalService, PortalPosService, OfflineSyncService, PortalMyErpService, PortalUsersService, PasswordService],
-  exports: [PortalService],
+  exports: [PortalService, PortalPosService], // PortalPosService: the generic sale engine reused by the internal POS (docs/52 Phase 1b)
 })
 export class PortalModule {}

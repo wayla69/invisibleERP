@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql, gte, lte, like, or } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { custPosSales, custPosItems, payments, customerInventory, custStockLog, branchStock, posReturns, posReturnItems, taxInvoices } from '../../database/schema';
@@ -8,6 +8,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { RecipeService } from '../menu/recipe.service';
 import { GiftCardService } from '../giftcards/gift-card.service';
+import { TaxInvoiceService } from '../tax/documents/tax-invoice.service';
 import { n, fx, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import type { CreateReturnDto } from './dto';
@@ -23,6 +24,7 @@ export class ReturnsService {
     private readonly ledger: LedgerService,
     private readonly recipe: RecipeService,
     private readonly gift: GiftCardService,
+    @Optional() private readonly taxInvoice?: TaxInvoiceService, // #2: auto-issue a credit note (ใบลดหนี้) on a return
   ) {}
 
   // item-level return: refund (reuse PaymentService.refund) + restock + GL reversal — ATOMIC.
@@ -129,9 +131,24 @@ export class ReturnsService {
         await this.ledger.postEntry({ source: 'RTN-COGS', sourceRef: returnNo, tenantId: sale.tenantId, memo: `COGS reversal ${returnNo}`, createdBy: user.username, lines: [{ account_code: postingDefault('RETURN.STOCK', 'inventory'), debit: cogsRev }, { account_code: (await this.ledger.postingOverrides('RETURN.STOCK', sale.tenantId ?? null)).cogs_reversal ?? postingDefault('RETURN.STOCK', 'cogs_reversal'), credit: cogsRev }] }, tx);
       }
 
-      // credit-note (ใบลดหนี้) hook: link the original tax invoice for a future CRN issuer (Tier 2)
+      // credit-note (ใบลดหนี้ ม.86/10): if the sale carries an Issued tax invoice, auto-issue the matching
+      // credit note so the output-VAT (ภ.พ.30) report is reduced for the return. The RTN journal above is
+      // the GL effect (cash reversal), so the note posts NO new GL — it only LINKS journalNo. On THIS tx ⇒
+      // it commits/rolls back atomically with the return. Skipped (credit_note_no stays null) when the sale
+      // has no Issued tax invoice (e.g. a Comp/unbilled sale) — there is nothing to reduce in the VAT report.
       const [tiv] = await tx.select({ docNo: taxInvoices.docNo }).from(taxInvoices).where(and(eq(taxInvoices.sourceType, 'POS'), eq(taxInvoices.sourceRef, dto.sale_no), eq(taxInvoices.status, 'Issued'))).limit(1);
-      return { return_no: returnNo, sale_no: dto.sale_no, refund_no: refundNo, refund_method: dto.refund_method ?? 'Cash', store_credit_card_no: storeCreditCardNo, subtotal_returned: subtotalReturned, vat_returned: vatReturned, total_returned: totalReturned, restocked: restockedAny, journal_no: journalNo, credit_note_no: null, original_tax_invoice_no: tiv?.docNo ?? null };
+      let creditNoteNo: string | null = null;
+      if (tiv?.docNo && this.taxInvoice && totalReturned > 0) {
+        const cn = await this.taxInvoice.issueCreditNoteForReturn({
+          originalDocNo: tiv.docNo, returnNo, reason: dto.reason ?? null,
+          subtotal: subtotalReturned, vat: vatReturned,
+          lines: retLines.map((rl) => ({ description: rl.line.itemDescription ?? String(rl.line.itemId ?? 'สินค้า'), qty: rl.qty, unit_price: n(rl.line.unitPrice), amount: rl.lineNet })),
+          glEntryNo: journalNo, createdBy: user.username,
+        }, tx);
+        creditNoteNo = cn?.doc_no ?? null;
+        if (creditNoteNo) await tx.update(posReturns).set({ creditNoteNo }).where(eq(posReturns.id, h.id));
+      }
+      return { return_no: returnNo, sale_no: dto.sale_no, refund_no: refundNo, refund_method: dto.refund_method ?? 'Cash', store_credit_card_no: storeCreditCardNo, subtotal_returned: subtotalReturned, vat_returned: vatReturned, total_returned: totalReturned, restocked: restockedAny, journal_no: journalNo, credit_note_no: creditNoteNo, original_tax_invoice_no: tiv?.docNo ?? null };
     });
   }
 
