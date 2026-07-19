@@ -50,6 +50,11 @@ const WarehouseBody = z.object({
 // Item relationships + lifecycle (master-data audit Phase 10).
 const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
 const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), note: z.string().optional() });
+// docs/52 Phase 2b — generate a variant matrix under a parent item from axes (Size, Color, …).
+const GenerateVariantsBody = z.object({
+  axes: z.array(z.object({ axis: z.string().trim().min(1).max(40), values: z.array(z.string().trim().min(1).max(40)).min(1).max(50) })).min(1).max(4),
+  barcodes: z.record(z.string(), z.string().trim().max(64)).optional(),
+});
 const ItemStatusBody = z.object({ status: z.enum(['active', 'inactive', 'discontinued']), superseded_by: z.string().nullish() });
 // Match-merge / DQM (master-data audit Phase 11).
 const ItemMergeBody = z.object({ survivor_item_id: z.string().min(1), duplicate_item_id: z.string().min(1) });
@@ -123,6 +128,9 @@ export class ItemSetupController {
   @Patch('items/:itemId/status') setItemStatus(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemStatusBody)) b: z.infer<typeof ItemStatusBody>, @CurrentUser() u: JwtUser) { return this.svc.setItemStatus(itemId, b, u); }
   @Post('items/:itemId/relationships') addItemRelationship(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemRelBody)) b: z.infer<typeof ItemRelBody>, @CurrentUser() u: JwtUser) { return this.svc.addItemRelationship(itemId, b, u); }
   @Get('items/:itemId/relationships') listItemRelationships(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.listItemRelationships(itemId, u); }
+  // docs/52 Phase 2b — product variants / matrix items.
+  @Post('items/:itemId/variants') generateVariants(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(GenerateVariantsBody)) b: z.infer<typeof GenerateVariantsBody>, @CurrentUser() u: JwtUser) { return this.svc.generateVariants(itemId, b, u); }
+  @Get('items/:itemId/variants') listVariants(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.listVariants(itemId, u); }
   @Delete('items/:itemId/relationships/:relId') deleteItemRelationship(@Param('itemId') itemId: string, @Param('relId') relId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteItemRelationship(itemId, +relId, u); }
   // Match-merge / DQM (master-data audit Phase 11) — detect is a read-only review queue for the setup duties;
   // merge is gated in the service to the platform owner (god) because items are a shared cross-tenant master.
