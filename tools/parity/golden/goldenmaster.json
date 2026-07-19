@@ -83,7 +83,46 @@
         }
       ],
       "net_income": 700,
-      "retained_earnings": 0
+      "retained_earnings": 0,
+      "sections": [
+        {
+          "group": "current_asset",
+          "label_en": "Current assets",
+          "label_th": "สินทรัพย์หมุนเวียน",
+          "lines": [
+            {
+              "account_code": "1000",
+              "account_name": "Cash",
+              "account_type": "Asset",
+              "balance": -330,
+              "bs_group": "current_asset"
+            },
+            {
+              "account_code": "1280",
+              "account_name": "Prepaid Expenses",
+              "account_type": "Asset",
+              "balance": 1100,
+              "bs_group": "current_asset"
+            }
+          ],
+          "total": 770
+        },
+        {
+          "group": "current_liability",
+          "label_en": "Current liabilities",
+          "label_th": "หนี้สินหมุนเวียน",
+          "lines": [
+            {
+              "account_code": "2100",
+              "account_name": "Tax Payable",
+              "account_type": "Liability",
+              "balance": 70,
+              "bs_group": "current_liability"
+            }
+          ],
+          "total": 70
+        }
+      ]
     },
     "cash_flow_direct": {
       "cash_beginning": 0,
@@ -157,6 +196,40 @@
       "cost_center": null,
       "expense": 300,
       "from": "<DATE>",
+      "groups": [
+        {
+          "group": "revenue",
+          "label_en": "Revenue",
+          "label_th": "รายได้",
+          "lines": [
+            {
+              "account_code": "4000",
+              "account_name": "Sales Revenue",
+              "account_type": "Revenue",
+              "credit": 1000,
+              "debit": 0,
+              "is_group": "revenue"
+            }
+          ],
+          "total": 1000
+        },
+        {
+          "group": "selling_admin",
+          "label_en": "Selling & administrative expenses",
+          "label_th": "ค่าใช้จ่ายในการขายและบริหาร",
+          "lines": [
+            {
+              "account_code": "5100",
+              "account_name": "Operating Expense",
+              "account_type": "Expense",
+              "credit": 0,
+              "debit": 300,
+              "is_group": "selling_admin"
+            }
+          ],
+          "total": 300
+        }
+      ],
       "ledger": "TFRS",
       "lines": [
         {
@@ -176,6 +249,19 @@
       ],
       "net_income": 700,
       "revenue": 1000,
+      "summary": {
+        "cogs": 0,
+        "finance_cost": 0,
+        "gross_profit": 1000,
+        "net_income": 700,
+        "operating_profit": 700,
+        "other_expense": 0,
+        "other_income": 0,
+        "profit_before_tax": 700,
+        "revenue": 1000,
+        "selling_admin": 300,
+        "tax": 0
+      },
       "to": "<DATE>"
     },
     "post_draft": {

@@ -1,5 +1,8 @@
-import { Module, Controller, Get, Query } from '@nestjs/common';
-import { TH_PROVINCES, normalizeProvince } from '../../common/thai-address';
+import { Module, Controller, Get, Param, Query } from '@nestjs/common';
+import {
+  TH_PROVINCES, normalizeProvince,
+  lookupPostalCode, subdistrictProvinces, districtsOfProvince, subdistrictsOfDistrict,
+} from '../../common/thai-address';
 import { TH_BANKS, normalizeBank } from '../../common/thai-banks';
 
 // Thai geography reference (master-data audit Phase 7). Read-only canonical data — the 77-province list that
@@ -17,6 +20,33 @@ export class GeoRefController {
   normalize(@Query('q') q: string | undefined) {
     const canonical = normalizeProvince(q);
     return { input: q ?? null, canonical, recognized: canonical != null };
+  }
+
+  // Postal-code → the subdistrict(s)/district/province it covers (a code usually spans several
+  // subdistricts). Drives the address form's "type รหัสไปรษณีย์ → pick เขต/แขวง" autofill.
+  @Get('postal/:code')
+  postal(@Param('code') code: string) {
+    const matches = lookupPostalCode(code);
+    return { code, matches, count: matches.length };
+  }
+
+  // Cascade fallback (choose without knowing the postal code): provinces → districts → subdistricts.
+  @Get('address/provinces')
+  addressProvinces() {
+    const provinces = subdistrictProvinces();
+    return { provinces, count: provinces.length };
+  }
+
+  @Get('address/districts')
+  addressDistricts(@Query('province') province: string | undefined) {
+    const districts = province ? districtsOfProvince(province) : [];
+    return { province: province ?? null, districts, count: districts.length };
+  }
+
+  @Get('address/subdistricts')
+  addressSubdistricts(@Query('province') province: string | undefined, @Query('district') district: string | undefined) {
+    const subdistricts = province && district ? subdistrictsOfDistrict(province, district) : [];
+    return { province: province ?? null, district: district ?? null, subdistricts, count: subdistricts.length };
   }
 
   // Governed bank master (Phase 9) — the canonical Thai-banks list the vendor bank dialog binds to.

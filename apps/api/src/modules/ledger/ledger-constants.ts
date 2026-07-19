@@ -22,6 +22,15 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   { code: '4000', name: 'Sales Revenue', type: 'Revenue' },
   { code: '5000', name: 'COGS', type: 'Expense' },
   { code: '5100', name: 'Operating Expense', type: 'Expense' },
+  // Everyday SME operating-expense detail (add-on 2026-07-18) — named breakdowns of the 5100 catch-all so a
+  // company can post/report by expense kind out of the box (and hang sub-accounts under any of them, e.g.
+  // 5110 ค่าเดินทาง → 511001 ค่าเครื่องบิน). All ordinary P&L expenses (no CF_CLASSIFY — captured in net income).
+  { code: '5110', name: 'Travel & Transport Expense', type: 'Expense' },   // ค่าเดินทางและขนส่ง
+  { code: '5120', name: 'Utilities Expense', type: 'Expense' },            // ค่าสาธารณูปโภค (ไฟฟ้า/น้ำ/อินเทอร์เน็ต)
+  { code: '5130', name: 'Rent Expense', type: 'Expense' },                 // ค่าเช่า — short-term / low-value leases (TFRS 16 recognition exemption); capitalised leases use 5210/5900
+  { code: '5140', name: 'Marketing & Advertising Expense', type: 'Expense' }, // ค่าการตลาดและโฆษณา
+  { code: '5150', name: 'Professional & Legal Fees', type: 'Expense' },    // ค่าธรรมเนียมวิชาชีพและกฎหมาย (audit/legal/consulting)
+  { code: '5160', name: 'Office Supplies & Admin Expense', type: 'Expense' }, // ค่าวัสดุสำนักงานและค่าใช้จ่ายบริหาร
   { code: '1500', name: 'Fixed Assets', type: 'Asset' },
   { code: '1520', name: 'Construction in Progress', type: 'Asset' }, // สินทรัพย์ระหว่างก่อสร้าง (CIP/AUC) — accumulates cost until settled to 1500 (FA-13)
   { code: '1590', name: 'Accumulated Depreciation', type: 'Asset' }, // contra-asset (normal credit bal)
@@ -135,6 +144,51 @@ export const COA: { code: string; name: string; type: 'Asset' | 'Liability' | 'E
   // loan is a financing/investing instrument, so its receivable buckets investing and its payable financing.
   { code: '1155', name: 'Intercompany Loan Receivable', type: 'Asset' },      // ลูกหนี้เงินให้กู้ยืมระหว่างบริษัท — creditor side of an IC loan (elimination pair with 2155, TRE-05)
   { code: '2155', name: 'Intercompany Loan Payable', type: 'Liability' },     // เจ้าหนี้เงินกู้ยืมระหว่างบริษัท — debtor side of an IC loan (elimination pair with 1155, TRE-05)
+
+  // ── Comprehensive SME chart expansion (2026-07-18) ──────────────────────────────────────────────────
+  // Everyday accounts a professional Thai SME chart expects but the lean core omitted. All are additive
+  // (boot-seeded, idempotent, no migration) and post via manual JE / posting-rule overrides / sub-accounts
+  // — no existing poster is rewired. Balance-sheet ones get a CF_CLASSIFY entry below; P&L ones do not.
+  // Current assets (working capital)
+  { code: '1160', name: 'Other Receivables', type: 'Asset' },                 // ลูกหนี้อื่น — non-trade receivables
+  { code: '1175', name: 'Accrued Income', type: 'Asset' },                    // รายได้ค้างรับ — earned but not yet billed/received
+  { code: '1185', name: 'Deposits Paid', type: 'Asset' },                     // เงินประกัน/เงินมัดจำจ่าย — refundable deposits (rent/utilities)
+  { code: '1270', name: 'Advances to Suppliers', type: 'Asset' },            // เงินจ่ายล่วงหน้าค่าสินค้า/บริการ — prepayments to vendors
+  { code: '1290', name: 'Other Current Assets', type: 'Asset' },             // สินทรัพย์หมุนเวียนอื่น
+  { code: '1310', name: 'Withholding Tax Receivable', type: 'Asset' },       // ภาษีเงินได้ถูกหัก ณ ที่จ่าย — WHT suffered on our income, creditable against CIT (Thai)
+  { code: '1400', name: 'Undue Input VAT', type: 'Asset' },                  // ภาษีซื้อยังไม่ถึงกำหนด — input VAT on unpaid purchase invoices (Thai), moves to 1300 on payment
+  // Non-current assets — PP&E broken out by class (gross; the asset module may remap categories to these)
+  { code: '1530', name: 'Land', type: 'Asset' },                            // ที่ดิน (not depreciated)
+  { code: '1540', name: 'Buildings', type: 'Asset' },                       // อาคารและสิ่งปลูกสร้าง
+  { code: '1550', name: 'Machinery & Equipment', type: 'Asset' },          // เครื่องจักรและอุปกรณ์
+  { code: '1560', name: 'Vehicles', type: 'Asset' },                       // ยานพาหนะ
+  { code: '1570', name: 'Furniture & Office Equipment', type: 'Asset' },   // เครื่องตกแต่งและอุปกรณ์สำนักงาน
+  { code: '1800', name: 'Intangible Assets', type: 'Asset' },              // สินทรัพย์ไม่มีตัวตน — software/licences/goodwill
+  { code: '1810', name: 'Accumulated Amortization', type: 'Asset' },       // ค่าตัดจำหน่ายสะสม — contra-asset (normal credit bal) for 1800
+  // Current liabilities
+  { code: '2020', name: 'Other Payables', type: 'Liability' },             // เจ้าหนี้อื่น — non-trade payables
+  { code: '2030', name: 'Accrued Expenses', type: 'Liability' },           // ค่าใช้จ่ายค้างจ่าย — expenses incurred not yet invoiced
+  { code: '2050', name: 'Accrued Salaries & Wages', type: 'Liability' },   // เงินเดือนและค่าจ้างค้างจ่าย
+  { code: '2140', name: 'Undue Output VAT', type: 'Liability' },           // ภาษีขายยังไม่ถึงกำหนด — output VAT on unpaid sales invoices (Thai), moves to 2100 on receipt
+  { code: '2510', name: 'Current Portion of Long-term Debt', type: 'Liability' }, // หนี้สินระยะยาวที่ถึงกำหนดชำระภายในหนึ่งปี
+  { code: '2640', name: 'Dividends Payable', type: 'Liability' },          // เงินปันผลค้างจ่าย
+  // Equity
+  { code: '3050', name: 'Share Premium', type: 'Equity' },                 // ส่วนเกินมูลค่าหุ้น
+  { code: '3300', name: 'Legal Reserve', type: 'Equity' },                 // สำรองตามกฎหมาย (Thai statutory reserve, appropriated from RE)
+  // Other income
+  { code: '4800', name: 'Other Income', type: 'Revenue' },                 // รายได้อื่น — miscellaneous income
+  { code: '4810', name: 'Interest Income', type: 'Revenue' },              // ดอกเบี้ยรับ — bank/deposit interest (distinct from 4700 investment income)
+  // Operating expenses (P&L detail)
+  { code: '5170', name: 'Insurance Expense', type: 'Expense' },            // ค่าเบี้ยประกันภัย
+  { code: '5180', name: 'Communication Expense', type: 'Expense' },        // ค่าโทรศัพท์และอินเทอร์เน็ต
+  { code: '5190', name: 'Freight Out / Delivery Expense', type: 'Expense' }, // ค่าขนส่งสินค้าออก (to customers)
+  { code: '5630', name: 'Staff Welfare', type: 'Expense' },                // สวัสดิการพนักงาน
+  { code: '5640', name: 'Training & Development', type: 'Expense' },       // ค่าฝึกอบรมและพัฒนาบุคลากร
+  { code: '5730', name: 'Bank Charges', type: 'Expense' },                 // ค่าธรรมเนียมธนาคาร
+  { code: '5740', name: 'Commission Expense', type: 'Expense' },           // ค่านายหน้า
+  { code: '5750', name: 'Entertainment Expense', type: 'Expense' },        // ค่ารับรอง (Thai — capped deductibility)
+  { code: '5760', name: 'Donation Expense', type: 'Expense' },             // เงินบริจาค
+  { code: '5870', name: 'Other Expenses', type: 'Expense' },               // ค่าใช้จ่ายอื่น
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
@@ -222,4 +276,27 @@ export const CF_CLASSIFY: Record<string, { bucket: CfBucket; label: string }> = 
   // a financing inflow. Both ELIMINATE on consolidation, so at the group layer they self-cancel.
   '1155': { bucket: 'investing', label: 'ลูกหนี้เงินให้กู้ยืมระหว่างบริษัท (Intercompany loan receivable)' },
   '2155': { bucket: 'financing', label: 'เจ้าหนี้เงินกู้ยืมระหว่างบริษัท (Intercompany loan payable)' },
+  // Comprehensive SME chart expansion (2026-07-18) — CF buckets for the new balance-sheet accounts.
+  '1160': { bucket: 'operating', label: 'ลูกหนี้อื่น (Other receivables)' },
+  '1175': { bucket: 'operating', label: 'รายได้ค้างรับ (Accrued income)' },
+  '1185': { bucket: 'operating', label: 'เงินประกัน/เงินมัดจำจ่าย (Deposits paid)' },
+  '1270': { bucket: 'operating', label: 'เงินจ่ายล่วงหน้าค่าสินค้า (Advances to suppliers)' },
+  '1290': { bucket: 'operating', label: 'สินทรัพย์หมุนเวียนอื่น (Other current assets)' },
+  '1310': { bucket: 'operating', label: 'ภาษีเงินได้ถูกหัก ณ ที่จ่าย (Withholding tax receivable)' },
+  '1400': { bucket: 'operating', label: 'ภาษีซื้อยังไม่ถึงกำหนด (Undue input VAT)' },
+  '1530': { bucket: 'investing', label: 'ที่ดิน (Land)' },
+  '1540': { bucket: 'investing', label: 'อาคารและสิ่งปลูกสร้าง (Buildings)' },
+  '1550': { bucket: 'investing', label: 'เครื่องจักรและอุปกรณ์ (Machinery & equipment)' },
+  '1560': { bucket: 'investing', label: 'ยานพาหนะ (Vehicles)' },
+  '1570': { bucket: 'investing', label: 'เครื่องตกแต่งและอุปกรณ์สำนักงาน (Furniture & office equipment)' },
+  '1800': { bucket: 'investing', label: 'สินทรัพย์ไม่มีตัวตน (Intangible assets)' },
+  '1810': { bucket: 'addback', label: 'ค่าตัดจำหน่ายสะสม (Accumulated amortization)' }, // contra-asset — non-cash amortization add-back (mirrors 1590/1690)
+  '2020': { bucket: 'operating', label: 'เจ้าหนี้อื่น (Other payables)' },
+  '2030': { bucket: 'operating', label: 'ค่าใช้จ่ายค้างจ่าย (Accrued expenses)' },
+  '2050': { bucket: 'operating', label: 'เงินเดือนและค่าจ้างค้างจ่าย (Accrued salaries & wages)' },
+  '2140': { bucket: 'operating', label: 'ภาษีขายยังไม่ถึงกำหนด (Undue output VAT)' },
+  '2510': { bucket: 'financing', label: 'หนี้สินระยะยาวที่ถึงกำหนดชำระในหนึ่งปี (Current portion of long-term debt)' },
+  '2640': { bucket: 'financing', label: 'เงินปันผลค้างจ่าย (Dividends payable)' },
+  '3050': { bucket: 'financing', label: 'ส่วนเกินมูลค่าหุ้น (Share premium)' },
+  '3300': { bucket: 'financing', label: 'สำรองตามกฎหมาย (Legal reserve)' },
 };

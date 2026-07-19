@@ -13,7 +13,11 @@ const SignupBody = z.object({
   admin_password: z.string().min(8),
   email: z.string().email(),
   plan_code: z.string().optional(),
-  industry: z.enum(['restaurant', 'retail', 'distribution', 'services', 'general']).optional(),
+  industry: z.enum([
+    'restaurant', 'retail', 'distribution', 'services', 'manufacturing', 'construction', 'ecommerce',
+    'hospitality', 'healthcare', 'professional', 'agriculture', 'automotive', 'logistics', 'education',
+    'nonprofit', 'realestate', 'general',
+  ]).optional(),
   // SME single-user edition (docs/49) — the control environment chosen AT CREATION. Default 'enterprise'.
   // Only the @PlatformAdmin create-company path may set 'sme' (enforced in provisionTenant, not here,
   // because this body is shared with the public signup/request forms).

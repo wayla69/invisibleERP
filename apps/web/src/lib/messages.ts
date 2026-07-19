@@ -701,6 +701,14 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'acct.revenue': { th: 'รายได้', en: 'Revenue' },
   'acct.expense': { th: 'ค่าใช้จ่าย', en: 'Expense' },
   'acct.net_income': { th: 'กำไรสุทธิ', en: 'Net income' },
+  // 0438 — statement-section breakdown (งบดุล / งบกำไรขาดทุน จัดหมวดตามการผูกบัญชี)
+  'acct.pl_breakdown': { th: 'งบกำไรขาดทุนแยกตามหมวด', en: 'Income statement by section' },
+  'acct.bs_breakdown': { th: 'งบดุลแยกตามหมวด', en: 'Balance sheet by section' },
+  'acct.gross_profit': { th: 'กำไรขั้นต้น', en: 'Gross profit' },
+  'acct.operating_profit': { th: 'กำไรจากการดำเนินงาน', en: 'Operating profit' },
+  'acct.profit_before_tax': { th: 'กำไรก่อนภาษี', en: 'Profit before tax' },
+  'acct.income_tax': { th: 'ภาษีเงินได้', en: 'Income tax' },
+  'acct.section_total': { th: 'รวม', en: 'Total' },
 
   // Opening balances
   'acct.ob_paste_none': { th: 'ไม่พบรายการที่อ่านได้ — วางคอลัมน์ รหัสบัญชี / เดบิต / เครดิต', en: 'No readable rows found — paste columns Account code / Debit / Credit' },

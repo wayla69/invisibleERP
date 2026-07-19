@@ -46,9 +46,13 @@ async function main() {
     { code: 'SVC', name: 'บริการ', industry: 'services' },
     { code: 'GEN', name: 'ทั่วไป', industry: 'general' },
     { code: 'NONE', name: 'ยังไม่ตั้ง', industry: null },
+    // Expanded business types (2026-07-19) — one representative of each register shape.
+    { code: 'HOTEL', name: 'โรงแรม', industry: 'hospitality' },
+    { code: 'FACTORY', name: 'โรงงาน', industry: 'manufacturing' },
+    { code: 'CLINIC', name: 'คลินิก', industry: 'healthcare' },
   ]).onConflictDoNothing();
   const tid = async (c: string) => Number((await db.select().from(s.tenants).where(eq(s.tenants.code, c)))[0].id);
-  for (const c of ['REST', 'SHOP', 'DIST', 'SVC', 'GEN', 'NONE']) {
+  for (const c of ['REST', 'SHOP', 'DIST', 'SVC', 'GEN', 'NONE', 'HOTEL', 'FACTORY', 'CLINIC']) {
     await db.insert(s.users).values({ username: `u_${c}`, passwordHash: await pw.hash('pw1'), role: 'Admin', tenantId: await tid(c) }).onConflictDoNothing();
   }
   // a POS cashier (pos_sell only) and a non-POS user (Warehouse) in the retail shop for the access checks.
@@ -105,6 +109,20 @@ async function main() {
   ok('unset industry → restaurant profile (non-breaking fallback)',
     none.business_type === 'restaurant' && none.sale_path === 'restaurant' && none.revenue_event === 'SALE.FOOD',
     JSON.stringify(none));
+
+  // ── expanded business types map to the right register shape (2026-07-19) ──
+  const hotel = await profileFor('u_HOTEL');
+  ok('hospitality → restaurant register (tables/kds + SALE.FOOD) for the hotel F&B outlet',
+    hotel.business_type === 'hospitality' && hotel.tables === true && hotel.kds === true && hotel.sale_path === 'restaurant' && hotel.revenue_event === 'SALE.FOOD',
+    JSON.stringify(hotel));
+  const factory = await profileFor('u_FACTORY');
+  ok('manufacturing → generic goods register (no tables/kitchen, SALE.GOODS)',
+    factory.business_type === 'manufacturing' && factory.tables === false && factory.kds === false && factory.sale_path === 'generic' && factory.revenue_event === 'SALE.GOODS',
+    JSON.stringify(factory));
+  const clinic = await profileFor('u_CLINIC');
+  ok('healthcare → generic service register (no tables/kitchen, SALE.SERVICE)',
+    clinic.business_type === 'healthcare' && clinic.tables === false && clinic.kds === false && clinic.sale_path === 'generic' && clinic.revenue_event === 'SALE.SERVICE',
+    JSON.stringify(clinic));
 
   // ── a pos_sell-only cashier can read the profile (the register needs it) ──
   const cashierP = await inj('GET', '/api/pos/profile', await login('cashier'));

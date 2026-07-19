@@ -2906,6 +2906,13 @@
       "when": 2023820000380,
       "tag": "0441_kit_component_qty",
       "breakpoints": true
+    },
+    {
+      "idx": 416,
+      "version": "7",
+      "when": 2023820000381,
+      "tag": "0442_accounts_statement_sections",
+      "breakpoints": true
     }
   ]
 }
