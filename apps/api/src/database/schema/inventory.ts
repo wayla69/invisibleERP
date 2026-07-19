@@ -10,6 +10,7 @@ export const items = pgTable('items', {
   barcode: text('barcode'),                                     // GTIN/EAN/UPC for hardware scan-to-add (exact match)
   supplyType: text('supply_type').notNull().default('goods'),   // 'goods' | 'service' — VAT tax-point class (5.1, ม.78 vs 78/1). Inert until 5.1b.
   isLotTracked: boolean('is_lot_tracked').notNull().default(false), // docs/52 Phase 3a — sells only from a real, non-expired, non-held lot (FEFO at POS); shared master, no RLS loop
+  isSerialTracked: boolean('is_serial_tracked').notNull().default(false), // docs/52 Phase 3b — sold as a specific serial/IMEI unit (InStock → Sold); shared master, no RLS loop
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),
@@ -169,6 +170,26 @@ export const lotHolds = pgTable('lot_holds', {
   byTenantStatus: index('idx_lot_holds_tenant').on(t.tenantId, t.status),   // R1-1 tenant-leading index
   byTenantLot: index('idx_lot_holds_lot').on(t.tenantId, t.lotNo),
   uqHoldNo: unique('uq_lot_holds_no').on(t.tenantId, t.holdNo),
+}));
+
+// docs/52 Phase 3b — serial/IMEI unit register. A serial-tracked item is sold as a SPECIFIC physical unit:
+// the exact serial leaves stock (InStock → Sold, stamped with the sale) so warranty / returns / theft-recovery
+// key on it. TENANT-SCOPED (a serialised unit belongs to one shop) — canonical 0232 RLS + leading index
+// (migration 0445), unlike the shared `lot_ledger`.
+export const itemSerials = pgTable('item_serials', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemId: text('item_id').notNull(),
+  serialNo: text('serial_no').notNull(),
+  status: text('status').notNull().default('InStock'),   // InStock | Sold | Returned | Void
+  receivedRef: text('received_ref'),
+  saleNo: text('sale_no'),
+  soldAt: timestamp('sold_at', { withTimezone: true }),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenantItem: index('idx_item_serials_tenant').on(t.tenantId, t.itemId, t.status), // R1-1 tenant-leading
+  uqSerial: unique('uq_item_serials_no').on(t.tenantId, t.itemId, t.serialNo),
 }));
 
 export const stockMovements = pgTable('stock_movements', {

@@ -10,6 +10,7 @@ import { WmsModule } from '../modules/wms/wms.module';
 import { StockOpsModule } from '../modules/stock-ops/stock-ops.module';
 import { ClaimsModule } from '../modules/claims/claims.module';
 import { LotsModule } from '../modules/lots/lots.module';
+import { SerialsModule } from '../modules/serials/serials.module';
 import { ScanModule } from '../modules/scan/scan.module';
 import { MasterDataModule } from '../modules/masterdata/masterdata.module';
 import { ItemSetupModule } from '../modules/item-setup/item-setup.module';
@@ -38,6 +39,7 @@ import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
     StockOpsModule,
     ClaimsModule,
     LotsModule,
+    SerialsModule,
     ScanModule,
     MasterDataModule,
     ItemSetupModule,
@@ -62,6 +64,7 @@ import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
     StockOpsModule,
     ClaimsModule,
     LotsModule,
+    SerialsModule,
     ScanModule,
     MasterDataModule,
     ItemSetupModule,

@@ -16,9 +16,10 @@ import { PosFiscalModule } from '../pos/fiscal/pos-fiscal.module';
 import { PosScaleModule } from '../pos/scale/pos-scale.module';
 import { UsageModule } from '../usage/usage.module';
 import { LotsModule } from '../lots/lots.module';
+import { SerialsModule } from '../serials/serials.module';
 
 @Module({
-  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule, PricingModule, PosFiscalModule, PosScaleModule, UsageModule, LotsModule],
+  imports: [TaxModule, PaymentsModule, LedgerModule, MenuModule, CostingModule, PricingModule, PosFiscalModule, PosScaleModule, UsageModule, LotsModule, SerialsModule],
   controllers: [PortalController],
   providers: [PortalService, PortalPosService, OfflineSyncService, PortalMyErpService, PortalUsersService, PasswordService],
   exports: [PortalService, PortalPosService], // PortalPosService: the generic sale engine reused by the internal POS (docs/52 Phase 1b)

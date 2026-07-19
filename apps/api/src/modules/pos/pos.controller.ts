@@ -33,6 +33,7 @@ const PosSaleBody = z.object({
     uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
     modifier_option_ids: z.array(z.number().int()).optional(),
     lot_no: z.string().trim().max(64).optional(), // docs/52 Phase 3a — explicit lot for a lot-tracked item (else FEFO)
+    serial_nos: z.array(z.string().trim().min(1).max(64)).max(500).optional(), // docs/52 Phase 3b — serial/IMEI per unit for a serial-tracked item
   })).min(1),
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),

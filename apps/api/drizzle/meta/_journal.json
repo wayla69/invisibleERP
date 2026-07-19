@@ -2927,6 +2927,13 @@
       "when": 2023820000383,
       "tag": "0444_pos_lot_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 419,
+      "version": "7",
+      "when": 2023820000384,
+      "tag": "0445_pos_serial_capture",
+      "breakpoints": true
     }
   ]
 }
