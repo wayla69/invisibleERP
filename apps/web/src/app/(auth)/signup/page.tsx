@@ -90,6 +90,18 @@ export default function SignupPage() {
               <option value="retail">{t('auth.su_ind_retail')}</option>
               <option value="distribution">{t('auth.su_ind_distribution')}</option>
               <option value="services">{t('auth.su_ind_services')}</option>
+              <option value="manufacturing">{t('auth.su_ind_manufacturing')}</option>
+              <option value="construction">{t('auth.su_ind_construction')}</option>
+              <option value="ecommerce">{t('auth.su_ind_ecommerce')}</option>
+              <option value="hospitality">{t('auth.su_ind_hospitality')}</option>
+              <option value="healthcare">{t('auth.su_ind_healthcare')}</option>
+              <option value="professional">{t('auth.su_ind_professional')}</option>
+              <option value="agriculture">{t('auth.su_ind_agriculture')}</option>
+              <option value="automotive">{t('auth.su_ind_automotive')}</option>
+              <option value="logistics">{t('auth.su_ind_logistics')}</option>
+              <option value="education">{t('auth.su_ind_education')}</option>
+              <option value="nonprofit">{t('auth.su_ind_nonprofit')}</option>
+              <option value="realestate">{t('auth.su_ind_realestate')}</option>
               <option value="general">{t('auth.su_ind_general')}</option>
             </select>
             <p className="text-xs text-muted-foreground">{t('auth.su_industry_hint')}</p>

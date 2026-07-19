@@ -772,9 +772,11 @@ A vendor can carry more than one address (billing / shipping / registered /
 other, one marked **หลัก — primary**) and more than one contact (name, title,
 phone, email), instead of the single scalar address/contact of before. Add or
 delete either from this panel — both save immediately, with no second
-approval (same reasoning as the direct-edit fields above). The **จังหวัด
-(province)** field suggests from the standard 77-province list and is saved in
-its official spelling; the **รหัสไปรษณีย์ (postal code)** must be 5 digits.
+approval (same reasoning as the direct-edit fields above). **Type the 5-digit
+รหัสไปรษณีย์ (postal code) first** and pick the **ตำบล/แขวง** from the dropdown —
+**อำเภอ/เขต** and **จังหวัด** fill in automatically from the full Thailand address
+dataset; **กรอกเอง** falls back to free text (the **จังหวัด** field still suggests
+from the 77-province list and saves the official spelling).
 
 The same panel has a **ความสัมพันธ์ (relationships)** section — record links to
 other vendors by type (**บุคคลที่เกี่ยวข้องกัน (related party)**, **บริษัทลูก

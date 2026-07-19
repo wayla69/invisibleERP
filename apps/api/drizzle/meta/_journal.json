@@ -2911,7 +2911,14 @@
       "idx": 416,
       "version": "7",
       "when": 2023820000381,
-      "tag": "0442_tender_event_types",
+      "tag": "0442_accounts_statement_sections",
+      "breakpoints": true
+    },
+    {
+      "idx": 417,
+      "version": "7",
+      "when": 2023820000382,
+      "tag": "0443_tender_event_types",
       "breakpoints": true
     }
   ]

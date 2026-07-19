@@ -1866,6 +1866,17 @@ async function main() {
   ok('FIN-4: rendered Assets group ties to balance-sheet assets', near(rowVal(bsRender.rows, 'as'), bsWin.assets), `as=${rowVal(bsRender.rows, 'as')} bs=${bsWin.assets}`);
   ok('FIN-4: rendered Equity group ties to balance-sheet equity', near(rowVal(bsRender.rows, 'eq'), bsWin.equity), `eq=${rowVal(bsRender.rows, 'eq')} bs=${bsWin.equity}`);
 
+  // 0438 — statement-section binding: the BS/IS group by section, and the section subtotals reconcile to the
+  // type totals (current+non-current assets = assets; the summary net_income = revenue − expense).
+  const bsSecTotal = (g: string) => (bsWin.sections ?? []).filter((s: any) => s.group === g).reduce((a: number, s: any) => a + s.total, 0);
+  ok('FIN-4/0438: balance-sheet returns section groups (current + non-current asset sum ties to assets)',
+    Array.isArray(bsWin.sections) && near(bsSecTotal('current_asset') + bsSecTotal('noncurrent_asset'), bsWin.assets),
+    JSON.stringify({ sections: (bsWin.sections ?? []).map((s: any) => [s.group, s.total]) }));
+  ok('FIN-4/0438: income-statement returns a structured section summary that reconciles to net income',
+    !!isWin.summary && Array.isArray(isWin.groups) && near(isWin.summary.net_income, isWin.net_income)
+      && near(isWin.summary.revenue - isWin.summary.cogs, isWin.summary.gross_profit),
+    JSON.stringify(isWin.summary));
+
   // (3) SOCE roll-forward — baseline, then a share issue + a dividend (both maker-checker approved), re-read.
   const socePart = (soce: any, code: string) => soce.components.find((c: any) => c.account_code === code) ?? { opening: 0, movements: 0, profit: 0, closing: 0 };
   const soce0 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;

@@ -1,4 +1,4 @@
--- 0442_tender_event_types — register the split-payment tender events TENDER.CASH/CARD/QR/VOUCHER/OTHER in
+-- 0443_tender_event_types — register the split-payment tender events TENDER.CASH/CARD/QR/VOUCHER/OTHER in
 -- posting_event_types (docs/52 Phase 6a). These were added to the code registry (posting-events.sales.ts) so
 -- that a split sale can post one asset (cash) debit per tender method; seeding them here lets a tenant remap a
 -- method to a clearing / bank / gift-card-liability account via a GL-24 posting override (posting_rules.event_type

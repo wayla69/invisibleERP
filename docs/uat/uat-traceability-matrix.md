@@ -1,6 +1,8 @@
 # UAT Traceability Matrix — Invisible ERP V2
 
-**Status: DRAFT v7.71 · *v7.71: Multi-tender split payment (docs/52 Phase 6a; migration `0442`; no new control) — maps UAT-O2C-568: an optional `tenders[]` on the POS sale settles one bill across several tenders (cash + card + QR + voucher …); each leg is a separate `PAY` tender linked to the sale + open till (pending-settlement worklist + drawer count); the legs must apply exactly the total (`TENDER_MISMATCH`), a cash leg may over-tender for change (`change_due`) but a non-cash leg may not (`NONCASH_OVERTENDER`); the GL asset debit splits across `TENDER.CASH/CARD/QR/VOUCHER/OTHER` posting events, all default 1000 → an all-default split is net-GL-identical to the legacy single `Dr 1000 = total` (GL-24-remappable). Absent `tenders[]` ⇒ single-tender path, byte-identical (golden 534/writeflow 36/basics 458/restaurant 220/returns 25/payments-gateway 11 unchanged). Toggle-gated split panel on the register checkout. ToE `pos-split.ts` (8); docs/52 rev 0.7; PN-07 rev 2.4; manual 01 v0.70; UAT-02 v1.06.* ·
+**Status: DRAFT v7.73 · *v7.73: Multi-tender split payment (docs/52 Phase 6a; migration `0443`; no new control) — maps UAT-O2C-570: an optional `tenders[]` on the POS sale settles one bill across several tenders (cash + card + QR + voucher …); each leg is a separate `PAY` tender linked to the sale + open till (pending-settlement worklist + drawer count); the legs must apply exactly the total (`TENDER_MISMATCH`), a cash leg may over-tender for change (`change_due`) but a non-cash leg may not (`NONCASH_OVERTENDER`); the GL asset debit splits across `TENDER.CASH/CARD/QR/VOUCHER/OTHER` posting events, all default 1000 → an all-default split is net-GL-identical to the legacy single `Dr 1000 = total` (GL-24-remappable). Absent `tenders[]` ⇒ single-tender path, byte-identical (golden 588/writeflow 36/basics/restaurant 220/returns 25/payments-gateway 11 unchanged). Toggle-gated split panel on the register checkout. ToE `pos-split.ts` (8); docs/52 rev 0.8; PN-07 rev 2.4; manual 01 v0.70; UAT-02 v1.08.* ·
+**Status: DRAFT v7.72 · *v7.72: maps UAT-O2C-569 — the docs/52 POS business-type profile (`forIndustry`) now covers all 17 business types (hospitality→restaurant register, manufacturing/ecommerce/agriculture/automotive/nonprofit→goods, construction/healthcare/professional/logistics/education/realestate→service; unset→restaurant, non-breaking). ToE `pos-profile.ts` 16.* ·
+**Status: DRAFT v7.71 · *v7.71: maps UAT-GL-212..216 (chart expansion → 142 accounts + งบดุล/งบกำไรขาดทุน section binding `bs_group`/`is_group`, migration 0441, GL-11/GL-27 — no new control), UAT-O2C-567 + UAT-P2P-153 (customer/vendor Thai postal-code → เขต/แขวง address autofill), and UAT-ADM-172..173 (business types 5→17 with a CoA template + SME nav profile each, and the B3 starter kit + E1 industry packs covering all 17 types). Coverage tally unchanged (see the reconciliation-pending note). ToE `coa-change.test.ts` · `statement-sections.test.ts` · `pure-utils.test.ts` · `basics.ts` 460 · `onboarding.ts` 157; golden re-pinned 588.* ·
 **Status: DRAFT v7.70 · *v7.70: Kits/bundles + non-inventory items (docs/52 Phase 2c; migration `0441` adds `item_relationships.qty`; no new control) — maps UAT-O2C-567: a POS kit line explodes into its `kit_component` rows (each component's stock + `cust_stock_log` decrement + costed COGS at component-qty×line-qty) while the kit SKU is never decremented/costed; revenue posts the kit's own line price to 4000 (not the component-price sum); ×2 multiplies the BOM; a `supply_type='non_inventory'` line moves no stock/no COGS but posts to the goods event (not SALE.SERVICE); a non-kit goods line is byte-identical (golden 534/writeflow 36/restaurant 220/returns 25 unchanged). Kit components panel on `/setup/items`. ToE `item-kit.ts` (9); docs/52 rev 0.6; PN-17 rev 0.15; manual 04; UAT-02 v1.05.* ·
 **Status: DRAFT v7.69 · *v7.69: Product variants / matrix items (docs/52 Phase 2b; migration `0440`; no new control) — maps UAT-O2C-566: `POST /api/item-setup/items/:id/variants` generates a size×color matrix into real child `items` rows (own SKU/barcode/price, linked by `parent_item_id` + `item_variant_attributes`; idempotent); variant barcode resolves via `/api/procurement/catalog?barcode=`; Variants panel on `/setup/items`. Shared-master depth, no GL (golden/writeflow/basics unchanged). ToE `item-variants.ts` (7); docs/52 rev 0.5; PN-17 rev 0.14; manual 04; UAT-02 v1.04.* ·
 **Status: DRAFT v7.68 · *v7.68: Sale-line resolve + service items (docs/52 Phase 2a; migration `0439`; no new control) — maps UAT-O2C-565: a POS sale resolves each item_id against the shared `items` master; a service line skips stock + COGS and posts revenue to `SALE.SERVICE`; goods unchanged; mixed carts split; unknown item_id → goods (byte-identical, golden 534/writeflow 36 green). `0439` registers SALE.GOODS/SALE.SERVICE in posting_event_types (GL-24-overridable). ToE `item-service.ts` (7); docs/52 rev 0.4; PN-17 rev 0.13; manual 04; UAT-02 v1.03.* ·
@@ -611,6 +613,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-O2C-489 | CRM-18 a project can raise only one renewal (idempotent) | CRM-18 | 18 §7.20, rev 0.23 (pipeline.ts) |
 | UAT-O2C-490 | CRM-18 raising clears the gap | CRM-18 | 18 §7.20, rev 0.23 (pipeline.ts) |
 | UAT-O2C-491 | CRM-18 a delivered project with no CRM account can't raise | CRM-18 | 18 §7.20, rev 0.23 (pipeline.ts) |
+| UAT-O2C-568 | Customer address postal-code → เขต/แขวง autofill | Feature (Thai address autofill; no control) | 01 (customer master) |
+| UAT-O2C-569 | POS profile covers all 17 business types (register shape per industry) | Feature (docs/52; no control) | 01 (universal POS) |
 
 ## 03 — Procure-to-Pay → `02-procure-to-pay.md`
 
@@ -873,6 +877,7 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-INV-113 | Lot hold quarantines — excluded from FEFO + WMS wave allocation | INV-18 | 03 §7 (15), §9 (15) (`lot-trace.ts`) |
 | UAT-INV-114 | Release re-enables the lot; non-held release rejected (`LOT_NOT_HELD`) | INV-18 | 03 §7 (15) (`lot-trace.ts`) |
 | UAT-INV-115 | Trace an unknown lot rejected (`LOT_NOT_FOUND`) | INV-18 | 03 §7 (15) (`lot-trace.ts`) |
+| UAT-P2P-153 | Vendor address postal-code → เขต/แขวง autofill | Feature (Thai address autofill; no control) | 02 (vendor master) |
 
 ## 05 — General Ledger & Close → `04-general-ledger-close.md`
 
@@ -1228,6 +1233,11 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-UI-ESS-01 | ESS self-service screen reachable + own data + submit-only (UI) | Feature (ESS UI) | 25 §7 |
 | UAT-PAY-024 | Approver inbox lists pending expense claims (tenant-scoped) | Feature (ESS), ITGC-AC-03 | 25 §7 |
 | UAT-UI-ESS-02 | Expense approval screen — approve/reject + self-block (UI) | Feature (ESS UI), ITGC-AC-09 | 25 §7 |
+| UAT-GL-212 | Sub-account create + `PARENT_TYPE_MISMATCH`/`PARENT_SELF` + 4–6-digit codes | GL-11, GL-27 | 04 §7 step 15 |
+| UAT-GL-213 | Expanded canonical chart (~34 accounts, now 142) | GL-11 (no new control) | 04 §7 (rev 2.39–2.40) |
+| UAT-GL-214 | Balance sheet binds accounts to งบดุล sections (`bs_group`) | GL-11, GL-07 | 04 §7 (rev 2.40) |
+| UAT-GL-215 | Income statement binds accounts to งบกำไรขาดทุน sections (`is_group`) | GL-11 | 04 §7 (rev 2.40) |
+| UAT-GL-216 | Per-account statement-section binding overrides the default | GL-11 | 04 §7 (rev 2.40) |
 
 ## 08 — Admin / SoD / Audit → `08-itgc.md`
 
@@ -1555,6 +1565,8 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-QC-002 | Raise an NCR with no financial disposition → `status='open'` (`NCR-*`) | QC-01 | 15 §7 (13) (`quality-ncr.ts`) |
 | UAT-QC-003 | Promote a failed `quality_inspection` into an NCR (ref to GR, `pending_disposition`) | QC-01 | 15 §7 (13) (`quality-ncr.ts`) |
 | UAT-QC-004 | Propose scrap → parks `pending_disposition`; no GL posted yet | QC-01 | 15 §7 (13) (`quality-ncr.ts`) |
+| UAT-ADM-172 | Business types expanded 5→17 (CoA template + SME nav profile per industry) | GL-10 (no new control); docs/51 B1 | 04 §7 step 15; PN-30 |
+| UAT-ADM-173 | Starter kit + industry packs cover all 17 business types | (no control — tenant-scoped sample data); docs/51 B3, E1 | PN-30 §4 |
 | UAT-QC-005 | Raiser self-dispositions → 403 `SOD_SELF_APPROVAL` (maker-checker) | QC-01 (SoD raiser≠approver, R21) | 15 §9 (`quality-ncr.ts`) |
 | UAT-QC-006 | Distinct `quality_approve` user dispositions scrap → `dispositioned`, write-off 50, `entry_no` JE-*, Dr 5810 / Cr 1200, TB balanced | QC-01 / GL-01 | 15 §7 (13), §9 (`quality-ncr.ts`) |
 | UAT-QC-007 | Reject a proposed disposition → NCR returns to `open`, no GL | QC-01 | 15 §9 (`quality-ncr.ts`) |

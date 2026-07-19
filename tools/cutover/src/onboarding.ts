@@ -301,6 +301,39 @@ async function main() {
       && !(b3SvcSp.json.created ?? []).includes('menu_starter') && b3SvcRows[0].n === 1,
     JSON.stringify({ resp: b3SvcSp.json, demoProjects: b3SvcRows[0].n }));
 
+  // Expanded industries (2026-07-18): each new industry maps to one of the four seed kinds. Spot-check one
+  // per kind — ecommerce→catalog, manufacturing→warehouse, construction→project, hospitality→catalog+tables.
+  const b3Ecom = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ร้านออนไลน์คนเดียว', tenant_code: 'b1ecom', admin_username: 'b1_ecom_owner', admin_password: 'ecom12345',
+    email: 'b1ec@x.co', control_profile: 'sme', industry: 'ecommerce',
+  });
+  const b3EcomSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_ecom_owner', 'ecom12345')).json.token, {});
+  ok('B3: ecommerce SME kit seeds a POS catalog (no tables)',
+    b3EcomSp.status === 201 && (b3EcomSp.json.created ?? []).includes('menu_starter') && !(b3EcomSp.json.created ?? []).includes('dining_tables'),
+    JSON.stringify(b3EcomSp.json));
+  const b3Mfg = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'โรงงานคนเดียว', tenant_code: 'b1mfg', admin_username: 'b1_mfg_owner', admin_password: 'mfg1234567',
+    email: 'b1mf@x.co', control_profile: 'sme', industry: 'manufacturing',
+  });
+  const b3MfgSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_mfg_owner', 'mfg1234567')).json.token, {});
+  ok('B3: manufacturing SME kit seeds a WH1 warehouse (no menu kit)',
+    b3MfgSp.status === 201 && (b3MfgSp.json.created ?? []).includes('wh_branch') && !(b3MfgSp.json.created ?? []).includes('menu_starter'),
+    JSON.stringify(b3MfgSp.json));
+  const b3Con = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ผู้รับเหมาคนเดียว', tenant_code: 'b1con', admin_username: 'b1_con_owner', admin_password: 'con1234567',
+    email: 'b1co@x.co', control_profile: 'sme', industry: 'construction',
+  });
+  const b3ConSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_con_owner', 'con1234567')).json.token, {});
+  ok('B3: construction SME kit seeds the demo project (no menu kit)',
+    b3ConSp.status === 201 && (b3ConSp.json.created ?? []).includes('demo_project') && !(b3ConSp.json.created ?? []).includes('menu_starter'),
+    JSON.stringify(b3ConSp.json));
+
+  // Onboarding industry packs (E1) also cover the new industries — applying one seeds its custom objects.
+  const b3MfgPack = await inj('POST', '/api/onboarding/apply-pack', (await login('b1_mfg_owner', 'mfg1234567')).json.token, { pack: 'manufacturing' });
+  ok('E1: the manufacturing industry pack seeds its custom objects (BOM + work center)',
+    b3MfgPack.status === 201 && b3MfgPack.json.objects_created === 2,
+    JSON.stringify(b3MfgPack.json));
+
   // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
   const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });
   ok('POST /api/admin/tenants/:id/extend-trial extends the trial (status Trialing, future end)',

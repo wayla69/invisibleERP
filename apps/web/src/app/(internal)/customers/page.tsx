@@ -14,7 +14,7 @@ import { StateView } from '@/components/state-view';
 import { FormField } from '@/components/form-field';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ChangeHistorySection } from '@/components/change-history-section';
-import { ProvinceInput } from '@/components/province-input';
+import { ThaiAddressFields } from '@/components/thai-address-fields';
 import { PartyRelationshipsSection } from '@/components/party-relationships';
 import { CustomFieldsSection } from '@/components/custom-fields-section';
 
@@ -424,10 +424,11 @@ function AddressFormDialog({ customerNo, onClose, onSaved }: { customerNo: strin
           </FormField>
           <FormField label={t('mx.cm_f_address_line1')} className="sm:col-span-2"><Input value={form.address_line1} onChange={set('address_line1')} /></FormField>
           <FormField label={t('mx.cm_f_address_line2')} className="sm:col-span-2"><Input value={form.address_line2} onChange={set('address_line2')} /></FormField>
-          <FormField label={t('mx.cm_f_sub_district')}><Input value={form.sub_district} onChange={set('sub_district')} /></FormField>
-          <FormField label={t('mx.cm_f_district')}><Input value={form.district} onChange={set('district')} /></FormField>
-          <FormField label={t('mx.cm_f_province')}><ProvinceInput value={form.province} onChange={(v) => setForm((f) => ({ ...f, province: v }))} placeholder={t('mx.cm_f_province_ph')} /></FormField>
-          <FormField label={t('mx.cm_f_postal_code')}><Input inputMode="numeric" maxLength={5} value={form.postal_code} onChange={set('postal_code')} placeholder="10230" /></FormField>
+          <ThaiAddressFields
+            className="grid gap-4 sm:col-span-2 sm:grid-cols-2"
+            value={{ postal_code: form.postal_code, sub_district: form.sub_district, district: form.district, province: form.province }}
+            onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+          />
         </div>
         <DialogFooter><Button disabled={save.isPending} onClick={() => save.mutate()}>{t('mx.cm_save')}</Button></DialogFooter>
       </DialogContent>
