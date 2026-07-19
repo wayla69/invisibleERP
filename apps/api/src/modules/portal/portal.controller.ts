@@ -20,6 +20,7 @@ const SaleBody = z.object({
     qty: z.number().positive(), unit_price: z.number().nonnegative(),
     uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
     modifier_option_ids: z.array(z.number().int()).optional(),
+    lot_no: z.string().trim().max(64).optional(), // docs/52 Phase 3a — explicit lot for a lot-tracked item (else FEFO)
   })).min(1),
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),
