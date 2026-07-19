@@ -13,6 +13,8 @@
 // The `general` industry is intentionally absent here — it falls back to the full canonical chart with
 // canonical names (today's behaviour), built at provisioning time from `COA`.
 
+import { industrySubAccountRows } from './coa-industry-subaccounts';
+
 export type IndustryKey =
   | 'restaurant'
   | 'retail'
@@ -128,8 +130,7 @@ const RETAIL: CoaTemplateRow[] = [
   { code: '2200', name: 'Customer Deposits (Store Credit / Gift Cards)', nameTh: 'เงินมัดจำลูกค้า (เครดิตร้าน/บัตรของขวัญ)' },
   { code: '2250', name: 'Loyalty Points Liability', nameTh: 'หนี้สินแต้มสะสม' },
   { code: '5700', name: 'Loyalty Points Expense', nameTh: 'ค่าใช้จ่ายแต้มสะสม' },
-  // Sub-account — the genuine distinct line only; category/department sales analysis is a DIMENSION.
-  { code: '500040', name: 'Inventory Shrinkage / Markdown', nameTh: 'ผลขาดทุนสินค้าขาด/ปรับลดราคา' },
+  ...industrySubAccountRows('retail'),
 ];
 
 // Distribution / wholesale: stock for resale, COGS, PPV, delivery income, intercompany.
@@ -142,8 +143,7 @@ const DISTRIBUTION: CoaTemplateRow[] = [
   { code: '5500', name: 'Purchase Price Variance', nameTh: 'ผลต่างราคาซื้อ' },
   { code: '1150', name: 'Intercompany Receivable', nameTh: 'ลูกหนี้ระหว่างบริษัท' },
   { code: '2150', name: 'Intercompany Payable', nameTh: 'เจ้าหนี้ระหว่างบริษัท' },
-  // Sub-account — inbound freight as a distinct COGS line; category analysis is a DIMENSION.
-  { code: '500050', name: 'COGS — Inbound Freight', nameTh: 'ต้นทุน — ค่าขนส่งขาเข้า' },
+  ...industrySubAccountRows('distribution'),
 ];
 
 // Services: no inventory/COGS — service & project revenue, unbilled cost, deferred revenue, advances.
@@ -157,9 +157,7 @@ const SERVICES: CoaTemplateRow[] = [
   { code: '2390', name: 'Project Costs Applied', nameTh: 'ต้นทุนโครงการรอปันส่วน' },
   { code: '5800', name: 'Cost of Services', nameTh: 'ต้นทุนงานบริการ' },
   { code: '1180', name: 'Employee Advances', nameTh: 'เงินทดรองจ่ายพนักงาน' },
-  // Sub-accounts — cost of services by kind.
-  { code: '580030', name: 'Cost of Services — Staff Cost', nameTh: 'ต้นทุนงานบริการ — ค่าแรงพนักงาน' },
-  { code: '580031', name: 'Cost of Services — Subcontractors', nameTh: 'ต้นทุนงานบริการ — ผู้รับเหมาช่วง' },
+  ...industrySubAccountRows('services'),
 ];
 
 // Manufacturing: raw-material → WIP → finished-goods flow, standard-cost PPV, scrap/rework, applied costs.
@@ -173,13 +171,7 @@ const MANUFACTURING: CoaTemplateRow[] = [
   { code: '5500', name: 'Purchase Price Variance', nameTh: 'ผลต่างราคาซื้อ' },
   { code: '2380', name: 'Manufacturing Costs Applied', nameTh: 'ค่าใช้จ่ายการผลิตรอปันส่วน' },
   { code: '5810', name: 'Scrap / Rework Loss', nameTh: 'ผลขาดทุนของเสีย/แก้ไขงาน' },
-  // Sub-accounts — WIP and COGS by cost element (materials / labor / overhead).
-  { code: '125001', name: 'WIP — Direct Materials', nameTh: 'งานระหว่างทำ — วัตถุดิบทางตรง' },
-  { code: '125002', name: 'WIP — Direct Labor', nameTh: 'งานระหว่างทำ — ค่าแรงทางตรง' },
-  { code: '125003', name: 'WIP — Manufacturing Overhead', nameTh: 'งานระหว่างทำ — ค่าโสหุ้ยการผลิต' },
-  { code: '500001', name: 'COGS — Direct Materials', nameTh: 'ต้นทุนขาย — วัตถุดิบทางตรง' },
-  { code: '500002', name: 'COGS — Direct Labor', nameTh: 'ต้นทุนขาย — ค่าแรงทางตรง' },
-  { code: '500003', name: 'COGS — Manufacturing Overhead', nameTh: 'ต้นทุนขาย — ค่าโสหุ้ยการผลิต' },
+  ...industrySubAccountRows('manufacturing'),
 ];
 
 // Construction / contracting: CIP, project WIP, contract asset/liability, retention both sides, progress revenue.
@@ -194,15 +186,7 @@ const CONSTRUCTION: CoaTemplateRow[] = [
   { code: '2410', name: 'Contract Liability / Deferred Revenue', nameTh: 'หนี้สินตามสัญญา' },
   { code: '4200', name: 'Construction / Project Revenue', nameTh: 'รายได้งานก่อสร้าง' },
   { code: '5800', name: 'Cost of Construction Work', nameTh: 'ต้นทุนงานก่อสร้าง' },
-  // Sub-accounts — WIP by trade phase + cost of work by resource.
-  { code: '126001', name: 'WIP — Earthwork', nameTh: 'งานระหว่างก่อสร้าง — งานดิน' },
-  { code: '126002', name: 'WIP — Structure', nameTh: 'งานระหว่างก่อสร้าง — งานโครงสร้าง' },
-  { code: '126003', name: 'WIP — Architectural / Finishing', nameTh: 'งานระหว่างก่อสร้าง — งานสถาปัตย์/ตกแต่ง' },
-  { code: '126004', name: 'WIP — MEP / Systems', nameTh: 'งานระหว่างก่อสร้าง — งานระบบ' },
-  { code: '580001', name: 'Cost of Work — Labor', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าแรง' },
-  { code: '580002', name: 'Cost of Work — Materials', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าวัสดุ' },
-  { code: '580003', name: 'Cost of Work — Subcontractor', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าผู้รับเหมาช่วง' },
-  { code: '580004', name: 'Cost of Work — Equipment / Plant', nameTh: 'ต้นทุนงานก่อสร้าง — ค่าเครื่องจักร' },
+  ...industrySubAccountRows('construction'),
 ];
 
 // E-commerce: merchandise inventory, online sales, delivery & card surcharge income, gift cards, loyalty.
@@ -216,11 +200,7 @@ const ECOMMERCE: CoaTemplateRow[] = [
   { code: '2200', name: 'Customer Deposits (Gift Cards / Store Credit)', nameTh: 'เงินมัดจำลูกค้า (บัตร/เครดิตร้าน)' },
   { code: '2250', name: 'Loyalty Points Liability', nameTh: 'หนี้สินแต้มสะสม' },
   { code: '5700', name: 'Loyalty Points Expense', nameTh: 'ค่าใช้จ่ายแต้มสะสม' },
-  // Sub-accounts — distinct online-selling costs + marketplace settlement (channel split = a dimension).
-  { code: '510010', name: 'Payment Gateway Fees', nameTh: 'ค่าธรรมเนียมเกตเวย์ชำระเงิน' },
-  { code: '510011', name: 'Marketplace Commission', nameTh: 'ค่าคอมมิชชันมาร์เก็ตเพลส' },
-  { code: '510012', name: 'Fulfilment / Shipping Cost', nameTh: 'ค่าจัดส่ง/แพ็กสินค้า' },
-  { code: '116010', name: 'Marketplace Payout Receivable', nameTh: 'ลูกหนี้เงินโอนจากมาร์เก็ตเพลส' },
+  ...industrySubAccountRows('ecommerce'),
 ];
 
 // Hospitality / hotel: rooms + F&B revenue, service charge, booking deposits, tips, recipe COGS.
@@ -234,13 +214,7 @@ const HOSPITALITY: CoaTemplateRow[] = [
   { code: '2300', name: 'Tips Payable', nameTh: 'ทิปพนักงานค้างจ่าย' },
   { code: '5000', name: 'Cost of Food & Beverage', nameTh: 'ต้นทุนอาหารและเครื่องดื่ม' },
   { code: '5300', name: 'Recipe Ingredient COGS', nameTh: 'ต้นทุนวัตถุดิบตามสูตร' },
-  // Sub-accounts — revenue by department (rooms / F&B) + F&B cost by kind.
-  { code: '430001', name: 'Room Revenue', nameTh: 'รายได้ค่าห้องพัก' },
-  { code: '430002', name: 'Other Service Revenue (spa/laundry)', nameTh: 'รายได้บริการอื่น (สปา/ซักรีด)' },
-  { code: '400001', name: 'Food Sales', nameTh: 'รายได้อาหาร' },
-  { code: '400002', name: 'Beverage Sales', nameTh: 'รายได้เครื่องดื่ม' },
-  { code: '500011', name: 'Cost of Food', nameTh: 'ต้นทุนอาหาร' },
-  { code: '500012', name: 'Cost of Beverage', nameTh: 'ต้นทุนเครื่องดื่ม' },
+  ...industrySubAccountRows('hospitality'),
 ];
 
 // Healthcare / clinic: medical-service revenue, drug & supplies inventory, prepaid packages, bad debt.
@@ -252,12 +226,7 @@ const HEALTHCARE: CoaTemplateRow[] = [
   { code: '5000', name: 'Cost of Drugs & Supplies', nameTh: 'ต้นทุนยาและเวชภัณฑ์' },
   { code: '2400', name: 'Unearned Revenue (Prepaid Packages)', nameTh: 'รายได้รับล่วงหน้า (แพ็กเกจ)' },
   { code: '5720', name: 'Bad Debt Expense', nameTh: 'หนี้สูญ' },
-  // Sub-accounts — revenue by service line + drug vs medical-supplies inventory.
-  { code: '430010', name: 'OPD Revenue', nameTh: 'รายได้ผู้ป่วยนอก (OPD)' },
-  { code: '430011', name: 'IPD Revenue', nameTh: 'รายได้ผู้ป่วยใน (IPD)' },
-  { code: '430012', name: 'Laboratory & Imaging Revenue', nameTh: 'รายได้ห้องปฏิบัติการและเอกซเรย์' },
-  { code: '120010', name: 'Drug Inventory', nameTh: 'ยาคงคลัง' },
-  { code: '120011', name: 'Medical Supplies Inventory', nameTh: 'เวชภัณฑ์คงคลัง' },
+  ...industrySubAccountRows('healthcare'),
 ];
 
 // Professional services / consulting: retainer + project revenue, unbilled cost, contract asset, advances.
@@ -270,11 +239,7 @@ const PROFESSIONAL: CoaTemplateRow[] = [
   { code: '2400', name: 'Unearned Revenue', nameTh: 'รายได้รับล่วงหน้า' },
   { code: '5800', name: 'Cost of Services', nameTh: 'ต้นทุนงานบริการ' },
   { code: '1180', name: 'Employee Advances', nameTh: 'เงินทดรองจ่ายพนักงาน' },
-  // Sub-accounts — unbilled WIP + cost of services by kind (staff time / disbursements).
-  { code: '126010', name: 'Unbilled WIP — Staff Time', nameTh: 'งานระหว่างทำ — ค่าแรงวิชาชีพ' },
-  { code: '126011', name: 'Unbilled WIP — Disbursements', nameTh: 'งานระหว่างทำ — ค่าใช้จ่ายทดรองตามงาน' },
-  { code: '580010', name: 'Cost of Services — Staff Time', nameTh: 'ต้นทุนงานบริการ — ค่าแรง' },
-  { code: '580011', name: 'Cost of Services — Disbursements', nameTh: 'ต้นทุนงานบริการ — ค่าใช้จ่ายทดรอง' },
+  ...industrySubAccountRows('professional'),
 ];
 
 // Agriculture: produce/supplies inventory, growing crops (biological WIP), harvested goods, produce sales.
@@ -286,13 +251,7 @@ const AGRICULTURE: CoaTemplateRow[] = [
   { code: '4000', name: 'Produce Sales', nameTh: 'รายได้จากการขายผลผลิต' },
   { code: '5000', name: 'Cost of Goods Sold', nameTh: 'ต้นทุนขาย' },
   { code: '5500', name: 'Purchase Price Variance', nameTh: 'ผลต่างราคาซื้อ' },
-  // Sub-accounts — biological assets (TAS 41) + COGS by farm input.
-  { code: '125010', name: 'Biological Assets — Livestock', nameTh: 'สินทรัพย์ชีวภาพ — ปศุสัตว์' },
-  { code: '125011', name: 'Growing Crops', nameTh: 'พืชผลระหว่างเพาะปลูก' },
-  { code: '500030', name: 'COGS — Seed & Planting', nameTh: 'ต้นทุน — เมล็ดพันธุ์/เพาะปลูก' },
-  { code: '500031', name: 'COGS — Fertilizer & Chemicals', nameTh: 'ต้นทุน — ปุ๋ยและเคมีภัณฑ์' },
-  { code: '500032', name: 'COGS — Feed', nameTh: 'ต้นทุน — อาหารสัตว์' },
-  { code: '500033', name: 'COGS — Farm Labor', nameTh: 'ต้นทุน — ค่าแรงในฟาร์ม' },
+  ...industrySubAccountRows('agriculture'),
 ];
 
 // Automotive / repair centre: parts inventory, parts sales + repair-service revenue, service charge.
@@ -304,11 +263,7 @@ const AUTOMOTIVE: CoaTemplateRow[] = [
   { code: '4400', name: 'Service Charge Income', nameTh: 'รายได้ค่าบริการ' },
   { code: '5000', name: 'Cost of Parts Sold', nameTh: 'ต้นทุนอะไหล่ที่ขาย' },
   { code: '5800', name: 'Cost of Services', nameTh: 'ต้นทุนงานบริการ' },
-  // Sub-accounts — vehicle-sales revenue line, COGS by stream, warranty provision.
-  { code: '400020', name: 'Vehicle Sales', nameTh: 'รายได้ขายรถยนต์' },
-  { code: '500020', name: 'COGS — Vehicles', nameTh: 'ต้นทุนขายรถยนต์' },
-  { code: '500021', name: 'COGS — Parts', nameTh: 'ต้นทุนขายอะไหล่' },
-  { code: '203010', name: 'Warranty Provision', nameTh: 'ประมาณการหนี้สินการรับประกัน' },
+  ...industrySubAccountRows('automotive'),
 ];
 
 // Logistics / transport: freight & logistics-service revenue, goods-in-transit, cost of services.
@@ -318,12 +273,7 @@ const LOGISTICS: CoaTemplateRow[] = [
   { code: '4300', name: 'Logistics Service Revenue', nameTh: 'รายได้ค่าบริการโลจิสติกส์' },
   { code: '1255', name: 'Goods-in-Transit', nameTh: 'สินค้าระหว่างทาง' },
   { code: '5800', name: 'Cost of Services', nameTh: 'ต้นทุนงานบริการ' },
-  // Sub-accounts — cost of services by resource.
-  { code: '580020', name: 'Cost of Service — Fuel', nameTh: 'ต้นทุนบริการ — น้ำมันเชื้อเพลิง' },
-  { code: '580021', name: 'Cost of Service — Driver / Crew Wages', nameTh: 'ต้นทุนบริการ — ค่าแรงพนักงานขับรถ/ประจำรถ' },
-  { code: '580022', name: 'Cost of Service — Subcontracted Transport', nameTh: 'ต้นทุนบริการ — ค่าจ้างขนส่งช่วง' },
-  { code: '580023', name: 'Cost of Service — Vehicle R&M', nameTh: 'ต้นทุนบริการ — ค่าซ่อมบำรุงยานพาหนะ' },
-  { code: '580024', name: 'Cost of Service — Warehousing / Handling', nameTh: 'ต้นทุนบริการ — ค่าคลังสินค้า/ยกขน' },
+  ...industrySubAccountRows('logistics'),
 ];
 
 // Education: tuition & course revenue, prepaid fees (unearned), book/material sales + inventory.
@@ -334,10 +284,7 @@ const EDUCATION: CoaTemplateRow[] = [
   { code: '4000', name: 'Books & Materials Sales', nameTh: 'รายได้ขายหนังสือและอุปกรณ์' },
   { code: '1200', name: 'Books & Materials Inventory', nameTh: 'หนังสือและอุปกรณ์คงคลัง' },
   { code: '5000', name: 'Cost of Goods Sold', nameTh: 'ต้นทุนขาย' },
-  // Sub-accounts — tuition vs fees vs activity income (distinct revenue lines).
-  { code: '430020', name: 'Tuition Revenue', nameTh: 'รายได้ค่าเล่าเรียน' },
-  { code: '430021', name: 'Registration & Exam Fees', nameTh: 'ค่าลงทะเบียนและค่าสอบ' },
-  { code: '430022', name: 'Activity & Excursion Income', nameTh: 'รายได้กิจกรรมและทัศนศึกษา' },
+  ...industrySubAccountRows('education'),
 ];
 
 // Non-profit: grants/donation revenue, restricted (deferred) funds, fundraising income, supplies.
@@ -347,14 +294,7 @@ const NONPROFIT: CoaTemplateRow[] = [
   { code: '2400', name: 'Restricted / Deferred Funds', nameTh: 'เงินทุนที่มีข้อจำกัด (รับล่วงหน้า)' },
   { code: '4000', name: 'Program / Fundraising Income', nameTh: 'รายได้จากกิจกรรมและการระดมทุน' },
   { code: '1200', name: 'Supplies Inventory', nameTh: 'วัสดุคงคลัง' },
-  // Sub-accounts — grant vs donation income, the functional-expense split, restricted vs unrestricted net assets.
-  { code: '430030', name: 'Grant Income', nameTh: 'รายได้ทุนสนับสนุน' },
-  { code: '430031', name: 'Donation Income', nameTh: 'รายได้เงินบริจาค' },
-  { code: '510020', name: 'Program Services Expense', nameTh: 'ค่าใช้จ่ายดำเนินโครงการ' },
-  { code: '510021', name: 'Management & Administration Expense', nameTh: 'ค่าใช้จ่ายบริหารจัดการ' },
-  { code: '510022', name: 'Fundraising Expense', nameTh: 'ค่าใช้จ่ายการระดมทุน' },
-  { code: '310010', name: 'Unrestricted Net Assets', nameTh: 'สินทรัพย์สุทธิไม่มีข้อจำกัด' },
-  { code: '310011', name: 'Restricted Net Assets', nameTh: 'สินทรัพย์สุทธิที่มีข้อจำกัด' },
+  ...industrySubAccountRows('nonprofit'),
 ];
 
 // Real estate: rental + property-sales revenue, property under development (CIP), booking deposits, SBT.
@@ -367,11 +307,7 @@ const REALESTATE: CoaTemplateRow[] = [
   { code: '2130', name: 'Specific Business Tax Payable (ภ.ธ.40)', nameTh: 'ภาษีธุรกิจเฉพาะค้างจ่าย' },
   { code: '5840', name: 'Specific Business Tax Expense', nameTh: 'ค่าภาษีธุรกิจเฉพาะ' },
   { code: '5000', name: 'Cost of Property Sold', nameTh: 'ต้นทุนอสังหาริมทรัพย์ที่ขาย' },
-  // Sub-accounts — property inventory stages + rental income by property class.
-  { code: '152010', name: 'Land Held for Development', nameTh: 'ที่ดินเพื่อการพัฒนา' },
-  { code: '152011', name: 'Construction Work in Progress', nameTh: 'งานก่อสร้างระหว่างทำ' },
-  { code: '461010', name: 'Residential Rental Income', nameTh: 'รายได้ค่าเช่าที่อยู่อาศัย' },
-  { code: '461011', name: 'Commercial Rental Income', nameTh: 'รายได้ค่าเช่าเชิงพาณิชย์' },
+  ...industrySubAccountRows('realestate'),
 ];
 
 // `general` omitted — provisioning falls back to the full canonical chart with canonical names.
