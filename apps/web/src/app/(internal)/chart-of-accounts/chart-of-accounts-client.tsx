@@ -524,6 +524,19 @@ function CreateAccountDialog({ preset, onClose, onSaved }: { preset?: { parentCo
           <DialogTitle>{isSub ? t('fnx.coa.create_sub_title', { parent: preset!.parentCode }) : t('fnx.coa.create_title')}</DialogTitle>
           <DialogDescription>{isSub ? t('fnx.coa.create_sub_desc') : t('fnx.coa.create_desc')}</DialogDescription>
         </DialogHeader>
+        {isSub && (
+          // P5 — sub-account vs dimension guidance: steer analytical breakdowns to the posting dimensions
+          // (cost centre / project / branch) rather than an ever-deeper code tree, and state the P4 rules.
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-950/30 p-3 text-sm">
+            <p className="font-medium">{t('fnx.coa.sub_vs_dim_title')}</p>
+            <ul className="mt-1 list-disc pl-5 space-y-1 text-muted-foreground">
+              <li>{t('fnx.coa.sub_vs_dim_sub')}</li>
+              <li>{t('fnx.coa.sub_vs_dim_dim')}</li>
+            </ul>
+            <p className="mt-2 text-xs text-muted-foreground">{t('fnx.coa.sub_vs_dim_rules')}</p>
+            <a href="/cost-centers" className="mt-1 inline-block text-xs font-medium text-primary underline underline-offset-2">{t('fnx.coa.sub_vs_dim_manage')} →</a>
+          </div>
+        )}
         <div className="grid gap-4">
           <FormField label={t('fnx.coa.f_code')} htmlFor="coa-code" required error={code && !codeOk ? t('fnx.coa.f_code_error') : undefined}>
             <Input id="coa-code" value={code} onChange={(e) => setCode(e.target.value.trim())} maxLength={6} inputMode="numeric" />

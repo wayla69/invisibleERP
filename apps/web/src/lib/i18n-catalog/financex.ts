@@ -207,6 +207,11 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.coa.add_sub': { th: 'เพิ่มบัญชีย่อย', en: 'Add sub-account' },
   'fnx.coa.create_sub_title': { th: 'เพิ่มบัญชีย่อยใต้ {parent}', en: 'Add sub-account under {parent}' },
   'fnx.coa.create_sub_desc': { th: 'บัญชีย่อยผูกกับบัญชีแม่และเป็นประเภทเดียวกัน เช่น 5110 ค่าเดินทาง → 511001 ค่าเครื่องบิน', en: 'A sub-account links to its parent and shares its type — e.g. 5110 Travel → 511001 Airfare' },
+  'fnx.coa.sub_vs_dim_title': { th: 'บัญชีย่อย หรือ มิติ?', en: 'Sub-account or dimension?' },
+  'fnx.coa.sub_vs_dim_sub': { th: 'ใช้ บัญชีย่อย เมื่อต้องการบัญชีที่มียอด/บรรทัดในงบการเงินเป็นของตัวเอง (เช่น แยกต้นทุนงานตามหมวด).', en: 'Use a sub-account for a genuine account that needs its own balance / financial-statement line (e.g. cost of work by trade phase).' },
+  'fnx.coa.sub_vs_dim_dim': { th: 'ใช้ มิติ (ศูนย์ต้นทุน / โครงการ / สาขา) เมื่อต้องการเพียงแยกวิเคราะห์ยอดของบัญชีเดียว (เช่น ยอดขายตามหมวดสินค้า/ช่องทาง) — บันทึกมิติตอนลงบัญชี ไม่ต้องเพิ่มรหัสบัญชี.', en: 'Use a dimension (cost centre / project / branch) to only slice one account analytically (e.g. sales by category or channel) — tag it at posting time, no new code needed.' },
+  'fnx.coa.sub_vs_dim_rules': { th: 'ผังบัญชีรองรับบัญชีย่อยชั้นเดียว — สร้างบัญชีย่อยซ้อนบัญชีย่อย หรือใต้บัญชีที่วิเคราะห์ตามมิติอยู่แล้วไม่ได้ (ระบบจะปฏิเสธ).', en: 'The chart keeps one level of sub-accounts — a sub-account can’t sit under another sub-account or a dimension-analysed account (the server refuses it).' },
+  'fnx.coa.sub_vs_dim_manage': { th: 'จัดการมิติที่ ศูนย์ต้นทุน', en: 'Manage dimensions in Cost centres' },
   'fnx.coa.f_type_sub_hint': { th: 'บัญชีย่อยใช้ประเภทเดียวกับบัญชีแม่ {parent}', en: 'A sub-account uses the same type as its parent {parent}' },
   'fnx.coa.f_parent_hint': { th: 'ระบุรหัสบัญชีแม่เพื่อสร้างบัญชีย่อย (ประเภทต้องตรงกับบัญชีแม่)', en: 'Set a parent code to make this a sub-account (its type must match the parent)' },
   // 0438 — statement-section binding (which line of the งบดุล / งบกำไรขาดทุน the account rolls into).
