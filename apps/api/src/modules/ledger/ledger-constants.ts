@@ -3,6 +3,8 @@
 // are the place to ADD a new balance-sheet account / CF bucket, so a dedicated module makes them findable.
 // Parallel sets of books. The LEADING ledger is the statutory/primary book — reports default to it, and a
 // journal with ledger_code = NULL is shared by every ledger (so all existing postings are universal).
+import { toCanonicalSubAccountRows } from './coa-industry-subaccounts';
+
 export const LEADING = 'TFRS';
 export const LEDGERS: { code: string; name: string; gaap: string; isLeading: boolean; description: string }[] = [
   { code: 'TFRS', name: 'TFRS (งบตามกฎหมาย)', gaap: 'TFRS', isLeading: true, description: 'Thai Financial Reporting Standards — statutory financial statements' },
@@ -198,95 +200,11 @@ export const COA: CoaSeedRow[] = [
   { code: '5760', name: 'Donation Expense', type: 'Expense' },             // เงินบริจาค
   { code: '5870', name: 'Other Expenses', type: 'Expense' },               // ค่าใช้จ่ายอื่น
 
-  // ─────────── P3 industry-depth sub-accounts (canonical superset; curated per industry by the CoA templates) ───────────
-  // CONSTRUCTION — work-in-progress by trade phase (under 1260) + cost of work by resource (under 5800).
-  { code: '126001', name: 'WIP — Earthwork', type: 'Asset', parentCode: '1260' },                 // งานระหว่างก่อสร้าง — งานดิน
-  { code: '126002', name: 'WIP — Structure', type: 'Asset', parentCode: '1260' },                 // งานโครงสร้าง
-  { code: '126003', name: 'WIP — Architectural / Finishing', type: 'Asset', parentCode: '1260' }, // งานสถาปัตย์/ตกแต่ง
-  { code: '126004', name: 'WIP — MEP / Systems', type: 'Asset', parentCode: '1260' },             // งานระบบ
-  { code: '580001', name: 'Cost of Work — Labor', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },        // ค่าแรง
-  { code: '580002', name: 'Cost of Work — Materials', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },    // ค่าวัสดุ
-  { code: '580003', name: 'Cost of Work — Subcontractor', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },// ค่าผู้รับเหมาช่วง
-  { code: '580004', name: 'Cost of Work — Equipment / Plant', type: 'Expense', parentCode: '5800', isGroup: 'cogs' }, // ค่าเครื่องจักร
-
-  // MANUFACTURING — WIP by cost element (under 1250) + COGS by cost element (under 5000).
-  { code: '125001', name: 'WIP — Direct Materials', type: 'Asset', parentCode: '1250' },   // งานระหว่างทำ — วัตถุดิบทางตรง
-  { code: '125002', name: 'WIP — Direct Labor', type: 'Asset', parentCode: '1250' },       // ค่าแรงทางตรง
-  { code: '125003', name: 'WIP — Manufacturing Overhead', type: 'Asset', parentCode: '1250' }, // ค่าโสหุ้ยการผลิต
-  { code: '500001', name: 'COGS — Direct Materials', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ต้นทุนขาย — วัตถุดิบทางตรง
-  { code: '500002', name: 'COGS — Direct Labor', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },     // ค่าแรงทางตรง
-  { code: '500003', name: 'COGS — Manufacturing Overhead', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ค่าโสหุ้ยการผลิต
-
-  // HOSPITALITY — revenue by department (room under 4300; F&B under 4000) + F&B cost by kind (under 5000).
-  { code: '430001', name: 'Room Revenue', type: 'Revenue', parentCode: '4300' },            // รายได้ค่าห้องพัก
-  { code: '430002', name: 'Other Service Revenue (spa/laundry)', type: 'Revenue', parentCode: '4300' }, // รายได้บริการอื่น
-  { code: '400001', name: 'Food Sales', type: 'Revenue', parentCode: '4000' },              // รายได้อาหาร
-  { code: '400002', name: 'Beverage Sales', type: 'Revenue', parentCode: '4000' },          // รายได้เครื่องดื่ม
-  { code: '500011', name: 'Cost of Food', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },     // ต้นทุนอาหาร
-  { code: '500012', name: 'Cost of Beverage', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ต้นทุนเครื่องดื่ม
-
-  // PROFESSIONAL SERVICES — unbilled WIP by engagement kind (under 1260) + cost of services by kind (under 5800).
-  { code: '126010', name: 'Unbilled WIP — Staff Time', type: 'Asset', parentCode: '1260' },        // งานระหว่างทำ — ค่าแรงวิชาชีพ
-  { code: '126011', name: 'Unbilled WIP — Disbursements', type: 'Asset', parentCode: '1260' },     // ค่าใช้จ่ายทดรองตามงาน
-  { code: '580010', name: 'Cost of Services — Staff Time', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },     // ต้นทุนบริการ — ค่าแรง
-  { code: '580011', name: 'Cost of Services — Disbursements', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },  // ต้นทุนบริการ — ค่าใช้จ่ายทดรอง
-
-  // ─────────── P5 industry-depth sub-accounts — remaining verticals (canonical superset; curated per industry) ───────────
-  // Only GENUINE sub-accounts (a distinct sub-ledger account with its own statement line/nature). Purely
-  // ANALYTICAL breakdowns (retail sales by category, revenue by channel) belong to the posting DIMENSIONS
-  // (cost_center/branch/project), NOT the code tree — see the CoA sub-account-vs-dimension guardrails (P4).
-  // ECOMMERCE — distinct selling costs + the marketplace settlement receivable.
-  { code: '510010', name: 'Payment Gateway Fees', type: 'Expense', parentCode: '5100' },          // ค่าธรรมเนียมเกตเวย์ชำระเงิน
-  { code: '510011', name: 'Marketplace Commission', type: 'Expense', parentCode: '5100' },         // ค่าคอมมิชชันมาร์เก็ตเพลส
-  { code: '510012', name: 'Fulfilment / Shipping Cost', type: 'Expense', parentCode: '5100' },     // ค่าจัดส่ง/แพ็กสินค้า
-  { code: '116010', name: 'Marketplace Payout Receivable', type: 'Asset', parentCode: '1160' },    // ลูกหนี้เงินโอนจากมาร์เก็ตเพลส
-  // LOGISTICS — cost of services by resource (under 5800).
-  { code: '580020', name: 'Cost of Service — Fuel', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },                 // ต้นทุนบริการ — น้ำมันเชื้อเพลิง
-  { code: '580021', name: 'Cost of Service — Driver / Crew Wages', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },  // ค่าแรงพนักงานขับรถ/พนักงานประจำรถ
-  { code: '580022', name: 'Cost of Service — Subcontracted Transport', type: 'Expense', parentCode: '5800', isGroup: 'cogs' }, // ค่าจ้างขนส่งช่วง
-  { code: '580023', name: 'Cost of Service — Vehicle R&M', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },          // ค่าซ่อมบำรุงยานพาหนะ
-  { code: '580024', name: 'Cost of Service — Warehousing / Handling', type: 'Expense', parentCode: '5800', isGroup: 'cogs' }, // ค่าคลังสินค้า/ยกขน
-  // AUTOMOTIVE — a distinct vehicle-sales revenue line, COGS by stream, and a warranty provision.
-  { code: '400020', name: 'Vehicle Sales', type: 'Revenue', parentCode: '4000' },                  // รายได้ขายรถยนต์
-  { code: '500020', name: 'COGS — Vehicles', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ต้นทุนขายรถยนต์
-  { code: '500021', name: 'COGS — Parts', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },    // ต้นทุนขายอะไหล่
-  { code: '203010', name: 'Warranty Provision', type: 'Liability', parentCode: '2030' },           // ประมาณการหนี้สินการรับประกัน
-  // HEALTHCARE — revenue by service line + drug vs medical-supplies inventory.
-  { code: '430010', name: 'OPD Revenue', type: 'Revenue', parentCode: '4300' },                    // รายได้ผู้ป่วยนอก (OPD)
-  { code: '430011', name: 'IPD Revenue', type: 'Revenue', parentCode: '4300' },                    // รายได้ผู้ป่วยใน (IPD)
-  { code: '430012', name: 'Laboratory & Imaging Revenue', type: 'Revenue', parentCode: '4300' },   // รายได้ห้องปฏิบัติการและเอกซเรย์
-  { code: '120010', name: 'Drug Inventory', type: 'Asset', parentCode: '1200' },                   // ยาคงคลัง
-  { code: '120011', name: 'Medical Supplies Inventory', type: 'Asset', parentCode: '1200' },       // เวชภัณฑ์คงคลัง
-  // AGRICULTURE — biological assets (TAS 41) + COGS by farm input.
-  { code: '125010', name: 'Biological Assets — Livestock', type: 'Asset', parentCode: '1250' },    // สินทรัพย์ชีวภาพ — ปศุสัตว์
-  { code: '125011', name: 'Growing Crops', type: 'Asset', parentCode: '1250' },                    // พืชผลระหว่างเพาะปลูก
-  { code: '500030', name: 'COGS — Seed & Planting', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },       // ต้นทุน — เมล็ดพันธุ์/เพาะปลูก
-  { code: '500031', name: 'COGS — Fertilizer & Chemicals', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ต้นทุน — ปุ๋ยและเคมีภัณฑ์
-  { code: '500032', name: 'COGS — Feed', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },                  // ต้นทุน — อาหารสัตว์
-  { code: '500033', name: 'COGS — Farm Labor', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },            // ต้นทุน — ค่าแรงในฟาร์ม
-  // EDUCATION — tuition vs fees vs activity income (distinct revenue lines).
-  { code: '430020', name: 'Tuition Revenue', type: 'Revenue', parentCode: '4300' },                // รายได้ค่าเล่าเรียน
-  { code: '430021', name: 'Registration & Exam Fees', type: 'Revenue', parentCode: '4300' },       // ค่าลงทะเบียนและค่าสอบ
-  { code: '430022', name: 'Activity & Excursion Income', type: 'Revenue', parentCode: '4300' },     // รายได้กิจกรรมและทัศนศึกษา
-  // REAL ESTATE — property inventory stages (under 1520) + rental income by property class (under 4610).
-  { code: '152010', name: 'Land Held for Development', type: 'Asset', parentCode: '1520' },         // ที่ดินเพื่อการพัฒนา
-  { code: '152011', name: 'Construction Work in Progress', type: 'Asset', parentCode: '1520' },     // งานก่อสร้างระหว่างทำ
-  { code: '461010', name: 'Residential Rental Income', type: 'Revenue', parentCode: '4610' },       // รายได้ค่าเช่าที่อยู่อาศัย
-  { code: '461011', name: 'Commercial Rental Income', type: 'Revenue', parentCode: '4610' },        // รายได้ค่าเช่าเชิงพาณิชย์
-  // NONPROFIT — grant vs donation income, the classic functional-expense split, restricted vs unrestricted net assets.
-  { code: '430030', name: 'Grant Income', type: 'Revenue', parentCode: '4300' },                   // รายได้ทุนสนับสนุน
-  { code: '430031', name: 'Donation Income', type: 'Revenue', parentCode: '4300' },                // รายได้เงินบริจาค
-  { code: '510020', name: 'Program Services Expense', type: 'Expense', parentCode: '5100' },        // ค่าใช้จ่ายดำเนินโครงการ
-  { code: '510021', name: 'Management & Administration Expense', type: 'Expense', parentCode: '5100' }, // ค่าใช้จ่ายบริหารจัดการ
-  { code: '510022', name: 'Fundraising Expense', type: 'Expense', parentCode: '5100' },             // ค่าใช้จ่ายการระดมทุน
-  { code: '310010', name: 'Unrestricted Net Assets', type: 'Equity', parentCode: '3100' },         // สินทรัพย์สุทธิไม่มีข้อจำกัด
-  { code: '310011', name: 'Restricted Net Assets', type: 'Equity', parentCode: '3100' },           // สินทรัพย์สุทธิที่มีข้อจำกัด
-  // RETAIL / DISTRIBUTION — the genuine distinct lines only (category/department analysis is a DIMENSION).
-  { code: '500040', name: 'Inventory Shrinkage / Markdown', type: 'Expense', parentCode: '5000', isGroup: 'cogs' }, // ผลขาดทุนสินค้าขาด/ปรับลดราคา
-  { code: '500050', name: 'COGS — Inbound Freight', type: 'Expense', parentCode: '5000', isGroup: 'cogs' },         // ต้นทุน — ค่าขนส่งขาเข้า
-  // SERVICES — cost of services by kind.
-  { code: '580030', name: 'Cost of Services — Staff Cost', type: 'Expense', parentCode: '5800', isGroup: 'cogs' },     // ต้นทุนบริการ — ค่าแรงพนักงาน
-  { code: '580031', name: 'Cost of Services — Subcontractors', type: 'Expense', parentCode: '5800', isGroup: 'cogs' }, // ต้นทุนบริการ — ผู้รับเหมาช่วง
+  // ─────────── Industry-depth sub-accounts (canonical superset; curated per industry by the CoA templates) ───────────
+  // Definitions live in the single-source registry `coa-industry-subaccounts.ts` (one entry per sub-account,
+  // shared with the per-industry CoA templates); derived here as canonical postable rows in registry order.
+  // Add a vertical's sub-account THERE, not here. See that file for the sub-account-vs-dimension scope rule.
+  ...toCanonicalSubAccountRows(),
 ];
 
 // ───────────────────── Statement of Cash Flows (indirect method) classification ─────────────────────
