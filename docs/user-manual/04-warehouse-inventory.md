@@ -13,6 +13,37 @@ expiry, locations / bins, mobile scanning, and cycle counts / stocktakes.
 **Screen:** `/inventory` · **Required permission:** `warehouse` (also `dashboard`
 / `planner` for read access)
 
+> **Goods vs. service items (universal POS).** On the item setup screen
+> (`/setup/items`) an item can be marked **ประเภทอุปทาน (supply type)** = *goods*
+> (the default — a stocked product) or *service* (a haircut, a consultation, a
+> service fee). A **service item is not stocked**: selling it at the POS records
+> the sale and the revenue but **does not reduce inventory** and posts **no cost
+> of goods** — its revenue books to the service-revenue account. A regular
+> **goods** item is unchanged (selling it reduces stock as before).
+
+> **Variants / matrix items (size × color).** On `/setup/items`, load an item and
+> use the **ตัวเลือกสินค้า (Variants)** panel to generate a matrix: type the axes
+> (e.g. *Size* = `S, M, L` and *Color* = `Red, Blue`) and press **สร้างตัวเลือก
+> (Generate)**. Each combination becomes its **own product** (`PARENT-S-RED`, …)
+> with its own barcode, price and stock — so you can **scan a specific size/color
+> barcode** at the till and count it separately. Re-generating after adding a new
+> colour only creates the new cells (nothing is duplicated).
+
+> **Kits / bundles (sell one, deduct many).** On `/setup/items`, load the bundle
+> item (e.g. a gift set) and use the **ชุดสินค้า / ส่วนประกอบ (Kit / bundle
+> components)** panel to list what it contains: enter each **component item ID**
+> and its **quantity per kit**, then **เพิ่ม (Add)**. Selling the bundle at the
+> POS charges the **bundle's own price** as one line, but **reduces the stock of
+> each component** (and books their cost of goods) — the bundle item itself is not
+> stocked. Selling two bundles deducts twice the components, and so on. An item
+> with **no** components listed sells normally (its own stock is reduced).
+
+> **Non-inventory items (fees & charges).** Mark an item's **supply type** as
+> *non-inventory* for a line that isn't a physical product — a **delivery fee**,
+> **gift-wrap** or a **printed-on-demand** charge. It sells and posts revenue like
+> a normal sale line but **moves no stock and books no cost of goods** (its
+> revenue books to the sales-revenue account, not the service account).
+
 1. Go to **Inventory** (`/inventory`).
 2. Search for an item (**ค้นหา** by Item ID or name — typing is debounced, and the
    list stays on screen while it refreshes), or toggle **เฉพาะสต๊อกต่ำ** to show
@@ -115,6 +146,31 @@ genealogy for recall evidence.
 > stop picking. Only a user with the inventory-control duty can hold or release a
 > lot; anyone with `lots`/`warehouse` can run the trace.
 
+> **Selling a lot-tracked item at the POS (FEFO).** On the item setup screen
+> (`/setup/items`) an item can be marked **ติดตามล็อต/วันหมดอายุ (Lot-tracked)**.
+> A lot-tracked item can be sold **only from a real lot** — when the cashier rings
+> it, the POS automatically picks the **soonest-to-expire** lot (FEFO) that is
+> **not expired and not on hold**, stamps that lot number + expiry on the sale
+> line, and records the draw against the lot ledger (so the sale shows up in the
+> lot's forward **recall trace**). If the only stock left is **expired** or **on
+> hold**, the sale is **refused** at the till (you can't sell expired or recalled
+> stock), and if a lot-tracked item has **no lot on hand** it can't be sold until
+> it's received with a lot. A normal (non-lot-tracked) item is unaffected — it
+> sells exactly as before with no lot prompt.
+
+> **Serial / IMEI tracking (electronics).** Mark an item **ติดตามซีเรียล/IMEI
+> (Serial-tracked)** on `/setup/items` when each unit has a unique serial or IMEI
+> (phones, appliances, tools). Register the serials you have in stock in the
+> **ซีเรียล / IMEI (Serial units)** panel — paste or type the numbers (comma or
+> space separated) and press **เพิ่มเข้าสต๊อก**; the panel shows how many are
+> **InStock** vs **Sold**. When the cashier sells the item, they scan/enter the
+> **specific serial** for each unit — that exact unit is marked **Sold** against
+> the sale, so warranty, returns and theft-recovery can look it up later. Selling
+> a serial that is **already sold** or **not on file** is refused, and a
+> serial-tracked line **must** name a serial for every unit sold. Registering
+> serials requires a setup / warehouse duty (a sell-only cashier can ring the
+> sale but can't add stock serials).
+
 **Error messages:**
 
 - **LOT_NOT_HELD** — you tried to release a lot that is not currently on hold.
@@ -142,7 +198,10 @@ transferring and counting.
      barcodes** (EAN/UPC, Code-128, Code-39, ITF), so an existing product barcode
      scans too, not just our printed QR tags. On a successful read you get a short
      **beep + vibrate**; if your phone has a camera light, a **torch** button
-     appears to toggle it for dim aisles. In a scan session the camera stays open
+     appears to toggle it for dim aisles, and on cameras that support it a **zoom
+     slider** (bottom-left of the preview) helps resolve small or far-away labels —
+     the scanner also automatically retries at full camera resolution when a code
+     isn't found after a moment. In a scan session the camera stays open
      for **continuous scanning** — rattle through many items, each added
      automatically — with a running count and a **Done** button to close.
    - **Hardware scanner** — a USB/Bluetooth wedge scanner types the code into the

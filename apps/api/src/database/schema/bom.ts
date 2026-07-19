@@ -45,6 +45,7 @@ export const bomSubmissions = pgTable('bom_submissions', {
   sellingPrice: numeric('selling_price', { precision: 14, scale: 2 }),
   notes: text('notes'),
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  submittedBy: text('submitted_by'), // maker identity for SoD (audit #6): approver must differ (bom.submission.approve)
   status: text('status').default('Pending'),
 });
 

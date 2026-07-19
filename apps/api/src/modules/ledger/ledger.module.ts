@@ -19,11 +19,14 @@ import { AccountDeterminationService } from './account-determination.service';
 import { LedgerBiReports } from './ledger-bi-reports';
 import { LedgerApprovalQueues } from './ledger-approval-queues';
 import { LedgerReadService } from './ledger-read.service';
+import { LedgerJeAnomalyService } from './ledger-je-anomaly.service';
+import { LedgerJeAnomalyController } from './ledger-je-anomaly.controller';
 
 // LedgerService is exported so other modules (POS, AR, AP, Payments) can post into the GL.
+// LedgerJeAnomalyService is exported for the finance Close-Cockpit pillar (GL-28 tile).
 @Module({
-  controllers: [LedgerController, CostCentersController, CoaController, PostingRulesController, SubledgerTieoutController, CloseController, FxRevalController, DeferredTaxController],
-  providers: [LedgerApprovalQueues, LedgerReadService, LedgerBiReports, LedgerService, CostCentersService, CoaService, PostingService, SubledgerTieoutService, CloseService, FxRevalService, DeferredTaxService, AccountDeterminationService],
-  exports: [LedgerReadService, LedgerService, CostCentersService, CoaService, PostingService, SubledgerTieoutService, CloseService, FxRevalService, DeferredTaxService, AccountDeterminationService],
+  controllers: [LedgerController, CostCentersController, CoaController, PostingRulesController, SubledgerTieoutController, CloseController, FxRevalController, DeferredTaxController, LedgerJeAnomalyController],
+  providers: [LedgerApprovalQueues, LedgerReadService, LedgerBiReports, LedgerService, CostCentersService, CoaService, PostingService, SubledgerTieoutService, CloseService, FxRevalService, DeferredTaxService, AccountDeterminationService, LedgerJeAnomalyService],
+  exports: [LedgerReadService, LedgerService, CostCentersService, CoaService, PostingService, SubledgerTieoutService, CloseService, FxRevalService, DeferredTaxService, AccountDeterminationService, LedgerJeAnomalyService],
 })
 export class LedgerModule {}

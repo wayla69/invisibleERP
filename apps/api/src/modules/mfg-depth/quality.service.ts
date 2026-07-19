@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { qualityInspections } from '../../database/schema';
@@ -37,6 +37,17 @@ export class QualityService {
     if (failed < 0) throw new BadRequestException({ code: 'BAD_QTY', message: 'passed cannot exceed inspected', messageTh: 'จำนวนผ่านมากกว่าจำนวนตรวจไม่ได้' });
     const disposition = dto.disposition ?? (failed > 0 ? 'Quarantine' : 'Accept');
     const scrapValue = disposition === 'Scrap' ? r2(failed * n(dto.unit_cost)) : 0;
+    // PE-4 — a Scrap disposition posts an inventory GL write-off. Segregate that financial disposition from
+    // the coarse ops duties (warehouse/bom_master) that raise the inspection: require the quality-approver
+    // (quality_approve) or exec duty, mirroring the NCR maker-checker (QC-01 / SoD R21). A controlled
+    // two-person disposition uses the NCR path (raise → a DIFFERENT quality_approve user dispositions).
+    if (scrapValue > 0 && !(user.permissions ?? []).some((p) => p === 'quality_approve' || p === 'exec')) {
+      throw new ForbiddenException({
+        code: 'SCRAP_APPROVAL_REQUIRED',
+        message: 'Posting a scrap write-off requires the quality-approver (quality_approve) or exec duty',
+        messageTh: 'การตัดจำหน่ายของเสีย (Scrap) ที่ลงบัญชี ต้องมีสิทธิ์อนุมัติคุณภาพ (quality_approve) หรือผู้บริหาร (exec)',
+      });
+    }
     const inspNo = `INS-${String(Date.now()).slice(-10)}`;
 
     const [row] = await db.insert(qualityInspections).values({

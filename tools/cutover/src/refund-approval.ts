@@ -109,6 +109,18 @@ async function main() {
   const exc = await inj('GET', '/api/payments/exceptions/voids-refunds', mgr1);
   ok('G14: void/refund exception report lists the 2 executed refunds (total 2500)', exc.status === 200 && exc.json.refund_count === 2 && near(exc.json.refund_total, 2500) && exc.json.void_count === 0, JSON.stringify({ v: exc.json.void_count, r: exc.json.refund_count, rt: exc.json.refund_total }));
 
+  // ── Security (pentest P6): the REV-16 threshold is CUMULATIVE, not per-call — a large refund split into
+  //    sub-threshold parts must NOT dodge approval. A 3000-payment refunded 600 then 600 (well within the
+  //    refundable balance, so this is NOT an over-refund): the first runs immediately (cumulative 600 < 1000),
+  //    the second parks (cumulative 1200 >= 1000) even though its own amount is < 1000. ──
+  const split = await pay(3000);
+  const sp1 = await inj('POST', '/api/payments/refunds', cash1, { payment_no: split, amount: 600, reason: 'บางส่วน 1' });
+  ok('P6: first sub-threshold refund (cum 600<1000) runs immediately', sp1.json.status === 'Refunded', JSON.stringify(sp1.json).slice(0, 70));
+  const sp2 = await inj('POST', '/api/payments/refunds', cash1, { payment_no: split, amount: 600, reason: 'บางส่วน 2' });
+  const splitRefunds = await cnt(`SELECT count(*)::int n FROM payment_refunds WHERE payment_no='${split}'`);
+  ok('P6: second refund crossing the cumulative threshold parks PendingApproval (no split-to-evade)',
+    sp2.json.status === 'PendingApproval' && splitRefunds === 1, JSON.stringify({ status: sp2.json.status, refunds: splitRefunds }));
+
   await app.close();
   await pg.close();
   console.log('\n── Payments Refund maker-checker (อนุมัติคืนเงิน) ──');

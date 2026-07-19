@@ -470,7 +470,7 @@ function PendingJournal() {
 
 // ───────────────────────── งบกำไรขาดทุน ─────────────────────────
 function IncomeStatement() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [from, setFrom] = useState(monthStart());
   const [to, setTo] = useState(today());
   // FIN-7a: optional dimension slice (project / dept / branch / cost centre) on the P&L.
@@ -492,14 +492,53 @@ function IncomeStatement() {
       </div>
       <StateView q={q}>
         {q.data && (
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label={t('acct.revenue')} value={baht(q.data.revenue)} tone="primary" />
-            <StatCard label={t('acct.expense')} value={baht(q.data.expense)} tone="danger" />
-            <StatCard label={t('acct.net_income')} value={baht(q.data.net_income)} tone={q.data.net_income >= 0 ? 'success' : 'danger'} />
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatCard label={t('acct.revenue')} value={baht(q.data.revenue)} tone="primary" />
+              <StatCard label={t('acct.expense')} value={baht(q.data.expense)} tone="danger" />
+              <StatCard label={t('acct.net_income')} value={baht(q.data.net_income)} tone={q.data.net_income >= 0 ? 'success' : 'danger'} />
+            </div>
+            {q.data.summary && Array.isArray(q.data.groups) && (
+              <Card className="p-5">
+                <div className="mb-2 text-sm font-semibold">{t('acct.pl_breakdown')}</div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {q.data.groups.map((g: any) => (
+                      <Fragment key={g.group}>
+                        <tr>
+                          <td className="py-0.5 pr-3 font-medium">{lang === 'th' ? g.label_th : g.label_en}</td>
+                          <td className="py-0.5 text-right tabular font-medium">{baht(g.total)}</td>
+                        </tr>
+                        {g.lines.map((l: any) => (
+                          <tr key={l.account_code} className="text-muted-foreground">
+                            <td className="py-0.5 pl-4 pr-3">{l.account_code} · {l.account_name}</td>
+                            <td className="py-0.5 text-right tabular">{baht(Math.abs(Number(l.debit) - Number(l.credit)))}</td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                    <SubtotalRow label={t('acct.gross_profit')} value={q.data.summary.gross_profit} />
+                    <SubtotalRow label={t('acct.operating_profit')} value={q.data.summary.operating_profit} />
+                    <SubtotalRow label={t('acct.profit_before_tax')} value={q.data.summary.profit_before_tax} />
+                    <SubtotalRow label={t('acct.net_income')} value={q.data.summary.net_income} strong />
+                  </tbody>
+                </table>
+              </Card>
+            )}
           </div>
         )}
       </StateView>
     </div>
+  );
+}
+
+// A bold subtotal line in the งบกำไรขาดทุน / งบดุล section breakdown.
+function SubtotalRow({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
+  return (
+    <tr className={`border-t ${strong ? 'border-t-2' : ''}`}>
+      <td className={`py-1 pr-3 ${strong ? 'font-bold' : 'font-semibold'}`}>{label}</td>
+      <td className={`py-1 text-right tabular ${strong ? 'font-bold' : 'font-semibold'} ${value < 0 ? 'text-red-600' : ''}`}>{baht(value)}</td>
+    </tr>
   );
 }
 
@@ -707,7 +746,7 @@ function OpeningBalances() {
 
 // ───────────────────────── งบดุล ─────────────────────────
 function BalanceSheet() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [asOf, setAsOf] = useState(today());
   const q = useQuery<any>({ queryKey: ['bs', asOf], queryFn: () => api(`/api/ledger/balance-sheet?as_of=${asOf}`) });
   return (
@@ -730,6 +769,29 @@ function BalanceSheet() {
               {t('acct.assets')} <span className="tabular">{baht(q.data.assets)}</span> = {t('acct.liab_plus_equity')} <span className="tabular">{baht(q.data.liabilities_plus_equity)}</span>{' '}
               <Badge variant={q.data.balanced ? 'success' : 'destructive'}>{q.data.balanced ? t('acct.balanced') : t('acct.unbalanced')}</Badge>
             </Card>
+            {Array.isArray(q.data.sections) && q.data.sections.length > 0 && (
+              <Card className="p-5">
+                <div className="mb-2 text-sm font-semibold">{t('acct.bs_breakdown')}</div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {q.data.sections.map((sec: any) => (
+                      <Fragment key={sec.group}>
+                        <tr>
+                          <td className="py-0.5 pr-3 font-medium">{lang === 'th' ? sec.label_th : sec.label_en}</td>
+                          <td className="py-0.5 text-right tabular font-medium">{baht(sec.total)}</td>
+                        </tr>
+                        {sec.lines.map((l: any) => (
+                          <tr key={l.account_code} className="text-muted-foreground">
+                            <td className="py-0.5 pl-4 pr-3">{l.account_code} · {l.account_name}</td>
+                            <td className="py-0.5 text-right tabular">{baht(l.balance)}</td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            )}
           </div>
         )}
       </StateView>

@@ -19,7 +19,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy, runGlobalDb} from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
@@ -61,6 +61,8 @@ async function main() {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   const ledger = app.get(LedgerService);
+  // Harness pokes this tenant-scoped in-tx method directly; declare the base-pool access for =1.
+  const g = <T>(fn: () => Promise<T>): Promise<T> => runGlobalDb('finance-kpi:direct', fn);
   await ledger.seedChartOfAccounts();
 
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
@@ -78,7 +80,7 @@ async function main() {
   //    Revenue 100k · COGS 40k · Opex 20k · Depreciation 10k · Interest 5k → net income 25k
   //  Σ debits = Σ credits = 455k. viaSubledger allows the control-account lines (1100/2000/1200).
   const today = ymd();
-  await ledger.postEntry({
+  await g(() => ledger.postEntry({
     date: today, source: 'SEED', sourceRef: 'KPI-TB', tenantId: hq, createdBy: 'seed', viaSubledger: true,
     lines: [
       { account_code: '1000', debit: 100000 }, { account_code: '1100', debit: 50000 }, { account_code: '1200', debit: 30000 },
@@ -87,7 +89,7 @@ async function main() {
       { account_code: '1590', credit: 10000 }, { account_code: '2000', credit: 40000 }, { account_code: '2600', credit: 60000 },
       { account_code: '3000', credit: 245000 }, { account_code: '4000', credit: 100000 },
     ],
-  });
+  }));
 
   // Seed AR sub-ledger (aging): one 90+ overdue invoice + one current, total 50k, overdue 20k, 90+ 20k.
   const past = (days: number) => ymd(new Date(Date.now() - days * 86400000));
@@ -225,7 +227,7 @@ async function main() {
   await db.insert(s.branches).values([{ tenantId: hq, code: 'BR1', name: 'Branch One' }, { tenantId: hq, code: 'BR2', name: 'Branch Two' }]).onConflictDoNothing();
   const brId = async (c: string) => Number((await db.select().from(s.branches).where(eq(s.branches.code, c)))[0].id);
   const [b1, b2] = [await brId('BR1'), await brId('BR2')];
-  const postBr = (ref: string, lines: any[]) => ledger.postEntry({ date: today, source: 'SEED', sourceRef: ref, tenantId: hq, createdBy: 'seed', viaSubledger: true, lines });
+  const postBr = (ref: string, lines: any[]) => g(() => ledger.postEntry({ date: today, source: 'SEED', sourceRef: ref, tenantId: hq, createdBy: 'seed', viaSubledger: true, lines }));
   await postBr('BR1-REV', [{ account_code: '1000', debit: 30000 }, { account_code: '4000', credit: 30000, branch_id: b1 }]);
   await postBr('BR1-COGS', [{ account_code: '5000', debit: 10000, branch_id: b1 }, { account_code: '2000', credit: 10000 }]);
   await postBr('BR2-REV', [{ account_code: '1000', debit: 20000 }, { account_code: '4000', credit: 20000, branch_id: b2 }]);

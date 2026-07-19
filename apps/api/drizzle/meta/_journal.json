@@ -2738,6 +2738,209 @@
       "when": 2023820000356,
       "tag": "0417_sme_review_signoffs",
       "breakpoints": true
+    },
+    {
+      "idx": 392,
+      "version": "7",
+      "when": 2023820000357,
+      "tag": "0418_baseline_resync_2",
+      "breakpoints": true
+    },
+    {
+      "idx": 393,
+      "version": "7",
+      "when": 2023820000358,
+      "tag": "0419_recurring_auto_reverse",
+      "breakpoints": true
+    },
+    {
+      "idx": 394,
+      "version": "7",
+      "when": 2023820000359,
+      "tag": "0420_project_material_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 395,
+      "version": "7",
+      "when": 2023820000360,
+      "tag": "0421_close_task_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 396,
+      "version": "7",
+      "when": 2023820000361,
+      "tag": "0422_recon_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 397,
+      "version": "7",
+      "when": 2023820000362,
+      "tag": "0423_project_tagged_waste",
+      "breakpoints": true
+    },
+    {
+      "idx": 398,
+      "version": "7",
+      "when": 2023820000363,
+      "tag": "0424_je_exceptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 399,
+      "version": "7",
+      "when": 2023820000364,
+      "tag": "0425_psp_terminal_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 400,
+      "version": "7",
+      "when": 2023820000365,
+      "tag": "0426_till_blind_close",
+      "breakpoints": true
+    },
+    {
+      "idx": 401,
+      "version": "7",
+      "when": 2023820000366,
+      "tag": "0427_free_issue_custody",
+      "breakpoints": true
+    },
+    {
+      "idx": 402,
+      "version": "7",
+      "when": 2023820000367,
+      "tag": "0428_scrub_legacy_sha256_password_hashes",
+      "breakpoints": true
+    },
+    {
+      "idx": 403,
+      "version": "7",
+      "when": 2023820000368,
+      "tag": "0429_webhook_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 404,
+      "version": "7",
+      "when": 2023820000369,
+      "tag": "0430_bom_submission_maker",
+      "breakpoints": true
+    },
+    {
+      "idx": 405,
+      "version": "7",
+      "when": 2023820000370,
+      "tag": "0431_qr_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 406,
+      "version": "7",
+      "when": 2023820000371,
+      "tag": "0432_ap_intake_lines",
+      "breakpoints": true
+    },
+    {
+      "idx": 407,
+      "version": "7",
+      "when": 2023820000372,
+      "tag": "0433_vendor_taxid_bidx",
+      "breakpoints": true
+    },
+    {
+      "idx": 408,
+      "version": "7",
+      "when": 2023820000373,
+      "tag": "0434_qr_dynamic_kds_priority",
+      "breakpoints": true
+    },
+    {
+      "idx": 409,
+      "version": "7",
+      "when": 2023820000374,
+      "tag": "0435_qr_recommend_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 410,
+      "version": "7",
+      "when": 2023820000375,
+      "tag": "0436_service_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 411,
+      "version": "7",
+      "when": 2023820000376,
+      "tag": "0437_session_member",
+      "breakpoints": true
+    },
+    {
+      "idx": 412,
+      "version": "7",
+      "when": 2023820000377,
+      "tag": "0438_pos_change_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 413,
+      "version": "7",
+      "when": 2023820000378,
+      "tag": "0439_sale_service_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 414,
+      "version": "7",
+      "when": 2023820000379,
+      "tag": "0440_item_variants",
+      "breakpoints": true
+    },
+    {
+      "idx": 415,
+      "version": "7",
+      "when": 2023820000380,
+      "tag": "0441_kit_component_qty",
+      "breakpoints": true
+    },
+    {
+      "idx": 416,
+      "version": "7",
+      "when": 2023820000381,
+      "tag": "0442_accounts_statement_sections",
+      "breakpoints": true
+    },
+    {
+      "idx": 417,
+      "version": "7",
+      "when": 2023820000382,
+      "tag": "0443_tender_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 418,
+      "version": "7",
+      "when": 2023820000383,
+      "tag": "0444_pos_lot_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 419,
+      "version": "7",
+      "when": 2023820000384,
+      "tag": "0445_pos_serial_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 420,
+      "version": "7",
+      "when": 2023820000385,
+      "tag": "0446_pos_age_restricted",
+      "breakpoints": true
     }
   ]
 }

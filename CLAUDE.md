@@ -259,6 +259,124 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     inline duplicate + its dispatch line; never leave both. And remember mantra #9's hidden second collision:
     the auto-merge can silently DROP main's added dispatch line in a region your branch edited — grep the
     merged file for every key main added, not just the conflict hunks.
+14. **A control/validation TIGHTENING breaks test FIXTURES, not just product behaviour — run the `apps/api`
+    vitest suite too, and sweep EVERY harness + test for inputs that now violate the new rule.** Two CI
+    breakages in the 2026-07-16 pentest work, both from tightening a rule (not changing an endpoint's shape):
+    (a) adding `.for('update')` to the in-tx over-receipt read (P5) threw `TypeError:
+    tx.select(...).where(...).for is not a function` in `apps/api/test/procurement-grn.test.ts` — its
+    hand-rolled `tx` query-builder stub (`{from,where,limit,orderBy,then}`) didn't implement `.for`; the
+    PGlite-backed cutover harnesses DID, so they passed and hid it. The `build` gate runs `pnpm --filter
+    @ierp/api test:coverage` (`vitest run --coverage`), so **run the `apps/api` vitest suite locally, not only
+    the cutover harnesses** — a mock missing a newly-called builder method (or a service ctor gaining a param)
+    only fails there. Fix the mock to model the real builder (`for: () => p`), never the product. (b) raising the
+    admin/portal password minimum 6→8 rejected EVERY harness that creates a user via `POST /api/admin/users` /
+    `/api/portal/my/users` with a <8-char password — `gaps.ts` (`'secret1'`) **and** `compliance.ts` (7×
+    `'pw1234'`); a spot-fix of the first let the second fail the NEXT CI cycle. When you tighten a validation
+    (min length, amount cap, required field, real-reference gate), `grep -rn` EVERY `tools/cutover/src/*.ts` +
+    `apps/api/test` for inputs that now violate it and fix them in ONE pass — mantra #11's "grep every harness"
+    applies to fixture INPUTS + mocks, not just endpoint names.
+15. **Before remediating a reported finding (pentest / audit / review), VERIFY ITS PREMISE against the live
+    system — a static audit can miss a later migration that already fixed it, and "fixing" a non-defect can
+    BREAK something.** Pentest P8 claimed four metering tables (`ai_token_usage`, `usage_events`, the two
+    `*_overage_billing_runs`) "never ENABLE ROW LEVEL SECURITY" — but the auditor read only each table's own
+    CREATE-TABLE migration and missed the **canonical generic RLS loop** (`FOR r IN SELECT table_name … WHERE
+    column_name='tenant_id' LOOP … CREATE POLICY tenant_isolation`) that runs in later migrations and sweeps in
+    every pre-existing `tenant_id` table. Proven empirically (mantra #3: instrument, don't theorise) by booting
+    the full migration set over PGlite and querying `pg_class.relrowsecurity` + `pg_policy` — all four were
+    already covered. Enabling RLS "again" would have BROKEN the autocommit operator writers (they run OUTSIDE
+    the request tx and never set `app.tenant_id`, so the canonical `WITH CHECK` rejects them). The durable win
+    was a CI gate (`cutover:rls-coverage`, in the `platform-a` shard) that locks the invariant, not a code
+    change. NB a new `cutover:<name>` added INSIDE an existing shard job needs NO branch-protection change — the
+    shard's check name (`harnesses (platform-a)`) already gates it; only a brand-new top-level JOB introduces a
+    new required-check name.
+16. **A Playwright spec that fails IDENTICALLY on the fixed AND unfixed build is a harness artifact (mantra
+    #2 applied to specs) — and the usual culprit is a PRE-HYDRATION swallowed event.** Next.js SSR paints
+    interactive elements before React hydrates; a `selectOption`/`click` dispatched at first paint changes the
+    DOM but React's handler never fires, and hydration then RESETS the element to React state — which looks
+    exactly like "the fix didn't work" (bit `lang-persistence.spec.ts`: red at the same line on both builds
+    while a paced debug script against the same server passed; the a11y snapshot showed the select back on
+    its initial value). Diagnose by driving the same interaction paced/scripted outside the runner; fix by
+    gating the FIRST interaction on a signal that only exists post-hydration — `waitForResponse` on a call the
+    mount effect makes (keep the predicate method-agnostic if different code paths fire GET vs PUT on mount) —
+    never by sleeps. Related first-paint latency (not hydration): the `frontline-sweep` pos-home test kept
+    flaking even with generous 30s windows (#791/#794/#805×2/#821 + twice post-#809) because the window
+    starts at `goto` and must absorb app boot + hydration + query dispatch BEFORE any render. The durable
+    fix (#835): set up `page.waitForResponse` waiters for the page's own mocked queries BEFORE `goto`,
+    await them, THEN assert visibility — each visibility window then covers only render-after-data. Prefer
+    this response-anchored shape over widening timeouts for any heavy first-paint spec.
+17. **Tightening an AUTHORIZATION gate: the scope→permission model EXPANDS non-obviously, and the fixture that
+    breaks is the one that PROVISIONS a broad credential (auth-specific extension of #14).** The PE-1 api-key
+    scope-bound (bind a key's scopes to the minter's own perms, PR #819) broke the `ext` harness — which minted
+    a full-scope (`*`) *public-API* key as a `users`-only `AccessAdmin`. Non-obvious root cause: `*`/`admin`
+    scopes resolve via `resolvePermissions('Sales')`, and Sales holds `exec`, which `expandPermissions` turns
+    into `gl_post`/`gl_close` — so a `*` key is **GL-capable**, an AccessAdmin minting one IS the escalation, and
+    the fix is to mint it as an **Admin**, never loosen the bound. Two corollaries when bounding scopes:
+    (a) bound only scopes that are REAL internal permissions (`∈ PERMISSIONS`) — a public-API-ONLY scope like
+    `catalog:read` grants nothing on the `@Permissions` surface, so bounding it wrongly rejects legit
+    integration keys (`common/api-scopes.ts` `scopesToPermissions` is the shared expansion, used by both
+    `guards.ts` and `ApiKeyService.issue`); (b) you can't blanket-`detectSodConflicts` a scope-derived set —
+    coarse roles (Sales/`pos`/`warehouse`) carry GRANDFATHERED SoD conflicts, so the user-grant path SoD-checks
+    only the per-user OVERRIDE, never role defaults. `grep -rln "api-keys\|scopes:" tools/ apps/api/test` before
+    pushing an api-key change — the harness that mints a broad key *as a convenience* is where it breaks.
+18. **A scripted bump of the stacked `**Status: DRAFT vN**` doc headers DUPLICATES the old version marker —
+    make the replacement CONSUME it, assert uniqueness, and grep for the double.** The UAT/traceability
+    headers are ONE long line of stacked `*vN: …*` notes; replacing the prefix `"**Status: DRAFT v0.90 · "`
+    with a new prefix that itself ends `… · *v0.90: ` leaves the remainder still starting `*v0.90:` →
+    `· *v0.90: *v0.90: …` (bit the F2 UAT-02 bump). Recipe: `assert s.count(old) == 1` before replacing,
+    write the new prefix so the OLD marker text is not re-emitted (or explicitly strip it), and afterwards
+    grep the file for `vN: \*vN:` to prove no doubling. Same one-line-header care applies to PN rev tables
+    (multi-line, safe) vs the UAT Status lines (single line, fragile).
+19. **Two branches burning down the same down-only baseline conflict at merge — resolve as the UNION of
+    both sides' removals; never plain ours/theirs and never a blind `--update`.** When G4 extracted
+    procurement while main's #809 extracted ap-payment-run/inventory-ledger/dine-in, both edited
+    `service-size-baseline.json` (files map AND the `_note` lineage). Resolution: take **theirs** (main's),
+    then re-apply your delta by hand — delete the entry for the file YOUR branch shrank and append your
+    justification to main's `_note` — and prove it with `node tools/ci/check-service-size.mjs`. `--update`
+    on the merged tree gets the counts right but regenerates the note text (and unicode-escapes it); the
+    hand-applied delta preserves the note lineage. Same family as the RCM-xlsx/census rule (mantra: shared
+    aggregation artifacts merge by union + regenerate/verify, not by picking a side).
+20. **Babysitting PR CI: the `harnesses (finance)` shard is the long pole (~25–30 min; fast gates ~5 min,
+    other shards 10–20) — pace polls to it, and a DISJOINT docs-only main advance needs no re-cycle.** Poll
+    once at ~5 min (build/web-e2e/pg gates + any early failure), then not again until ~25 min. When main
+    advances under a green PR but the new commit touches only files your branch never modified (e.g. a
+    docs-only PR), attempt the squash merge directly — it succeeds without re-merging or another CI run;
+    only a 405 sends you into mantra #10's fetch-remerge-renumber loop.
+21. **A parallel session can CANNIBALIZE your open PR's scope — on every main advance, diff main against
+    your PR's INTENT, and resolve overlap by adopting main's CI-proven twin wholesale.** PR #830 (boundary
+    round: bank+recon+tax) had recon absorbed by #828 and bank by #831 while its CI ran — both concurrent
+    sessions built near-twin narrow readers under different names (`accountLines`/`sourceLineId` vs this
+    branch's `postedLinesForAccount`/`lineIdBySourceRef`) and the auto-merge silently kept BOTH, including a
+    DUPLICATE `lineExists` class member (grep the merged file for twin/duplicate METHODS, not just conflict
+    hunks — mantra #13's shadow rule applied to class members). Resolution: `git checkout origin/main --`
+    the overlapping files (theirs is merged and CI-proven), delete your now-orphaned near-twins, keep only
+    your disjoint remainder, baseline = union of removals (mantra #19). Don't mourn the discarded work —
+    the ratchet moved either way; re-scope the PR title/body to what actually remains yours.
+22. **A fixture that BACKDATES a timestamp into a metric windowed on the Asia/Bangkok business day flips
+    day near midnight — a 1-of-N harness failure that passes locally and passed at other hours is a
+    time-of-day flake; find the windowed metric AND the backdated fixture before touching anything.** The
+    POS-4 recall counter failed 0→0 exactly once, on the 00:0x-BKK run: the harness backdates SLA-WARN's
+    `fired_at` by 12 min for the SLA-band check, and `recalls_today` windows on the ticket's FIRE business
+    day — so runs inside 00:00–00:12 BKK fired it "yesterday". The failure's SHAPE pinpoints the window:
+    sibling checks on the same station passed because `bumped_today` windows on `servedAt` (set live) and
+    overdue ignores fire-day. Fix at the FIXTURE (product semantics were right): re-pin the timestamp to
+    `now()` once the assertion that needed the backdate has run, and re-pin again after the mutation so a
+    midnight between the before/after reads can't reopen the window. Sweep candidates: any harness
+    `interval 'N minutes'` backdate feeding a `bizYmd`-windowed read. (An empty-commit re-run is the
+    correct IMMEDIATE unblock once diagnosed — but only after diagnosis, and land the structural fix next.)
+23. **A green PR whose ENTIRE intent already merged via a concurrent twin gets CLOSED as superseded — never
+    merged; on EVERY green-PR merge attempt, first diff `origin/main` against your branch on the PR's own
+    files.** Mantra #21's limit case, hit twice in one day: #833 (ledger-boundary round 12) went all-19-green
+    while #830 merged the identical tax-reports migration + baseline→1; and #835's POS-4 half was superseded
+    mid-flight by #836 (same root cause, superset fix — re-pins fired_at around BOTH load reads). The tell is
+    `mergeable_state: dirty` + the same intent already on main; the residual deltas (comment wording, a
+    competing baseline `_note`, slightly worse lambda typing) are NEVER worth a conflict re-merge + CI cycle.
+    Full supersede → close with an explanatory comment, restart the branch from main. Partial supersede →
+    take main's file VERBATIM (`git checkout origin/main -- <file>`; an auto-merge that "succeeds" can leave
+    BOTH fixes stacked — three fired_at re-pins — so never trust it on the overlapping file), re-scope the PR
+    title/body to the disjoint remainder, and re-verify the merged tree locally before pushing. Corollary:
+    with several sessions burning down the same lists, treat every merge attempt as contested — the
+    ancestry check (`merge-base --is-ancestor`) says main moved, but only the per-file diff says WHOSE
+    change survived.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
@@ -282,12 +400,53 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     `app.inject()`s a signed body must create the app with `{ rawBody: true }` too, else rawBody is empty).
   - **API keys carry `created_by`; the guard adopts that human as the maker-checker principal** (H-2) — a key
     can't launder a self-approval. The **guard sources `tenantId` LIVE from the DB** (L-3), like role/orgId.
+- **Privilege-escalation remediation (2026-07-17 audit, PR #819 — `docs/security/2026-07-17-privilege-escalation-audit.md`;
+  don't regress the new fail-closed controls).** The escalation surface is the `users` perm (`AccessAdmin`)
+  granting capability UNBOUNDED by its own — the 2026-07-16 pentest closed the reach-Admin paths (P1/P2/P3);
+  #819 closed the reach-sub-Admin paths. **(PE-1)** `ApiKeyService.issue` bounds a key's scopes to the minter's
+  own perms (`403 KEY_SCOPE_EXCEEDS_GRANTOR`) via `common/api-scopes.ts` `scopesToPermissions` (shared with
+  `guards.ts`) — only scopes `∈ PERMISSIONS` are bounded, the platform owner is exempt (see mantra #16 for the
+  `*`=GL-capable trap). **(PE-2)** an `admin-users` create/update grant BEYOND the grantor's own set is STAGED
+  for a second admin in the existing `access_grant_exceptions` two-person queue (`sod_rules:['ESCALATION']`) —
+  NOT hard-blocked (that would break SCIM + delegated user admin); SCIM opts out with `{viaScim:true}`, and
+  Admin/god hold everything so they never stage. Others (all fail-closed): QC `Scrap` GL write-off needs
+  `quality_approve`/`exec` (PE-4, `mfg-depth/quality.service.ts`); `PUT /api/procurement/match/tolerance` is
+  approver-set (`exec`/`approvals`), not the `creditors` beneficiary (PE-5); platform `mfa/setup` refuses
+  re-enrol when already enabled (PE-6); `hcm/leave/balances` own-scopes non-HR `ess` callers via `callerEmpCode`
+  (PE-3). **Harness patterns for a `users`-holder / AccessAdmin fixture** (learned building the ToE): SEED it
+  directly (`db.insert(s.users)`, `mustChangePassword` unset) and log in — the create→change-password→relogin
+  dance on a *platform-created-tenant* user 401s `USER_NOT_FOUND` on the guard (a PGlite tx-visibility quirk;
+  `access-recert.ts` is the good pattern); a non-Admin (tenant-scoped) session can't insert a NULL-tenant row
+  (RLS `WITH CHECK` — pass `customer_name` = its tenant code); the `/api/login` body does NOT expose
+  `permissions`, so assert effective perms by querying `userPermissions` on the raw harness `db`.
   - **Behind a proxy / multi-replica (L-8/L-12):** `TRUSTED_PROXY_HOPS` sets Fastify `trustProxy` + the
     audit-IP trusted hop; `RATE_LIMIT_REDIS_URL` shares the edge + public-API limiters via
     `common/rate-limit-store.ts`. Both default off = per-process / socket-peer (single-node unchanged).
   - SSRF guard (`net-guard.ts`) now blocks hex IPv4-mapped IPv6 literals (H-1); `image-fetch` routes through
     it (L-6); object-storage keys are `isSafeObjectKey`-validated (L-9); SSE/`realtime-bus.recent()` no longer
     fan `tenant_id==null` events to all tenants (L-7); PII redaction masks international `+` phones (L-11).
+- **Web i18n architecture (2026-07-17 EN coverage, PRs #816/#818/#821) — extend it, don't re-derive.**
+  `LanguageProvider` lives ONLY in the ROOT layout (one app-wide instance; signed-out/public pages get the
+  device's cached `ierp_lang` choice, default th). Per-domain key fragments in `apps/web/src/lib/i18n-catalog/*`
+  (portal `pt.*`, auth `auth.*`, public diner/member `pub.*`/`mb.*`, shared client errors `err.*`/`je.*`) merged
+  in `messages.ts` — the catalog is th+en COMPLETE (≈11.6k keys, audited 0 missing en), so a "แปลไม่ครบ" report
+  means a HARDCODED string, not a missing translation (when grepping for Thai literals, exclude comments and
+  `฿` — U+0E3F is inside the Thai Unicode block). Non-React code translates via `lib/i18n-static.ts`
+  `ts()`/`currentLang()` (evaluated at CALL time — fine for thrown errors/toasts/prompts, never for rendered
+  labels). `lib/api.ts` picks the server error `message` vs `messageTh` by locale (`localizedErr`) — any new
+  fetch layer (cf. `/m`'s `mapi`) must do the same, and regexes matching error text must match BOTH languages
+  (the `/m` session-expiry detector). Client-side status labels/colors key on stable server CODES
+  (`kds_status`), never on the Thai display text (`status_th` is only the fallback). Bilingual-BY-DESIGN, do
+  NOT wire: `/q` scan resolver (server component — no client island, per the use-client ratchet), `/display`
+  pole display (both audiences see it at once), `global-error` (renders without providers), `/legal/privacy`.
+- **A user preference that "PUTs best-effort then trusts the server read" REVERTS under read-only
+  impersonation — every mutation 403s there (`READONLY_IMPERSONATION`), so the server never learns the
+  choice and the next mount's read clobbers it.** Canonical fix shape (`lib/i18n.tsx`, the #816 lang-revert
+  bug): on a failed persist write a localStorage PENDING marker (`ierp_lang_pending`); while pending the
+  LOCAL value is authoritative — the mount effect RETRIES the persist and SKIPS the server read — and a
+  `userChose` ref stops a still-in-flight mount read from clobbering a choice that raced past it; a
+  successful persist clears the marker and restores server authority (cross-device sync). Reuse this shape
+  for any per-user pref that must survive read-only company view / offline.
 - **Business timezone = Asia/Bangkok (UTC+7).** `ymd()`/`bizYmdDash` date everything on the business day,
   not UTC. Seed/compare dates on that basis or you get off-by-one window drift (root cause of the
   `analytics` flake).
@@ -347,14 +506,31 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   must OMIT its own directive** (it inherits the boundary — pattern: `apps/web/src/components/state-view.tsx`);
   adding the directive needlessly is what trips it. (3) `tools/ci/check-service-size.mjs` (docs/46 Phase 0 —
   god-service accretion): a grandfathered `apps/api/src/modules` file (in
-  `service-size-baseline.json`; 14 at Phase 0, **8** after docs/46 Phase 4 — the list may only shrink) may not GROW — in lines **or** constructor params — and no NEW module file may
+  `service-size-baseline.json`; 14 at Phase 0, **0 (EMPTY)** after the 2026-07-17 burn-down rounds 2–5 (#809 + G4 + #810/#812/#813 — every god-service extracted off; the list may only shrink, so it must STAY empty: any module file crossing 600 LOC now fails outright) may not GROW — in lines **or** constructor params — and no NEW module file may
   pass 600 LOC. Land the feature as its own sub-service / registered provider (docs/46 §4) instead of appending
   to a facade; a justified exception bumps the baseline with a note in the same PR; `--update` regenerates
-  after an extraction. (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
+  after an extraction. **Headroom rounds 14–15 (2026-07-18, #839/#840) pre-buffered every near-cap file — no
+  module file is now within ~80 lines of the cap — by extracting five ctor-body sub-services: EXTEND THESE,
+  don't grow the facades back:** `finance/ap-payment-run-file.service.ts` (EXP-13 bank bulk-transfer file;
+  `loadRun` closure), `restaurant/dine-in-sale.service.ts` (`buildSale` — the ONE place POS food GL posts —
+  + `buildCheckSale`; channel-order/qr/split call through facade delegators), `cpq/cpq-bundles.service.ts`
+  (bundles + recommendations; assertConfig/assertQuote/fmtQuote closures), `crm/pipeline/crm-lead-capture.service.ts`
+  (webToLead + import; `LEAD_IMPORT_HEADERS` static alias keeps the controller import), `crm/crm-audience.service.ts`
+  (PDPA-05 audience/CDP egress, db-only). Proven extraction recipe: move method blocks VERBATIM (python
+  line-range script), name the plain class's ctor params exactly like the facade's fields so bodies stay
+  byte-identical, wire canonical primitives as facade-ctor closures, keep thin delegators, sweep dead
+  imports, then verify with the OWNING harnesses (a money-path move like buildSale warrants the full
+  consumer sweep — 12 harnesses — plus vitest + golden; NB the `pdpa` harness alone runs >10 min, so give
+  the Bash call a generous timeout or run it solo). (4) `tools/ci/check-import-boundaries.mjs` (docs/46 Phase 3): files outside
   `modules/ledger` referencing the `journalEntries`/`journalLines` tables are grandfathered in
-  `ledger-boundary-baseline.json` and the set may only SHRINK — read GL state via **`LedgerReadService`**
-  (`accountNet`/`cashPosition`/`entryRefNo`, exported by LedgerModule) and post via `LedgerService.postEntry`,
-  never a direct journal join from another module. Run all four scripts locally before pushing. Also: **PR CI runs
+  `ledger-boundary-baseline.json` and the set may only SHRINK — **at its FLOOR of 1 since the 2026-07-17/18
+  rounds 6–12 (#815/#817/#820/#826/#828/#830/#831): only `seed-demo-finance.ts` remains, BY DESIGN (a demo
+  fixture writer; posting through `postEntry` would renumber docs), so any new direct read fails outright.**
+  Read GL state via **`LedgerReadService`** (now a rich narrow surface: `accountNet`/`accountGross{from,toExcl}`/
+  `accountNetPerAccount{periodBefore}`/`accountLineRefs`/`accountLines`/`lineExists`/`sourceLineId`/
+  `revenueExpenseByPeriod`/`entryRefNo{status}` — check it BEFORE adding a method; two sessions built
+  near-twins in one day) and post via `LedgerService.postEntry`, never a direct journal join from another
+  module. Run all four scripts locally before pushing. Also: **PR CI runs
   on the branch⋈main *merge* commit**, so a ratchet reads against *current* `main`'s baseline — your local
   count can be off by the files `main` added since you branched (relative pass/fail still holds).
 - **docs/46 is fully delivered (PRs #740/#749/#755) — its growth seams are now the ONLY way to add these
@@ -398,10 +574,37 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   PO/PR/GR/GRC). Settings: `GET/PUT /api/procurement/receiving-settings` (change = `procurement`/`exec` only,
   mirrors EXP-04). ToE: 8 EXP-12 checks in `cutover/compliance.ts` (user `whrecv` = wh_receive-only fixture);
   the `gaps` harness seeds a real `GR-1`. Narrative PN-02 §7(5) rev 3.29; UAT-P2P-120..124.
+- **The procurement facade is FULLY extracted (docs/46 G4, 2026-07-17) — new procurement logic goes in a
+  sub-service, never back on the facade.** `procurement.service.ts` is ~160 LOC of ctor wiring + thin
+  delegators over FIVE ctor-body plain classes: `procurement-pr/-po/-grn` (docs/38) plus
+  `procurement-vendor.service.ts` (supplier screening Phase 16, party model, the 0270 bank-detail
+  maker-checker, scorecards, T2-D price lists, match-merge/DQM) and `procurement-catalog.service.ts`
+  (item/vendor search, the pr_raise shop catalog, sourcing suggestion + preferred vendor, spend insights,
+  low-stock, item images). Cross-sub-service needs are wired as facade-ctor closures (e.g. catalog gets
+  `assertSupplierAllowed` from vendor; pr gets `lowStock`/`setPreferredVendor` from catalog). The facade's
+  POSITIONAL ctor `(db, docNo, statusLog)` is a goldenmaster/writeflow contract — sub-services are built in
+  the ctor BODY, never DI'd. Extraction recipe that proved safe: move method blocks VERBATIM (python
+  line-range script), keep names/behavior byte-identical, then let `golden` (534 paths) + `writeflow` +
+  compliance/match/ext prove the move.
+- **Subcontractor free-issue custody (PROJ-28, migration 0427) — extend it, don't re-derive.**
+  `reservations.service.ts`: reserve with `subcontract_no` (fail-closed `SUBCONTRACT_NOT_FOUND`/
+  `SUBCONTRACT_PROJECT_MISMATCH`/`SUBCONTRACT_NOT_ACTIVE`) stamps `stock_reservations.subcontract_id` — the
+  ordinary INV-13 issue IS the free-issue event (GL/stock byte-identical); `custodyStatement`
+  (`GET /api/reservations/custody?subcontract_no=`; issued − Posted MRET returns − acked = in_custody) and
+  `ackCustody` (`POST …/:id/custody-ack`; `NOT_FREE_ISSUE`/`RESERVATION_NOT_CONSUMED`/`OVER_ACK` cap,
+  by/at trail). The teeth live in `subcontracts.service.ts` `certifyValuation`: a FINAL certificate (reaching
+  contract value) with open custody → `FREE_ISSUE_CUSTODY_OPEN` + `details.open`; interim certificates
+  unaffected. Web: reserve-dialog field + รับรู้การใช้ action (project จองสต๊อก tab) + the ฝากวัสดุ statement
+  panel on `/projects/subcontracts`. ToE: `projects` §9h-bis (12 checks — NB the free-issue fixture drops
+  `boq_line_id`, else the RES commitment double-books the Depth-2 budget line). PN-16 §27d.
 - **Sandbox networking:** direct `git push` to `main` is blocked (use the PR flow — open + merge via the
   GitHub MCP), `api.github.com` returns **403** from the shell (poll CI via the GitHub MCP, not curl),
   Playwright's Chromium download (`cdn.playwright.dev`) is blocked (runs in CI), branch **deletion** is
-  blocked (403), and the commit-signing server is occasionally flaky (retry the commit).
+  blocked (403), and the commit-signing server is occasionally flaky (retry the commit). Also:
+  **`pkill -f`/`pgrep -f` with the pattern written literally in the SAME Bash command kills your own
+  shell** — the harness runs `bash -c "<command>"`, so the pattern string is on your own process's command
+  line and matches (exit 144, the whole compound dies mid-way). Split the literal (`'next-serv''er'`) or
+  target by port instead.
 - **CodeQL `CodeQL` results gate races / is one commit behind.** The capital-`CodeQL` PR check (distinct
   from the lowercase `codeql` analysis *job*) concludes ~5–8s **before** that run's analysis finishes
   uploading, so on a fresh push it reports the **prior** commit's alerts — a pushed fix can read red even
@@ -427,7 +630,9 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **Drizzle migrations MUST be journaled.** Every new `apps/api/drizzle/NNNN_*.sql` needs a matching entry
   appended to `apps/api/drizzle/meta/_journal.json` (sequential `idx`, ascending `when`), or the CI
   `migrations-journaled` gate fails and prod `drizzle-kit migrate` skips it. Verify no duplicate `idx`.
-  Sequence is at `0121` / idx 126 as of the gap-pack work.
+  Sequence is at `0427_free_issue_custody` / idx 401 / when 2023820000366 as of the F2 wave (2026-07-17) —
+  the next free is 0428 / idx 402 / when …367, but ALWAYS re-derive from the live journal tail after a
+  main merge (mantra #10: concurrent PRs steal numbers).
 - **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
@@ -469,7 +674,9 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
 - **After merging `main`, rebuild `@ierp/shared` before trusting typecheck/ratchets.** If the merge brings
   in new shared exports (e.g. main's `qr.ts` adding `qrLink`/`stripTrailingSlashes`), code importing them
   fails with `TS2305: has no exported member` against the **stale dist** — which the `check-ts-debt` gate
-  surfaces as phantom "new errors". Read the actual error (`TS2305` ≠ a `noUncheckedIndexedAccess` index
+  surfaces as phantom "new errors". Same phantom when main widens a shared ZOD SCHEMA/type: the consumer
+  errors `TS2353: 'x' does not exist in type` (bit the #829 `company_name` auth-schema merge, showing up as
+  a strict-index count 1>0). Read the actual error (`TS2305`/`TS2353` ≠ a `noUncheckedIndexedAccess` index
   error) before assuming new debt, and run `pnpm --filter @ierp/shared build` to resolve.
 - **Authoring `basics` harness GL assertions:** trial-balance rows expose `debit`, `credit`, *and* `balance`
   (= debit − credit). Use `balance` for net-position checks (e.g. a control account that gets both a debit
@@ -645,6 +852,18 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   - Asset revaluation/impairment + disposal recycling (**FA-07**): `modules/assets/assets.service.ts`
     (`revalue`, `dispose` recycles surplus 3200→3100). EAM work orders/PM/reliability (**FA-06**): `modules/eam/`.
   - Collections/dunning + credit-hold workflow (**REV-08/REV-12**): `modules/finance/collections.service.ts`.
+  - **Close Manager v2/v2b (extends GL-15/GL-19; `modules/ledger/close.service.ts` `autoComplete`):**
+    `POST /api/ledger/close/auto-complete` ticks a checklist step ONLY on system evidence — recurring ←
+    nothing left due (recurring templates + prepaid schedules ≤ period end); fx_reval / deferred_tax ← a
+    Posted run for the period; depreciation ← ≥1 Posted `DEP` JE; **bank_rec / subledger_tieout ← every
+    REC-01 recon workspace OPENED for the period on the step's account set is CERTIFIED** (bank_rec: the
+    canonical `CASH_ACCOUNTS` from `ledger-constants`; tie-out: `TIEOUT_ACCOUNTS` 1100/2000/1200/1500) —
+    fail-closed both ways (zero workspaces = no evidence; one un-certified blocks), certifiers pinned in
+    `detail.evidence.certifications`. The REC-01 certification is the human act; the tick reflects it.
+    Register-less judgments (TB review, flux, disclosure) + custom tasks NEVER auto-complete. Attribution
+    `"<user> (auto)"` (B4 precedent). Overdue close tasks (past `due_date`, run not Locked) surface in
+    GOV-01 via the `close_task_overdue` provider in `ledger-approval-queues.ts`. ToE: `basics` F1+G3 blocks
+    (isolated period 2028-02).
   - Scheduled "action" jobs ride the BI report scheduler: `ar_collections_dunning`, `eam_pm_generate`,
     `gl_recurring_journals`, `gl_prepaid_amortize`, `lease_periodic_run` — each idempotent. Since docs/46
     Phase 1 the GENERATOR lives in the owning module's `*-bi-reports.ts` provider (implements

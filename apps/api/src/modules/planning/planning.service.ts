@@ -3,7 +3,7 @@ import { eq, and, sql, asc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { budgetVersions, budgetScenarios, budgetDrivers, forecastLines } from '../../database/schema/planning';
 import { budgets } from '../../database/schema/budgets';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { docCountersTenant } from '../../database/schema/system';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
@@ -11,10 +11,16 @@ import { WorkflowService } from '../workflow/workflow.service';
 
 @Injectable()
 export class PlanningService {
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     @Optional() private readonly workflow?: WorkflowService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // ── Doc-number: BV-{year}-{n:04d}, sequential per tenant+year ──
   private async nextVersionNo(tenantId: number, fiscalYear: number): Promise<string> {
@@ -215,19 +221,7 @@ export class PlanningService {
     if (!drivers.length) return { lines_written: 0 };
 
     // Get GL net movement (debit - credit) for each account+period from posted journal entries
-    const glRows: any[] = await db.select({
-      accountCode: journalLines.accountCode,
-      period: journalEntries.period,
-      net: sql`sum(${journalLines.debit} - ${journalLines.credit})`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, tenantId),
-        eq(journalEntries.status, 'Posted'),
-        inArray(journalEntries.period, dto.periods),
-        inArray(journalLines.accountCode, drivers.map((d: any) => d.accountCode)),
-      ))
-      .groupBy(journalLines.accountCode, journalEntries.period);
+    const glRows: any[] = await this.ledgerRead.accountNetPerAccountPeriod({ tenantId, periods: dto.periods, accounts: drivers.map((d: any) => d.accountCode) });
 
     // Index actuals: account → period → net
     const actuals: Record<string, Record<string, number>> = {};
@@ -287,17 +281,7 @@ export class PlanningService {
     for (const r of forecastRows) forecastMap[r.accountCode] = n(r.amount);
 
     // Actual: net GL movement (debit - credit) from posted journal entries for this tenant+period
-    const actualRows = await db.select({
-      accountCode: journalLines.accountCode,
-      net: sql`sum(${journalLines.debit} - ${journalLines.credit})`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, tenantId),
-        eq(journalEntries.status, 'Posted'),
-        eq(journalEntries.period, period),
-      ))
-      .groupBy(journalLines.accountCode);
+    const actualRows = await this.ledgerRead.accountNetPerAccount({ tenantId, period });
     const actualMap: Record<string, number> = {};
     for (const r of actualRows) actualMap[r.accountCode] = n(r.net);
 

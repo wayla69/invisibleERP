@@ -36,10 +36,10 @@ export class KnowledgeService {
     const db = this.db;
     const [doc] = await db.insert(kbDocuments).values({ tenantId: user.tenantId ?? null, title: dto.title, source: dto.source ?? null, createdBy: user.username }).returning({ id: kbDocuments.id });
     const chunks = this.chunk(dto.content);
-    const rows = [] as any[];
+    const rows: (typeof kbChunks.$inferInsert)[] = [];
     for (let i = 0; i < chunks.length; i++) {
       const emb = await this.embedder.embed(chunks[i]!);
-      rows.push({ tenantId: user.tenantId ?? null, docId: Number(doc!.id), ord: i, content: chunks[i], embedding: emb.vector, embedProvider: emb.provider });
+      rows.push({ tenantId: user.tenantId ?? null, docId: Number(doc!.id), ord: i, content: chunks[i]!, embedding: emb.vector, embedProvider: emb.provider });
     }
     if (rows.length) await db.insert(kbChunks).values(rows);
     return { doc_id: Number(doc!.id), title: dto.title, chunks: rows.length };

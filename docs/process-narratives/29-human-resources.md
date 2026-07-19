@@ -791,3 +791,4 @@ flowchart TD
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 DRAFT | 2026-07-11 | HR-7 | Initial training & certifications narrative + HR-07 control matrix (migration 0326) |
+| 0.2 | 2026-07-17 | HR-2 / Security | **HR-02 — leave-balance read own-scoped (privilege-escalation audit PE-3, `docs/security/2026-07-17-privilege-escalation-audit.md`).** `GET /api/hcm/leave/balances` is reachable by `ess` self-service; it ignored the caller, so any employee could read a colleague's balances by `emp_code` (or dump every employee's with no arg). A non-HR (`ess`) caller is now own-scoped to their linked employee via `callerEmpCode` (mirrors hcm-comp/perf/training); `hr`/`hr_admin`/`exec`/Admin keep the full view. Within-tenant PII (RLS does not help). **No new RCM control** (strengthens HR-02). ToE: `hcm-leave` harness (ess no-arg → own only; ess `emp_code`=colleague → own-scoped, not the colleague). |

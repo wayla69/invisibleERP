@@ -7,6 +7,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { assertMakerChecker, SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { BillingService } from './billing.service';
+import { StarterPackService } from './starter-pack.service';
 import { TaxService } from '../tax/tax.service';
 import { isValidPromptPayTarget } from '../payments/promptpay-qr';
 
@@ -45,6 +46,7 @@ export class TenantController {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly billing: BillingService,
     private readonly tax: TaxService,
+    private readonly starterPackSvc: StarterPackService,
   ) {}
 
   @Get('profile')
@@ -171,22 +173,14 @@ export class TenantController {
     return { tenant_id: id, steps, done, total: steps.length, percent: Math.round((done / steps.length) * 100), complete: done === steps.length, next: steps.find((s) => !s.done)?.key ?? null };
   }
 
-  // Minimal industry starter (ITGC-AC-18 #4) — idempotent: gives a brand-new company a head-office branch
-  // so it isn't empty (branches are needed for POS/inventory). Safe to call repeatedly.
+  // Industry starter (ITGC-AC-18 #4 + docs/51 B3) — idempotent: gives a brand-new company its HQ branch,
+  // and an SME company additionally a small industry kit (sample menu/tables/warehouse/project) so the B1
+  // industry nav lands on non-empty screens. Logic in StarterPackService; safe to call repeatedly.
   @Post('starter-pack')
   @Permissions('users')
   async starterPack(@CurrentUser() user: JwtUser) {
     const id = await this.billing.resolveTenantId({ username: user.username, customerName: user.customerName });
-    const created: string[] = [];
-    const skipped: string[] = [];
-    const branchN = Number((await this.db.select({ n: sql<number>`count(*)` }).from(branches).where(eq(branches.tenantId, id)))[0]?.n ?? 0);
-    if (branchN === 0) {
-      await this.db.insert(branches).values({ tenantId: id, code: 'HQ', name: 'สำนักงานใหญ่', isHq: true, active: true, createdBy: user.username });
-      created.push('hq_branch');
-    } else {
-      skipped.push('hq_branch');
-    }
-    return { created, skipped };
+    return this.starterPackSvc.apply(id, user.username);
   }
 
   private fmt(t: any) {

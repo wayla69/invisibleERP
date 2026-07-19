@@ -2,7 +2,7 @@ import { Inject, Injectable, BadRequestException, NotFoundException, ForbiddenEx
 import { eq, and, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { reconPeriods, reconItems } from '../../database/schema/reconciliation';
-import { journalEntries, journalLines } from '../../database/schema/ledger';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
@@ -11,27 +11,28 @@ const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
 
 @Injectable()
 export class ReconciliationService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // ── Open / find recon period ──
 
-  async openPeriod(dto: { account_code: string; period: string }, user: JwtUser) {
+  async openPeriod(dto: { account_code: string; period: string; risk_rating?: 'low' | 'medium' | 'high' }, user: JwtUser) {
     const db = this.db;
     const tenantId = user.tenantId!;
 
-    // Compute GL balance for the account + period
-    const [glRow] = await db.select({
-      net: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}), 0)`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, tenantId),
-        eq(journalEntries.period, dto.period),
-        eq(journalEntries.status, 'Posted'),
-        eq(journalLines.accountCode, dto.account_code),
-      ));
-
+    // Period activity for the account (posted GL only).
+    const [glRow] = await this.ledgerRead.accountNetPerAccount({ tenantId, period: dto.period, accounts: [dto.account_code] });
     const glBalance = n(glRow?.net ?? 0);
+    // B4 (docs/50 Wave 4) — roll-forward: opening = Σ posted GL BEFORE the period; activity = the period's
+    // net; closing = opening + activity. Computed from the same posted ledger the TB reads, so the
+    // roll-forward ties to the trial balance by construction.
+    const [openRow] = await this.ledgerRead.accountNetPerAccount({ tenantId, periodBefore: dto.period, accounts: [dto.account_code] });
+    const opening = n(openRow?.net ?? 0);
 
     const [existing] = await db.select().from(reconPeriods)
       .where(and(eq(reconPeriods.tenantId, tenantId), eq(reconPeriods.accountCode, dto.account_code), eq(reconPeriods.period, dto.period)))
@@ -42,9 +43,38 @@ export class ReconciliationService {
     const [rp] = await db.insert(reconPeriods).values({
       tenantId, accountCode: dto.account_code, period: dto.period,
       status: 'Open', glBalance: fx(glBalance, 4), subledgerBalance: '0',
+      openingBalance: fx(opening, 4), activity: fx(glBalance, 4), closingBalance: fx(opening + glBalance, 4),
+      riskRating: dto.risk_rating ?? 'medium',
       preparedBy: user.username, preparedAt: new Date(),
     }).returning();
     return this.fmtPeriod(rp);
+  }
+
+  // B4 — re-rate an account's review depth (recon_prep; drives auto-certification eligibility).
+  async setRisk(reconPeriodId: number, riskRating: 'low' | 'medium' | 'high', user: JwtUser) {
+    await this.assertPeriod(reconPeriodId, user);
+    await this.db.update(reconPeriods).set({ riskRating }).where(eq(reconPeriods.id, reconPeriodId));
+    return this.fmtPeriod(await this.assertPeriod(reconPeriodId, user));
+  }
+
+  // B4 — auto-certification for the PROVABLY-SAFE class only: LOW risk AND zero opening AND zero activity
+  // AND zero closing (nothing happened, nothing to reconcile). Flagged auto_certified + attributed to the
+  // caller "(auto)" so the register shows exactly which certifications were machine-issued. Every other
+  // account keeps the manual REC-01 path (preparer ≠ certifier) untouched.
+  async autoCertify(period: string, user: JwtUser) {
+    const db = this.db;
+    const tenantId = user.tenantId!;
+    const rows = await db.select().from(reconPeriods)
+      .where(and(eq(reconPeriods.tenantId, tenantId), eq(reconPeriods.period, period), eq(reconPeriods.riskRating, 'low'), sql`${reconPeriods.status} <> 'Certified'`));
+    const safe = rows.filter((r: any) => n(r.openingBalance) === 0 && n(r.activity) === 0 && n(r.closingBalance) === 0);
+    for (const r of safe) {
+      await db.update(reconPeriods).set({ status: 'Certified', autoCertified: true, certifiedBy: `${user.username} (auto)`, certifiedAt: new Date() }).where(eq(reconPeriods.id, r.id));
+    }
+    return {
+      period, scanned: rows.length, auto_certified: safe.length,
+      accounts: safe.map((r: any) => r.accountCode),
+      skipped: rows.filter((r: any) => !safe.includes(r)).map((r: any) => ({ account_code: r.accountCode, reason: 'NOT_ZERO' })),
+    };
   }
 
   // ── Import GL items into recon workspace ──
@@ -53,30 +83,19 @@ export class ReconciliationService {
     const db = this.db;
     const rp = await this.assertPeriod(reconPeriodId, user);
 
-    const glLines = await db.select({
-      id: journalLines.id,
-      refDoc: journalEntries.entryNo,
-      amount: sql<string>`${journalLines.debit} - ${journalLines.credit}`,
-    }).from(journalLines)
-      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        eq(journalEntries.tenantId, rp.tenantId!),
-        eq(journalEntries.period, rp.period),
-        eq(journalEntries.status, 'Posted'),
-        eq(journalLines.accountCode, rp.accountCode),
-      ));
+    const glLines = await this.ledgerRead.accountLineRefs({ tenantId: rp.tenantId!, period: rp.period, account: rp.accountCode });
 
     if (!glLines.length) return { imported: 0 };
 
     await db.insert(reconItems).values(
-      glLines.map((l: any) => ({
+      glLines.map((l) => ({
         reconPeriodId, source: 'GL', refDoc: l.refDoc, refLineId: Number(l.id),
         amount: fx(n(l.amount), 4), isMatched: false,
       }))
     ).onConflictDoNothing();
 
     // Update GL balance
-    const glBalance = round4(glLines.reduce((s: number, l: any) => s + n(l.amount), 0));
+    const glBalance = round4(glLines.reduce((s: number, l) => s + n(l.amount), 0));
     await db.update(reconPeriods).set({ glBalance: fx(glBalance, 4), preparedBy: user.username, preparedAt: new Date() }).where(eq(reconPeriods.id, reconPeriodId));
 
     return { imported: glLines.length, gl_balance: glBalance };
@@ -168,9 +187,22 @@ export class ReconciliationService {
     const unmatchedGl = items.filter((i: any) => i.source === 'GL' && !i.isMatched).length;
     const unmatchedSub = items.filter((i: any) => i.source === 'Subledger' && !i.isMatched).length;
 
+    // B4 — aging of UNMATCHED reconciling items (days since capture): the reviewer sees how long an
+    // exception has been open, not just that it exists.
+    const now = Date.now();
+    const ageDays = (d: any) => Math.floor((now - new Date(d ?? now).getTime()) / 86400_000);
+    const unmatched = items.filter((i: any) => !i.isMatched);
+    const aging = {
+      d0_30: unmatched.filter((i: any) => ageDays(i.createdAt) <= 30).length,
+      d31_60: unmatched.filter((i: any) => { const a = ageDays(i.createdAt); return a > 30 && a <= 60; }).length,
+      d61_plus: unmatched.filter((i: any) => ageDays(i.createdAt) > 60).length,
+      oldest_days: unmatched.length ? Math.max(...unmatched.map((i: any) => ageDays(i.createdAt))) : 0,
+    };
+
     return {
       ...this.fmtPeriod(rp),
       items: { total, matched: matchedCount, unmatched_gl: unmatchedGl, unmatched_subledger: unmatchedSub },
+      aging,
     };
   }
 
@@ -193,6 +225,8 @@ export class ReconciliationService {
     return {
       id: Number(rp.id), account_code: rp.accountCode, period: rp.period, status: rp.status,
       gl_balance: n(rp.glBalance), subledger_balance: n(rp.subledgerBalance),
+      opening_balance: n(rp.openingBalance), activity: n(rp.activity), closing_balance: n(rp.closingBalance),
+      risk_rating: rp.riskRating, auto_certified: !!rp.autoCertified,
       prepared_by: rp.preparedBy, prepared_at: rp.preparedAt,
       certified_by: rp.certifiedBy, certified_at: rp.certifiedAt,
     };

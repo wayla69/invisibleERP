@@ -63,6 +63,7 @@ function Recurring() {
 
   const [name, setName] = useState('');
   const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
+  const [autoReverse, setAutoReverse] = useState(false); // B2: monthly accrual auto-reversal (GL-08/GL-17)
   const [memo, setMemo] = useState('');
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
   const [showErrors, setShowErrors] = useState(false);
@@ -80,10 +81,11 @@ function Recurring() {
       method: 'POST',
       body: JSON.stringify({
         name, frequency, memo: memo || undefined,
+        auto_reverse: frequency === 'monthly' && autoReverse ? true : undefined,
         lines: lines.filter((l) => l.account_code && (Number(l.debit) || Number(l.credit))).map((l) => ({ account_code: l.account_code, debit: Number(l.debit) || undefined, credit: Number(l.credit) || undefined })),
       }),
     }),
-    onSuccess: () => { notifySuccess(t('fnx.gls.recurring_created')); setName(''); setMemo(''); setLines([emptyLine(), emptyLine()]); setShowErrors(false); refresh(); },
+    onSuccess: () => { notifySuccess(t('fnx.gls.recurring_created')); setName(''); setMemo(''); setAutoReverse(false); setLines([emptyLine(), emptyLine()]); setShowErrors(false); refresh(); },
     onError: (e: any) => notifyError(e.message),
   });
   const submit = () => { setShowErrors(true); if (nameErr || formErr || lines.some((l) => jeLineError(l))) { notifyError(t('fnx.gls.fix_before_save')); return; } create.mutate(); };
@@ -114,6 +116,12 @@ function Recurring() {
               </Select>
             </div>
             <div className="grid flex-1 gap-1.5"><Label htmlFor="rc-memo">{t('fnx.gls.memo')}</Label><Input id="rc-memo" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder={t('fnx.gls.memo_placeholder')} /></div>
+            {frequency === 'monthly' && (
+              <label className="flex items-center gap-2 pb-2 text-sm" htmlFor="rc-autorev" title={t('fnx.gls.auto_reverse_hint')}>
+                <input id="rc-autorev" type="checkbox" className="size-4" checked={autoReverse} onChange={(e) => setAutoReverse(e.target.checked)} />
+                {t('fnx.gls.auto_reverse')}
+              </label>
+            )}
           </div>
           <table className="w-full text-sm">
             <thead>
@@ -172,6 +180,7 @@ function Recurring() {
                   <strong>{r.name}</strong>
                   <span className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Badge variant="secondary">{freqLabel(r.frequency)}</Badge>
+                    {r.auto_reverse && <Badge variant="outline">{t('fnx.gls.auto_reverse_badge')}</Badge>}
                     <span className="flex items-center gap-1"><CalendarClock className="size-3.5" /> {t('fnx.gls.next_run')} {thaiDate(r.next_run_date)}</span>
                     <Badge variant={r.active ? 'success' : 'muted'}>{r.active ? t('fnx.gls.active') : t('fnx.gls.paused')}</Badge>
                     {canManage && <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate({ id: r.id, active: !r.active })}>{r.active ? t('fnx.gls.pause') : t('fnx.gls.enable')}</Button>}

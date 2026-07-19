@@ -54,6 +54,12 @@ jobs:
         # that touch journalEntries/journalLines are grandfathered and the set may only shrink: read GL
         # state via LedgerReadService (accountNet/cashPosition/entryRefNo), post via LedgerService.postEntry.
         run: node tools/ci/check-import-boundaries.mjs
+      - name: maker-checker coverage ratchet (SoD self-approval by omission)
+        # SOX-ICFR #6 — every state-mutating approve/override/authorize/certify/reverse/release route must be
+        # maker-checker-covered: its module wires assertMakerChecker/assertActionAllowed, or it is listed in
+        # tools/ci/maker-checker-baseline.json "exempt" with a reason. A new sensitive route in a non-enforcing
+        # module fails the build; add the check (common/control-profile.ts) or justify an exemption.
+        run: node tools/ci/check-maker-checker.mjs
       # Hand the compiled output to the harness shards so they don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4
@@ -105,7 +111,7 @@ jobs:
           - shard: platform-a
             run: >-
               cutover:e2e cutover:ext cutover:tenant-isolation cutover:tenant-idx
-              cutover:module-qr cutover:gaps
+              cutover:rls-coverage cutover:module-qr cutover:gaps
           - shard: platform-b
             run: >-
               cutover:worldclass cutover:migration-parity cutover:ai-eval
@@ -176,11 +182,20 @@ jobs:
             # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
             ev=""
             if [ "$script" = "compliance" ]; then ev="${GITHUB_WORKSPACE}/compliance-evidence.json"; fi
-            if EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script"; then
-              echo "::endgroup::"
-            else
-              echo "::endgroup::"
-              echo "::error::harness FAILED: ${pkg} → ${script}"
+            # `&& rc=0 || rc=$?` captures the exit code without tripping the step's `set -e` (errexit).
+            EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script" && rc=0 || rc=$?
+            # Retry ONCE on a native CRASH SIGNAL (exit >=128, e.g. 139 SIGSEGV / 134 SIGABRT) — a rare,
+            # non-deterministic PGlite / node:sqlite (--experimental-sqlite) segfault at boot, before any
+            # check runs. A real assertion failure (exit 1) is NOT retried: it fails fast, so this can never
+            # mask a logic regression, only self-heal an infrastructure flake (previously needed a manual
+            # re-run of the whole shard). The harnesses are deterministic, so a genuine failure fails twice.
+            if [ "$rc" -ge 128 ]; then
+              echo "::warning::${pkg} → ${script} crashed (exit ${rc}, signal) — retrying once (native flake)"
+              EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script" && rc=0 || rc=$?
+            fi
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::harness FAILED: ${pkg} → ${script} (exit ${rc})"
               failed="$failed ${pkg}:${script}"
             fi
           done

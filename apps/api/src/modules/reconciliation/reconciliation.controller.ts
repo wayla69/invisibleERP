@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, ParseIntPipe, HttpCode } from '@nestjs/common';
 import { z } from 'zod';
 import { ReconciliationService } from './reconciliation.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -6,7 +6,9 @@ import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 
-const OpenPeriodBody = z.object({ account_code: z.string().min(1), period: z.string().min(1) });
+const RiskBody = z.object({ risk_rating: z.enum(['low', 'medium', 'high']) });
+const AutoCertifyBody = z.object({ period: z.string().min(6).max(8) });
+const OpenPeriodBody = z.object({ account_code: z.string().min(1), period: z.string().min(1) , risk_rating: z.enum(['low', 'medium', 'high']).optional() });
 const AddItemBody = z.object({ source: z.enum(['Subledger', 'Adjustment']), amount: z.number(), ref_doc: z.string().optional(), notes: z.string().optional() });
 
 @Controller('api/recon')
@@ -25,6 +27,19 @@ export class ReconciliationController {
   @Permissions('recon_prep')
   openPeriod(@Body(new ZodValidationPipe(OpenPeriodBody)) dto: z.infer<typeof OpenPeriodBody>, @CurrentUser() user: JwtUser) {
     return this.svc.openPeriod(dto, user);
+  }
+
+  // B4 (docs/50 Wave 4) — risk-driven review depth + safe-class auto-certification (REC-01 untouched).
+  @Put('periods/:id/risk')
+  @Permissions('recon_prep')
+  setRisk(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(RiskBody)) b: z.infer<typeof RiskBody>, @CurrentUser() user: JwtUser) {
+    return this.svc.setRisk(id, b.risk_rating, user);
+  }
+
+  @Post('periods/auto-certify')
+  @Permissions('approvals', 'exec')
+  autoCertify(@Body(new ZodValidationPipe(AutoCertifyBody)) b: z.infer<typeof AutoCertifyBody>, @CurrentUser() user: JwtUser) {
+    return this.svc.autoCertify(b.period, user);
   }
 
   @Get('periods/:id/summary')

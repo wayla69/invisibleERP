@@ -168,7 +168,7 @@ export class LedgerCashflowService {
     for (const r of ap) { const o = n(r.out); if (o > 0.0001) outflow[weekIndex(r.due)] += o; }
 
     let running = opening;
-    const periods = [] as any[];
+    const periods: { week: number; label: string; inflow: number; outflow: number; net: number; projected_balance: number }[] = [];
     for (let w = 0; w <= weeks; w++) {
       const inn = round4(inflow[w]), out = round4(outflow[w]);
       running = round4(running + inn - out);

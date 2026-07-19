@@ -192,7 +192,7 @@ export class CollectionsService {
     let messageRecipient: string | null = null;
     if (DISPATCH_CHANNELS.has(channel) && this.messaging) {
       const body = dunningMessage(dto.stage, { party: cust?.code ?? `tenant ${inv.tenantId}`, invoiceNo, outstanding, daysOverdue, dueDate: inv.dueDate ?? null });
-      const res: any = await this.messaging.send({ to: recipient ?? undefined, channel: channel as any, body, campaign: `dunning:${dto.stage}` }, user);
+      const res: any = await this.messaging.send({ to: recipient ?? undefined, channel: channel as 'line' | 'sms' | 'email', body, campaign: `dunning:${dto.stage}` }, user);
       messageStatus = res?.status ?? 'failed';
       messageRecipient = res?.recipient ?? recipient ?? null;
     } else if (channel === 'phone' || channel === 'letter') {

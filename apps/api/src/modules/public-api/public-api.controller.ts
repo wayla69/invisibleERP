@@ -10,7 +10,9 @@ import { renderApiReferenceHtml } from './api-reference';
 
 const EnrollBody = z.object({ name: z.string().optional(), phone: z.string().optional(), card_no: z.string().optional(), email: z.string().optional(), birthday: z.string().optional(), marketing_opt_in: z.boolean().optional() })
   .refine((d) => d.phone != null || d.card_no != null || d.email != null || d.name != null, { message: 'at least one identifier required' });
-const EarnBody = z.object({ member_id: z.number().int().positive(), net_spend: z.number().positive(), ref_doc: z.string().optional() });
+// net_spend is bounded (pentest info-item): an unbounded money field on a public endpoint is an overflow /
+// abuse vector. 10,000,000 THB per single earn call is far above any real transaction.
+const EarnBody = z.object({ member_id: z.number().int().positive(), net_spend: z.number().positive().max(10_000_000), ref_doc: z.string().optional() });
 const RedeemBody = z.object({ member_id: z.number().int().positive(), points: z.number().int().positive(), ref_doc: z.string().optional() });
 
 // Public REST API, v1. API-key authenticated (Bearer ierp_…), scope-gated, per-key rate-limited.

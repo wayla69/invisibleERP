@@ -371,6 +371,39 @@ async function main() {
   const posted5710 = await tbDebit('5710');
   ok('Recurring: a second user approves → accrual hits the GL (+1000)', recAppr.status === 200 && near(posted5710, before5710 + 1000), `st=${recAppr.status} after=${posted5710}`);
 
+  // ── B2 auto-reversing accruals (docs/50 Wave 1; GL-08 + GL-17 semantics) ──
+  // auto_reverse is accrual-only (monthly): the sweep's first run in the NEXT business month posts a
+  // flipped Draft reversal of the prior month's entry (maker-checker GL-05, idempotent per source_ref).
+  const arBad = await inj('POST', '/api/ledger/recurring', admin, { name: 'bad-autorev', frequency: 'daily', auto_reverse: true, lines: [{ account_code: '5720', debit: 700 }, { account_code: '2100', credit: 700 }] });
+  ok('AutoRev: non-monthly template rejected (AUTO_REVERSE_MONTHLY_ONLY)', arBad.status === 400 && arBad.json?.error?.code === 'AUTO_REVERSE_MONTHLY_ONLY', `st=${arBad.status} code=${arBad.json?.error?.code}`);
+  const tbBalanceOf = async (code: string) => {
+    const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
+    const row = (tb.rows ?? []).find((r: any) => r.account_code === code);
+    return row ? Number(row.balance) : 0;
+  };
+  const beforeAr5720 = await tbDebit('5720');
+  const beforeArBal5720 = await tbBalanceOf('5720');
+  const arTpl = await inj('POST', '/api/ledger/recurring', admin, { name: 'Accrued utilities', frequency: 'monthly', auto_reverse: true, lines: [{ account_code: '5720', debit: 700 }, { account_code: '2100', credit: 700 }] });
+  ok('AutoRev: monthly accrual template created (auto_reverse=true)', arTpl.status === 201 && arTpl.json?.auto_reverse === true, JSON.stringify(arTpl.json).slice(0, 90));
+  const runA = await inj('POST', '/api/ledger/recurring/run', admin);
+  const arEntryNo = (runA.json?.entries ?? []).find((e: any) => e.recurring_id === arTpl.json.id)?.entry_no;
+  ok('AutoRev: accrual posts on the sweep, no same-month reversal', /^JE-/.test(arEntryNo ?? '') && (runA.json?.reversals ?? []).length === 0, `no=${arEntryNo} rev=${(runA.json?.reversals ?? []).length}`);
+  await inj('POST', `/api/ledger/journal/${arEntryNo}/approve`, mgr);
+  ok('AutoRev: approved accrual hits the GL (+700)', near(await tbDebit('5720'), beforeAr5720 + 700), `after=${await tbDebit('5720')}`);
+  // simulate the month rollover: stamp the template's last run into the PRIOR business month
+  const asOf = String(runA.json?.as_of ?? '');
+  const priorMonthDate = (() => { const d = new Date(`${asOf}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); })();
+  await pg.query(`UPDATE recurring_journals SET last_run_date='${priorMonthDate}' WHERE id=${Number(arTpl.json.id)}`);
+  const runB = await inj('POST', '/api/ledger/recurring/run', admin);
+  const arRev = (runB.json?.reversals ?? [])[0];
+  ok('AutoRev: first sweep of the new month posts the reversal (Draft)', (runB.json?.reversals ?? []).length === 1 && /^JE-/.test(arRev?.entry_no ?? '') && arRev?.reversed_run === priorMonthDate, JSON.stringify(runB.json?.reversals));
+  const pendAr = (await inj('GET', '/api/ledger/journal/pending', admin)).json;
+  ok('AutoRev: reversal is Draft awaiting maker-checker (GL-05) — GL unchanged', (pendAr.entries ?? []).some((e: any) => e.entry_no === arRev?.entry_no) && near(await tbDebit('5720'), beforeAr5720 + 700), `pending has=${(pendAr.entries ?? []).some((e: any) => e.entry_no === arRev?.entry_no)}`);
+  const revAppr = await inj('POST', `/api/ledger/journal/${arRev?.entry_no}/approve`, mgr);
+  ok('AutoRev: approved reversal nets the accrual back out (flipped lines; gross debit kept)', revAppr.status === 200 && near(await tbDebit('5720'), beforeAr5720 + 700) && near(await tbBalanceOf('5720'), beforeArBal5720), `st=${revAppr.status} bal=${await tbBalanceOf('5720')}`);
+  const runC = await inj('POST', '/api/ledger/recurring/run', admin);
+  ok('AutoRev: re-run posts no second reversal (idempotent source_ref)', (runC.json?.reversals ?? []).length === 0 && runC.json?.posted === 0, `rev=${(runC.json?.reversals ?? []).length} posted=${runC.json?.posted}`);
+
   const tbCredit2 = async (code: string) => {
     const tb = (await inj('GET', '/api/ledger/trial-balance', admin)).json;
     const row = (tb.rows ?? []).find((r: any) => r.account_code === code);
@@ -563,7 +596,7 @@ async function main() {
   ok('Lessor: classification boundary — term 75/100 (75%) → FINANCE (major part of economic life)', clsFin.status === 200 && clsFin.json?.classification === 'finance' && clsFin.json?.reasons?.includes('major_part_of_economic_life'), JSON.stringify(clsFin.json));
 
   // FINANCE lease: derecognise the asset + book the net investment (lease receivable) at PV, interest income over the term.
-  const lsr1610Before = await tbDebit('1610'), lsr1500Before = await tbCredit2('1500'), lsr4600Before = await tbCredit2('4600');
+  const lsr1610Before = await tbDebit('1610'), lsr1500Before = await tbCredit2('1500'), lsr4620Before = await tbCredit2('4620');
   const mkFin = await inj('POST', '/api/lessor-leases', admin, { name: 'Excavator finance lease', lessee: 'BuildCo', term_months: 12, monthly_payment: 1000, annual_rate_pct: 12, asset_cost: 11000, fair_value: 12000, transfer_ownership: true });
   ok('Lessor finance: create classifies FINANCE + net investment = PV of payments, PENDING (no GL yet)',
     mkFin.status === 201 && mkFin.json?.classification === 'finance' && mkFin.json?.net_investment > 11200 && mkFin.json?.net_investment < 11300 && mkFin.json?.status === 'pending' && near(await tbDebit('1610'), lsr1610Before),
@@ -579,8 +612,8 @@ async function main() {
   const runFin = await inj('POST', '/api/lessor-leases/run', admin);
   const fe = (runFin.json?.entries ?? []).find((e: any) => e.lease_no === finNo);
   ok('Lessor finance: periodic run recognises interest income + collects cash (interest + principal = payment)',
-    runFin.status === 200 && fe && near(fe.interest_income + fe.principal, 1000) && fe.interest_income > 0 && near(await tbCredit2('4600'), lsr4600Before + fe.interest_income),
-    `int=${fe?.interest_income} prin=${fe?.principal} 4600Δ=${(await tbCredit2('4600')) - lsr4600Before}`);
+    runFin.status === 200 && fe && near(fe.interest_income + fe.principal, 1000) && fe.interest_income > 0 && near(await tbCredit2('4620'), lsr4620Before + fe.interest_income),
+    `int=${fe?.interest_income} prin=${fe?.principal} 4620Δ=${(await tbCredit2('4620')) - lsr4620Before}`);
   const lsrList = (await inj('GET', '/api/lessor-leases', admin)).json;
   const finRow = (lsrList.leases ?? []).find((x: any) => x.lease_no === finNo);
   ok('Lessor finance: net investment (receivable) reduced by the principal after the period', finRow && finRow.receivable_balance < ni && finRow.receivable_balance > 0, `recv=${finRow?.receivable_balance} ni=${ni}`);
@@ -1508,6 +1541,41 @@ async function main() {
   ok('GL-16b: a different user can re-lock the reopened period → Locked',
     reLock.status === 200 && reLock.json?.status === 'Locked', `st=${reLock.status} status=${reLock.json?.status}`);
 
+  // ── B1 Close Manager (docs/50 Wave 3): per-tenant configurable close tasks over the GL-15 checklist ──
+  // A custom REQUIRED task (with owner/due-offset) gates the lock exactly like a standard step; a
+  // dependency gates sign-off ORDER; an override template re-titles a standard step. No templates ⇒
+  // byte-identical (every earlier GL-15/16 check above ran template-free).
+  const tplBad = await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [{ step_key: 'a_task', title: 'x', depends_on_key: 'a_task' }] });
+  ok('B1: self-dependency rejected (SELF_DEPENDENCY)', tplBad.status === 400 && tplBad.json?.error?.code === 'SELF_DEPENDENCY', `st=${tplBad.status} code=${tplBad.json?.error?.code}`);
+  const tplBad2 = await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [{ step_key: 'a_task', title: 'x', depends_on_key: 'no_such_step' }] });
+  ok('B1: unknown dependency rejected (UNKNOWN_DEPENDENCY)', tplBad2.status === 400 && tplBad2.json?.error?.code === 'UNKNOWN_DEPENDENCY', `st=${tplBad2.status} code=${tplBad2.json?.error?.code}`);
+  const tplPut = await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [
+    { step_key: 'insurance_review', title: 'ทบทวนกรมธรรม์ประกันภัยงวด', required: true, owner_role: 'FinancialController', due_day_offset: 3, depends_on_key: 'bank_rec' },
+    { step_key: 'bank_rec', title: 'Bank reconciliation complete (ธนาคารหลัก + PromptPay)', required: true },
+  ] });
+  ok('B1: templates saved (1 custom + 1 standard override)', tplPut.status === 200 && tplPut.json?.count === 2 && (tplPut.json?.standard_steps ?? []).length >= 9, `st=${tplPut.status} n=${tplPut.json?.count}`);
+  const b1Period = '2020-03';
+  const b1Start = await inj('POST', '/api/ledger/close/start', admin, { period: b1Period });
+  const b1RunId = Number(b1Start.json?.id);
+  const b1Steps = b1Start.json?.steps ?? [];
+  const b1Custom = b1Steps.find((st: any) => st.step_key === 'insurance_review');
+  ok('B1: startClose seeds standard + custom task (owner, due = period end + 3d, dependency)',
+    b1Steps.length >= 10 && !!b1Custom && b1Custom.required === true && b1Custom.owner_role === 'FinancialController' && String(b1Custom.due_date).startsWith('2020-04-03') && b1Custom.depends_on_key === 'bank_rec',
+    JSON.stringify(b1Custom));
+  ok('B1: an override template re-titles the standard step (bank_rec)', /PromptPay/.test(b1Steps.find((st: any) => st.step_key === 'bank_rec')?.title ?? ''), b1Steps.find((st: any) => st.step_key === 'bank_rec')?.title);
+  const depBlocked = await inj('POST', '/api/ledger/close/step', admin, { close_run_id: b1RunId, step_key: 'insurance_review' });
+  ok('B1: dependent task blocked before its predecessor (DEPENDENCY_NOT_DONE)', depBlocked.status === 400 && depBlocked.json?.error?.code === 'DEPENDENCY_NOT_DONE', `st=${depBlocked.status} code=${depBlocked.json?.error?.code}`);
+  for (const st of b1Steps.filter((x: any) => x.required && x.step_key !== 'insurance_review')) {
+    await inj('POST', '/api/ledger/close/step', admin, { close_run_id: b1RunId, step_key: st.step_key });
+  }
+  const b1LockEarly = await inj('POST', '/api/ledger/close/lock', mgr, { close_run_id: b1RunId });
+  ok('B1: lock blocked while the custom REQUIRED task is pending (STEPS_INCOMPLETE lists it)', b1LockEarly.status === 400 && b1LockEarly.json?.error?.code === 'STEPS_INCOMPLETE' && /insurance_review/.test(b1LockEarly.json?.error?.message ?? ''), `st=${b1LockEarly.status} msg=${b1LockEarly.json?.error?.message}`);
+  const depOk = await inj('POST', '/api/ledger/close/step', admin, { close_run_id: b1RunId, step_key: 'insurance_review' });
+  ok('B1: predecessor Done → dependent task signs off; run ReadyToLock', depOk.status === 200 && depOk.json?.status === 'ReadyToLock', `st=${depOk.status} status=${depOk.json?.status}`);
+  const b1Lock = await inj('POST', '/api/ledger/close/lock', mgr, { close_run_id: b1RunId });
+  ok('B1: maker-checker lock unchanged (a different user locks)', b1Lock.status === 200 && b1Lock.json?.status === 'Locked', `st=${b1Lock.status} status=${b1Lock.json?.status}`);
+  await inj('PUT', '/api/ledger/close/task-templates', admin, { templates: [] }); // restore template-free default
+
   // ───────────────────── C2 — Pluggable tax + e-invoicing (SG/MY/EU) ─────────────────────
   // TC-C2-01: SG GST 9% — provider registered, calc correct.
   const sgTax = (await inj('GET', '/api/tax/calc?country=SG&net=100&currency=SGD', admin)).json;
@@ -1798,6 +1866,36 @@ async function main() {
   ok('FIN-4: rendered Assets group ties to balance-sheet assets', near(rowVal(bsRender.rows, 'as'), bsWin.assets), `as=${rowVal(bsRender.rows, 'as')} bs=${bsWin.assets}`);
   ok('FIN-4: rendered Equity group ties to balance-sheet equity', near(rowVal(bsRender.rows, 'eq'), bsWin.equity), `eq=${rowVal(bsRender.rows, 'eq')} bs=${bsWin.equity}`);
 
+  // 0438 — statement-section binding: the BS/IS group by section, and the section subtotals reconcile to the
+  // type totals (current+non-current assets = assets; the summary net_income = revenue − expense).
+  const bsSecTotal = (g: string) => (bsWin.sections ?? []).filter((s: any) => s.group === g).reduce((a: number, s: any) => a + s.total, 0);
+  ok('FIN-4/0438: balance-sheet returns section groups (current + non-current asset sum ties to assets)',
+    Array.isArray(bsWin.sections) && near(bsSecTotal('current_asset') + bsSecTotal('noncurrent_asset'), bsWin.assets),
+    JSON.stringify({ sections: (bsWin.sections ?? []).map((s: any) => [s.group, s.total]) }));
+  ok('FIN-4/0438: income-statement returns a structured section summary that reconciles to net income',
+    !!isWin.summary && Array.isArray(isWin.groups) && near(isWin.summary.net_income, isWin.net_income)
+      && near(isWin.summary.revenue - isWin.summary.cogs, isWin.summary.gross_profit),
+    JSON.stringify(isWin.summary));
+
+  // (2b) P2 — built-in Thai DBD/TFRS default layouts render out of the box (no tenant definition authored)
+  // and tie to the canonical statements. DBD-PL is a multi-step P&L (gross → operating → PBT → net); DBD-BS
+  // groups by งบดุล section and folds the unclosed result into equity so total assets = total liab+equity.
+  const dbdPl = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${fsTo}&from=${fsFrom}`, admin)).json;
+  ok('P2/DBD: default งบกำไรขาดทุน renders without a tenant definition (gross profit ties)',
+    near(rowVal(dbdPl.rows, 'gross_profit'), isWin.summary.gross_profit), `gp=${rowVal(dbdPl.rows, 'gross_profit')} is=${isWin.summary.gross_profit}`);
+  ok('P2/DBD: default P&L net profit = income-statement net income',
+    near(rowVal(dbdPl.rows, 'net_profit'), isWin.net_income), `np=${rowVal(dbdPl.rows, 'net_profit')} ni=${isWin.net_income}`);
+  const dbdBs = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${fsTo}`, admin)).json;
+  ok('P2/DBD: default งบแสดงฐานะการเงิน total assets ties to the balance sheet',
+    near(rowVal(dbdBs.rows, 'total_assets'), bsWin.assets), `ta=${rowVal(dbdBs.rows, 'total_assets')} bs=${bsWin.assets}`);
+  ok('P2/DBD: default balance sheet balances (total assets = total liabilities + equity)',
+    near(rowVal(dbdBs.rows, 'total_assets'), rowVal(dbdBs.rows, 'total_liab_equity')),
+    `ta=${rowVal(dbdBs.rows, 'total_assets')} tle=${rowVal(dbdBs.rows, 'total_liab_equity')}`);
+  const dbdList = (await inj('GET', '/api/reports/fs/definitions', admin)).json;
+  ok('P2/DBD: the built-in DBD-BS / DBD-PL defaults are discoverable in the definition list',
+    (dbdList.definitions ?? []).some((d: any) => d.code === 'DBD-BS' && d.is_default) && (dbdList.definitions ?? []).some((d: any) => d.code === 'DBD-PL' && d.is_default),
+    JSON.stringify((dbdList.definitions ?? []).map((d: any) => d.code)));
+
   // (3) SOCE roll-forward — baseline, then a share issue + a dividend (both maker-checker approved), re-read.
   const socePart = (soce: any, code: string) => soce.components.find((c: any) => c.account_code === code) ?? { opening: 0, movements: 0, profit: 0, closing: 0 };
   const soce0 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;
@@ -1969,7 +2067,131 @@ async function main() {
   ok('COA-D2: a create naming a non-existent parent → 400 PARENT_NOT_FOUND (fail-closed at request time)',
     badParent.status === 400 && badParent.json?.error?.code === 'PARENT_NOT_FOUND', `${badParent.status} ${badParent.json?.error?.code}`);
 
-  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides ──');
+  // ── B5 (docs/50 Wave 5, GL-28): JE anomaly & control-exception analytics — seed one anomaly per rule,
+  //    scan (idempotent), dismiss-with-reason (audit-logged), cockpit pillar + scheduled BI sweep ──
+  const jePost = async (date: string, memo: string, lines: any[]) => {
+    const r = await inj('POST', '/api/ledger/journal', admin, { date, source: 'Manual', memo, lines });
+    await inj('POST', `/api/ledger/journal/${r.json?.entry_no}/approve`, mgr);
+    return r.json?.entry_no as string;
+  };
+  // duplicate_je: same date + same total + same account set, twice (odd amount so round_amount stays quiet)
+  const dupA = await jePost('2027-04-01', 'B5 dup A', [{ account_code: '5100', debit: 1234.56 }, { account_code: '1010', credit: 1234.56 }]);
+  const dupB = await jePost('2027-04-01', 'B5 dup B', [{ account_code: '5100', debit: 1234.56 }, { account_code: '1010', credit: 1234.56 }]);
+  // round_amount: Manual, ≥ ฿10,000, whole ฿1,000 (unique date+total so it doesn't pair as a duplicate)
+  const roundNo = await jePost('2027-04-02', 'B5 round', [{ account_code: '5100', debit: 50000 }, { account_code: '1010', credit: 50000 }]);
+  // backdated: accounting date 30 days before its real capture time (still inside the 90-day window)
+  const backNo = await jePost(daysAgo(30), 'B5 backdated', [{ account_code: '5100', debit: 777.25 }, { account_code: '1010', credit: 777.25 }]);
+  // after_hours: rewrite the audit event to 03:00 Asia/Bangkok (20:00 UTC). NB a maker-checker manual JE
+  // writes its landing evidence as APPROVE (the POST action fires only on direct land-Posted sources).
+  const nightNo = await jePost('2027-04-03', 'B5 night', [{ account_code: '5100', debit: 888.75 }, { account_code: '1010', credit: 888.75 }]);
+  const [nightRow] = await db.select().from(s.journalEntries).where(eq(s.journalEntries.entryNo, nightNo));
+  await pg.query(`UPDATE gl_audit_log SET at='2027-04-03T20:00:00Z' WHERE entry_id=${Number(nightRow.id)} AND action IN ('POST','APPROVE')`);
+  // unusual_pair: a Manual JE pairing cash (10xx) with revenue (4xxx) directly — bypasses AR
+  const pairNo = await jePost('2027-04-04', 'B5 cash↔revenue', [{ account_code: '1000', debit: 999.5 }, { account_code: '4000', credit: 999.5 }]);
+
+  const jeScan1 = await inj('POST', '/api/ledger/je-exceptions/scan', admin);
+  ok('B5: scan runs and finds every seeded rule (duplicate/round/backdated/after_hours/unusual_pair)',
+    jeScan1.status < 300 && jeScan1.json.new > 0 && ['duplicate_je', 'round_amount', 'backdated', 'after_hours', 'unusual_pair'].every((r) => (jeScan1.json.by_rule?.[r] ?? 0) >= 1),
+    JSON.stringify(jeScan1.json.by_rule));
+  const jeList1 = await inj('GET', '/api/ledger/je-exceptions?status=open', admin);
+  const jeBy = (rule: string, no: string) => (jeList1.json.exceptions ?? []).find((x: any) => x.rule === rule && x.entry_no === no);
+  ok('B5: both duplicate entries flagged HIGH, each naming its peer',
+    !!jeBy('duplicate_je', dupA) && !!jeBy('duplicate_je', dupB) && jeBy('duplicate_je', dupA).severity === 'high' && (jeBy('duplicate_je', dupA).detail?.peer_entry_nos ?? []).includes(dupB),
+    JSON.stringify(jeBy('duplicate_je', dupA)?.detail));
+  ok('B5: round-amount Manual JE flagged (medium, total 50000)', jeBy('round_amount', roundNo)?.severity === 'medium' && near(jeBy('round_amount', roundNo)?.detail?.total, 50000), JSON.stringify(jeBy('round_amount', roundNo)?.detail));
+  ok('B5: backdated JE flagged (lag ≈ 30 days > 7)', (jeBy('backdated', backNo)?.detail?.lag_days ?? 0) >= 28, JSON.stringify(jeBy('backdated', backNo)?.detail));
+  ok('B5: after-hours POST flagged (03:00 Asia/Bangkok)', jeBy('after_hours', nightNo)?.detail?.bkk_hour === 3, JSON.stringify(jeBy('after_hours', nightNo)?.detail));
+  ok('B5: cash↔revenue Manual pair flagged HIGH', jeBy('unusual_pair', pairNo)?.severity === 'high', JSON.stringify(jeBy('unusual_pair', pairNo)?.detail));
+  const jeScan2 = await inj('POST', '/api/ledger/je-exceptions/scan', admin);
+  ok('B5: re-scan is idempotent (same findings, new=0)', jeScan2.status < 300 && jeScan2.json.new === 0 && jeScan2.json.findings === jeScan1.json.findings, JSON.stringify({ n: jeScan2.json.new, f: jeScan2.json.findings }));
+
+  const cockpit = await inj('GET', '/api/finance/metrics/close/status', admin);
+  ok('B5: Close Cockpit gains the je_exceptions pillar (open>0, HIGH open ⇒ red)',
+    cockpit.status === 200 && (cockpit.json.je_exceptions?.open ?? 0) > 0 && (cockpit.json.je_exceptions?.high_open ?? 0) > 0 && cockpit.json.rag?.je_exceptions === 'red',
+    JSON.stringify({ je: cockpit.json.je_exceptions, rag: cockpit.json.rag?.je_exceptions }));
+
+  const roundExc = jeBy('round_amount', roundNo);
+  const disNoReason = await inj('POST', `/api/ledger/je-exceptions/${roundExc.id}/dismiss`, admin, {});
+  ok('B5: dismissal without a reason rejected (400)', disNoReason.status === 400, `${disNoReason.status} ${disNoReason.json?.error?.code ?? ''}`);
+  const dis1 = await inj('POST', `/api/ledger/je-exceptions/${roundExc.id}/dismiss`, admin, { reason: 'ยอดกลมตามสัญญาเช่า — ตรวจสอบแล้ว' });
+  ok('B5: dismiss-with-reason lands (status dismissed, who/when stamped)', dis1.status < 300 && dis1.json.status === 'dismissed' && dis1.json.dismissed_by === 'admin', JSON.stringify(dis1.json));
+  const audRows = await db.select().from(s.glAuditLog).where(eq(s.glAuditLog.action, 'EXCEPTION_DISMISSED'));
+  ok('B5: dismissal writes the gl_audit_log EXCEPTION_DISMISSED evidence (rule + reason)',
+    audRows.some((a: any) => a.detail?.rule === 'round_amount' && a.detail?.exception_id === roundExc.id && /ตรวจสอบแล้ว/.test(a.detail?.reason ?? '')),
+    JSON.stringify(audRows.slice(-1).map((a: any) => a.detail)));
+  const dis2 = await inj('POST', `/api/ledger/je-exceptions/${roundExc.id}/dismiss`, admin, { reason: 'ซ้ำ' });
+  ok('B5: re-dismiss rejected (ALREADY_DISMISSED)', dis2.status === 400 && dis2.json?.error?.code === 'ALREADY_DISMISSED', `${dis2.status} ${dis2.json?.error?.code}`);
+  const jeScan3 = await inj('POST', '/api/ledger/je-exceptions/scan', admin);
+  ok('B5: a dismissed exception stays dismissed on re-scan (new=0)', jeScan3.json.new === 0, JSON.stringify({ n: jeScan3.json.new }));
+
+  const jeSub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'JE exception sweep', report_type: 'je_exceptions', frequency: 'daily' });
+  ok('B5: je_exceptions subscription accepted (registered report type)', jeSub.status < 300 && !!jeSub.json.id, JSON.stringify(jeSub.json).slice(0, 80));
+  const jeJob = await inj('POST', `/api/bi/subscriptions/${jeSub.json.id}/run`, admin);
+  ok('B5: scheduled sweep runs (summary carries the finding counts)', jeJob.status === 200 && /JE exceptions/.test(JSON.stringify(jeJob.json)), JSON.stringify(jeJob.json).slice(0, 140));
+
+  // ── F1 (Close Manager v2, docs/50 follow-up): evidence-driven auto-complete + overdue tasks in GOV-01 ──
+  //    Isolated period 2028-02 so every evidence source is controlled by THIS block.
+  const f1Start = await inj('POST', '/api/ledger/close/start', admin, { period: '2028-02' });
+  const f1RunId = f1Start.json.id;
+  ok('F1: close run started for the isolated period', f1Start.status < 300 && !!f1RunId, `id=${f1RunId}`);
+  const f1Auto0 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('F1: with NO evidence nothing auto-completes (all four candidates evidence_not_met)',
+    f1Auto0.status === 200 && (f1Auto0.json.completed ?? []).length === 0
+      && ['recurring', 'fx_reval', 'deferred_tax', 'depreciation'].every((k) => (f1Auto0.json.skipped ?? []).some((x: any) => x.step_key === k && x.reason === 'evidence_not_met')),
+    JSON.stringify(f1Auto0.json.skipped));
+  // Manufacture the evidence: nothing left due for the sweeps; a Posted reval + deferred-tax run; a Posted DEP entry.
+  await pg.query(`UPDATE recurring_journals SET next_run_date='2028-03-05' WHERE active='true' AND next_run_date <= '2028-02-29'`);
+  await pg.query(`UPDATE prepaid_schedules SET next_run_date='2028-03-05' WHERE status='active' AND next_run_date <= '2028-02-29'`);
+  await db.insert(s.fxRevalRuns).values({ tenantId: hq, period: '2028-02', asOfDate: '2028-02-29', status: 'Posted', runBy: 'admin', postedBy: 'mgr' });
+  await db.insert(s.deferredTaxRuns).values({ tenantId: hq, period: '2028-02', asOfDate: '2028-02-29', status: 'Posted' } as any);
+  await db.insert(s.journalEntries).values({ entryNo: 'JE-F1-DEP-1', entryDate: '2028-02-05', period: '2028-02', source: 'DEP', status: 'Posted', memo: 'F1 dep evidence', tenantId: hq, createdBy: 'system' });
+  const f1Auto1 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('F1: with evidence all four system-verifiable steps flip Done',
+    f1Auto1.status === 200 && ['recurring', 'fx_reval', 'deferred_tax', 'depreciation'].every((k) => (f1Auto1.json.completed ?? []).some((x: any) => x.step_key === k)),
+    JSON.stringify((f1Auto1.json.completed ?? []).map((x: any) => x.step_key)));
+  const f1Steps = f1Auto1.json.run?.steps ?? [];
+  const f1Fx = f1Steps.find((x: any) => x.step_key === 'fx_reval');
+  ok('F1: auto-completed steps carry the (auto) attribution + pinned evidence', f1Fx?.completed_by === 'admin (auto)' && f1Fx?.detail?.auto === true && f1Fx?.detail?.evidence?.posted_reval_run != null, JSON.stringify({ by: f1Fx?.completed_by, d: f1Fx?.detail }));
+  ok('F1: human sign-offs are NEVER auto-completed (trial_balance_review stays Pending; run not ReadyToLock)',
+    f1Steps.find((x: any) => x.step_key === 'trial_balance_review')?.status === 'Pending' && f1Auto1.json.run?.status !== 'ReadyToLock',
+    JSON.stringify({ tb: f1Steps.find((x: any) => x.step_key === 'trial_balance_review')?.status, run: f1Auto1.json.run?.status }));
+  const f1Auto2 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('F1: re-run is idempotent (0 completed, already_done)', (f1Auto2.json.completed ?? []).length === 0 && (f1Auto2.json.skipped ?? []).filter((x: any) => x.reason === 'already_done').length >= 4, JSON.stringify(f1Auto2.json.skipped?.slice(0, 5)));
+  // ── G3 (Close Manager v2b): bank_rec / subledger_tieout tick from CERTIFIED REC-01 recons ──
+  //    Absence never ticks: with zero recon workspaces for 2028-02 both steps read evidence_not_met.
+  ok('G3: with no recon workspaces bank_rec/subledger_tieout stay evidence_not_met (absence is not evidence)',
+    ['bank_rec', 'subledger_tieout'].every((k) => (f1Auto2.json.skipped ?? []).some((x: any) => x.step_key === k && x.reason === 'evidence_not_met')),
+    JSON.stringify((f1Auto2.json.skipped ?? []).filter((x: any) => x.reason === 'evidence_not_met')));
+  // A cash recon exists but is only Reconciled (not certified) → still blocked; tie-out has 1100 Certified
+  // but 2000 still Open → the one uncertified workspace blocks the whole set.
+  await db.insert(s.reconPeriods).values({ tenantId: hq, accountCode: '1000', period: '2028-02', status: 'Reconciled', preparedBy: 'admin' } as any);
+  await db.insert(s.reconPeriods).values({ tenantId: hq, accountCode: '1100', period: '2028-02', status: 'Certified', preparedBy: 'admin', certifiedBy: 'mgr' } as any);
+  await db.insert(s.reconPeriods).values({ tenantId: hq, accountCode: '2000', period: '2028-02', status: 'Open', preparedBy: 'admin' } as any);
+  const g3Auto1 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('G3: an un-certified workspace in the set blocks the step (both still evidence_not_met)',
+    (g3Auto1.json.completed ?? []).length === 0
+      && ['bank_rec', 'subledger_tieout'].every((k) => (g3Auto1.json.skipped ?? []).some((x: any) => x.step_key === k && x.reason === 'evidence_not_met')),
+    JSON.stringify((g3Auto1.json.skipped ?? []).filter((x: any) => x.step_key === 'bank_rec' || x.step_key === 'subledger_tieout')));
+  // Certify the blockers (the REC-01 certification is the human act; the tick only reflects it).
+  await pg.query(`UPDATE recon_periods SET status='Certified', certified_by='mgr' WHERE period='2028-02' AND account_code IN ('1000','2000')`);
+  const g3Auto2 = await inj('POST', '/api/ledger/close/auto-complete', admin, { close_run_id: f1RunId });
+  ok('G3: once every opened workspace on the set is Certified both steps flip Done',
+    ['bank_rec', 'subledger_tieout'].every((k) => (g3Auto2.json.completed ?? []).some((x: any) => x.step_key === k)),
+    JSON.stringify((g3Auto2.json.completed ?? []).map((x: any) => x.step_key)));
+  const g3Bank = (g3Auto2.json.run?.steps ?? []).find((x: any) => x.step_key === 'bank_rec');
+  ok('G3: the tick pins the human certifications it rests on ((auto) attribution + certifier per account)',
+    g3Bank?.completed_by === 'admin (auto)' && g3Bank?.detail?.evidence?.certifications?.some((c: any) => c.account === '1000' && c.certified_by === 'mgr'),
+    JSON.stringify({ by: g3Bank?.completed_by, ev: g3Bank?.detail?.evidence }));
+  // Overdue close task → GOV-01 pending-approvals worklist (GL-15 detective).
+  await pg.query(`UPDATE close_run_steps SET due_date='2026-01-15' WHERE close_run_id=${Number(f1RunId)} AND step_key='trial_balance_review'`);
+  const f1Gov = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  const f1Over = (f1Gov.items ?? []).find((i: any) => i.type === 'close_task_overdue' && i.ref === 'CLOSE-2028-02:trial_balance_review');
+  ok('F1: an overdue, not-Done close task surfaces in the GOV-01 center with its overdue age', !!f1Over && f1Over.age_days > 0 && f1Over.control === 'GL-15', JSON.stringify(f1Over));
+  await inj('POST', '/api/ledger/close/step', admin, { close_run_id: f1RunId, step_key: 'trial_balance_review' });
+  const f1Gov2 = (await inj('GET', '/api/finance/approvals/pending', admin)).json;
+  ok('F1: signing the task off clears it from the overdue worklist', !(f1Gov2.items ?? []).some((i: any) => i.type === 'close_task_overdue' && i.ref === 'CLOSE-2028-02:trial_balance_review'), '');
+
+  console.log('\n── ERP basics — Cash Flows + Collections/Dunning + ESS-AP + EAM + credit/depth/forecast + recurring + statements/petty-cash/prepaid/lease/revaluation + inventory sub-ledger + FIFO/FEFO + industry CoA + GL-12 posting-rules engine + GL-13 multi-dim postings + GL-14 sub-ledger tie-out + GL-15/GL-16 hard period close + C1 multi-currency (JPY 0dp) + C2 pluggable tax (SG/MY/EU) + e-invoicing (MyInvois/Peppol) + REV-21 AR cash application + FIN-4 statutory FS pack (report builder/SOCE/notes/DBD) + docs/43 PR-2 posting-override re-route (GL-24) + PR-3 category-grain asset accounts & dispose/prepaid overrides + B5 JE anomaly analytics (GL-28) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;
   console.log(failed ? `\n❌ ${failed}/${checks.length} basics checks failed` : `\n✅ All ${checks.length} basics checks passed`);

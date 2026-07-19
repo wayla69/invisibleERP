@@ -28,6 +28,9 @@ import { CATALOG as CAT_SODREG } from './i18n-catalog/sodreg';
 import { CATALOG as CAT_MDCHANGE } from './i18n-catalog/mdchange';
 import { CATALOG as CAT_REPUTATION } from './i18n-catalog/reputation';
 import { CATALOG as CAT_MMM } from './i18n-catalog/mmm';
+import { CATALOG as CAT_PORTAL } from './i18n-catalog/portal';
+import { CATALOG as CAT_AUTH } from './i18n-catalog/auth';
+import { CATALOG as CAT_PUBLIC } from './i18n-catalog/public';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -74,6 +77,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.favorites': { th: 'รายการโปรด', en: 'Favourites', ms: 'Kegemaran', vi: 'Yêu thích', id: 'Favorit' },
   'nav.recents': { th: 'ล่าสุด', en: 'Recent', ms: 'Terkini', vi: 'Gần đây', id: 'Terkini' },
   'nav.show_advanced': { th: 'แสดงเมนูขั้นสูง', en: 'Show advanced', ms: 'Tunjuk lanjutan', vi: 'Hiện nâng cao', id: 'Tampilkan lanjutan' },
+  'nav.show_sme_hidden': { th: 'แสดงเมนูที่ซ่อนไว้', en: 'Show hidden menus', ms: 'Tunjuk menu tersembunyi', vi: 'Hiện menu ẩn', id: 'Tampilkan menu tersembunyi' },
   'nav.items_count': { th: 'รายการ', en: 'items', ms: 'item', vi: 'mục', id: 'item' },
   'nav.fav_add': { th: 'เพิ่ม {label} ในรายการโปรด', en: 'Add {label} to favourites', ms: 'Tambah {label} ke kegemaran', vi: 'Thêm {label} vào yêu thích', id: 'Tambah {label} ke favorit' },
   'nav.fav_remove': { th: 'เอา {label} ออกจากรายการโปรด', en: 'Remove {label} from favourites', ms: 'Buang {label} dari kegemaran', vi: 'Xoá {label} khỏi yêu thích', id: 'Hapus {label} dari favorit' },
@@ -697,6 +701,14 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'acct.revenue': { th: 'รายได้', en: 'Revenue' },
   'acct.expense': { th: 'ค่าใช้จ่าย', en: 'Expense' },
   'acct.net_income': { th: 'กำไรสุทธิ', en: 'Net income' },
+  // 0438 — statement-section breakdown (งบดุล / งบกำไรขาดทุน จัดหมวดตามการผูกบัญชี)
+  'acct.pl_breakdown': { th: 'งบกำไรขาดทุนแยกตามหมวด', en: 'Income statement by section' },
+  'acct.bs_breakdown': { th: 'งบดุลแยกตามหมวด', en: 'Balance sheet by section' },
+  'acct.gross_profit': { th: 'กำไรขั้นต้น', en: 'Gross profit' },
+  'acct.operating_profit': { th: 'กำไรจากการดำเนินงาน', en: 'Operating profit' },
+  'acct.profit_before_tax': { th: 'กำไรก่อนภาษี', en: 'Profit before tax' },
+  'acct.income_tax': { th: 'ภาษีเงินได้', en: 'Income tax' },
+  'acct.section_total': { th: 'รวม', en: 'Total' },
 
   // Opening balances
   'acct.ob_paste_none': { th: 'ไม่พบรายการที่อ่านได้ — วางคอลัมน์ รหัสบัญชี / เดบิต / เครดิต', en: 'No readable rows found — paste columns Account code / Debit / Credit' },
@@ -1810,6 +1822,17 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'pos.col_bills': { th: 'บิล', en: 'Bills' },
   'pos.col_session_total': { th: 'ยอดรวม', en: 'Total' },
   'pos.recent_bills': { th: 'บิลล่าสุด', en: 'Recent bills' },
+  'pos.fti_already': { th: 'บิลนี้มีใบกำกับเต็มรูปแล้ว ({doc_no})', en: 'This sale already has a full tax invoice ({doc_no})' },
+  'pos.fti_address': { th: 'ที่อยู่ผู้ซื้อ', en: 'Buyer address' },
+  'pos.fti_branch': { th: 'รหัสสาขา (00000 = สำนักงานใหญ่)', en: 'Branch code (00000 = HQ)' },
+  'pos.fti_btn_tip': { th: 'ออกใบกำกับภาษีเต็มรูป (ม.86/4)', en: 'Issue a full tax invoice (Sec. 86/4)' },
+  'pos.fti_desc': { th: 'สำหรับลูกค้านิติบุคคล/ผู้ประกอบการที่ขอใบกำกับเต็มรูป — ระบบจะแปลงใบกำกับอย่างย่อของบิลนี้ (ยอดเดิม ภาษีเดิม งวดภาษีเดิม) และออกได้บิลละ 1 ใบเท่านั้น', en: 'For a business buyer requesting a full tax invoice — the sale\'s abbreviated slip is converted (same amounts, VAT and tax period; exactly one full invoice per sale)' },
+  'pos.fti_failed': { th: 'ออกใบกำกับเต็มรูปไม่สำเร็จ', en: 'Failed to issue the full tax invoice' },
+  'pos.fti_issued': { th: 'ออกใบกำกับเต็มรูปแล้ว ({doc_no})', en: 'Full tax invoice issued ({doc_no})' },
+  'pos.fti_name': { th: 'ชื่อผู้ซื้อ (นิติบุคคล/บุคคล)', en: 'Buyer name' },
+  'pos.fti_submit': { th: 'ออกใบกำกับเต็มรูป', en: 'Issue full tax invoice' },
+  'pos.fti_taxid': { th: 'เลขประจำตัวผู้เสียภาษี (13 หลัก)', en: 'Tax ID (13 digits)' },
+  'pos.fti_title': { th: 'ขอใบกำกับเต็มรูป — {sale_no}', en: 'Full tax invoice — {sale_no}' },
   'pos.no_tills_title': { th: 'ยังไม่มีกะที่เปิดอยู่', en: 'No open tills' },
   'pos.no_tills_desc': { th: 'เปิดกะขายที่หน้า POS เพื่อเริ่มรับออเดอร์', en: 'Open a till on the POS screen to start taking orders' },
   'pos.no_bills_title': { th: 'ยังไม่มีบิลวันนี้', en: 'No bills today' },
@@ -1855,5 +1878,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM, CAT_PORTAL, CAT_AUTH, CAT_PUBLIC,
 );

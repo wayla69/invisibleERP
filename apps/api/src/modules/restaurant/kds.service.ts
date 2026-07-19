@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { eq, inArray, asc } from 'drizzle-orm';
+import { eq, inArray, asc, desc, and, gte, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { dineInOrderItems, kitchenStations, dineInOrders, diningTables } from '../../database/schema';
 import { n } from '../../database/queries';
@@ -16,6 +16,10 @@ export type SlaState = 'ok' | 'warn' | 'late';
 export const kdsSla = (elapsedMin: number, prepMin: number): SlaState =>
   elapsedMin < prepMin ? 'ok' : elapsedMin < prepMin * 1.5 ? 'warn' : 'late';
 
+// Hard "stuck" alarm (POS): a line still cooking past this many minutes since it fired must raise a loud
+// warning on the board regardless of its per-dish prep SLA — a ticket that has hung this long needs a human.
+export const kdsStuckMinutes = (): number => Number(process.env.KDS_STUCK_MINUTES ?? 10);
+
 type KdsStatus = typeof dineInOrderItems.$inferSelect['kdsStatus'];
 type ReadyItem = { item_id: number; name: string; qty: number; station_name: string | null; course: number; ready_at: Date | null; ready_min: number };
 const ACTIVE_KDS = ['queued', 'preparing', 'ready'] as KdsStatus[];
@@ -28,14 +32,52 @@ export class KdsService {
     @Optional() private readonly guests?: GuestProfileService, // consent-gated allergy flags on tickets
   ) {}
 
+  // Prep-time auto-learn (F5): the rolling average COMPLETION time (fired → served) per menu SKU over the
+  // trailing window, with ≥3 samples so a single outlier can't skew it. Used as the prep estimate that
+  // drives the SLA colours + ETA, so the board gets more accurate the more the kitchen cooks.
+  private async learnedPrepMap(days = 14, minSamples = 3): Promise<Map<string, number>> {
+    const since = new Date(Date.now() - days * 86_400_000);
+    const rows = await this.db.select({ sku: dineInOrderItems.itemId, firedAt: dineInOrderItems.firedAt, servedAt: dineInOrderItems.servedAt })
+      .from(dineInOrderItems)
+      .where(and(eq(dineInOrderItems.kdsStatus, 'served'), isNotNull(dineInOrderItems.itemId), isNotNull(dineInOrderItems.firedAt), isNotNull(dineInOrderItems.servedAt), gte(dineInOrderItems.servedAt, since)));
+    const acc = new Map<string, { sum: number; n: number }>();
+    for (const r of rows) {
+      if (!r.sku || !r.firedAt || !r.servedAt) continue;
+      const mins = (new Date(r.servedAt).getTime() - new Date(r.firedAt).getTime()) / 60000;
+      if (mins <= 0 || mins > 240) continue; // ignore zero/degenerate and absurd (>4h) samples
+      const e = acc.get(r.sku) ?? { sum: 0, n: 0 }; e.sum += mins; e.n += 1; acc.set(r.sku, e);
+    }
+    const out = new Map<string, number>();
+    for (const [sku, e] of acc) if (e.n >= minSamples) out.set(sku, Math.max(1, Math.round(e.sum / e.n)));
+    return out;
+  }
+
+  // Manager view: learned average completion time per dish (+ sample count) — the "prep-time learning" report.
+  async prepTimes(_user: JwtUser) {
+    const rows = await this.db.select({ sku: dineInOrderItems.itemId, name: dineInOrderItems.name, firedAt: dineInOrderItems.firedAt, servedAt: dineInOrderItems.servedAt })
+      .from(dineInOrderItems)
+      .where(and(eq(dineInOrderItems.kdsStatus, 'served'), isNotNull(dineInOrderItems.itemId), isNotNull(dineInOrderItems.firedAt), isNotNull(dineInOrderItems.servedAt), gte(dineInOrderItems.servedAt, new Date(Date.now() - 14 * 86_400_000))));
+    const acc = new Map<string, { name: string; sum: number; n: number }>();
+    for (const r of rows) {
+      if (!r.sku || !r.firedAt || !r.servedAt) continue;
+      const mins = (new Date(r.servedAt).getTime() - new Date(r.firedAt).getTime()) / 60000;
+      if (mins <= 0 || mins > 240) continue;
+      const e = acc.get(r.sku) ?? { name: r.name, sum: 0, n: 0 }; e.sum += mins; e.n += 1; acc.set(r.sku, e);
+    }
+    const dishes = [...acc.entries()].map(([sku, e]) => ({ sku, name: e.name, avg_prep_min: Math.round((e.sum / e.n) * 10) / 10, samples: e.n }))
+      .sort((a, b) => b.avg_prep_min - a.avg_prep_min);
+    return { dishes, generated_at: new Date().toISOString() };
+  }
+
   // active kitchen items grouped by station, oldest-fired first (cook next), excl served/voided
   async feed(_user: JwtUser) {
     const db = this.db;
+    const learned = await this.learnedPrepMap(); // F5: prefer the learned completion time as the prep estimate
     const rows = await db.select({
-      itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
+      itemId: dineInOrderItems.id, sku: dineInOrderItems.itemId, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
       modifiers: dineInOrderItems.modifiers, notes: dineInOrderItems.notes, kdsStatus: dineInOrderItems.kdsStatus,
       firedAt: dineInOrderItems.firedAt, estPrep: dineInOrderItems.estPrepMinutes,
-      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course,
+      isBuffet: dineInOrderItems.isBuffet, createdBy: dineInOrderItems.createdBy, course: dineInOrderItems.course, kdsPriority: dineInOrderItems.kdsPriority,
       stationId: kitchenStations.id, stationCode: kitchenStations.code, stationName: kitchenStations.name, stationSort: kitchenStations.sort, stationPrep: kitchenStations.defaultPrepMinutes,
       orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo, tableId: dineInOrders.tableId,
     }).from(dineInOrderItems)
@@ -43,7 +85,9 @@ export class KdsService {
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
       .where(inArray(dineInOrderItems.kdsStatus, ['queued', 'preparing', 'ready']))
-      .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.course), asc(dineInOrderItems.firedAt));
+      // fire-time order first (oldest lot cooks next); WITHIN one fire lot the higher food-priority plates
+      // out first (same-lot prioritisation); course breaks any remaining tie.
+      .orderBy(asc(kitchenStations.sort), asc(dineInOrderItems.firedAt), desc(dineInOrderItems.kdsPriority), asc(dineInOrderItems.course));
 
     // Consent-gated dining cautions of the guest seated at each ticket's table — the kitchen sees
     // "แพ้กุ้ง" on the ticket itself. Computed at read time (never stored on the item), best-effort.
@@ -54,24 +98,51 @@ export class KdsService {
     } catch { /* the board must render regardless */ }
 
     const now = Date.now();
+    const stuckMin = kdsStuckMinutes();
+    let stuckCount = 0;
+    let waitSum = 0;
     const stations = new Map<number, any>();
     for (const r of rows) {
       const sid = Number(r.stationId);
       if (!stations.has(sid)) stations.set(sid, { station_id: sid, station_code: r.stationCode, station_name: r.stationName, items: [] });
       const fired = r.firedAt ? new Date(r.firedAt).getTime() : now;
-      const prep = r.estPrep ?? r.stationPrep ?? 10;
+      const prep = (r.sku && learned.get(r.sku)) || r.estPrep || r.stationPrep || 10; // F5: learned → snapshot → station default
       const elapsedMin = Math.floor((now - fired) / 60000);
+      waitSum += elapsedMin;
+      const stuck = elapsedMin >= stuckMin; // hard aging alarm: hung this long since firing → needs a human
+      if (stuck) stuckCount += 1;
       stations.get(sid).items.push({
-        item_id: Number(r.itemId), order_no: r.orderNo, table_label: r.tableNo ?? null, name: r.name, qty: n(r.qty),
+        item_id: Number(r.itemId), sku: r.sku ?? null, order_no: r.orderNo, table_label: r.tableNo ?? null, table_id: r.tableId != null ? Number(r.tableId) : null,
+        station_code: r.stationCode, station_name: r.stationName, name: r.name, qty: n(r.qty),
         modifiers: r.modifiers ?? [], notes: r.notes, kds_status: r.kdsStatus, fired_at: r.firedAt,
-        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1,
+        is_buffet: r.isBuffet, from_diner: r.createdBy === 'diner:qr', course: r.course ?? 1, priority: Number(r.kdsPriority) || 0,
         elapsed_min: elapsedMin, prep_min: prep, remaining_min: Math.max(0, prep - elapsedMin),
         sla: kdsSla(elapsedMin, prep), // aging colour (POS-4)
+        stuck, // over the hard stuck threshold (default 10 min)
         guest_allergies: (r.tableId != null && guestFlags.get(Number(r.tableId))?.allergies) || [],
         guest_dietary: (r.tableId != null ? guestFlags.get(Number(r.tableId))?.dietary : null) ?? null,
       });
     }
-    return { stations: [...stations.values()], generated_at: new Date().toISOString() };
+    // Live throughput summary for the board header: current WIP + average wait of active lines, and the
+    // business-day (Asia/Bangkok) average completion time (fired → served) with the served count.
+    const dayStartApprox = new Date(now - 30 * 3600 * 1000); // bound the served scan; biz-day filter below is exact
+    const servedRows = await db.select({ firedAt: dineInOrderItems.firedAt, servedAt: dineInOrderItems.servedAt })
+      .from(dineInOrderItems)
+      .where(and(eq(dineInOrderItems.kdsStatus, 'served'), isNotNull(dineInOrderItems.servedAt), isNotNull(dineInOrderItems.firedAt), gte(dineInOrderItems.servedAt, dayStartApprox)));
+    const today = bizYmdDash();
+    let prepSum = 0, servedToday = 0;
+    for (const s of servedRows) {
+      if (!s.servedAt || !s.firedAt || bizYmdDash(new Date(s.servedAt)) !== today) continue;
+      prepSum += Math.max(0, (new Date(s.servedAt).getTime() - new Date(s.firedAt).getTime()) / 60000);
+      servedToday += 1;
+    }
+    const summary = {
+      active_count: rows.length,
+      avg_wait_min: rows.length ? Math.round(waitSum / rows.length) : 0,
+      served_today: servedToday,
+      avg_prep_today_min: servedToday ? Math.round(prepSum / servedToday) : 0,
+    };
+    return { stations: [...stations.values()], stuck_count: stuckCount, stuck_minutes: stuckMin, summary, generated_at: new Date().toISOString() };
   }
 
   // Expo / order-ready pass (POS-4): aggregates the active kitchen lines BY ORDER so the expeditor sees
@@ -81,7 +152,7 @@ export class KdsService {
     const db = this.db;
     const rows = await db.select({
       itemId: dineInOrderItems.id, name: dineInOrderItems.name, qty: dineInOrderItems.qty,
-      kdsStatus: dineInOrderItems.kdsStatus, readyAt: dineInOrderItems.readyAt, course: dineInOrderItems.course,
+      kdsStatus: dineInOrderItems.kdsStatus, readyAt: dineInOrderItems.readyAt, course: dineInOrderItems.course, kdsPriority: dineInOrderItems.kdsPriority,
       stationName: kitchenStations.name,
       orderId: dineInOrders.id, orderNo: dineInOrders.orderNo, firedAt: dineInOrders.firedAt,
       tableNo: diningTables.tableNo,
@@ -90,7 +161,8 @@ export class KdsService {
       .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
       .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
       .where(inArray(dineInOrderItems.kdsStatus, ACTIVE_KDS))
-      .orderBy(asc(dineInOrders.firedAt), asc(dineInOrderItems.course));
+      // oldest ticket first; within it the higher food-priority line lists first for the runner.
+      .orderBy(asc(dineInOrders.firedAt), desc(dineInOrderItems.kdsPriority), asc(dineInOrderItems.course));
 
     const now = Date.now();
     const orders = new Map<number, any>();
@@ -175,6 +247,33 @@ export class KdsService {
       return b;
     });
     return { stations, generated_at: new Date().toISOString() };
+  }
+
+  // Course-pacing helper (F8): for orders that fire course-by-course, suggest firing the NEXT held course
+  // once the current fired course is plated (nothing still cooking) — so the kitchen paces multi-course
+  // tables without the floor watching each ticket. Returns one nudge per order that's ready to advance.
+  async pacing(_user: JwtUser) {
+    const db = this.db;
+    const rows = await db.select({
+      orderId: dineInOrders.id, orderNo: dineInOrders.orderNo, tableNo: diningTables.tableNo,
+      course: dineInOrderItems.course, kdsStatus: dineInOrderItems.kdsStatus,
+    }).from(dineInOrderItems)
+      .innerJoin(dineInOrders, eq(dineInOrderItems.orderId, dineInOrders.id))
+      .leftJoin(diningTables, eq(dineInOrders.tableId, diningTables.id))
+      .where(inArray(dineInOrderItems.kdsStatus, ['new', 'queued', 'preparing', 'ready', 'served']));
+    const orders = new Map<number, { orderNo: string; tableNo: string | null; firedMax: number; heldMin: number | null; cooking: boolean }>();
+    for (const r of rows) {
+      const o = orders.get(Number(r.orderId)) ?? { orderNo: r.orderNo, tableNo: r.tableNo ?? null, firedMax: 0, heldMin: null, cooking: false };
+      const course = r.course ?? 1;
+      if (r.kdsStatus === 'new') o.heldMin = o.heldMin == null ? course : Math.min(o.heldMin, course);
+      else { o.firedMax = Math.max(o.firedMax, course); if (r.kdsStatus === 'queued' || r.kdsStatus === 'preparing') o.cooking = true; }
+      orders.set(Number(r.orderId), o);
+    }
+    const nudges = [...orders.values()]
+      // a held course exists beyond what's fired, and the current fired course is fully plated (not cooking)
+      .filter((o) => o.heldMin != null && o.heldMin > o.firedMax && o.firedMax > 0 && !o.cooking)
+      .map((o) => ({ order_no: o.orderNo, table_label: o.tableNo, next_course: o.heldMin as number, current_course: o.firedMax }));
+    return { nudges, generated_at: new Date().toISOString() };
   }
 
   async listStations(_user: JwtUser) {

@@ -109,6 +109,54 @@ ever run via the bare CLI. **CI parity (rev 1.27):** the `pg-smoke` harness prov
 role — asserting the full run completes and that `users` visibility flips 0 → 1 with the GUC, so the
 superuser-masked class can no longer ship green.
 
+### 1ter. App-layer belt-and-braces — `STRICT_TENANT_PROXY` (SOX-ICFR audit #2, staged)
+
+The per-request scoping state (`SET LOCAL ROLE app_user` + the `app.*` GUCs, all `set_config(..., true)`) is
+**transaction-local**, so it reverts at `COMMIT`/`ROLLBACK` exactly when postgres-js returns the connection
+to the pool — the classic "context leaks onto a reused pooled connection" bug is **structurally impossible**
+on the request path, and nothing performs (or relies on) an explicit pool-return scrub. The residual gap is
+an app-layer one: `tenantAwareProxy` (`database.module.ts`) routes a query to the request tenant tx when the
+`tenantALS` store is present, and otherwise **falls through to the base pool with no GUCs** — so a query
+issued with *no* tenant context (a service method invoked outside a request / `runInTenantContext`) runs on
+the base connection, safe today only because that role lacks `BYPASSRLS` (the §1bis H-3 backstop).
+
+`STRICT_TENANT_PROXY` has **three modes** (`proxyMode()` in `database.module.ts`):
+- **`1` (enforce)** — a guarded op (`select/insert/update/delete/execute/query/$count`) with no `tenantALS`
+  tx **and** no `runGlobalDb()` context throws `503 TENANT_CONTEXT_MISSING` instead of running on the base
+  pool — a loud failure, not a silent cross-tenant read.
+- **`warn` (audit-only, rollout)** — the same detection, but it logs the call site + a short stack to
+  stderr (`[tenant-proxy] base-pool <op>() with NO tenant context: …`) and then **falls through** to the
+  base pool. Used to enumerate every un-wrapped base-pool read across a full harness run without breaking it.
+- anything else (**off**) — legacy base-pool fallback, no detection.
+
+`transaction` is **deliberately not guarded** (it is how `runInTenantContext` / `RealtimeScope` / the guards
+*open* the scoping tx, before any ALS store exists). Genuinely-global base-pool reads — the cross-tenant
+"which tenant owns this phone / providerRef" lookups (member-auth OTP verify/LINE-login, the PSP + Stripe
+webhooks, the email-to-case / NPS public routes, the journeys/campaigns cron sweeps) and boot seeds (ledger
+COA, billing plan catalogue) — declare themselves with `runGlobalDb('reason', async () => …)`, the
+grep-able escape hatch (sets `globalDbALS`, an `AsyncLocalStorage` that propagates through the whole async
+chain, so wrapping an **entry point** covers every nested service call it makes — each of which still
+filters `WHERE tenant_id = …` explicitly, never relying on RLS).
+
+**Two coverage seams (both landed, so the flag is enforce-ready):**
+1. **`@NoTx` HTTP routes are wrapped at one choke point.** `TenantTxInterceptor` runs `@NoTx` handlers
+   inside `globalDbALS` — `@NoTx` already means "no per-request tenant tx, I scope myself", exactly the
+   `runGlobalDb` contract — so every current and future `@NoTx` route (webhooks, public tokenized routes,
+   cron sweeps, member-auth) is permitted base-pool access without a per-service wrap.
+2. **Direct service entry points are wrapped in the service.** The control harnesses call service methods
+   **directly** (not over HTTP), bypassing the interceptor, so the cross-tenant/base-pool entry points wrap
+   their own bodies too: `member-auth` (verify-otp/login-line/revoke), `service-cases.handleInbound`,
+   `nps.submit`/`getSurvey`, `campaigns.sendCampaign`/`runDueAll`, `journeys.runDueAll`, `billing.seedPlans`/
+   `applyStripeEvent`, `ledger.seedChartOfAccounts`, and the pre-tx guard reads (`module-config.loadConfig`,
+   `plan.guard`). Nested `runGlobalDb` is a harmless no-op, and inside a real request tx the proxy uses the
+   tx regardless — so the wrap never forces base-pool when a tenant context exists.
+
+**Now enforce-ready (default still OFF; flip in staging first).** The `warn`-mode sweep over the full
+harness suite surfaced every base-pool site; all are now wrapped, and the **entire harness suite passes with
+`STRICT_TENANT_PROXY=1`**. Rollout: set `warn` in staging to confirm the log is silent, then `1` in staging,
+then `1` in prod. ToE: `apps/api/test/tenant-proxy.test.ts` (OFF ⇒ base fallback; ON ⇒ throws outside
+context; a `tenantALS` tx or `runGlobalDb` is allowed; `transaction` is never guarded).
+
 ## 2. `TENANCY_MODE`
 
 | Mode | Admin sees | Use when |
@@ -420,6 +468,8 @@ sees its own.
 ## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.30 | 2026-07-17 | Platform / Security | **§1ter — `STRICT_TENANT_PROXY` is now ENFORCE-READY (SOX-ICFR audit #2 follow-up; default still OFF).** Added the `warn` mode (audit-only: log the base-pool call site + short stack, then fall through) and used a full-suite `warn` sweep to enumerate every un-wrapped base-pool read. Closed them with two seams: (1) `TenantTxInterceptor` runs every `@NoTx` HTTP handler inside `globalDbALS` (one choke point — `@NoTx` ≡ the `runGlobalDb` contract), covering all current/future public webhooks + cron sweeps; (2) the direct-call entry points wrap their own bodies (member-auth, `service-cases.handleInbound`, `nps.submit`/`getSurvey`, `campaigns.sendCampaign`/`runDueAll`, `journeys.runDueAll`, `billing.seedPlans`/`applyStripeEvent`, `ledger.seedChartOfAccounts`, and the pre-tx guard reads `module-config.loadConfig` + `plan.guard`) so the harnesses (which call services directly, bypassing the interceptor) pass too. The **entire cutover + parity harness suite passes with `STRICT_TENANT_PROXY=1`**. Rollout unchanged: `warn` → `1` in staging → `1` in prod. No new RCM control. |
+| 1.29 | 2026-07-17 | Platform / Security | **§1ter — `STRICT_TENANT_PROXY` app-layer fail-closed proxy (SOX-ICFR audit #2, staged, default OFF).** Belt-and-braces above the §1bis H-3 base-role backstop: when ON, `tenantAwareProxy` throws `503 TENANT_CONTEXT_MISSING` for a direct `select/insert/update/delete/execute/query` issued with no `tenantALS` tx and no `runGlobalDb()` context, instead of silently falling through to the base pool. `transaction` is never guarded (it opens the scoping tx). New `runGlobalDb('reason', …)` escape hatch for genuinely-global base-pool reads. Staged: default-on is gated on wrapping every `@NoTx`/base-pool read (the flag surfaces them, e.g. member-auth verify-otp). No new RCM control. ToE `apps/api/test/tenant-proxy.test.ts` (5). |
 | 1.28 | 2026-07-13 | Platform / SRE | **§2 factory-reset: wipe TENANTLESS FK-child tables too (OSHINEI reset outage).** The OSHINEI factory-reset was permanently `FACTORY_RESET_BLOCKED`: `cust_pos_items` (2,417 rows) and `survey_answers` (74) have **no `tenant_id` column**, so the wipe loop never deleted them and they FK-blocked their parents (`cust_pos_sales`, `survey_responses`) forever. `tenant-wipe.ts` now walks the FK graph at runtime (`pg_constraint`, transitively) and deletes tenantless-child rows whose ancestor chain terminates in a wiped tenant row — ownership derived via FK, never guessed; other tenants'/shared rows untouched. Covers factory-reset AND purge (shared engine). Also documents the ordering gotcha: legacy cross-tenant vendor references (Amber POs → OSHINEI vendors) mean the referencing tenant must be reset FIRST. ToE: `cutover/onboarding.ts` seeds a tenantless `cust_pos_items` child and asserts the reset clears it. |
 | 1.27 | 2026-07-13 | Platform / SRE | **§1bis: pg-smoke now applies migrations as prod does — closing the CI gap that shipped 0387 twice — and `migrate.ts` applies one transaction per migration.** CI's `pg-smoke` used to apply migrations as the postgres service container's superuser (bypasses RLS unconditionally), which is why the 0387 class stayed green in CI while failing every prod deploy. Now the harness provisions a throwaway §1bis-shaped role (`ierp_smoke`: `LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE` + grants + `GRANT app_user` + `GRANT CREATE ON DATABASE` + table/sequence/view/enum-TYPE ownership transfer) and applies ALL migrations via `pnpm --filter @ierp/api db:migrate` as that role, asserting: the role posture, the full run completes, every journaled migration is recorded applied, and the incident mechanism itself (a seeded `users` row is invisible to a bare role session — FORCE RLS binds the owner — and visible under the GUC; needed because an empty fresh-CI DB lets a 0387-style backfill pass trivially). Doing this surfaced a second bug: drizzle-orm's built-in `migrate()` runs ALL pending migrations in ONE transaction, overflowing the lock table on a fresh DB (53200 "out of shared memory" at 372 migrations) — `migrate.ts` therefore applies one transaction per migration (drizzle-kit semantics), keeping the same journal bookkeeping. Verified on real PostgreSQL: fresh DB 372/372 applied under `ierp_smoke` + re-run 0 applied, 10/10 pg-smoke checks both times. |
 | 1.26 | 2026-07-13 | Platform / SRE | **§1bis: migrations run under RLS — GUC-setting migration runner (0387 deploy outage, root cause 3rd attempt).** Two deploys of 0387 failed with "196 rows unattributed": the backfill's `FROM users` join saw ZERO rows because prod migrations run as `ierp_app` (NOBYPASSRLS), `users` is FORCE RLS, and `drizzle-kit migrate` sets no `app.bypass_rls` GUC. Every local test masked it (superuser connections bypass RLS unconditionally). Fix: (a) 0387 sets the transaction-local GUC inline as its first statement; (b) **permanently**, `db:migrate` is now `src/database/migrate.ts` — sets the session GUC on a dedicated `max:1` connection, then runs drizzle-orm's programmatic `migrate()` (drizzle-kit-compatible bookkeeping; `db:migrate:kit` = bare-CLI fallback). Rule: test migration behaviour under `SET ROLE app_user`, never the superuser. |

@@ -34,6 +34,10 @@ export const menuItems = pgTable('menu_items', {
   taxType: menuTaxTypeEnum('tax_type').notNull().default('standard'),
   trackStock: boolean('track_stock').notNull().default(false),
   isAvailable: boolean('is_available').notNull().default(true), // 86 toggle
+  // "เมนูแนะนำ" — surfaced first on the diner QR menu (0434).
+  isRecommended: boolean('is_recommended').notNull().default(false),
+  // KDS food-prioritisation (0434): higher plates out first within one fire lot. Snapshot onto the kitchen line.
+  kdsPriority: integer('kds_priority').notNull().default(0),
   // day-parting: time-of-day + day-of-week availability (Asia/Bangkok). null = always available.
   availDays: text('avail_days'),                               // 7-char mask, index 0=Sunday
   availStartMin: integer('avail_start_min'),                   // minutes from midnight (inclusive)

@@ -4,9 +4,10 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import {
   projectBoqLines, projectCommitments, projects,
   budgets, budgetControlSettings, budgetCommitments,
-  journalEntries, journalLines, items, itemCategories,
+  items, itemCategories,
   purchaseRequests, prItems, purchaseOrders, poItems,
 } from '../../database/schema';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -36,7 +37,13 @@ export interface ReserveDto {
 // depend on it without a module cycle.
 @Injectable()
 export class CommitmentsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL actuals read rides the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   // The project's over-budget tolerance % (FU1). Defaults to 0 (strict) when the project is missing.
   private async tolerancePct(runner: any, projectId: number): Promise<number> {
@@ -113,6 +120,39 @@ export class CommitmentsService {
       .where(and(eq(projectCommitments.sourceDocType, sourceDocType), eq(projectCommitments.sourceDocNo, sourceDocNo), eq(projectCommitments.status, 'open')))
       .returning({ id: projectCommitments.id });
     return rows.length;
+  }
+
+  // A5 (docs/50 Wave 5) — resolve a project code to its id with the combined id+tenant (BOLA) check; the
+  // waste API accepts project_code so UI callers never handle raw numeric ids.
+  async projectIdByCode(code: string, tenantId: number | null): Promise<number> {
+    const [p] = await this.db.select({ id: projects.id, tenantId: projects.tenantId }).from(projects).where(eq(projects.projectCode, code)).limit(1);
+    if (!p || (tenantId != null && p.tenantId != null && Number(p.tenantId) !== Number(tenantId))) {
+      throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${code} not found`, messageTh: 'ไม่พบโครงการ' });
+    }
+    return Number(p.id);
+  }
+
+  // A5 (docs/50 Wave 5) — the net PHYSICAL draw value sitting in project WIP for a project (optionally one
+  // BoQ line): Σ consumed RES issues + consumed MRET returns (returns are negative rows, so they net down).
+  // Project-tagged waste relieves WIP against this picture — the waste service guards that a scrap can never
+  // exceed what was actually drawn. Validates the project (id + tenant, BOLA) and, when given, that the BoQ
+  // line belongs to that project. Deliberately does NOT write a commitment row: the RES issue already
+  // consumed the budget, so a WASTE row would double-count against the line.
+  async wipDrawn(projectId: number, boqLineId: number | null | undefined, tenantId: number | null): Promise<{ net_issued: number }> {
+    const [p] = await this.db.select({ id: projects.id, tenantId: projects.tenantId }).from(projects).where(eq(projects.id, Number(projectId))).limit(1);
+    if (!p || (tenantId != null && p.tenantId != null && Number(p.tenantId) !== Number(tenantId))) {
+      throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: `Project ${projectId} not found`, messageTh: 'ไม่พบโครงการ' });
+    }
+    if (boqLineId != null) {
+      const [line] = await this.db.select({ pid: projectBoqLines.projectId }).from(projectBoqLines).where(eq(projectBoqLines.id, Number(boqLineId))).limit(1);
+      if (!line || Number(line.pid) !== Number(projectId)) {
+        throw new BadRequestException({ code: 'BOQ_LINE_MISMATCH', message: `BoQ line ${boqLineId} does not belong to project ${projectId}`, messageTh: 'รายการ BoQ ไม่อยู่ในโครงการนี้' });
+      }
+    }
+    const conds = [eq(projectCommitments.projectId, Number(projectId)), eq(projectCommitments.status, 'consumed'), inArray(projectCommitments.sourceDocType, ['RES', 'MRET'])];
+    if (boqLineId != null) conds.push(eq(projectCommitments.boqLineId, Number(boqLineId)));
+    const [row] = await this.db.select({ v: sql<string>`coalesce(sum(${projectCommitments.amount}),0)` }).from(projectCommitments).where(and(...conds));
+    return { net_issued: r2(n(row?.v)) };
   }
 
   // Per-BoQ-line committed total (open+consumed) for a set of lines — feeds the budget/committed/remaining read
@@ -197,12 +237,8 @@ export class CommitmentsService {
     // Actuals: Posted journal lines, entry_date within [year start, end of the period month].
     const y = Number(period.slice(0, 4)), m = Number(period.slice(5, 7));
     const nextMonth = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    const actConds = [eq(journalEntries.status, 'Posted'), eq(journalLines.accountCode, accountCode),
-      gte(journalEntries.entryDate, `${fiscalYear}-01-01`), lt(journalEntries.entryDate, nextMonth)];
-    if (costCenter) actConds.push(eq(journalLines.costCenterCode, costCenter));
-    const [act] = await this.db.select({ d: sql<string>`coalesce(sum(${journalLines.debit}),0)`, c: sql<string>`coalesce(sum(${journalLines.credit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...actConds));
-    const actual = r2(n(act?.d) - n(act?.c)); // expense natural balance
+    const g = await this.ledgerRead.accountGross([accountCode], { from: `${fiscalYear}-01-01`, toExcl: nextMonth, costCenter: costCenter || undefined });
+    const actual = r2(g.net); // expense natural balance
 
     const commitConds = [eq(budgetCommitments.fiscalYear, fiscalYear), eq(budgetCommitments.accountCode, accountCode),
       eq(budgetCommitments.status, 'open'), lte(budgetCommitments.period, period),

@@ -52,6 +52,7 @@ async function main() {
     { username: 'procT1', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },
     { username: 'procT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },
     { username: 'apprv', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: hq }, // AP-PAY checker (≠ admin requester)
+    { username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: hq }, // PE-5: creditors-only (the match beneficiary) — must NOT set the tolerance
     { username: 'capT1', passwordHash: await pw.hash('pw'), role: 'StockCounter', tenantId: t1 }, // pr_raise-only (no procurement/creditors) — Quick Capture lane (docs/34)
   ]).onConflictDoNothing();
   // The Procurement role default is now SoD-clean (procurement/pr_raise only). These fixtures need the
@@ -145,6 +146,11 @@ async function main() {
   const m4b = await runMatch(ap4, poNo, [{ item_id: 'X', qty: 100, unit_price: 10.15 }]);
   ok('Tolerance: 10.15 @ price_pct 2% → matched; @ 0% → price_variance', m4.json.match_status === 'matched' && m4.json.payable === true && m4b.json.match_status === 'price_variance', JSON.stringify({ at2: m4.json.match_status, at0: m4b.json.match_status }));
   await inj('PUT', '/api/procurement/match/tolerance', admin, { price_pct: 2 }); // restore
+  // PE-5 — the AP beneficiary (creditors) that runs the match + releases payment must NOT set the tolerance
+  // that governs whether every invoice auto-passes; only an approver duty (exec/approvals) may.
+  const apclerk = await login('apclerk', 'pw');
+  const tolByClerk = await inj('PUT', '/api/procurement/match/tolerance', apclerk, { price_pct: 99 });
+  ok('PE-5: creditors (AP) cannot set the match tolerance (403); approver-only', tolByClerk.status === 403, `${tolByClerk.status} ${tolByClerk.json.error?.code}`);
 
   // ── F. override gate (EXP-01 maker-checker: overrider ≠ matcher, binds Admin) ──
   // the match was RUN by admin → admin cannot also override it.
@@ -564,6 +570,135 @@ async function main() {
   ok('Quick Capture SoD: capturer cannot post the bill (403) nor read the full AP worklist (403)',
     capPost.status === 403 && capFull.status === 403,
     JSON.stringify({ post: capPost.status, full: capFull.status }));
+
+  // (f) Vision LINE ITEMS (0432) — scripted LLM client (the ai-eval seam): an image upload extracts
+  // normalized lines that are STORED + returned on the intake, and posting still runs the UNCHANGED
+  // header-level 3-way match (lines are reviewer detail, never match input). Ordered LAST + restored in
+  // a finally: a leaked fake key would flip every keyless `source none` assertion above on a re-order.
+  {
+    const { setLlmClientForTests } = require('../../../apps/api/dist/common/llm-client');
+    const poL = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+    const poLNo = poL.json.po_no as string;
+    await inj('PATCH', `/api/procurement/pos/${poLNo}/approve`, admin, { approve: true });
+    await inj('POST', '/api/procurement/grs', admin, { po_no: poLNo, items: [{ item_id: 'X', received_qty: 10 }] });
+    process.env.ANTHROPIC_API_KEY = 'fake-key-harness';
+    try {
+      setLlmClientForTests({
+        async create() {
+          return { content: [{ type: 'text', text: '```json\n' + JSON.stringify({
+            vendor_name: 'V1 Supplies Co Ltd', vendor_tax_id: null, invoice_no: 'IV-9300',
+            invoice_date: '2569-07-01', amount: '1,000.00', currency: 'thb', po_no: poLNo,
+            lines: [
+              { description: 'Widget X (box)', qty: 6, unit_price: 100, amount: 600 },
+              { description: 'Widget X (loose)', qty: '4', unit_price: '100.00', amount: 400 },
+            ],
+          }) + '\n```' }] };
+        },
+        stream() { throw new Error('not used'); },
+      });
+      const upF = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'inv-9300.png', data_url: png1x1 });
+      ok('Vision upload: normalized lines stored on the intake (ai source, BE date → CE, qty strings → numbers)',
+        upF.json.extract_source === 'ai' && upF.json.invoice_date === '2026-07-01' && Array.isArray(upF.json.lines) && upF.json.lines.length === 2
+          && upF.json.lines[1].qty === 4 && upF.json.lines[1].unit_price === 100 && upF.json.currency === 'THB',
+        JSON.stringify({ src: upF.json.extract_source, d: upF.json.invoice_date, lines: upF.json.lines?.length, q: upF.json.lines?.[1]?.qty }));
+      const postF = await inj('POST', `/api/procurement/ap-intake/${upF.json.intake_no}/post`, admin, {});
+      ok('Vision lines do NOT perturb the match: posting runs the unchanged header-level 3-way match → matched/payable',
+        postF.json.status === 'Posted' && postF.json.match_status === 'matched' && truthy(postF.json.payable) && postF.json.lines?.length === 2,
+        JSON.stringify({ st: postF.json.status, m: postF.json.match_status, pay: postF.json.payable }));
+    } finally {
+      setLlmClientForTests(null);
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  }
+
+  // (g) Vendor tax-id BLIND INDEX (0433): the mapper looks the 13-digit tax id up via tax_id_bidx first
+  // (equality on the HMAC blind index), self-heals the column from the decrypt-and-scan fallback, and
+  // re-verifies every index hit against the decrypted value so a STALE index can only miss, never mis-map.
+  {
+    const { blindIndex } = require('../../../apps/api/dist/database/encrypted-column');
+    const TAXID = '0123456789012';
+    const [vtx] = await db.insert(s.vendors).values({ name: 'VTX Trading Co', isSupplier: true, approvalStatus: 'approved', blocklisted: false, taxId: TAXID }).returning({ id: s.vendors.id });
+    const poT = await inj('POST', '/api/procurement/pos', admin, { vendor_id: Number(vtx.id), items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+    await inj('PATCH', `/api/procurement/pos/${poT.json.po_no}/approve`, admin, { approve: true });
+
+    // First map: no bidx yet → decrypted-scan path resolves the vendor AND self-heals the index.
+    const in1 = await inj('POST', '/api/procurement/ap-intake', admin, { text: `VTX Trading Co\nTax ID ${TAXID}\nGrand Total 1,000.00` });
+    const [healed] = await db.select({ bidx: s.vendors.taxIdBidx }).from(s.vendors).where(eq(s.vendors.id, vtx.id));
+    ok('Tax-id map: scan fallback resolves the vendor + SELF-HEALS tax_id_bidx (= blindIndex(digits))',
+      in1.json.map_method === 'vendor_tax_id' && in1.json.po_no === poT.json.po_no && healed.bidx === blindIndex(TAXID),
+      JSON.stringify({ method: in1.json.map_method, po: in1.json.po_no, healed: healed.bidx === blindIndex(TAXID) }));
+
+    // Stale-index safety: plant the SAME bidx on a decoy vendor whose real tax id differs — the index
+    // hit fails decrypted re-verification, so the mapper still resolves the true vendor.
+    const [decoy] = await db.insert(s.vendors).values({ name: 'Decoy Ltd', isSupplier: true, approvalStatus: 'approved', blocklisted: false, taxId: '9999999999999', taxIdBidx: blindIndex(TAXID) }).returning({ id: s.vendors.id });
+    const in2 = await inj('POST', '/api/procurement/ap-intake', admin, { text: `VTX Trading Co\nTax ID ${TAXID}\nGrand Total 1,000.00` });
+    ok('Tax-id map: a stale/planted blind index can only MISS, never mis-map (decrypted re-verification)',
+      in2.json.map_method === 'vendor_tax_id' && in2.json.po_no === poT.json.po_no && in2.json.vendor_name === 'VTX Trading Co',
+      JSON.stringify({ method: in2.json.map_method, vendor: in2.json.vendor_name, decoy: Number(decoy.id) }));
+  }
+
+  // (h) Multi-currency intake bill (C1 parity): the extracted currency books onto the AP bill with the
+  // latest APPROVED fx rate at the invoice date, and the EXP-06 vendor statement reads it — base-THB
+  // statements convert at the booked rate; ?currency=USD reports the document's own units.
+  {
+    await db.insert(s.fxRates).values({ currency: 'USD', rateDate: '2026-06-01', rate: '35', status: 'Approved' });
+    // Amount far from VTX's open PO total so the mapper leaves it NeedsReview → posts as a non-PO bill.
+    const inU = await inj('POST', '/api/procurement/ap-intake', admin, { text: 'VTX Trading Co\nTax ID 0123456789012\nInvoice# IV-USD-77\nDate 2026-07-10\nGrand Total USD 2,500.00' });
+    ok('USD intake: rules path detects the currency', inU.json.currency === 'USD' && inU.json.invoice_no === 'IV-USD-77', JSON.stringify({ cur: inU.json.currency, inv: inU.json.invoice_no }));
+    const postU = await inj('POST', `/api/procurement/ap-intake/${inU.json.intake_no}/post`, admin, {});
+    const [apRow] = await db.select({ currency: s.apTransactions.currency, fxRate: s.apTransactions.fxRate, amount: s.apTransactions.amount }).from(s.apTransactions).where(eq(s.apTransactions.txnNo, postU.json.txn_no));
+    ok('USD intake books a USD bill at the approved rate (currency=USD, fx=35, amount in doc units)',
+      postU.json.status === 'Posted' && apRow?.currency === 'USD' && Math.abs(Number(apRow.fxRate) - 35) < 1e-6 && Math.abs(Number(apRow.amount) - 2500) < 0.01,
+      JSON.stringify({ cur: apRow?.currency, fx: apRow?.fxRate, amt: apRow?.amount }));
+    const stB = await inj('GET', '/api/finance/ap/statement?vendor=' + encodeURIComponent('VTX Trading Co') + '&from=2026-01-01&to=2026-12-31', admin);
+    const stU = await inj('GET', '/api/finance/ap/statement?vendor=' + encodeURIComponent('VTX Trading Co') + '&from=2026-01-01&to=2026-12-31&currency=USD', admin);
+    ok('EXP-06 statement: base THB converts at the booked rate (2,500×35=87,500); ?currency=USD shows doc units',
+      Math.abs(Number(stB.json.total_charges) - 87500) < 0.01 && Math.abs(Number(stU.json.total_charges) - 2500) < 0.01,
+      JSON.stringify({ thb: stB.json.total_charges, usd: stU.json.total_charges }));
+  }
+
+  // (i) LINE-level escalation (EXP-10 upgrade): when every vision line maps unambiguously onto the PO's
+  // lines (item_id-as-token / normalized description), the intake match runs PER-LINE — a price variance
+  // inside the header amount tolerance now blocks payment. Unmappable lines fall back to header-level.
+  {
+    const { setLlmClientForTests } = require('../../../apps/api/dist/common/llm-client');
+    const mkPo = async () => {
+      const p = await inj('POST', '/api/procurement/pos', admin, { vendor_id: V1, items: [{ item_id: 'X', order_qty: 10, unit_price: 100 }] });
+      await inj('PATCH', `/api/procurement/pos/${p.json.po_no}/approve`, admin, { approve: true });
+      await inj('POST', '/api/procurement/grs', admin, { po_no: p.json.po_no, items: [{ item_id: 'X', received_qty: 10 }] });
+      return p.json.po_no as string;
+    };
+    const scriptVision = (fields: any) => setLlmClientForTests({
+      async create() { return { content: [{ type: 'text', text: JSON.stringify(fields) }] }; },
+      stream() { throw new Error('not used'); },
+    });
+    process.env.ANTHROPIC_API_KEY = 'fake-key-harness';
+    try {
+      // Case 1: mapped lines engage the per-line verdict. Header would PASS (1,008 vs received value
+      // 1,000 = 0.8% ≤ 2% amount tolerance) — the 12% unit-price variance only blocks at line level.
+      const poH = await mkPo();
+      scriptVision({ vendor_name: 'ผู้ขาย V1', invoice_no: 'IV-9500', invoice_date: '2026-07-02', amount: 1008, currency: 'THB', po_no: poH,
+        lines: [{ description: 'Widget X', qty: 9, unit_price: 112, amount: 1008 }] });
+      const upH = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'iv-9500.png', data_url: png1x1 });
+      const postH = await inj('POST', `/api/procurement/ap-intake/${upH.json.intake_no}/post`, admin, {});
+      ok('Line-level escalation: a 12% unit-price variance blocks even though the header amount is in tolerance',
+        postH.json.status === 'Posted' && postH.json.match_status === 'price_variance' && postH.json.payable === false,
+        JSON.stringify({ m: postH.json.match_status, pay: postH.json.payable }));
+
+      // Case 2: an unmappable line (no item identity) falls the whole set back to header-level → matched.
+      const poF = await mkPo();
+      scriptVision({ vendor_name: 'ผู้ขาย V1', invoice_no: 'IV-9600', invoice_date: '2026-07-02', amount: 1000, currency: 'THB', po_no: poF,
+        lines: [{ description: 'ค่าบริการจัดส่งพิเศษ', qty: 1, unit_price: 1000, amount: 1000 }] });
+      const upF2 = await inj('POST', '/api/procurement/ap-intake/upload', admin, { file_name: 'iv-9600.png', data_url: png1x1 });
+      const postF2 = await inj('POST', `/api/procurement/ap-intake/${upF2.json.intake_no}/post`, admin, {});
+      ok('Unmappable vision lines fall back to the header-level match (matched/payable — never a degraded verdict)',
+        postF2.json.status === 'Posted' && postF2.json.match_status === 'matched' && truthy(postF2.json.payable),
+        JSON.stringify({ m: postF2.json.match_status, pay: postF2.json.payable }));
+    } finally {
+      setLlmClientForTests(null);
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  }
 
   console.log('\n── Phase 16 — Source-to-Pay: 3-way match + RFQ + supplier screening ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

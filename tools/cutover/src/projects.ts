@@ -307,6 +307,135 @@ async function main() {
   const availRel = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
   ok('Released reservation restores availability → available 70', near(availRel.json.available, 70), JSON.stringify(availRel.json));
 
+  // ── 9f-bis. A2 stale-hold sweep (docs/50 Wave 1): aging holds surface on the action center, then the
+  //    sweep releases them; fresh holds untouched; re-run idempotent ──
+  const resOld = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 15 });
+  const resNew = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 5 });
+  await pg.query(`UPDATE stock_reservations SET created_at = now() - interval '45 days' WHERE id = ${Number(resOld.json.reservation_id)}`);
+  const acRes = await inj('GET', '/api/projects/action-center', admin);
+  ok('A2: aging held reservation surfaces on the action center (reservation_stale)',
+    (acRes.json.items ?? []).some((i: any) => i.kind === 'reservation_stale' && Number(i.meta?.reservation_id) === Number(resOld.json.reservation_id)),
+    JSON.stringify((acRes.json.items ?? []).filter((i: any) => i.kind === 'reservation_stale').slice(0, 2)));
+  const availPreSweep = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A2: both holds reduce availability before the sweep (70−20=50)', near(availPreSweep.json.available, 50), JSON.stringify(availPreSweep.json));
+  const sweep1 = await inj('POST', '/api/reservations/expire-stale?max_age_days=30', admin);
+  ok('A2: sweep releases ONLY the stale hold (released=1, id matches)',
+    sweep1.status < 300 && sweep1.json.released === 1 && Number(sweep1.json.reservations?.[0]?.id) === Number(resOld.json.reservation_id),
+    JSON.stringify(sweep1.json).slice(0, 120));
+  const availPostSweep = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A2: released stale hold restores availability (fresh hold still held → 65)', near(availPostSweep.json.available, 65), JSON.stringify(availPostSweep.json));
+  const sweep2 = await inj('POST', '/api/reservations/expire-stale?max_age_days=30', admin);
+  ok('A2: re-run is a no-op (released=0)', sweep2.json.released === 0 && sweep2.json.scanned === 0, JSON.stringify(sweep2.json));
+  const acResAfter = await inj('GET', '/api/projects/action-center', admin);
+  ok('A2: released hold leaves the action center', !(acResAfter.json.items ?? []).some((i: any) => i.kind === 'reservation_stale' && Number(i.meta?.reservation_id) === Number(resOld.json.reservation_id)), '');
+  await inj('POST', `/api/reservations/${resNew.json.reservation_id}/release`, admin); // restore availability for later sections
+
+  // ── 9f-ter. A1 material return-to-stock (docs/50 Wave 2, INV-19): the governed inverse of issue —
+  //    qty ≤ issued, reason mandatory, original issue cost, maker-checker at/above the threshold ──
+  const boqBeforeRet = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const committedBefore = Number((boqBeforeRet.json.lines ?? []).find((l: any) => l.id === matLineId)?.committed ?? 0);
+  const tbRet0 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const wipRet0 = Number(bal(tbRet0, '1260')?.balance ?? 0), invRet0 = Number(bal(tbRet0, '1200')?.balance ?? 0);
+  const noReason = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 5 });
+  ok('A1: return without a reason rejected (REASON_REQUIRED / 400)', noReason.status === 400, `${noReason.status} ${noReason.json.error?.code}`);
+  const resHeld = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 5 });
+  const retHeld = await inj('POST', `/api/reservations/${resHeld.json.reservation_id}/return`, admin, { qty: 5, reason: 'ผิดสถานะ' });
+  ok('A1: return on a HELD (not issued) reservation rejected (RESERVATION_NOT_CONSUMED)', retHeld.status === 400 && retHeld.json.error?.code === 'RESERVATION_NOT_CONSUMED', `${retHeld.status} ${retHeld.json.error?.code}`);
+  await inj('POST', `/api/reservations/${resHeld.json.reservation_id}/release`, admin);
+  // Sub-threshold return (10 × 50 = 500 < 1000) posts IMMEDIATELY at the original issue cost.
+  const ret1 = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 10, reason: 'เหลือใช้จากหน้างาน' });
+  ok('A1: sub-threshold return posts immediately (MRET-, unit 50, value 500)', ret1.status < 300 && ret1.json.status === 'Posted' && /^MRET-/.test(ret1.json.return_no ?? '') && near(ret1.json.unit_cost, 50) && near(ret1.json.value, 500) && /^INV-PRJR/.test(ret1.json.move_no ?? ''), JSON.stringify(ret1.json).slice(0, 140));
+  const availRet1 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A1: returned stock is back on hand and available (70 → 80)', near(availRet1.json.on_hand, 80) && near(availRet1.json.available, 80), JSON.stringify(availRet1.json));
+  const tbRet1 = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('A1: GL reversal — Dr 1200 +500 / Cr 1260 −500, balanced',
+    tbRet1.json.totals?.balanced === true && near(Number(bal(tbRet1, '1200')?.balance ?? 0) - invRet0, 500) && near(wipRet0 - Number(bal(tbRet1, '1260')?.balance ?? 0), 500),
+    JSON.stringify({ dInv: Number(bal(tbRet1, '1200')?.balance ?? 0) - invRet0, dWip: wipRet0 - Number(bal(tbRet1, '1260')?.balance ?? 0) }));
+  const boqAfterRet1 = await inj('GET', '/api/projects/PRJ-A/boq', admin);
+  const committedAfter1 = Number((boqAfterRet1.json.lines ?? []).find((l: any) => l.id === matLineId)?.committed ?? 0);
+  ok('A1: BoQ-line committed un-drawn by the returned value (−500)', near(committedBefore - committedAfter1, 500), `before=${committedBefore} after=${committedAfter1}`);
+  // Material return (20 × 50 = 1000 ≥ threshold): parks PendingApproval — no stock/GL until a DIFFERENT user approves.
+  const ret2 = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 20, reason: 'ปิดงาน คืนทั้งหมด' });
+  ok('A1: material return parks PendingApproval (≥ threshold 1000)', ret2.status < 300 && ret2.json.status === 'PendingApproval' && near(ret2.json.value, 1000), JSON.stringify(ret2.json).slice(0, 120));
+  const availRet2 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A1: pending return moves NO stock (still 80)', near(availRet2.json.on_hand, 80), JSON.stringify(availRet2.json));
+  const selfAppr = await inj('POST', `/api/reservations/returns/${ret2.json.return_no}/approve`, admin);
+  ok('A1: requester cannot approve own return (403 SOD_VIOLATION)', selfAppr.status === 403 && selfAppr.json.error?.code === 'SOD_VIOLATION', `${selfAppr.status} ${selfAppr.json.error?.code}`);
+  const mgrAppr = await inj('POST', `/api/reservations/returns/${ret2.json.return_no}/approve`, mgr);
+  ok('A1: a different user approves → posted (stock 100, WIP relieved 1000 more)', mgrAppr.status < 300 && mgrAppr.json.status === 'Posted' && mgrAppr.json.approved_by === 'mgr', JSON.stringify(mgrAppr.json).slice(0, 120));
+  const availRet3 = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A1: approved return restores the stock (on hand 100)', near(availRet3.json.on_hand, 100), JSON.stringify(availRet3.json));
+  const reAppr = await inj('POST', `/api/reservations/returns/${ret2.json.return_no}/approve`, mgr);
+  ok('A1: re-approval rejected (NO_PENDING_RETURN)', reAppr.status === 400 && reAppr.json.error?.code === 'NO_PENDING_RETURN', `${reAppr.status} ${reAppr.json.error?.code}`);
+  const over = await inj('POST', `/api/reservations/${res1.json.reservation_id}/return`, admin, { qty: 1, reason: 'เกิน' });
+  ok('A1: over-return rejected — 30 of 30 already returned (OVER_RETURN)', over.status === 400 && over.json.error?.code === 'OVER_RETURN', `${over.status} ${over.json.error?.code}`);
+  const retList = await inj('GET', '/api/reservations/returns', admin);
+  ok('A1: returns register lists both returns, none pending', retList.status === 200 && (retList.json.returns ?? []).filter((r: any) => [ret1.json.return_no, ret2.json.return_no].includes(r.return_no)).length === 2 && retList.json.pending === 0, `n=${retList.json.count} pending=${retList.json.pending}`);
+  const tbRet2 = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('A1: trial balance balanced after both returns (WIP net −1500 vs pre-return)', tbRet2.json.totals?.balanced === true && near(wipRet0 - Number(bal(tbRet2, '1260')?.balance ?? 0), 1500), JSON.stringify({ dWip: wipRet0 - Number(bal(tbRet2, '1260')?.balance ?? 0) }));
+
+  // ── 9f-quater. A3 material control tower (docs/50 Wave 3): WBS rollup + planned-vs-actual draw curve —
+  //    read models over the commitment ledger (RES issues net of MRET returns); no new writes ──
+  const byWbs = await inj('GET', '/api/projects/PRJ-A/boq/by-wbs', admin);
+  ok('A3: by-WBS rollup returns nodes with budget/committed/issued/returned/remaining', byWbs.status === 200 && (byWbs.json.nodes ?? []).length >= 1 && byWbs.json.nodes.every((x: any) => ['budget', 'committed', 'issued', 'returned', 'remaining'].every((k) => typeof x[k] === 'number')), JSON.stringify(byWbs.json.nodes?.slice(0, 2)));
+  ok('A3: rollup issued reflects the physical RES draws and returned the MRET reversals (both 1500 after A1)', near(byWbs.json.totals?.issued, 1500 + 500) || near(byWbs.json.totals?.issued, 1500), JSON.stringify(byWbs.json.totals));
+  ok('A3: node totals reconcile to the BoQ read model (committed_total)', near(byWbs.json.totals?.committed, (await inj('GET', '/api/projects/PRJ-A/boq', admin)).json.committed_total), JSON.stringify(byWbs.json.totals));
+  const draw = await inj('GET', '/api/projects/PRJ-A/material-draw', admin);
+  ok('A3: draw curve returns monthly points with cumulative actual vs linear plan', draw.status === 200 && (draw.json.points ?? []).length >= 1 && draw.json.points.every((pt: any) => typeof pt.actual_cum === 'number' && typeof pt.planned_cum === 'number'), JSON.stringify(draw.json.points?.slice(0, 2)));
+  const lastPt = (draw.json.points ?? [])[draw.json.points.length - 1];
+  ok('A3: final cumulative actual = Σ RES − Σ MRET (physical net draw)', near(lastPt?.actual_cum, byWbs.json.totals.issued - byWbs.json.totals.returned), JSON.stringify({ last: lastPt, iss: byWbs.json.totals.issued, ret: byWbs.json.totals.returned }));
+  ok('A3: final planned_cum = the full material budget (linear spread ends at 100%)', near(lastPt?.planned_cum, draw.json.budget_total), JSON.stringify({ p: lastPt?.planned_cum, b: draw.json.budget_total }));
+
+  // ── 9f-quinquies. A5 project-tagged wastage + EVM by category (docs/50 Wave 5, migration 0423): site
+  //    scrap relieves project WIP (Dr 5810 / Cr 1260 project_id) — never inventory — capped at the net
+  //    drawn value; feeds the per-node "wasted" figure and the material lens of EVM-by-category ──
+  const prjAId = Number(prjRow?.id);
+  // Fresh WIP to scrap against: A1 returned everything, so reserve + issue 10 more STEEL (10 × 50 = 500).
+  const resW = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 10, boq_line_id: matLineId });
+  const issW = await inj('POST', `/api/reservations/${resW.json.reservation_id}/issue`, admin);
+  ok('A5: fixture issue 10 STEEL → WIP +500', issW.status < 300 && near(issW.json.value, 500), JSON.stringify({ s: issW.status, v: issW.json.value }));
+  const tbW0 = await inj('GET', '/api/ledger/trial-balance', admin);
+  const wipW0 = Number(bal(tbW0, '1260')?.balance ?? 0), invW0 = Number(bal(tbW0, '1200')?.balance ?? 0), lossW0 = Number(bal(tbW0, '5810')?.balance ?? 0);
+  const wNoProj = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, boq_line_id: matLineId });
+  ok('A5: boq_line_id without project_id → 400 PROJECT_REQUIRED', wNoProj.status === 400 && wNoProj.json.error?.code === 'PROJECT_REQUIRED', `${wNoProj.status} ${wNoProj.json.error?.code}`);
+  const wUntagged = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50 });
+  ok('A5: UNTAGGED waste of a perpetual item still rejected (USE_WRITEOFF — INV-07 boundary unchanged)', wUntagged.status === 400 && wUntagged.json.error?.code === 'USE_WRITEOFF', `${wUntagged.status} ${wUntagged.json.error?.code}`);
+  const wNoCost = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', project_id: prjAId });
+  ok('A5: project waste without unit_cost rejected (COST_REQUIRED — WIP relief needs the issue cost)', wNoCost.status === 400 && wNoCost.json.error?.code === 'COST_REQUIRED', `${wNoCost.status} ${wNoCost.json.error?.code}`);
+  const wBadPrj = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, project_id: 999999 });
+  ok('A5: unknown project → 404 PROJECT_NOT_FOUND (BOLA combined id+tenant check)', wBadPrj.status === 404 && wBadPrj.json.error?.code === 'PROJECT_NOT_FOUND', `${wBadPrj.status} ${wBadPrj.json.error?.code}`);
+  const wBadLine = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: 999999 });
+  ok('A5: BoQ line of another/no project → 400 BOQ_LINE_MISMATCH', wBadLine.status === 400 && wBadLine.json.error?.code === 'BOQ_LINE_MISMATCH', `${wBadLine.status} ${wBadLine.json.error?.code}`);
+  const wOver = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 100, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: matLineId });
+  ok('A5: scrap beyond the net drawn value rejected (WASTE_EXCEEDS_WIP, 5000 > 500)', wOver.status === 400 && wOver.json.error?.code === 'WASTE_EXCEEDS_WIP', `${wOver.status} ${wOver.json.error?.code}`);
+  const w1 = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 4, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: matLineId, notes: 'เหล็กงอหน้างาน' });
+  ok('A5: project-tagged scrap posts (200) — journal_no set, wip_remaining 300, no stock touched (stock_after null)',
+    w1.status < 300 && !!w1.json.journal_no && near(w1.json.total_cost, 200) && near(w1.json.wip_remaining, 300) && w1.json.stock_after === null && Number(w1.json.project_id) === prjAId,
+    JSON.stringify(w1.json).slice(0, 160));
+  const tbW1 = await inj('GET', '/api/ledger/trial-balance', admin);
+  ok('A5: GL — Dr 5810 +200 / Cr 1260 −200, 1200 UNTOUCHED, balanced',
+    tbW1.json.totals?.balanced === true && near(Number(bal(tbW1, '5810')?.balance ?? 0) - lossW0, 200) && near(wipW0 - Number(bal(tbW1, '1260')?.balance ?? 0), 200) && near(Number(bal(tbW1, '1200')?.balance ?? 0), invW0),
+    JSON.stringify({ dLoss: Number(bal(tbW1, '5810')?.balance ?? 0) - lossW0, dWip: wipW0 - Number(bal(tbW1, '1260')?.balance ?? 0) }));
+  const availW = await inj('GET', '/api/reservations/available?item_id=STEEL', admin);
+  ok('A5: physical stock untouched by project scrap (on hand still 90)', near(availW.json.on_hand, 90), JSON.stringify(availW.json));
+  const wipLine = await db.select().from(s.journalLines).where(eq(s.journalLines.projectId, prjAId));
+  ok('A5: the 1260 credit line carries the project dimension', wipLine.some((l: any) => l.accountCode === '1260' && near(l.credit, 200)), JSON.stringify(wipLine.filter((l: any) => l.accountCode === '1260').slice(-1)));
+  const byWbsW = await inj('GET', '/api/projects/PRJ-A/boq/by-wbs', admin);
+  ok('A5: by-WBS rollup shows the wasted value (totals.wasted 200)', near(byWbsW.json.totals?.wasted, 200), JSON.stringify(byWbsW.json.totals));
+  const evmCat = await inj('GET', '/api/projects/PRJ-A/evm/by-category', admin);
+  const matCat = (evmCat.json.categories ?? []).find((c: any) => c.category === 'material');
+  ok('A5: EVM by category — material bucket carries budget/committed/actual/wasted (wasted 200) + cpi field',
+    evmCat.status === 200 && !!matCat && near(matCat.wasted, 200) && matCat.budget > 0 && ('cpi' in matCat) && near(evmCat.json.totals?.budget, byWbsW.json.totals?.budget),
+    JSON.stringify(matCat));
+  const gpMat = await inj('GET', '/api/projects/PRJ-A/governance-pack', admin);
+  ok('A5: single-project governance pack carries the material lens (material_cpi + wasted)', gpMat.status === 200 && !!gpMat.json.project?.material && near(gpMat.json.project.material.totals?.wasted, 200), JSON.stringify(gpMat.json.project?.material?.totals));
+  const w2 = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 6, reason_code: 'damage', unit_cost: 50, project_code: 'PRJ-A', boq_line_id: matLineId });
+  ok('A5: second scrap via project_code resolves + exhausts the drawn value (wip_remaining 0)', w2.status < 300 && near(w2.json.wip_remaining, 0) && Number(w2.json.project_id) === prjAId, JSON.stringify({ s: w2.status, r: w2.json.wip_remaining, p: w2.json.project_id }));
+  const w3 = await inj('POST', '/api/inventory/waste', admin, { item_id: 'STEEL', qty: 1, reason_code: 'damage', unit_cost: 50, project_id: prjAId, boq_line_id: matLineId });
+  ok('A5: one more baht of scrap rejected — WIP can never go negative (WASTE_EXCEEDS_WIP)', w3.status === 400 && w3.json.error?.code === 'WASTE_EXCEEDS_WIP', `${w3.status} ${w3.json.error?.code}`);
+  const wList = await inj('GET', '/api/inventory/waste', admin);
+  ok('A5: waste register rows carry the project dimension', (wList.json.waste ?? []).some((r: any) => Number(r.project_id) === prjAId && Number(r.boq_line_id) === Number(matLineId)), JSON.stringify((wList.json.waste ?? []).filter((r: any) => r.project_id).slice(0, 1)));
+
   // ── 9g. Project-linked advances & reimbursements (M4, PROJ-14): site cash managed on the project ──
   const adv = await inj('POST', '/api/finance/advances', admin, { payee: 'ช่างสมชาย', amount: 2000, purpose: 'ค่าเดินทางหน้างาน', project_code: 'PRJ-A' });
   ok('Issue project-tagged advance → 2xx + project_id set', adv.status < 300 && !!adv.json.advance_no && Number(adv.json.project_id) === Number(prjRow?.id), JSON.stringify({ s: adv.status, prj: adv.json.project_id }));
@@ -1394,7 +1523,46 @@ async function main() {
     near(scList.json.subcontract_value, 40000) && near(scList.json.certified_to_date, 32000) && near(scList.json.retention_payable, 3200),
     JSON.stringify({ v: scList.json.subcontract_value, ctd: scList.json.certified_to_date, rp: scList.json.retention_payable }));
   const scRet2 = await inj('GET', '/api/retention/project/PRJ-SUB', admin);
+  // (F2 free-issue custody checks run right after this retention read — see §9h-bis below.)
   ok('PROJ-17 → P0: retention payable outstanding 3200 after two certified valuations (2000 + 1200)', near(scRet2.json.payable?.outstanding, 3200), JSON.stringify({ pay: scRet2.json.payable?.outstanding }));
+
+  // ── 9h-bis. F2 subcontractor FREE-ISSUE custody (docs/50 Track A parked item, unblocked by A1; NEW
+  //    control PROJ-28, migration 0427): company material issued FOR a subcontractor is tracked in their
+  //    custody until returned (MRET) or acknowledged consumed; the FINAL valuation is gated on clearance ──
+  const fiBad = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-SUB', item_id: 'STEEL', qty: 1, subcontract_no: 'SC-NOPE' });
+  ok('F2: unknown subcontract → 404 SUBCONTRACT_NOT_FOUND', fiBad.status === 404 && fiBad.json.error?.code === 'SUBCONTRACT_NOT_FOUND', `${fiBad.status} ${fiBad.json.error?.code}`);
+  const fiMis = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-A', item_id: 'STEEL', qty: 1, subcontract_no: sc1No });
+  ok("F2: another project's subcontract → 400 SUBCONTRACT_PROJECT_MISMATCH", fiMis.status === 400 && fiMis.json.error?.code === 'SUBCONTRACT_PROJECT_MISMATCH', `${fiMis.status} ${fiMis.json.error?.code}`);
+  // (no boq_line_id — scL1's budget headroom is consumed to the last baht by the Depth-2 fixture below;
+  //  custody tracking is independent of the budget line)
+  const fiRes = await inj('POST', '/api/reservations', admin, { project_code: 'PRJ-SUB', item_id: 'STEEL', qty: 6, subcontract_no: sc1No });
+  ok('F2: free-issue reservation stamped with the subcontract', fiRes.status < 300 && fiRes.json.subcontract_no === sc1No, JSON.stringify({ s: fiRes.status, sc: fiRes.json.subcontract_no }));
+  const fiIss = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/issue`, admin);
+  ok('F2: issue rides the INV-13 path (Dr 1260 / Cr 1200, value 300)', fiIss.status < 300 && near(fiIss.json.value, 300), JSON.stringify({ s: fiIss.status, v: fiIss.json.value }));
+  const cust0 = await inj('GET', `/api/reservations/custody?subcontract_no=${sc1No}`, admin);
+  ok('F2: custody statement shows the material with the subcontractor (issued 6, in custody 6)',
+    cust0.status === 200 && near(cust0.json.totals?.issued, 6) && near(cust0.json.totals?.in_custody, 6) && cust0.json.lines?.[0]?.item_id === 'STEEL',
+    JSON.stringify(cust0.json.totals));
+  const fiRet = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/return`, admin, { qty: 2, reason: 'เหลือจากหน้างานผู้รับเหมาช่วง' });
+  ok('F2: a governed A1 return (sub-threshold, posts) reduces custody', fiRet.status < 300 && fiRet.json.status === 'Posted', JSON.stringify({ s: fiRet.status, st: fiRet.json.status }));
+  const fiAck = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/custody-ack`, admin, { qty: 3 });
+  ok('F2: consumption acknowledgment clears custody (returned 2 + acked 3 → in custody 1)', fiAck.status < 300 && near(fiAck.json.in_custody, 1), JSON.stringify(fiAck.json));
+  const fiOver = await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/custody-ack`, admin, { qty: 2 });
+  ok('F2: acknowledging beyond what is in custody → 400 OVER_ACK', fiOver.status === 400 && fiOver.json.error?.code === 'OVER_ACK', `${fiOver.status} ${fiOver.json.error?.code}`);
+  const fiNotFi = await inj('POST', `/api/reservations/${res1.json.reservation_id}/custody-ack`, admin, { qty: 1 });
+  ok('F2: acknowledging a non-free-issue reservation → 400 NOT_FREE_ISSUE', fiNotFi.status === 400 && fiNotFi.json.error?.code === 'NOT_FREE_ISSUE', `${fiNotFi.status} ${fiNotFi.json.error?.code}`);
+  // The FINAL valuation (→ full contract value 40000) is blocked while 1 unit is still unaccounted.
+  const svFin = await inj('POST', `/api/subcontracts/${sc1No}/valuations`, admin, { period: '2026-09', pct_complete: 100 });
+  const svFinNo = svFin.json.valuation_no;
+  const finBlocked = await inj('POST', `/api/subcontracts/valuations/${svFinNo}/certify`, mgr);
+  ok('F2: final certification blocked while custody is open (FREE_ISSUE_CUSTODY_OPEN, names the reservation)',
+    finBlocked.status === 400 && finBlocked.json.error?.code === 'FREE_ISSUE_CUSTODY_OPEN' && (finBlocked.json.error?.details?.open ?? []).some((x: any) => x.reservation_id === Number(fiRes.json.reservation_id)),
+    `${finBlocked.status} ${finBlocked.json.error?.code}`);
+  await inj('POST', `/api/reservations/${fiRes.json.reservation_id}/custody-ack`, admin, { qty: 1 });
+  const finOk = await inj('POST', `/api/subcontracts/valuations/${svFinNo}/certify`, mgr);
+  ok('F2: with custody cleared the final valuation certifies (certified_to_date reaches 40000)', finOk.status < 300 && finOk.json.status === 'certified', JSON.stringify({ s: finOk.status, st: finOk.json.status }));
+  const cust1 = await inj('GET', `/api/reservations/custody?subcontract_no=${sc1No}`, admin);
+  ok('F2: custody statement fully cleared (in custody 0; who acknowledged is stamped)', near(cust1.json.totals?.in_custody, 0) && cust1.json.lines?.[0]?.acked_by === 'admin', JSON.stringify(cust1.json.totals));
 
   // ── P1 (docs/35) — progress billing / งวดงาน + retention receivable (Track A, PROJ-16) ──
   // A construction contract billed in periodic progress claims: value work by BoQ line (cumulative), withhold
@@ -1591,6 +1759,29 @@ async function main() {
   ok('PR-4: the approved override re-routes the project-revenue leg to 4210 (AR 1100 stays pinned)',
     p4Lines.some((l: any) => l.accountCode === '4210' && Math.abs(Number(l.credit) - 4444) < 0.01) && p4Lines.some((l: any) => l.accountCode === '1100' && Math.abs(Number(l.debit) - 4444) < 0.01),
     `lines=${p4Lines.map((l: any) => l.accountCode).join(',')}`);
+
+  // ── 9j. A4 BoQ takeoff import (docs/50 Wave 4): csv → DRAFT lines, fail-closed all-or-nothing ──
+  const tplA4 = await inj('GET', '/api/projects/boq/import-template', admin);
+  ok('A4: import template exposes the headers + sample', tplA4.status === 200 && (tplA4.json.headers ?? []).includes('budget_qty') && (tplA4.json.sample ?? []).length >= 1, JSON.stringify(tplA4.json.headers));
+  await inj('POST', '/api/projects', admin, { name: 'Import test', project_code: 'PRJ-IMP' });
+  const badCsv = 'item_no,description,category,uom,budget_qty,rate,wbs_code\nNOSUCH,,material,ถุง,10,100,1.1\n,ค่าแรง,badcat,จุด,-1,x,1.2';
+  const impBad = await inj('POST', '/api/projects/PRJ-IMP/boq/import', admin, { format: 'csv', csv: badCsv });
+  ok('A4: invalid rows reject the WHOLE file (IMPORT_INVALID, per-row errors, nothing imported)',
+    impBad.status === 400 && impBad.json.error?.code === 'IMPORT_INVALID' && (impBad.json.error?.details?.errors ?? []).length >= 3
+    && (await inj('GET', '/api/projects/PRJ-IMP/boq', admin)).json.boq === null,
+    JSON.stringify(impBad.json.error?.details?.errors ?? []).slice(0, 140));
+  const okCsv = 'item_no,description,category,uom,budget_qty,rate,wbs_code\nSTEEL,เหล็กเส้น,material,,20,50,2.1\n,ค่าแรงติดตั้ง,labor,จุด,5,300,2.2';
+  const imp1 = await inj('POST', '/api/projects/PRJ-IMP/boq/import', admin, { format: 'csv', csv: okCsv, title: 'takeoff' });
+  ok('A4: valid csv lands DRAFT lines (2 imported, new draft BoQ, budget 2500; unknown-item WARNING kept)',
+    imp1.status < 300 && imp1.json.imported === 2 && imp1.json.created_boq === true && imp1.json.boq?.status === 'draft' && near(imp1.json.budget_total, 2500)
+    && (imp1.json.warnings ?? []).some((w: any) => w.code === 'ITEM_NOT_FOUND'),
+    JSON.stringify({ n: imp1.json.imported, st: imp1.json.boq?.status, b: imp1.json.budget_total, w: imp1.json.warnings }));
+  const imp2 = await inj('POST', '/api/projects/PRJ-IMP/boq/import', admin, { format: 'rows', rows: [{ item_no: 'STEEL', description: 'เหล็กเพิ่ม', category: 'material', budget_qty: 2, rate: 50 }] });
+  ok('A4: re-import APPENDS to the same draft (created_boq=false, 3 lines, budget 2600)',
+    imp2.status < 300 && imp2.json.created_boq === false && imp2.json.count === 3 && near(imp2.json.budget_total, 2600),
+    JSON.stringify({ c: imp2.json.count, b: imp2.json.budget_total }));
+  const impApprove = await inj('POST', `/api/projects/boq/${imp1.json.boq_id}/approve`, mgr);
+  ok('A4: the imported BoQ still flows through PROJ-12 approval (approver ≠ author)', impApprove.status < 300 && (impApprove.json.boq?.status === 'approved' || impApprove.json.status === 'approved'), JSON.stringify(impApprove.json).slice(0, 90));
 
   console.log('\n── Phase 18 — Projects/PPM (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectBoqLines, projectSubcontracts, subcontractScope, subcontractValuations, tenants } from '../../database/schema';
+import { projects, projectBoqLines, projectSubcontracts, subcontractScope, subcontractValuations, tenants, stockReservations, projectMaterialReturns } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { RetentionService } from '../retention/retention.service';
@@ -148,6 +148,33 @@ export class SubcontractsService {
     const newCertified = r2(n(s.certifiedToDate) + gross);
     if (newCertified > n(s.contractValue) + 0.01)
       throw new BadRequestException({ code: 'VAL_EXCEEDS_SUBCONTRACT', message: `Certifying ${gross} would exceed the subcontract ${n(s.contractValue)} (already certified ${n(s.certifiedToDate)})`, messageTh: 'รับรองงวดเกินมูลค่าสัญญาผู้รับเหมาช่วง' });
+    // PROJ-28 (free-issue custody clearance, migration 0427): the FINAL valuation — the one that certifies
+    // the subcontract out to its full contract value — is blocked while company material free-issued to
+    // this subcontractor is still unaccounted (neither returned to stock via the governed MRET path nor
+    // acknowledged consumed in the works). A plain filtered read of the custody register (reservations owns
+    // the write paths; subcontracts must never import reservations — the commitments-service precedent).
+    if (newCertified >= n(s.contractValue) - 0.01) {
+      const fiRows = await this.db.select().from(stockReservations)
+        .where(and(eq(stockReservations.subcontractId, Number(s.id)), eq(stockReservations.status, 'consumed')));
+      if (fiRows.length) {
+        const retRows = await this.db.select({ rid: projectMaterialReturns.reservationId, v: sql<string>`coalesce(sum(${projectMaterialReturns.qty}),0)` })
+          .from(projectMaterialReturns)
+          .where(and(inArray(projectMaterialReturns.reservationId, fiRows.map((r: any) => Number(r.id))), eq(projectMaterialReturns.status, 'Posted')))
+          .groupBy(projectMaterialReturns.reservationId);
+        const retBy = new Map<number, number>(retRows.map((r: any) => [Number(r.rid), n(r.v)]));
+        const open = fiRows
+          .map((r: any) => ({ reservation_id: Number(r.id), item_id: r.itemId, in_custody: r2(n(r.qtyReserved) - (retBy.get(Number(r.id)) ?? 0) - n(r.custodyAckQty)) }))
+          .filter((x: any) => x.in_custody > EPS);
+        if (open.length) {
+          throw new BadRequestException({
+            code: 'FREE_ISSUE_CUSTODY_OPEN',
+            message: `Final certification blocked: ${open.length} free-issue reservation(s) still hold unaccounted material — return it (MRET) or acknowledge consumption first`,
+            messageTh: 'รับรองงวดสุดท้ายไม่ได้: ยังมีวัสดุฝากผู้รับเหมาช่วงที่ยังไม่คืน/ยังไม่รับรู้การใช้',
+            details: { open },
+          });
+        }
+      }
+    }
     if (await this.ledger.alreadyPosted('PRJ-SUBVAL', valNo, tenantId)) return { already: true, valuation_no: valNo };
 
     const lines: any[] = [];

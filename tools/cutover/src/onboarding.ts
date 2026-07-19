@@ -5,6 +5,7 @@
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover onboarding
  */
 import 'reflect-metadata';
+import { authenticator } from 'otplib';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'onb-secret';
 process.env.NODE_ENV = 'test';
 
@@ -130,6 +131,64 @@ async function main() {
   // A non-platform Admin also cannot PROMOTE an existing user to Admin.
   const promoteDenied = await inj('PATCH', '/api/admin/users/platco_sales', platLogin.json.token, { role: 'Admin' });
   ok('Company Admin cannot promote a user to Admin either (403 ADMIN_GRANT_DENIED)', promoteDenied.status === 403 && promoteDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${promoteDenied.status} ${promoteDenied.json.error?.code}`);
+
+  // ── 3b3. Pentest remediation (2026-07-16) — the "only the platform owner may grant Admin" control
+  //         (assertCanGrantRole) must have NO side doors. Three paths previously reached Admin/god authority
+  //         without passing through it; each is now closed. ──
+  // P1 — a password reset is a privileged-access grant over the TARGET account. A non-platform Admin cannot
+  //      reset another Admin's password (would seize a peer Admin account + inherit its bypass); only the
+  //      platform owner can. Resetting a non-privileged user is unchanged.
+  const resetAdminDenied = await inj('POST', '/api/admin/users/god_made_admin/reset-password', platLogin.json.token, { password: 'hijacked12345' });
+  ok('P1: a non-platform Admin cannot reset an Admin account password (403 ADMIN_GRANT_DENIED)', resetAdminDenied.status === 403 && resetAdminDenied.json.error?.code === 'ADMIN_GRANT_DENIED', `${resetAdminDenied.status} ${resetAdminDenied.json.error?.code}`);
+  const resetSalesOk = await inj('POST', '/api/admin/users/platco_sales/reset-password', platLogin.json.token, { password: 'admin123' });
+  ok('P1: a company Admin CAN still reset a non-Admin user password (granularity preserved)', (resetSalesOk.status === 200 || resetSalesOk.status === 201) && resetSalesOk.json.reset === true, `${resetSalesOk.status} ${JSON.stringify(resetSalesOk.json)}`);
+  const resetAdminByGod = await inj('POST', '/api/admin/users/god_made_admin/reset-password', owner, { password: 'admin123' });
+  ok('P1: the platform owner CAN reset an Admin account (2xx)', (resetAdminByGod.status === 200 || resetAdminByGod.status === 201) && resetAdminByGod.json.reset === true, `${resetAdminByGod.status}`);
+
+  // P2 — the SSO JIT default_role allow-list excludes privileged roles, so an AccessAdmin/Admin cannot
+  //      configure SSO to auto-provision itself an Admin (a second bypass of the Admin-grant control).
+  const ssoAdminDenied = await inj('PUT', '/api/platform/identity', platLogin.json.token, { default_role: 'Admin' });
+  ok('P2: SSO default_role cannot be set to Admin (400 BAD_ROLE)', ssoAdminDenied.status === 400 && ssoAdminDenied.json.error?.code === 'BAD_ROLE', `${ssoAdminDenied.status} ${ssoAdminDenied.json.error?.code}`);
+  const ssoAccessAdminDenied = await inj('PUT', '/api/platform/identity', platLogin.json.token, { default_role: 'AccessAdmin' });
+  ok('P2: SSO default_role cannot be set to AccessAdmin either (400 BAD_ROLE)', ssoAccessAdminDenied.status === 400 && ssoAccessAdminDenied.json.error?.code === 'BAD_ROLE', `${ssoAccessAdminDenied.status} ${ssoAccessAdminDenied.json.error?.code}`);
+  const ssoSalesOk = await inj('PUT', '/api/platform/identity', platLogin.json.token, { default_role: 'Sales' });
+  ok('P2: SSO default_role CAN still be a non-privileged role (Sales, 200)', ssoSalesOk.status === 200 && ssoSalesOk.json.default_role === 'Sales', `${ssoSalesOk.status} ${JSON.stringify(ssoSalesOk.json?.error ?? ssoSalesOk.json?.default_role ?? '')}`);
+
+  // P3 — an API key ADOPTS its minting human's identity (security review H-2). A key minted by the platform
+  //      owner must NOT thereby become an MFA-free "god" credential: PlatformAdminGuard rejects machine
+  //      principals outright, even when created_by is a platform owner.
+  const godKey = (await inj('POST', '/api/platform/api-keys', owner, { name: 'god-key', scopes: ['exec'] })).json.key;
+  const keyHitsPlatform = await inj('GET', '/api/admin/tenants', godKey);
+  ok('P3: a platform-owner-minted API key is NOT a platform-admin credential (403 PLATFORM_ADMIN_REQUIRED)', keyHitsPlatform.status === 403 && keyHitsPlatform.json.error?.code === 'PLATFORM_ADMIN_REQUIRED', `${keyHitsPlatform.status} ${keyHitsPlatform.json.error?.code}`);
+
+  // ── 3b4. Privilege-escalation audit (2026-07-17, PE-1/PE-2): the `users` permission grants capability
+  //         BOUNDED by the grantor's OWN — a least-privilege AccessAdmin (holds only `users`) cannot silently
+  //         escalate, whether via an API-key scope (PE-1) or by provisioning a transacting puppet account
+  //         (PE-2, which is routed to a second admin for approval — not blocked, so delegated admin still works). ──
+  await db.insert(s.users).values([{ username: 'pe_iam', passwordHash: await pw.hash('peiam12345'), role: 'AccessAdmin', tenantId: hq }]).onConflictDoNothing();
+  const iam = (await login('pe_iam', 'peiam12345')).json.token;
+  // PE-2 — an AccessAdmin provisioning a role BEYOND its own set (GlAccountant ⇒ gl_post) is STAGED for a
+  // different admin (two-person control), not applied. (customer_name=HQ keeps the staged row in-tenant.)
+  const escGrant = await inj('POST', '/api/admin/users', iam, { username: 'iam_puppet', password: 'puppet12345', role: 'GlAccountant', customer_name: 'HQ' });
+  ok('PE-2: AccessAdmin provisioning a transacting role is STAGED for approval, not applied', escGrant.json?.pending === true && !!escGrant.json?.access_exception_req_no, `${escGrant.status} ${JSON.stringify(escGrant.json)}`);
+  const puppetLogin = await login('iam_puppet', 'puppet12345');
+  ok('PE-2: the escalated puppet account was NOT created (cannot log in)', puppetLogin.status === 401, `${puppetLogin.status}`);
+  // An Admin is unaffected (holds all perms) — proven by the existing grants above (platco_admin/owner create
+  // Sales/Admin directly). PE-1 — an AccessAdmin cannot mint an API key whose scopes exceed its own perms.
+  const escKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'esc-key', scopes: ['gl_post'] });
+  ok('PE-1: AccessAdmin cannot mint an API key with scopes beyond its perms (403 KEY_SCOPE_EXCEEDS_GRANTOR)', escKey.status === 403 && escKey.json.error?.code === 'KEY_SCOPE_EXCEEDS_GRANTOR', `${escKey.status} ${escKey.json.error?.code}`);
+  const okKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-key', scopes: ['users'] });
+  ok('PE-1: AccessAdmin CAN mint a key within its own permissions (users scope)', !!okKey.json?.key, `${okKey.status}`);
+  // PE-1 (refinement) — a public-API-ONLY scope (`catalog:read`, not an internal permission) is not an
+  // escalation and may be minted by any `users`-holder for integration.
+  const pubKey = await inj('POST', '/api/platform/api-keys', iam, { name: 'iam-pub', scopes: ['catalog:read'] });
+  ok('PE-1: AccessAdmin CAN mint a public-API-only scope key (catalog:read — not an internal permission)', !!pubKey.json?.key, `${pubKey.status}`);
+  // PE-6 — the platform MFA surface must NOT silently re-enrol/downgrade an already-enrolled account (no
+  // step-up). Enrol once (setup → verify), then a second setup is refused (must disable first, needs password+TOTP).
+  const pmSetup = await inj('POST', '/api/platform/mfa/setup', iam);
+  await inj('POST', '/api/platform/mfa/verify', iam, { token: authenticator.generate(pmSetup.json.secret) });
+  const pmReenrol = await inj('POST', '/api/platform/mfa/setup', iam);
+  ok('PE-6: platform mfa/setup refuses to re-enrol an MFA-enabled account (400 MFA_ALREADY_ENABLED)', pmReenrol.status === 400 && pmReenrol.json.error?.code === 'MFA_ALREADY_ENABLED', `${pmReenrol.status} ${pmReenrol.json.error?.code}`);
   // Company directory (backs the Platform Console table + the switcher). Lists EVERY tenant enriched with
   // status/plan/user-count; a non-platform-admin is blocked at the guard.
   const dirDenied = await inj('GET', '/api/admin/tenants', platLogin.json.token); // platco_admin is NOT a platform owner
@@ -145,6 +204,136 @@ async function main() {
   ok('GET /api/admin/tenants/:id returns company detail (subscription + counts + activity)',
     detail.status === 200 && detail.json.id === Number(created.json.tenant_id) && !!detail.json.subscription && typeof detail.json.counts?.users === 'number' && Array.isArray(detail.json.recent_activity),
     `st=${detail.status} plan=${detail.json.subscription?.plan_code} users=${detail.json.counts?.users}`);
+  // ── 3b4. B1 (docs/51 Track B): SME provisioning folds the sidebar from the company's INDUSTRY —
+  //         the industry nav profile (@ierp/shared nav-profiles) is stamped into tenants.sme_prefs at
+  //         creation and surfaced on /api/auth/me as sme_hidden_nav_groups + sme_open_nav_groups. ──
+  const b1Resto = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ครัวคนเดียว', tenant_code: 'b1resto', admin_username: 'b1_resto_owner', admin_password: 'resto12345',
+    email: 'b1r@x.co', control_profile: 'sme', industry: 'restaurant',
+  });
+  ok('B1: god provisions an SME restaurant company (201, control_profile=sme, industry=restaurant)',
+    b1Resto.status === 201 && b1Resto.json.control_profile === 'sme' && b1Resto.json.industry === 'restaurant',
+    `${b1Resto.status} cp=${b1Resto.json.control_profile} ind=${b1Resto.json.industry}`);
+  const b1RestoTok = (await login('b1_resto_owner', 'resto12345')).json.token;
+  const b1RestoMe = await inj('GET', '/api/auth/me', b1RestoTok);
+  ok('B1: restaurant SME /api/auth/me carries the industry fold profile (hidden ⊇ projects; open ⊇ POS frontline)',
+    b1RestoMe.status === 200
+      && (b1RestoMe.json.sme_hidden_nav_groups ?? []).includes('nav.group.projects')
+      && (b1RestoMe.json.sme_open_nav_groups ?? []).includes('nav.group.pos_sales')
+      && (b1RestoMe.json.sme_open_nav_groups ?? []).includes('nav.sub.pos_frontline'),
+    JSON.stringify({ hidden: b1RestoMe.json.sme_hidden_nav_groups, open: b1RestoMe.json.sme_open_nav_groups }));
+  // A later god sme-prefs edit owns hidden_nav_groups but must PRESERVE the stamped industry open profile.
+  const b1PrefsEdit = await inj('POST', `/api/admin/tenants/${b1Resto.json.tenant_id}/sme-prefs`, owner, { hidden_nav_groups: ['nav.group.hr'] });
+  const b1RestoMe2 = await inj('GET', '/api/auth/me', b1RestoTok);
+  ok('B1: a god sme-prefs edit replaces hidden_nav_groups but preserves the stamped open_nav_groups',
+    b1PrefsEdit.status === 200
+      && (b1RestoMe2.json.sme_hidden_nav_groups ?? []).includes('nav.group.hr')
+      && !(b1RestoMe2.json.sme_hidden_nav_groups ?? []).includes('nav.group.projects')
+      && (b1RestoMe2.json.sme_open_nav_groups ?? []).includes('nav.sub.pos_frontline'),
+    JSON.stringify({ hidden: b1RestoMe2.json.sme_hidden_nav_groups, open: b1RestoMe2.json.sme_open_nav_groups }));
+  // A different industry gets a different fold (distribution: POS domains hidden, procurement open).
+  const b1Dist = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ค้าส่งคนเดียว', tenant_code: 'b1dist', admin_username: 'b1_dist_owner', admin_password: 'dist12345',
+    email: 'b1d@x.co', control_profile: 'sme', industry: 'distribution',
+  });
+  const b1DistMe = await inj('GET', '/api/auth/me', (await login('b1_dist_owner', 'dist12345')).json.token);
+  ok('B1: distribution SME gets its own industry fold (hidden ⊇ pos_sales; open ⊇ procurement)',
+    b1Dist.status === 201
+      && (b1DistMe.json.sme_hidden_nav_groups ?? []).includes('nav.group.pos_sales')
+      && (b1DistMe.json.sme_open_nav_groups ?? []).includes('nav.group.procurement'),
+    JSON.stringify({ hidden: b1DistMe.json.sme_hidden_nav_groups, open: b1DistMe.json.sme_open_nav_groups }));
+  // Enterprise regression: a non-SME company's /me carries NO nav profile fields at all.
+  const b1EntMe = await inj('GET', '/api/auth/me', platLogin.json.token);
+  ok('B1: an ENTERPRISE company /api/auth/me carries no SME nav profile (behaviour unchanged)',
+    b1EntMe.status === 200 && b1EntMe.json.control_profile !== 'sme'
+      && b1EntMe.json.sme_open_nav_groups === undefined && b1EntMe.json.sme_hidden_nav_groups === undefined,
+    JSON.stringify({ cp: b1EntMe.json.control_profile, open: b1EntMe.json.sme_open_nav_groups }));
+
+  // ── 3b5. B3 (docs/51 Track B): the starter pack seeds an SME industry kit — tenant-scoped sample
+  //         content matching the B1 nav (restaurant: menu + dining tables; distribution: WH branch),
+  //         idempotent, and NEVER touches the shared `items` master. Enterprise: HQ-only (pre-B3). ──
+  const b3Resto1 = await inj('POST', '/api/tenant/starter-pack', b1RestoTok, {});
+  ok('B3: restaurant SME starter-pack seeds HQ + sample menu + dining tables',
+    b3Resto1.status === 201
+      && ['hq_branch', 'menu_starter', 'dining_tables'].every((k) => (b3Resto1.json.created ?? []).includes(k)),
+    JSON.stringify(b3Resto1.json));
+  const b3RestoRows = (await pg.query(`SELECT (SELECT count(*)::int FROM menu_items WHERE tenant_id=${b1Resto.json.tenant_id}) AS menu, (SELECT count(*)::int FROM dining_tables WHERE tenant_id=${b1Resto.json.tenant_id}) AS tables, (SELECT count(*)::int FROM items WHERE item_id LIKE 'DEMO-%') AS shared_items`)).rows as any[];
+  ok('B3: kit rows are tenant-scoped (menu 2, tables 4) and the SHARED items master got NOTHING',
+    b3RestoRows[0].menu === 2 && b3RestoRows[0].tables === 4 && b3RestoRows[0].shared_items === 0,
+    JSON.stringify(b3RestoRows[0]));
+  const b3Resto2 = await inj('POST', '/api/tenant/starter-pack', b1RestoTok, {});
+  ok('B3: second starter-pack call skips every kit piece (idempotent)',
+    b3Resto2.status === 201
+      && ['hq_branch', 'menu_starter', 'dining_tables'].every((k) => (b3Resto2.json.skipped ?? []).includes(k))
+      && (b3Resto2.json.created ?? []).length === 0,
+    JSON.stringify(b3Resto2.json));
+  const b3Dist = await inj('POST', '/api/tenant/starter-pack', (await login('b1_dist_owner', 'dist12345')).json.token, {});
+  ok('B3: distribution SME kit seeds the WH1 warehouse branch instead',
+    b3Dist.status === 201 && (b3Dist.json.created ?? []).includes('wh_branch') && !(b3Dist.json.created ?? []).includes('menu_starter'),
+    JSON.stringify(b3Dist.json));
+  const b3Ent = await inj('POST', '/api/tenant/starter-pack', platLogin.json.token, {});
+  ok('B3: an ENTERPRISE company starter-pack stays HQ-only (no industry kit)',
+    b3Ent.status === 201
+      && ((b3Ent.json.created ?? []).includes('hq_branch') || (b3Ent.json.skipped ?? []).includes('hq_branch'))
+      && ['menu_starter', 'dining_tables', 'wh_branch', 'demo_project'].every((k) => !(b3Ent.json.created ?? []).includes(k) && !(b3Ent.json.skipped ?? []).includes(k)),
+    JSON.stringify(b3Ent.json));
+  // The remaining two industries: retail gets a POS sample catalog (type 'retail', no dining tables);
+  // services gets a demo project (no menu kit at all).
+  const b3Retail = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ร้านค้าคนเดียว', tenant_code: 'b1retail', admin_username: 'b1_retail_owner', admin_password: 'retail12345',
+    email: 'b1rt@x.co', control_profile: 'sme', industry: 'retail',
+  });
+  const b3RetailSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_retail_owner', 'retail12345')).json.token, {});
+  const b3RetailRows = (await pg.query(`SELECT count(*)::int AS n FROM menu_items WHERE tenant_id=${Number(b3Retail.json.tenant_id) || 0} AND type='retail'`)).rows as any[];
+  ok('B3: retail SME kit seeds 2 sample POS items (type retail) and NO dining tables',
+    b3RetailSp.status === 201 && (b3RetailSp.json.created ?? []).includes('menu_starter')
+      && !(b3RetailSp.json.created ?? []).includes('dining_tables') && !(b3RetailSp.json.skipped ?? []).includes('dining_tables')
+      && b3RetailRows[0].n === 2,
+    JSON.stringify({ resp: b3RetailSp.json, retailItems: b3RetailRows[0].n }));
+  const b3Svc = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ที่ปรึกษาคนเดียว', tenant_code: 'b1svc', admin_username: 'b1_svc_owner', admin_password: 'svc12345678',
+    email: 'b1sv@x.co', control_profile: 'sme', industry: 'services',
+  });
+  const b3SvcSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_svc_owner', 'svc12345678')).json.token, {});
+  const b3SvcRows = (await pg.query(`SELECT count(*)::int AS n FROM projects WHERE tenant_id=${Number(b3Svc.json.tenant_id) || 0} AND project_code='PRJ-DEMO'`)).rows as any[];
+  ok('B3: services SME kit seeds the demo project and NO menu kit',
+    b3SvcSp.status === 201 && (b3SvcSp.json.created ?? []).includes('demo_project')
+      && !(b3SvcSp.json.created ?? []).includes('menu_starter') && b3SvcRows[0].n === 1,
+    JSON.stringify({ resp: b3SvcSp.json, demoProjects: b3SvcRows[0].n }));
+
+  // Expanded industries (2026-07-18): each new industry maps to one of the four seed kinds. Spot-check one
+  // per kind — ecommerce→catalog, manufacturing→warehouse, construction→project, hospitality→catalog+tables.
+  const b3Ecom = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ร้านออนไลน์คนเดียว', tenant_code: 'b1ecom', admin_username: 'b1_ecom_owner', admin_password: 'ecom12345',
+    email: 'b1ec@x.co', control_profile: 'sme', industry: 'ecommerce',
+  });
+  const b3EcomSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_ecom_owner', 'ecom12345')).json.token, {});
+  ok('B3: ecommerce SME kit seeds a POS catalog (no tables)',
+    b3EcomSp.status === 201 && (b3EcomSp.json.created ?? []).includes('menu_starter') && !(b3EcomSp.json.created ?? []).includes('dining_tables'),
+    JSON.stringify(b3EcomSp.json));
+  const b3Mfg = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'โรงงานคนเดียว', tenant_code: 'b1mfg', admin_username: 'b1_mfg_owner', admin_password: 'mfg1234567',
+    email: 'b1mf@x.co', control_profile: 'sme', industry: 'manufacturing',
+  });
+  const b3MfgSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_mfg_owner', 'mfg1234567')).json.token, {});
+  ok('B3: manufacturing SME kit seeds a WH1 warehouse (no menu kit)',
+    b3MfgSp.status === 201 && (b3MfgSp.json.created ?? []).includes('wh_branch') && !(b3MfgSp.json.created ?? []).includes('menu_starter'),
+    JSON.stringify(b3MfgSp.json));
+  const b3Con = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'ผู้รับเหมาคนเดียว', tenant_code: 'b1con', admin_username: 'b1_con_owner', admin_password: 'con1234567',
+    email: 'b1co@x.co', control_profile: 'sme', industry: 'construction',
+  });
+  const b3ConSp = await inj('POST', '/api/tenant/starter-pack', (await login('b1_con_owner', 'con1234567')).json.token, {});
+  ok('B3: construction SME kit seeds the demo project (no menu kit)',
+    b3ConSp.status === 201 && (b3ConSp.json.created ?? []).includes('demo_project') && !(b3ConSp.json.created ?? []).includes('menu_starter'),
+    JSON.stringify(b3ConSp.json));
+
+  // Onboarding industry packs (E1) also cover the new industries — applying one seeds its custom objects.
+  const b3MfgPack = await inj('POST', '/api/onboarding/apply-pack', (await login('b1_mfg_owner', 'mfg1234567')).json.token, { pack: 'manufacturing' });
+  ok('E1: the manufacturing industry pack seeds its custom objects (BOM + work center)',
+    b3MfgPack.status === 201 && b3MfgPack.json.objects_created === 2,
+    JSON.stringify(b3MfgPack.json));
+
   // Platform subscription control — extend trial (pushes trial_ends_at out, status Trialing).
   const ext = await inj('POST', `/api/admin/tenants/${created.json.tenant_id}/extend-trial`, owner, { days: 14 });
   ok('POST /api/admin/tenants/:id/extend-trial extends the trial (status Trialing, future end)',

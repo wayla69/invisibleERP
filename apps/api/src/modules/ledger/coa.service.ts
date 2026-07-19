@@ -33,6 +33,7 @@ export class CoaService {
     isPostable?: boolean; requireDimension?: Record<string, boolean>;
     effectiveFrom?: string; effectiveTo?: string;
     cfBucket?: string; cfLabel?: string; isCurrent?: boolean;
+    bsGroup?: string; isGroup?: string;
   }) {
     const existing = await this.db.select({ id: accounts.id }).from(accounts)
       .where(eq(accounts.code, dto.code)).limit(1);
@@ -52,6 +53,8 @@ export class CoaService {
       cfBucket: dto.cfBucket,
       cfLabel: dto.cfLabel,
       isCurrent: dto.isCurrent,
+      bsGroup: dto.bsGroup,
+      isGroup: dto.isGroup,
     }).returning();
     return row;
   }
@@ -61,6 +64,7 @@ export class CoaService {
     isPostable?: boolean; requireDimension?: Record<string, boolean>;
     effectiveFrom?: string; effectiveTo?: string; active?: string;
     cfBucket?: string | null; cfLabel?: string | null; isCurrent?: boolean | null;
+    bsGroup?: string | null; isGroup?: string | null;
   }) {
     // Block code changes for accounts with postings
     if (dto.isPostable === false) {
@@ -84,6 +88,8 @@ export class CoaService {
       ...(dto.cfBucket !== undefined && { cfBucket: dto.cfBucket }),
       ...(dto.cfLabel !== undefined && { cfLabel: dto.cfLabel }),
       ...(dto.isCurrent !== undefined && { isCurrent: dto.isCurrent }),
+      ...(dto.bsGroup !== undefined && { bsGroup: dto.bsGroup }),
+      ...(dto.isGroup !== undefined && { isGroup: dto.isGroup }),
     }).where(eq(accounts.code, code)).returning();
     if (!row) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found`, messageTh: `ไม่พบบัญชี ${code}` });
     return row;
@@ -123,10 +129,20 @@ export class CoaService {
       if (existing) throw new BadRequestException({ code: 'DUPLICATE_ACCOUNT', message: `Account ${code} already exists`, messageTh: `บัญชี ${code} มีอยู่แล้ว` });
       // COA-D2: a parent must be a real account (was accepted unvalidated — a typo'd parent silently
       // orphaned the row in every hierarchy rollup).
-      const parent = (dto as { parentCode?: string } | undefined)?.parentCode;
+      const parent = (dto as { parentCode?: string; type?: string } | undefined)?.parentCode;
       if (parent) {
-        const [p] = await this.db.select({ code: accounts.code }).from(accounts).where(eq(accounts.code, parent)).limit(1);
+        if (parent === code) throw new BadRequestException({ code: 'PARENT_SELF', message: `Account ${code} cannot be its own parent`, messageTh: `บัญชี ${code} เป็นบัญชีแม่ของตัวเองไม่ได้` });
+        const [p] = await this.db.select({ code: accounts.code, type: accounts.type }).from(accounts).where(eq(accounts.code, parent)).limit(1);
         if (!p) throw new BadRequestException({ code: 'PARENT_NOT_FOUND', message: `Parent account ${parent} does not exist`, messageTh: `ไม่พบบัญชีแม่ ${parent}` });
+        // COA-SUB: a sub-account must share its parent's account type — a sub-account of an Expense header
+        // (e.g. 5150 ค่าเดินทาง → 51501 ค่าเครื่องบิน) is itself an Expense, and an AR debtor sub-type
+        // (1100 → 11010 ลูกหนี้การค้า) is an Asset. This keeps the parent's rollup one-typed.
+        const childType = (dto as { type?: string } | undefined)?.type;
+        if (childType && p.type && childType !== p.type) throw new BadRequestException({
+          code: 'PARENT_TYPE_MISMATCH',
+          message: `Sub-account type ${childType} must match its parent ${parent} (${p.type})`,
+          messageTh: `ประเภทบัญชีย่อย (${childType}) ต้องตรงกับบัญชีแม่ ${parent} (${p.type})`,
+        });
       }
     } else {
       if (!existing) throw new NotFoundException({ code: 'ACCOUNT_NOT_FOUND', message: `Account ${code} not found`, messageTh: `ไม่พบบัญชี ${code}` });

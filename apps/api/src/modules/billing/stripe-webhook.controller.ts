@@ -36,7 +36,7 @@ export class StripeWebhookController {
       const Stripe = (await import('stripe')).default;
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? 'sk_unused');
       try {
-        return stripe.webhooks.constructEvent(rawBody ?? Buffer.from(''), signature ?? '', secret) as any;
+        return stripe.webhooks.constructEvent(rawBody ?? Buffer.from(''), signature ?? '', secret);
       } catch {
         throw new UnauthorizedException({ code: 'BAD_WEBHOOK_SIGNATURE', message: 'Invalid Stripe webhook signature', messageTh: 'ลายเซ็น webhook ไม่ถูกต้อง' });
       }

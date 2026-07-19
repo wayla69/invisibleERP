@@ -1,5 +1,6 @@
-import { Global, Module, Logger } from '@nestjs/common';
+import { Global, Module, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import postgres from 'postgres';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import * as schema from './schema';
@@ -7,6 +8,32 @@ import { tenantALS } from '../common/tenant-context';
 
 export const DRIZZLE = Symbol('DRIZZLE');
 export type DrizzleDb = PostgresJsDatabase<typeof schema>;
+
+// SOX-ICFR #2 — fail-closed proxy (staged behind STRICT_TENANT_PROXY). The tenant-scoping state
+// (SET LOCAL ROLE + app.* GUCs) is transaction-local, so it can never survive a COMMIT onto a reused
+// pooled connection — the pool-return leak is structurally impossible on the request path. The residual
+// exposure is a DIRECT query issued with NO tenant context at all (a service method invoked outside a
+// request / runInTenantContext), which silently falls through to the BASE pool with no GUCs. When the flag
+// is on, such a query throws TENANT_CONTEXT_MISSING instead — a loud failure rather than a silent
+// cross-tenant read. Legitimately-global work (login-lockout style, cross-tenant platform reads on the base
+// pool) declares itself via runGlobalDb(); genuine per-tenant work already runs inside runInTenantContext.
+export const globalDbALS = new AsyncLocalStorage<{ reason: string }>();
+/** Explicit, grep-able escape hatch: run `fn` in a context where a base-pool DB query is intentional. */
+export function runGlobalDb<T>(reason: string, fn: () => Promise<T>): Promise<T> {
+  return globalDbALS.run({ reason }, fn);
+}
+
+// Direct query entry points guarded when there is no tenant context. `transaction` is deliberately NOT
+// guarded — runInTenantContext / RealtimeScope / the guards call db.transaction() precisely to OPEN the
+// scoping tx before any ALS store exists, so guarding it would break context establishment itself.
+const GUARDED_OPS = new Set(['select', 'insert', 'update', 'delete', 'execute', 'query', '$count']);
+// STRICT_TENANT_PROXY: '1' = enforce (throw TENANT_CONTEXT_MISSING), 'warn' = audit-only (log the call site
+// + short stack, then fall through to the base pool — used during rollout to enumerate every un-wrapped
+// base-pool read without breaking the run), anything else = off (legacy fallback). See docs/ops/tenancy-model §1ter.
+const proxyMode = (): '1' | 'warn' | 'off' => {
+  const v = process.env.STRICT_TENANT_PROXY;
+  return v === '1' ? '1' : v === 'warn' ? 'warn' : 'off';
+};
 
 // Route every query to the per-request tenant transaction (RLS-scoped) when present,
 // else the base pool. Services keep injecting DRIZZLE unchanged — isolation is transparent.
@@ -16,6 +43,21 @@ export function tenantAwareProxy(base: DrizzleDb): DrizzleDb {
   return new Proxy(base, {
     get(target, prop, receiver) {
       const tx = tenantALS.getStore()?.tx;
+      if (!tx && typeof prop === 'string' && GUARDED_OPS.has(prop) && !globalDbALS.getStore()) {
+        const mode = proxyMode();
+        if (mode === '1') {
+          throw new ServiceUnavailableException({
+            code: 'TENANT_CONTEXT_MISSING',
+            message: `DB ${prop}() ran outside a tenant context (no request tx / runInTenantContext / runGlobalDb)`,
+            messageTh: 'มีการเข้าถึงฐานข้อมูลนอกบริบทผู้เช่า',
+          });
+        }
+        if (mode === 'warn') {
+          const site = (new Error().stack ?? '').split('\n').slice(2, 7).join('\n');
+          // eslint-disable-next-line no-console
+          console.error(`[tenant-proxy] base-pool ${prop}() with NO tenant context:\n${site}`);
+        }
+      }
       const active: any = tx ?? target;
       const val = active[prop];
       return typeof val === 'function' ? val.bind(active) : val ?? Reflect.get(target, prop, receiver);

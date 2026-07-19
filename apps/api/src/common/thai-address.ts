@@ -6,8 +6,80 @@
 // intentionally out of scope here — province canonicalisation + postal-format validation is the high-value,
 // low-risk core (mirrors how Oracle anchors on a validated region reference).
 import { nameSimilarity, normalizeKey } from './text-similarity';
+import { THAI_SUBDISTRICTS_TSV } from './thai-subdistricts.data';
 
 export interface Province { th: string; en: string }
+
+// ── Subdistrict (tambon/khwaeng) reference — postal-code-driven address autofill ──────────────────
+// A full Thailand administrative dataset (province → district → subdistrict + postal code) parsed once,
+// lazily, from the AUTO-GENERATED tab-separated data module. It powers the address forms' "type a postal
+// code → pick the matching เขต/แขวง" dropdown (one postal code usually maps to several subdistricts).
+export interface Subdistrict {
+  postalCode: string;
+  provinceTh: string; provinceEn: string;
+  districtTh: string; districtEn: string;
+  subdistrictTh: string; subdistrictEn: string;
+}
+
+let _rows: Subdistrict[] | null = null;
+let _byPostal: Map<string, Subdistrict[]> | null = null;
+
+function rows(): Subdistrict[] {
+  if (_rows) return _rows;
+  const out: Subdistrict[] = [];
+  for (const line of THAI_SUBDISTRICTS_TSV.split('\n')) {
+    if (!line) continue;
+    const f = line.split('\t');
+    if (f.length < 7) continue;
+    out.push({
+      postalCode: f[0]!, provinceTh: f[1]!, provinceEn: f[2]!,
+      districtTh: f[3]!, districtEn: f[4]!, subdistrictTh: f[5]!, subdistrictEn: f[6]!,
+    });
+  }
+  _rows = out;
+  return out;
+}
+
+function byPostal(): Map<string, Subdistrict[]> {
+  if (_byPostal) return _byPostal;
+  const m = new Map<string, Subdistrict[]>();
+  for (const r of rows()) {
+    const bucket = m.get(r.postalCode);
+    if (bucket) bucket.push(r);
+    else m.set(r.postalCode, [r]);
+  }
+  _byPostal = m;
+  return m;
+}
+
+/** All subdistricts (with their district + province) that share a five-digit postal code. Empty if none. */
+export function lookupPostalCode(code: string | null | undefined): Subdistrict[] {
+  const c = (code ?? '').trim();
+  if (!/^\d{5}$/.test(c)) return [];
+  return byPostal().get(c) ?? [];
+}
+
+/** Distinct provinces present in the subdistrict dataset (Thai + English), sorted by Thai name. */
+export function subdistrictProvinces(): Province[] {
+  const seen = new Map<string, Province>();
+  for (const r of rows()) if (!seen.has(r.provinceTh)) seen.set(r.provinceTh, { th: r.provinceTh, en: r.provinceEn });
+  return [...seen.values()].sort((a, b) => a.th.localeCompare(b.th, 'th'));
+}
+
+/** Distinct districts (อำเภอ/เขต) of a province, by canonical Thai province name. */
+export function districtsOfProvince(provinceTh: string): { th: string; en: string }[] {
+  const seen = new Map<string, { th: string; en: string }>();
+  for (const r of rows()) if (r.provinceTh === provinceTh && !seen.has(r.districtTh)) seen.set(r.districtTh, { th: r.districtTh, en: r.districtEn });
+  return [...seen.values()].sort((a, b) => a.th.localeCompare(b.th, 'th'));
+}
+
+/** Subdistricts (ตำบล/แขวง) of a district within a province, each carrying its postal code. */
+export function subdistrictsOfDistrict(provinceTh: string, districtTh: string): { th: string; en: string; postalCode: string }[] {
+  return rows()
+    .filter((r) => r.provinceTh === provinceTh && r.districtTh === districtTh)
+    .map((r) => ({ th: r.subdistrictTh, en: r.subdistrictEn, postalCode: r.postalCode }))
+    .sort((a, b) => a.th.localeCompare(b.th, 'th'));
+}
 
 // 77 provinces (19 central · 7 east · 20 northeast · 17 north · 14 south). Bangkok is the special
 // administrative area กรุงเทพมหานคร.

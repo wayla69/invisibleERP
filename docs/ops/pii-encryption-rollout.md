@@ -39,7 +39,7 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 | `crm_pipeline.email` / `phone` | display (leads) | safe to encrypt if not searched — verify, then apply `encryptedText` |
 | `loyalty_referrals.referred_phone` | display | likely safe — verify, then apply |
 | ~~`hcm` employee identifiers~~ | ~~varies~~ | **DONE 2026-07-02** — `employees.national_id`/`sso_no`/`bank_account` + `payslips.national_id` encrypted; PND1A grouped in app code |
-| ~~`vendors.tax_id` / `bank_account`~~ | ~~ghost-vendor GROUP BY~~ | **DONE 2026-07-02** — encrypted; detector groups decrypted values in app code |
+| ~~`vendors.tax_id` / `bank_account`~~ | ~~ghost-vendor GROUP BY~~ | **DONE 2026-07-02** — encrypted; detector groups decrypted values in app code. **2026-07-18:** the AP-intake vendor mapper (its only value-based lookup) now uses a `tax_id_bidx` blind index (0433, digits-only normalized, self-healed from the scan fallback; every index hit re-verified against the decrypted value) — the 500-row decrypt-and-scan is the fallback, no longer the primary path |
 | `wht_certificates.payee_tax_id` (+ payer) | statutory filing snapshot (display/PDF) | verify no value-based query, then apply `encryptedText` (next phase) |
 
 ## Rollout checklist (per table)
@@ -61,4 +61,5 @@ remaining PII columns are either **lookup keys** or **substring-searched**, so e
 | Date | Version | Change |
 |------|---------|--------|
 | 2026-06-30 | v0.1 | Mechanism + `customer_master.tax_id`/`notes` shipped; lookup-keyed fields scaffolded + deferred. |
+| 2026-07-18 | v0.3 | `vendors.tax_id_bidx` blind index shipped (migration `0433`) for the AP-intake mapper lookup — the bidx pattern's first vendor-side application; self-healing (no decrypting backfill needed), stale-index-safe (decrypted re-verification). ToE `match.ts` §Q(g). |
 | 2026-07-02 | v0.2 | **docs/27 R0-1:** employee (`national_id`/`sso_no`/`bank_account`), payslip (`national_id`) and vendor (`tax_id`/`bank_account`) columns encrypted; PND1A + ghost-vendor aggregations moved to app-code grouping over decrypted values; idempotent `db:backfill:pii` script ships (covers the earlier customer_master debt too); at-rest ToE in `hcm`/`ext`; RCM ITGC-AC-19 text updated + xlsx regenerated. |

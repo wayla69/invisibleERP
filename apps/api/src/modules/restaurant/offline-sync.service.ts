@@ -1,11 +1,13 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
 import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { posOfflineSync, dineInOrders } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { DineInService } from './dine-in.service';
+import type { CreateOrderDto, CheckoutDto } from './dto';
 import { BuffetService } from './buffet.service';
+import { MemberService } from '../loyalty/member.service';
 
 // Offline-queued REGISTER (touch-POS) sales, replayed idempotently through the restaurant
 // order→checkout path. The touch register sells MENU items by `sku` (a different catalog + sale
@@ -32,9 +34,14 @@ export interface RegisterOfflineSaleOp {
   // ── Phase 2b: buffet-tier sale — the per-pax charge is re-priced from THIS server's package master
   //    (never the hub's number); `lines` may then be empty (buffet food itself bills ฿0). ──
   buffet?: { package_code: string; pax: number; overtime_pax?: number };
+  // ── Phase 2c (docs/50 Wave 4 C4): loyalty-redemption replay — the hub emits the member + the points
+  //    the HUB redeemed; the CLOUD re-checks the member and clamps to ITS balance under the redeem lock
+  //    (the cloud ledger is the book of record; the hub's local ledger never syncs). ──
+  member_id?: number;
+  redeem_points?: number;
 }
 export interface RegisterOfflineSyncBatchDto { sales: RegisterOfflineSaleOp[] }
-export interface SyncResult { client_uuid: string; status: 'synced' | 'duplicate' | 'failed'; sale_no: string | null; error: string | null }
+export interface SyncResult { client_uuid: string; status: 'synced' | 'duplicate' | 'failed'; sale_no: string | null; error: string | null; adjustments?: string[] }
 
 // ── POS-6: offline DINE-IN ops (open table / add items / fire) ──────────────────────────────────
 // Dine-in used to be online-only (the kitchen/fire path). POS-6 lets the register capture the dine-in
@@ -66,6 +73,7 @@ export class RestaurantOfflineSyncService {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly dineIn: DineInService,
     private readonly buffet: BuffetService,
+    @Optional() private readonly member?: MemberService, // C4: cloud-side redeem clamp on hub replay
   ) {}
 
   async syncBatch(dto: RegisterOfflineSyncBatchDto, user: JwtUser) {
@@ -92,23 +100,42 @@ export class RestaurantOfflineSyncService {
         // 86-checks the menu items) then checkout. Offline register sales are quick (no table) — fire
         // is skipped (the kitchen was offline anyway). The sale books on the SYNC day; offline windows
         // are short (intra-shift), so same-day sync books on the same business day.
-        const order: any = await this.dineIn.createOrder({ items: (op.lines ?? []) as any }, user);
+        const order: any = await this.dineIn.createOrder({ items: (op.lines ?? []) as CreateOrderDto['items'] }, user);
         // buffet-tier replay (Phase 2b): per-pax charge (+ overtime) priced from THIS server's master
         if (op.buffet) {
           const [row] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, order.order_no)).limit(1);
           await this.buffet.applyReplayCharge(Number(row!.id), user.tenantId ?? null, op.buffet.package_code, Number(op.buffet.pax), Number(op.buffet.overtime_pax ?? 0), user);
         }
+        // C4 (docs/50 Wave 4): loyalty-redemption replay — "adjusted at sync". The hub redeemed against
+        // its LOCAL balance; the cloud clamps to its OWN balance (never fails the revenue-bearing sale
+        // over a points drift) and surfaces what changed. redeemInTx's lock + LYL-22 idempotency then
+        // apply inside checkout exactly as a native sale.
+        const adjustments: string[] = [];
+        let memberId = op.member_id, redeemPoints = op.redeem_points ?? 0;
+        if (memberId && redeemPoints > 0) {
+          try {
+            const bal: any = this.member ? await this.member.balance(Number(memberId), user) : null;
+            const cloudBal = Number(bal?.balance ?? bal?.points ?? 0);
+            if (!bal) { adjustments.push(`LOYALTY_UNAVAILABLE: redeemed ${redeemPoints} points not replayed`); memberId = undefined; redeemPoints = 0; }
+            else if (cloudBal < redeemPoints) { adjustments.push(`REDEEM_CLAMPED: hub redeemed ${redeemPoints}, cloud balance ${cloudBal} — replayed ${cloudBal}`); redeemPoints = Math.max(0, cloudBal); }
+          } catch {
+            adjustments.push(`MEMBER_NOT_FOUND: member ${memberId} unknown on the cloud — redeemed ${redeemPoints} points not replayed`);
+            memberId = undefined; redeemPoints = 0;
+          }
+        }
         const sale: any = await this.dineIn.checkout(order.order_no, {
           method: op.method ?? 'Cash', discount_pct: op.discount_pct, discount: op.discount, tip: op.tip,
+          ...(memberId ? { member_id: memberId } : {}),
+          ...(memberId && redeemPoints > 0 ? { redeem_points: redeemPoints } : {}),
           // manual service charge replays exactly like the register applies it: forced at the given %.
           ...(op.service_charge_pct ? { apply_pricing_rules: true, service_charge_pct: op.service_charge_pct, party_size: 1, service_min_party: 1 } : {}),
-        } as any, user);
+        } as CheckoutDto, user);
         await db.insert(posOfflineSync).values({
           tenantId, clientUuid: op.client_uuid, deviceId: op.device_id ?? null, status: 'synced',
           saleNo: sale.sale_no, capturedAt: new Date(op.captured_at), clientSeq: op.client_seq ?? null,
           payloadHash: hashOp(op), createdBy: user.username,
         }).onConflictDoUpdate({ target: [posOfflineSync.tenantId, posOfflineSync.clientUuid], set: { status: 'synced', saleNo: sale.sale_no, errorCode: null, errorMessage: null, syncedAt: new Date() } });
-        return { client_uuid: op.client_uuid, status: 'synced' as const, sale_no: sale.sale_no, error: null };
+        return { client_uuid: op.client_uuid, status: 'synced' as const, sale_no: sale.sale_no, error: null, ...(adjustments.length ? { adjustments } : {}) };
       });
     } catch (e: any) {
       const code = e?.response?.code ?? e?.code ?? 'SYNC_FAILED';

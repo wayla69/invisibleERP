@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { MessagingService } from './messaging.service';
+import type { MessageChannel } from './gateways';
 import { TenantMessagingService } from './tenant-messaging.service';
 import { LineNotifyService } from './line-notify.service';
 
@@ -58,7 +59,7 @@ export class MessagingController {
 
   @Post('providers/:channel/test') @Permissions('users', 'exec')
   testProvider(@Param('channel') ch: string, @Body(new ZodValidationPipe(TestBody)) b: any, @CurrentUser() u: JwtUser) {
-    return this.svc.sendTest(ch as any, b.to, u);
+    return this.svc.sendTest(ch as MessageChannel, b.to, u);
   }
 
   // LP-1 (docs/31) — go-live console: push a test message to the CALLING admin's own linked LINE (no

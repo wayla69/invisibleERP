@@ -2,7 +2,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Log
 import { Reflector } from '@nestjs/core';
 import { from, firstValueFrom, finalize } from 'rxjs';
 import { sql } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../database/database.module';
+import { DRIZZLE, globalDbALS, type DrizzleDb } from '../database/database.module';
 import { tenantALS } from './tenant-context';
 import { NO_TX_KEY, isPlatformAdmin } from './decorators';
 import { txStart, txEnd } from '../observability/runtime-metrics';
@@ -34,9 +34,20 @@ export class TenantTxInterceptor implements NestInterceptor {
     // do not wrap SSE/streaming endpoints in a single transaction
     const isSse = this.reflector.get<boolean>('sse', ctx.getHandler());
     if (isSse) return next.handle();
-    // @NoTx() — opt out for handlers that touch no tenant-scoped data (health/config).
+    // @NoTx() — opt out for handlers that touch no tenant-scoped data (health/config) or that resolve and
+    // scope the tenant themselves (public webhooks, cross-tenant cron sweeps, member-auth). @NoTx is an
+    // explicit "no per-request tenant tx — I manage scoping myself" contract, which is exactly what
+    // runGlobalDb declares: run the handler inside globalDbALS so the fail-closed proxy (STRICT_TENANT_PROXY)
+    // permits its intentional base-pool access instead of throwing TENANT_CONTEXT_MISSING. This covers every
+    // @NoTx route at one choke point (harnesses that call the service directly still wrap at the method).
     const noTx = this.reflector.get<boolean>(NO_TX_KEY, ctx.getHandler());
-    if (noTx) return next.handle();
+    if (noTx) {
+      const r = ctx.switchToHttp().getRequest();
+      return from(globalDbALS.run(
+        { reason: `@NoTx ${r?.method ?? ''} ${r?.url ?? ''}` },
+        () => firstValueFrom(next.handle(), { defaultValue: undefined }),
+      ));
+    }
 
     const req = ctx.switchToHttp().getRequest();
     const user = req?.user;

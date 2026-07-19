@@ -356,6 +356,60 @@ export class TaxInvoiceService {
     return { ...(await this.getByDocNo(user, docNo)), gl_entry_no: je?.entry_no ?? null, gl_status: je ? 'Draft' : null };
   }
 
+  // ── ใบลดหนี้จากการคืนสินค้าหน้าร้าน (auto-issued on a POS return; ม.86/10) ──
+  // A POS return already reverses revenue + output-VAT in the GL (the RTN journal credits CASH — the sale
+  // was paid at the till, not on account). This issues the matching ใบลดหนี้ FISCAL DOCUMENT so the
+  // output-VAT (ภ.พ.30) report is reduced for the return — WITHOUT a second GL posting: the RTN journal IS
+  // the GL effect, which we only LINK (gl_entry_no). Contrast issueAdjustment (a standalone AR credit note)
+  // which POSTS its own Dr revenue+VAT / Cr 1100 AR under maker-checker — wrong here (cash sale, no AR, and
+  // the reversal already happened). The note is Issued immediately (the return is the authorising event; a
+  // large refund is separately gated by REV-16). Idempotent per return. Returns null when there is nothing
+  // to adjust (no Issued tax invoice on the sale — e.g. a Comp/unbilled sale — or a zero-value return).
+  // Runs on the caller's transaction so it commits/rolls back atomically with the return.
+  async issueCreditNoteForReturn(args: {
+    originalDocNo: string; returnNo: string; reason?: string | null; subtotal: number; vat: number;
+    lines: { description: string; qty?: number; unit_price?: number; amount: number }[];
+    glEntryNo?: string | null; createdBy: string;
+  }, tx?: any): Promise<{ doc_no: string; already?: boolean } | null> {
+    const db = tx ?? this.db;
+    const [orig] = await db.select().from(taxInvoices).where(eq(taxInvoices.docNo, args.originalDocNo)).limit(1);
+    if (!orig || orig.status !== 'Issued') return null;                        // nothing Issued to adjust
+    if (orig.type === 'credit_note' || orig.type === 'debit_note') return null; // never a note-on-a-note
+    const tenantId = Number(orig.tenantId);
+    // Idempotent: one credit note per return (a re-run returns the existing one, keyed on source_ref=RTN-).
+    const [existing] = await db.select({ docNo: taxInvoices.docNo }).from(taxInvoices)
+      .where(and(eq(taxInvoices.tenantId, tenantId), eq(taxInvoices.type, 'credit_note'), eq(taxInvoices.sourceRef, args.returnNo))).limit(1);
+    if (existing) return { doc_no: existing.docNo, already: true };
+
+    const subtotal = round2(args.subtotal);
+    const vat = round2(args.vat);
+    if (subtotal <= 0) return null;                                            // a zero-value return
+    const seller = await this.tenantRow(tenantId);
+    this.assertCanIssue(seller);
+    // A credit note cannot reduce the sale by more than the original net value (ม.82/10 basis).
+    if (subtotal > n(orig.subtotal) + 0.005) {
+      throw new BadRequestException({ code: 'CREDIT_EXCEEDS_ORIGINAL', message: `Credit ${subtotal} exceeds original net ${n(orig.subtotal)}`, messageTh: 'มูลค่าลดหนี้เกินมูลค่าตามใบกำกับภาษีเดิม' });
+    }
+    const total = round2(subtotal + vat);
+    const docNo = await this.docNo.nextMonthlyTenant('CN', tenantId);
+    const [head] = await db.insert(taxInvoices).values({
+      tenantId, docNo, type: 'credit_note', issueDate: ymd(), sourceType: orig.sourceType, sourceRef: args.returnNo,
+      ...sellerSnapshot(seller),
+      // credit notes inherit the original's buyer block (a POS abbreviated slip has none — stays null).
+      buyerName: orig.buyerName, buyerTaxId: orig.buyerTaxId, buyerBranchCode: orig.buyerBranchCode, buyerAddress: orig.buyerAddress,
+      subtotal: fx(subtotal, 2), vatRate: fx(n(orig.vatRate), 4), vatAmount: fx(vat, 2), grandTotal: fx(total, 2), isVatInclusive: false,
+      status: 'Issued', originalDocNo: orig.docNo, reason: args.reason?.trim() || 'คืนสินค้า', glEntryNo: args.glEntryNo ?? null, createdBy: args.createdBy,
+    }).returning({ id: taxInvoices.id });
+    if (args.lines.length) {
+      await db.insert(taxInvoiceLines).values(args.lines.map((l, i) => ({
+        taxInvoiceId: Number(head!.id), tenantId, lineNo: String(i + 1), itemId: null, description: l.description,
+        qty: l.qty != null ? fx(l.qty, 3) : null, uom: null,
+        unitPrice: l.unit_price != null ? fx(l.unit_price, 2) : null, discount: fx(0, 2), amount: fx(n(l.amount), 2),
+      })));
+    }
+    return { doc_no: docNo };
+  }
+
   // Checker approves the note: SoD-blocked if approver === maker (also re-enforced by the ledger). Posts the
   // linked Draft GL entry (→ VAT/GL land) and flips the note PendingApproval → Issued (→ hits the VAT report).
   async approveAdjustment(docNo: string, approver: JwtUser, selfApprovalReason?: string | null) {

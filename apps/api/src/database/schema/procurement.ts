@@ -25,6 +25,10 @@ export const vendors = pgTable('vendors', {
   // legacy-plaintext passthrough). NOT queried by value in SQL — the ghost-vendor detector
   // (controls.service.ts) groups decrypted values in app code, since random-IV ciphertext never collides.
   taxId: encryptedText('tax_id'),
+  // Blind index over the DIGITS-ONLY tax id (encrypted-column.ts blindIndex, 0433) — equality lookups
+  // only (AP-intake vendor mapping). Self-healed by the mapper's fallback scan; every index hit is
+  // re-verified against the decrypted tax_id, so a stale value can never mis-map a vendor.
+  taxIdBidx: text('tax_id_bidx'),
   paymentTerms: text('payment_terms').default('Cash'),
   leadTimeDays: integer('lead_time_days').default(3),
   rating: numeric('rating').default('3.0'),
@@ -138,6 +142,9 @@ export const apInvoiceIntakes = pgTable('ap_invoice_intakes', {
   mapMethod: text('map_method'), // po_number | vendor_tax_id | vendor_amount | manual
   mapConfidence: numeric('map_confidence', { precision: 5, scale: 2 }), // 0–100
   candidates: jsonb('candidates'), // scored PO candidates surfaced for human review
+  // Extracted line items (vision; 0432) — review/bill-draft detail ONLY, never fed to the 3-way match
+  // (vision lines carry no internal item_id; EXP-10 stays a header-level match by design).
+  lines: jsonb('lines'),
   dupOf: text('dup_of'), // earlier intake carrying the same vendor invoice no (duplicate-payment guard)
   // upload channel: the scanned source document (image/PDF). file_ref is `objstore:<key>` when the
   // object store is configured, else the inline data: URL (object-storage.ts fallback pattern).

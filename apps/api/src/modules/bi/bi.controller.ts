@@ -22,7 +22,7 @@ export class BiController {
   @Get('sales-cube')
   @Permissions('exec')
   salesCube(@Query('period') period?: string, @Query('months') months?: string, @Query('start') start?: string, @Query('end') end?: string, @CurrentUser() user?: JwtUser) {
-    return this.svc.salesCube({ period: period as any, months: qintOpt('months', months), start_date: start, end_date: end }, user!);
+    return this.svc.salesCube({ period: period as 'day' | 'week' | 'month' | undefined, months: qintOpt('months', months), start_date: start, end_date: end }, user!);
   }
 
   @Get('sales-cube/top-items')

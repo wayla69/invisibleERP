@@ -20,11 +20,12 @@ import { Label } from '@/components/ui/label';
 import { DocSelect } from '@/components/doc-select';
 
 type Candidate = { po_no: string; vendor_name: string | null; total_amount: number; score: number };
+type IntakeLine = { description: string | null; qty: number | null; unit_price: number | null; amount: number | null };
 type Intake = {
   intake_no: string; status: string; extract_source: string | null;
   vendor_name: string | null; vendor_tax_id: string | null; invoice_no: string | null; invoice_date: string | null;
   amount: number | null; currency: string | null; po_no: string | null; map_method: string | null;
-  map_confidence: number; candidates: Candidate[]; dup_of: string | null;
+  map_confidence: number; candidates: Candidate[]; lines: IntakeLine[]; dup_of: string | null;
   file_name: string | null; has_file: boolean;
   txn_no: string | null; match_status: string | null; payable: boolean | null; auto_posted?: boolean;
 };
@@ -180,6 +181,40 @@ function IntakeDetail({ intake: r, onChanged }: { intake: Intake; onChanged: (r:
         <table className="w-full text-sm"><tbody>
           {rows.map(([k, v]) => <tr key={k as string} className="border-b"><td className="px-2 py-1 text-muted-foreground">{k}</td><td className="px-2 py-1 text-right">{v == null || v === '' ? '—' : v}</td></tr>)}
         </tbody></table>
+
+        {(r.lines?.length ?? 0) > 0 && (() => {
+          // Reviewer detail read from the document by vision — pre-filled bill-draft lines, never match
+          // input. Flag a Σ(lines) that drifts >0.5% from the header total so the reviewer looks closer.
+          const sum = r.lines.reduce((s, l) => s + (l.amount ?? 0), 0);
+          const drift = r.amount != null && r.amount > 0 && Math.abs(sum - r.amount) / r.amount > 0.005;
+          return (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">{t('iv.ap_lines_title', { n: r.lines.length })}</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm"><thead><tr className="border-b text-muted-foreground">
+                  <th className="px-2 py-1 text-left font-normal">{t('iv.ap_line_desc')}</th>
+                  <th className="px-2 py-1 text-right font-normal">{t('iv.ap_line_qty')}</th>
+                  <th className="px-2 py-1 text-right font-normal">{t('iv.ap_line_price')}</th>
+                  <th className="px-2 py-1 text-right font-normal">{t('iv.ap_line_amount')}</th>
+                </tr></thead><tbody>
+                  {r.lines.map((l, i) => (
+                    <tr key={i} className="border-b">
+                      <td className="px-2 py-1">{l.description ?? '—'}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{l.qty != null ? num(l.qty) : '—'}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{l.unit_price != null ? num(l.unit_price) : '—'}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{l.amount != null ? num(l.amount) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody></table>
+              </div>
+              {drift && (
+                <p className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-sm">
+                  <ShieldAlert className="size-4 shrink-0" /> {t('iv.ap_lines_sum_warn', { sum: num(sum), total: num(r.amount ?? 0) })}
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {r.status !== 'Posted' && r.candidates.length > 0 && (
           <div className="space-y-2">

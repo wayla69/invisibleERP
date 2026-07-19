@@ -290,9 +290,14 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'hqaa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: hq.id },
     { username: 'cf2aa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: cf2.id },
+    // cf2 tenant Admin — provisions the cf2 full-scope (`*`) public-API key. A full-scope key expands (via the
+    // Sales role's `exec`) to gl_post/gl_close, so PE-1 permits it only for a holder of those perms (an Admin),
+    // NOT the users-only AccessAdmin (which could otherwise mint a GL-capable machine key it can't use itself).
+    { username: 'cf2admin', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: cf2.id },
   ]).onConflictDoNothing();
   const hqaa = (await inj('POST', '/api/login', undefined, { username: 'hqaa', password: 'pw' })).json.token;
   const cf2aa = (await inj('POST', '/api/login', undefined, { username: 'cf2aa', password: 'pw' })).json.token;
+  const cf2admin = (await inj('POST', '/api/login', undefined, { username: 'cf2admin', password: 'pw' })).json.token;
   // a guaranteed cf2-tenant mutation → one known audit row (actor cfwh2, tenant cf2)
   await inj('POST', '/api/saved-views', token2, { module: 'audit-probe', name: 'AUDITPROBE', config: {}, shared: false });
 
@@ -638,7 +643,7 @@ async function main() {
   const hqKeyR = await inj('POST', '/api/platform/api-keys', token, { name: 'pub-hq', scopes: ['*'] });
   const hqKey = hqKeyR.json.key;
   ok('Public API: an API key is issued (ierp_) for the public surface', /^ierp_/.test(hqKey ?? ''), `${hqKeyR.status}`);
-  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cf2', scopes: ['*'] })).json.key;
+  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2admin, { name: 'pub-cf2', scopes: ['*'] })).json.key; // full-scope key → minted by the cf2 Admin (PE-1)
   const catKey = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cat', scopes: ['catalog:read'] })).json.key;
   const rateKey = (await inj('POST', '/api/platform/api-keys', token, { name: 'pub-rate', scopes: ['*'] })).json.key;
 
@@ -892,10 +897,14 @@ async function main() {
   // ── B2 document-AI intake (Platform Phase 16) ──
   const docEx = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9001\nDate 2026-06-15\nSubtotal 1,401.87\nVAT 98.13\nGrand Total 1,500.00' });
   ok('Doc-AI: extracts invoice no / amount / date (regex fallback)', (docEx.status === 200 || docEx.status === 201) && docEx.json.fields?.invoice_no === 'INV-9001' && Number(docEx.json.fields?.amount) === 1500 && docEx.json.fields?.invoice_date === '2026-06-15', `${JSON.stringify(docEx.json.fields ?? {})}`);
+  ok('Doc-AI: rules path returns lines:[] (deterministic path never invents lines) + THB default', Array.isArray(docEx.json.fields?.lines) && docEx.json.fields.lines.length === 0 && docEx.json.fields?.currency === 'THB', `lines=${JSON.stringify(docEx.json.fields?.lines)} cur=${docEx.json.fields?.currency}`);
+  const docUsd = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9002\nGrand Total USD 1,500.00' });
+  ok('Doc-AI: rules path detects a non-THB currency (USD)', docUsd.json.fields?.currency === 'USD' && docUsd.json.fields?.invoice_no === 'INV-9002', `cur=${docUsd.json.fields?.currency}`);
   // image/PDF extraction endpoint (Quick Capture preview + LINE channel, docs/34) — extract-only, no GL.
   const docPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   const docImg = await inj('POST', '/api/doc-ai/extract-document', token, { file_name: 'bill.png', data_url: docPng });
   ok('Doc-AI: extract-document accepts an image (no key → honest empty draft, source none)', (docImg.status === 200 || docImg.status === 201) && docImg.json.source === 'none' && docImg.json.fields && 'invoice_no' in docImg.json.fields, JSON.stringify({ st: docImg.status, src: docImg.json.source }));
+  ok('Doc-AI: extract-document honest-empty draft carries lines:[]', Array.isArray(docImg.json.fields?.lines) && docImg.json.fields.lines.length === 0, `lines=${JSON.stringify(docImg.json.fields?.lines)}`);
   const docBad = await inj('POST', '/api/doc-ai/extract-document', token, { data_url: `data:text/plain;base64,${Buffer.from('x').toString('base64')}` });
   ok('Doc-AI: extract-document rejects non-image/PDF (400 UNSUPPORTED_FILE_TYPE)', docBad.status === 400 && docBad.json.error?.code === 'UNSUPPORTED_FILE_TYPE', JSON.stringify({ st: docBad.status, code: docBad.json.error?.code }));
 

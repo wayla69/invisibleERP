@@ -5,6 +5,8 @@
 // resolves with the typed reason (or null on cancel). Pages that never mount AppShell (portal/diner) have
 // no host registered, so we FALL BACK to the legacy window.prompt behaviour — the retry flow is identical.
 
+import { ts } from './i18n-static';
+
 export type SmeReasonHost = (serverMsg: string) => Promise<string | null>;
 
 let host: SmeReasonHost | null = null;
@@ -26,7 +28,7 @@ export function unregisterSmeReasonHost(h: SmeReasonHost): void {
 export function requestSmeReason(serverMsg: string): Promise<string | null> {
   if (host) return host(serverMsg);
   if (typeof window === 'undefined') return Promise.resolve(null);
-  const answer = window.prompt(`${serverMsg}\n\nกรุณาระบุเหตุผลการอนุมัติรายการของตนเอง (โหมด SME):`);
+  const answer = window.prompt(`${serverMsg}\n\n${ts('err.sme_reason_prompt')}`);
   const reason = (answer ?? '').trim();
   return Promise.resolve(reason || null);
 }

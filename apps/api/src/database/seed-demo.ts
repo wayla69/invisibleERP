@@ -196,6 +196,9 @@ async function main() {
         price: n(m.price), cost: n(m.cost), stationCode: m.station,
         prepMinutes: STATIONS.find((s) => s.code === m.station)?.prep ?? 10,
         trackStock: false, isAvailable: true, sort: m.sort, active: true,
+        // "เมนูแนะนำ" + KDS food-priority (0434): optional per-item fixture flags (default off / normal).
+        isRecommended: !!(m as { recommended?: boolean }).recommended,
+        kdsPriority: (m as { priority?: number }).priority ?? 0,
         imageUrl: menuImageDataUri(m.catCode, m.nameEn || m.nameTh),
       })),
     );

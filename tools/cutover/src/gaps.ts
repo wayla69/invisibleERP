@@ -146,7 +146,7 @@ async function main() {
   ok('scan Issue movement qty=-2', mv.length === 1 && Number(mv[0].qty) === -2, `qty=${mv[0]?.qty}`);
 
   // ── User CRUD ──
-  const uc = await inj('POST', '/api/admin/users', token, { username: 'u1', password: 'secret1', role: 'Sales' });
+  const uc = await inj('POST', '/api/admin/users', token, { username: 'u1', password: 'secret12', role: 'Sales' });
   ok('create user', (uc.status === 200 || uc.status === 201) && uc.json.created === true);
   const ulist = await inj('GET', '/api/admin/users', token);
   ok('list users includes u1', ulist.json.users.some((x: any) => x.username === 'u1'));
@@ -162,14 +162,28 @@ async function main() {
   ok('delete user', udel.json.deleted === true);
   const uself = await inj('DELETE', '/api/admin/users/admin', token);
   ok('cannot delete self → 400', uself.status === 400);
+  // Security (pentest P9): a non-platform actor cannot DELETE a higher-privileged Admin (denial-of-admin) —
+  // mirrors the P1 reset-password guard. Seed a peer Admin directly (creating one via the API is itself
+  // blocked by assertCanGrantRole), then the non-platform Admin's delete must be refused.
+  const hqRowP9 = (await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0];
+  await db.insert(s.users).values({ username: 'admin2', passwordHash: await new PasswordService().hash('admin123'), role: 'Admin', tenantId: hqRowP9.id }).onConflictDoNothing();
+  const udelAdmin = await inj('DELETE', '/api/admin/users/admin2', token);
+  ok('P9: non-platform admin cannot delete a peer Admin → 403 ADMIN_GRANT_DENIED', udelAdmin.status === 403 && udelAdmin.json.error?.code === 'ADMIN_GRANT_DENIED', `${udelAdmin.status} ${udelAdmin.json.error?.code}`);
 
   // ── Portal sub-accounts (admin tenant = HQ) ──
-  const su = await inj('POST', '/api/portal/my/users', token, { username: 'staff1', password: 'secret1', permissions: ['cust_pos', 'cust_inventory'] });
+  const su = await inj('POST', '/api/portal/my/users', token, { username: 'staff1', password: 'secret12', permissions: ['cust_pos', 'cust_inventory'] });
   ok('create sub-account', (su.status === 200 || su.status === 201) && su.json.created === true);
   const sl = await inj('GET', '/api/portal/my/users', token);
   ok('sub-account appears in my-users', sl.json.users.some((x: any) => x.username === 'staff1'));
   const sd = await inj('DELETE', '/api/portal/my/users/staff1', token);
   ok('delete sub-account', sd.json.deleted === true);
+  // PE-9 — a portal customer cannot grant a sub-user the back-office `loyalty` duty (it would satisfy the
+  // OR-gated staff loyalty routes, incl. member points-transfer). The allow-list filters it out.
+  await inj('POST', '/api/portal/my/users', token, { username: 'staff2', password: 'secret12', permissions: ['cust_pos', 'loyalty'] });
+  const [s2row] = await db.select({ id: s.users.id }).from(s.users).where(eq(s.users.username, 'staff2')).limit(1);
+  const s2perms = (await db.select({ perm: s.userPermissions.perm }).from(s.userPermissions).where(eq(s.userPermissions.userId, Number(s2row.id)))).map((r: any) => r.perm);
+  ok('PE-9: portal sub-user cannot be granted the back-office `loyalty` duty (filtered out)',
+    s2perms.includes('cust_pos') && !s2perms.includes('loyalty'), JSON.stringify(s2perms));
 
   await app.close();
   await pg.close();

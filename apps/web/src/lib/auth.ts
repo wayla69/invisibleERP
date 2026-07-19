@@ -6,12 +6,14 @@ import { api, hasSession } from './api';
 export interface Me {
   username: string;
   role: string;
-  customer_name: string | null;
+  customer_name: string | null; // tenant CODE
+  company_name?: string | null; // tenant display name — shown in the sidebar header
   permissions: string[];
   must_change_password?: boolean;
   is_platform_owner?: boolean; // configured platform owner ("god") — gates the cross-company switcher
   control_profile?: 'enterprise' | 'sme'; // docs/49 — 'sme' shows the SME-mode banner + hides configured nav groups
   sme_hidden_nav_groups?: string[];       // nav group title-keys hidden for this SME tenant
+  sme_open_nav_groups?: string[];         // B1 (docs/50) — industry-derived group/subgroup keys open by default
 }
 
 export function useMe() {

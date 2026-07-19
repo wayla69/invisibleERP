@@ -11,6 +11,7 @@ import { StripeWebhookController } from './stripe-webhook.controller';
 import { PlanGuard } from './plan.guard';
 import { PlatformNotificationsModule } from '../platform-notifications/platform-notifications.module';
 import { BillingBiReports } from './billing-bi-reports';
+import { StarterPackService } from './starter-pack.service';
 
 // AuthModule exports PasswordService (signup hashes the admin password); LedgerModule exports
 // LedgerService (signup provisions the new tenant's fiscal periods); TaxModule for cache invalidation.
@@ -20,7 +21,7 @@ import { BillingBiReports } from './billing-bi-reports';
 @Module({
   imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule],
   controllers: [BillingController, TenantController, StripeWebhookController],
-  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasMetricsService, PlanGuard],
+  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasMetricsService, PlanGuard, StarterPackService],
   exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}

@@ -3,7 +3,10 @@
 // join the vitest coverage include list with this suite.
 import { describe, expect, it, afterEach } from 'vitest';
 import { normalizeName, nameSimilarity, normalizeKey } from '../src/common/text-similarity';
-import { normalizeProvince, isValidPostalCode, TH_PROVINCES } from '../src/common/thai-address';
+import {
+  normalizeProvince, isValidPostalCode, TH_PROVINCES,
+  lookupPostalCode, subdistrictProvinces, districtsOfProvince, subdistrictsOfDistrict,
+} from '../src/common/thai-address';
 import { pgError, pgErrorCode, isUniqueViolation } from '../src/common/db-error';
 import { bizParts, bizYmdCompact, bizYmdDash, bizStamp, bizHourMin } from '../src/common/bizdate';
 
@@ -56,6 +59,32 @@ describe('thai-address', () => {
     expect(isValidPostalCode('10110')).toBe(true);
     expect(isValidPostalCode('1011')).toBe(false);
     expect(isValidPostalCode('10110a')).toBe(false);
+  });
+});
+
+describe('thai subdistrict reference (postal-code autofill)', () => {
+  it('maps a postal code to its subdistrict(s) with district + province', () => {
+    const m = lookupPostalCode('50000'); // เมืองเชียงใหม่
+    expect(m.length).toBeGreaterThan(0);
+    expect(m.every((r) => r.provinceTh === 'เชียงใหม่' && r.districtTh === 'เมืองเชียงใหม่')).toBe(true);
+    expect(m.every((r) => r.subdistrictTh && r.subdistrictEn && r.postalCode === '50000')).toBe(true);
+  });
+
+  it('returns empty for malformed / unknown postal codes', () => {
+    expect(lookupPostalCode('abc')).toEqual([]);
+    expect(lookupPostalCode('999')).toEqual([]);
+    expect(lookupPostalCode('00000')).toEqual([]);
+    expect(lookupPostalCode(null)).toEqual([]);
+  });
+
+  it('cascades province → districts → subdistricts (each carrying its postal code)', () => {
+    const provinces = subdistrictProvinces();
+    expect(provinces.length).toBe(77);
+    const districts = districtsOfProvince('เชียงใหม่');
+    expect(districts.length).toBeGreaterThan(20); // Chiang Mai has 25 districts
+    const subs = subdistrictsOfDistrict('เชียงใหม่', 'เมืองเชียงใหม่');
+    expect(subs.length).toBeGreaterThan(0);
+    expect(subs.every((s) => /^\d{5}$/.test(s.postalCode))).toBe(true);
   });
 });
 

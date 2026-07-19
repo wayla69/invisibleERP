@@ -31,6 +31,54 @@ const PACKS = [
   { key: 'services', label: 'ธุรกิจบริการ', label_en: 'Services', objects: [
     { object_key: 'service_job', label: 'งานบริการ', label_en: 'Service job', icon: 'Wrench' },
   ] },
+  { key: 'manufacturing', label: 'การผลิต / โรงงาน', label_en: 'Manufacturing', objects: [
+    { object_key: 'bom', label: 'สูตรการผลิต (BOM)', label_en: 'Bill of materials', icon: 'Factory' },
+    { object_key: 'work_center', label: 'ศูนย์การผลิต', label_en: 'Work center', icon: 'Cog' },
+  ] },
+  { key: 'construction', label: 'ก่อสร้าง / รับเหมา', label_en: 'Construction', objects: [
+    { object_key: 'boq', label: 'รายการวัสดุ/ปริมาณงาน (BoQ)', label_en: 'Bill of quantities', icon: 'ClipboardList' },
+    { object_key: 'subcontractor', label: 'ผู้รับเหมาช่วง', label_en: 'Subcontractor', icon: 'HardHat' },
+  ] },
+  { key: 'ecommerce', label: 'อีคอมเมิร์ซ / ขายออนไลน์', label_en: 'E-commerce', objects: [
+    { object_key: 'sales_channel', label: 'ช่องทางขายออนไลน์', label_en: 'Online sales channel', icon: 'ShoppingCart' },
+    { object_key: 'promotion_plan', label: 'แผนโปรโมชั่น', label_en: 'Promotion plan', icon: 'Tag' },
+  ] },
+  { key: 'hospitality', label: 'โรงแรม / ที่พัก', label_en: 'Hospitality', objects: [
+    { object_key: 'room_type', label: 'ประเภทห้องพัก', label_en: 'Room type', icon: 'BedDouble' },
+    { object_key: 'menu_recipe', label: 'สูตรอาหาร', label_en: 'Recipe', icon: 'ChefHat' },
+  ] },
+  { key: 'healthcare', label: 'สุขภาพ / คลินิก', label_en: 'Healthcare', objects: [
+    { object_key: 'service_item', label: 'รายการบริการ/หัตถการ', label_en: 'Service item', icon: 'Stethoscope' },
+    { object_key: 'drug_item', label: 'รายการยา/เวชภัณฑ์', label_en: 'Drug / supply', icon: 'Pill' },
+  ] },
+  { key: 'professional', label: 'บริการวิชาชีพ / ที่ปรึกษา', label_en: 'Professional services', objects: [
+    { object_key: 'engagement', label: 'งานที่ปรึกษา (Engagement)', label_en: 'Engagement', icon: 'Briefcase' },
+    { object_key: 'rate_card', label: 'อัตราค่าบริการ', label_en: 'Rate card', icon: 'DollarSign' },
+  ] },
+  { key: 'agriculture', label: 'เกษตรกรรม', label_en: 'Agriculture', objects: [
+    { object_key: 'crop_plan', label: 'แผนการเพาะปลูก', label_en: 'Crop plan', icon: 'Sprout' },
+    { object_key: 'harvest_batch', label: 'ล็อตผลผลิต', label_en: 'Harvest batch', icon: 'Wheat' },
+  ] },
+  { key: 'automotive', label: 'ยานยนต์ / ศูนย์บริการ', label_en: 'Automotive & service', objects: [
+    { object_key: 'service_job', label: 'ใบงานซ่อม', label_en: 'Service job', icon: 'Wrench' },
+    { object_key: 'part_catalog', label: 'แคตตาล็อกอะไหล่', label_en: 'Parts catalog', icon: 'Cog' },
+  ] },
+  { key: 'logistics', label: 'โลจิสติกส์ / ขนส่ง', label_en: 'Logistics & transport', objects: [
+    { object_key: 'delivery_route', label: 'เส้นทางจัดส่ง', label_en: 'Delivery route', icon: 'Truck' },
+    { object_key: 'vehicle', label: 'ยานพาหนะ', label_en: 'Vehicle', icon: 'Truck' },
+  ] },
+  { key: 'education', label: 'การศึกษา', label_en: 'Education', objects: [
+    { object_key: 'course', label: 'คอร์ส/หลักสูตร', label_en: 'Course', icon: 'GraduationCap' },
+    { object_key: 'class_schedule', label: 'ตารางเรียน', label_en: 'Class schedule', icon: 'CalendarDays' },
+  ] },
+  { key: 'nonprofit', label: 'องค์กรไม่แสวงหากำไร', label_en: 'Non-profit', objects: [
+    { object_key: 'program', label: 'โครงการ/กิจกรรม', label_en: 'Program', icon: 'HeartHandshake' },
+    { object_key: 'donor', label: 'ผู้บริจาค/ผู้สนับสนุน', label_en: 'Donor', icon: 'HandCoins' },
+  ] },
+  { key: 'realestate', label: 'อสังหาริมทรัพย์ / ให้เช่า', label_en: 'Real estate', objects: [
+    { object_key: 'property_unit', label: 'ยูนิต/ห้องให้เช่า', label_en: 'Property unit', icon: 'Building2' },
+    { object_key: 'lease_agreement', label: 'สัญญาเช่า', label_en: 'Lease agreement', icon: 'FileSignature' },
+  ] },
 ];
 
 @Injectable()

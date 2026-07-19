@@ -4,6 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Loader2, Send } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
+import { LanguageToggle } from '@/components/language-toggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
@@ -12,6 +14,7 @@ import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function SignupPage() {
+  const { t } = useLang();
   const [f, setF] = useState({ company_name: '', tenant_code: '', admin_username: '', admin_password: '', email: '', industry: 'restaurant' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,7 +31,7 @@ export default function SignupPage() {
       await api('/api/auth/signup-requests', { method: 'POST', body: JSON.stringify(f) });
       setSubmitted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ส่งคำขอไม่สำเร็จ');
+      setError(err instanceof Error ? err.message : t('auth.su_failed'));
     } finally {
       setLoading(false);
     }
@@ -43,13 +46,12 @@ export default function SignupPage() {
           <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
             <CheckCircle2 className="size-6" />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">ส่งคำขอเรียบร้อยแล้ว</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{t('auth.su_done_title')}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            คำขอเปิดบริษัท <span className="font-medium">{f.company_name}</span> ถูกส่งให้ผู้ดูแลแพลตฟอร์มพิจารณาแล้ว
-            เมื่อได้รับอนุมัติ เราจะเปิดใช้งานบัญชีผู้ดูแล <span className="font-medium">{f.admin_username}</span> และแจ้งให้ทราบทางอีเมล
+            {t('auth.su_done_body', { company: f.company_name, user: f.admin_username })}
           </p>
           <Link href="/login" className="mt-6 inline-block text-sm font-medium text-primary hover:underline">
-            กลับไปหน้าเข้าสู่ระบบ
+            {t('auth.back_to_login')}
           </Link>
         </Card>
       </main>
@@ -60,52 +62,65 @@ export default function SignupPage() {
     <main className="relative grid min-h-svh place-items-center overflow-hidden bg-muted/30 p-5">
       <div className="pointer-events-none absolute -top-24 -right-24 size-96 rounded-full bg-primary/5 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -left-24 size-96 rounded-full bg-primary/5 blur-3xl" />
+      <div className="absolute top-4 right-4"><LanguageToggle /></div>
 
       <Card className="w-full max-w-md gap-0 p-8 shadow-lg">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground shadow-sm">
             IE
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">ขอเปิดใช้งานบริษัท</h1>
-          <p className="mt-1 text-sm text-muted-foreground">กรอกรายละเอียดเพื่อส่งคำขอ — ผู้ดูแลแพลตฟอร์มจะอนุมัติและเปิดบัญชีให้</p>
+          <h1 className="text-xl font-semibold tracking-tight">{t('auth.su_title')}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t('auth.su_subtitle')}</p>
         </div>
 
         <form onSubmit={onSubmit} className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="company_name">ชื่อกิจการ</Label>
-            <Input id="company_name" value={f.company_name} onChange={set('company_name')} placeholder="ร้านโอชิเนอิ" required />
+            <Label htmlFor="company_name">{t('auth.su_company')}</Label>
+            <Input id="company_name" value={f.company_name} onChange={set('company_name')} placeholder={t('auth.su_company_ph')} required />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="industry">ประเภทธุรกิจ</Label>
+            <Label htmlFor="industry">{t('auth.su_industry')}</Label>
             <select
               id="industry"
               value={f.industry}
               onChange={set('industry')}
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
             >
-              <option value="restaurant">ร้านอาหาร</option>
-              <option value="retail">ค้าปลีก</option>
-              <option value="distribution">ค้าส่ง / กระจายสินค้า</option>
-              <option value="services">ธุรกิจบริการ</option>
-              <option value="general">ทั่วไป (ผังบัญชีเต็ม)</option>
+              <option value="restaurant">{t('auth.su_ind_restaurant')}</option>
+              <option value="retail">{t('auth.su_ind_retail')}</option>
+              <option value="distribution">{t('auth.su_ind_distribution')}</option>
+              <option value="services">{t('auth.su_ind_services')}</option>
+              <option value="manufacturing">{t('auth.su_ind_manufacturing')}</option>
+              <option value="construction">{t('auth.su_ind_construction')}</option>
+              <option value="ecommerce">{t('auth.su_ind_ecommerce')}</option>
+              <option value="hospitality">{t('auth.su_ind_hospitality')}</option>
+              <option value="healthcare">{t('auth.su_ind_healthcare')}</option>
+              <option value="professional">{t('auth.su_ind_professional')}</option>
+              <option value="agriculture">{t('auth.su_ind_agriculture')}</option>
+              <option value="automotive">{t('auth.su_ind_automotive')}</option>
+              <option value="logistics">{t('auth.su_ind_logistics')}</option>
+              <option value="education">{t('auth.su_ind_education')}</option>
+              <option value="nonprofit">{t('auth.su_ind_nonprofit')}</option>
+              <option value="realestate">{t('auth.su_ind_realestate')}</option>
+              <option value="general">{t('auth.su_ind_general')}</option>
             </select>
-            <p className="text-xs text-muted-foreground">เราจะตั้งผังบัญชีให้เหมาะกับธุรกิจของคุณโดยอัตโนมัติ (เปลี่ยนภายหลังได้)</p>
+            <p className="text-xs text-muted-foreground">{t('auth.su_industry_hint')}</p>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="tenant_code">รหัสองค์กร (ภาษาอังกฤษ)</Label>
+            <Label htmlFor="tenant_code">{t('auth.su_code')}</Label>
             <Input id="tenant_code" value={f.tenant_code} onChange={set('tenant_code')} placeholder="oshinei" autoCapitalize="none" required />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="email">อีเมล</Label>
+            <Label htmlFor="email">{t('auth.su_email')}</Label>
             <Input id="email" type="email" value={f.email} onChange={set('email')} placeholder="you@email.com" required />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label htmlFor="admin_username">ชื่อผู้ใช้ผู้ดูแล</Label>
+              <Label htmlFor="admin_username">{t('auth.su_admin_user')}</Label>
               <Input id="admin_username" value={f.admin_username} onChange={set('admin_username')} autoComplete="username" required />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="admin_password">รหัสผ่าน</Label>
+              <Label htmlFor="admin_password">{t('auth.password')}</Label>
               <PasswordInput id="admin_password" value={f.admin_password} onChange={set('admin_password')} autoComplete="new-password" minLength={8} required />
             </div>
           </div>
@@ -116,21 +131,21 @@ export default function SignupPage() {
           )}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            {loading ? 'กำลังส่งคำขอ…' : 'ส่งคำขอเปิดบริษัท'}
+            {loading ? t('auth.su_sending') : t('auth.su_submit')}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
-            การส่งคำขอถือว่ายอมรับ{' '}
+            {t('auth.su_terms_pre')}{' '}
             <Link href="/legal/privacy" className="underline hover:text-primary" target="_blank">
-              นโยบายความเป็นส่วนตัว
+              {t('auth.su_privacy')}
             </Link>{' '}
-            และข้อกำหนดการใช้บริการ
+            {t('auth.su_terms_post')}
           </p>
         </form>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          มีบัญชีอยู่แล้ว?{' '}
+          {t('auth.su_have_account')}{' '}
           <Link href="/login" className="font-medium text-primary hover:underline">
-            เข้าสู่ระบบ
+            {t('auth.sign_in')}
           </Link>
         </p>
       </Card>

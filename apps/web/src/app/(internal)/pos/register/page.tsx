@@ -42,6 +42,14 @@ export default function RegisterPage() {
   // last good localStorage snapshot, so a reload mid-outage still renders a sellable menu.
   const menu = useQuery<MenuResp>({ queryKey: ['menu'], networkMode: 'always', queryFn: () => fetchMenuOfflineFirst(() => api('/api/menu')) });
   const prefsQ = useQuery<UserPrefs>({ queryKey: ['user-prefs'], queryFn: () => api('/api/user-prefs') });
+  // docs/52 Phase 1 — business-type POS profile. A non-restaurant tenant (retail/services/…) gets a clean
+  // generic register: no table/dine-in affordances (attach-table, floor link, order-type/pax/service-charge).
+  // Default to the restaurant layout while the profile loads (safe — that is the current behaviour).
+  const profileQ = useQuery<{ business_type: string; tables: boolean; kds: boolean; sale_path: string }>({ queryKey: ['pos-profile'], queryFn: () => api('/api/pos/profile') });
+  // Restaurant layout is the default: only drop to the generic register when the profile EXPLICITLY says
+  // tables === false. This stays robust to a still-loading, errored, or partial profile response (all of
+  // which keep the current restaurant behaviour) rather than flipping generic on any falsy `tables`.
+  const restaurant = profileQ.data?.tables !== false;
   const favIds = useMemo(() => new Set<number>(prefsQ.data?.pos_fav ?? []), [prefsQ.data]);
   const favMut = useMutation({
     mutationFn: (ids: number[]) => api('/api/user-prefs', { method: 'PUT', body: JSON.stringify({ pos_fav: ids }) }),
@@ -112,7 +120,7 @@ export default function RegisterPage() {
 
   // ── settle: create the order (re-priced + 86-checked server-side), fire kitchen for dine-in, checkout,
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
-  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string }): Promise<SettleResult> => {
+  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode, tenders }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[] }): Promise<SettleResult> => {
     const items = lines.map((l) => ({ sku: l.sku, qty: l.qty, modifier_option_ids: l.modifier_option_ids, notes: l.notes }));
 
     // ── offline path: queue a QUICK (no-table) cash sale, or — for dine-in (POS-6) — capture the order
@@ -138,6 +146,48 @@ export default function RegisterPage() {
     };
     if (!online) return queueOffline();
 
+    // docs/52 Phase 1b — a NON-restaurant business rings a GENERIC sale: the shared engine writes the sale
+    // directly (cust_pos_sales + stock move + VAT + tender) with NO dine_in_orders / KDS / table, posting
+    // revenue under the business-type profile's event server-side. Restaurant tenants fall through to the
+    // dine-in checkout below (unchanged). A voucher/gift-card at the generic till is a later increment.
+    if (!restaurant) {
+      if (voucherCode) throw new Error(t('px.reg_err_offline_voucher'));
+      const genericItems = lines.map((l) => ({ item_id: l.sku, item_description: l.name, qty: l.qty, unit_price: l.unit_price, discount_pct: l.discount_pct || undefined, modifier_option_ids: l.modifier_option_ids }));
+      const genericDiscount = discountPct > 0 ? Math.round(cartTotals(lines).sub * discountPct) / 100 : undefined;
+      // docs/52 Phase 6a split tenders + 3c age gate. The generic sale posts once; if the server refuses on
+      // AGE_VERIFICATION_REQUIRED (the cart has an age-restricted item), the cashier confirms they checked the
+      // buyer's ID and we retry ONCE with age_ack — a serial/lot/expired refusal still surfaces as-is.
+      const postGeneric = (ageAck: boolean) => api<{ sale_no: string; total: number }>('/api/pos/sales', {
+        method: 'POST',
+        body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(ageAck ? { age_ack: true } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
+      });
+      let gsale: { sale_no: string; total: number };
+      try {
+        try {
+          gsale = await postGeneric(false);
+        } catch (ae) {
+          if ((ae as Error & { code?: string }).code === 'AGE_VERIFICATION_REQUIRED'
+            && typeof window !== 'undefined'
+            && window.confirm(t('px.reg_age_confirm'))) {
+            gsale = await postGeneric(true);
+          } else throw ae;
+        }
+      } catch (e) {
+        // network died mid-checkout while the browser still reports online → queue the sale offline instead
+        // of erroring at the cashier (mirrors the restaurant path). HTTP errors (validation etc.) surface.
+        if ((e as Error & { status?: number }).status === undefined) return queueOffline();
+        throw e;
+      }
+      const gtotal = Number(gsale.total ?? tot.total);
+      const gchange = cashReceived != null ? Math.round((cashReceived - gtotal) * 100) / 100 : undefined;
+      tm.pushDisplay({ message: t('px.reg_disp_thanks'), total: gtotal, amount_due: cashReceived ?? undefined, change: gchange });
+      if (tm.printerConnected) tm.printReceipt(gsale.sale_no).catch((e) => notifyError(t('px.reg_err_print', { msg: (e as Error).message })));
+      if (method === 'Cash') void tm.kickDrawer({ saleNo: gsale.sale_no, amount: gtotal, reason: 'sale' });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['pos-summary'] });
+      return { sale_no: gsale.sale_no, total: gtotal, change: gchange };
+    }
+
     let created: { order_no: string };
     try {
       created = await api<{ order_no: string }>('/api/restaurant/orders', {
@@ -159,14 +209,22 @@ export default function RegisterPage() {
     if (mode === 'dinein' || orderType !== 'dine_in') {
       await api(`/api/restaurant/orders/${orderNo}/fire`, { method: 'POST', body: '{}' }).catch(() => { /* kitchen fire best-effort */ });
     }
-    // manual service charge: force-apply at the entered % regardless of party size (service_min_party=1).
-    const sc = serviceChargePct > 0 ? { apply_pricing_rules: true, service_charge_pct: serviceChargePct, party_size: pax, service_min_party: 1, channel: orderType } : {};
-    const sale = await api<{ sale_no: string; total: number; total_with_tip?: number }>(`/api/restaurant/orders/${orderNo}/checkout`, {
+    // C3 (docs/50 Wave 3): ALWAYS apply the tenant's automatic price rules at the register — before this,
+    // apply_pricing_rules was only sent alongside a manual service charge, so happy-hour/BOGO/qty-break
+    // rules silently never fired at the till (a tenant with no rules is byte-identical: no rules = no
+    // discounts). The manual service charge keeps its force-apply semantics (service_min_party=1).
+    const sc = serviceChargePct > 0
+      ? { apply_pricing_rules: true, service_charge_pct: serviceChargePct, party_size: pax, service_min_party: 1, channel: orderType }
+      : { apply_pricing_rules: true, party_size: pax, channel: orderType };
+    const sale = await api<{ sale_no: string; total: number; total_with_tip?: number; applied_rules?: string[]; line_discount_total?: number }>(`/api/restaurant/orders/${orderNo}/checkout`, {
       method: 'POST',
       body: JSON.stringify({ method, discount_pct: discountPct || undefined, voucher_code: voucherCode || undefined, ...sc }),
     });
     const total = Number(sale.total ?? sale.total_with_tip ?? tot.total);
     const change = cashReceived != null ? Math.round((cashReceived - total) * 100) / 100 : undefined;
+    // Surface what the pricing engine did — the cashier (and the customer asking "why this price?")
+    // sees which automatic rules fired instead of a silently different total.
+    if ((sale.applied_rules ?? []).length > 0) notifySuccess(t('px.reg_rules_applied', { rules: (sale.applied_rules ?? []).join(', ') }));
 
     tm.pushDisplay({ message: t('px.reg_disp_thanks'), total, amount_due: cashReceived ?? undefined, change });
     // Auto-print only when a printer is paired — otherwise the cashier prints on demand from the success
@@ -177,7 +235,7 @@ export default function RegisterPage() {
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['pos-summary'] });
     return { sale_no: sale.sale_no, total, change };
-  }, [lines, tableId, mode, orderType, pax, serviceChargePct, tot.total, tm, qc, online, outbox, t]);
+  }, [lines, tableId, mode, orderType, pax, serviceChargePct, tot.total, tm, qc, online, outbox, t, restaurant]);
 
   const finishSale = () => { setCheckout(false); resetSale(); tm.pushDisplay({ message: t('px.reg_welcome') }); };
 
@@ -222,16 +280,16 @@ export default function RegisterPage() {
               {online ? <RefreshCw className="size-4" /> : <CloudOff className="size-4" />} {t('px.reg_pending_sync', { count: outbox.count })}
             </Button>
           )}
-          {mode === 'dinein' && tableNo ? (
+          {restaurant && (mode === 'dinein' && tableNo ? (
             <Badge variant="info" className="gap-1">
               <Utensils className="size-3" /> {t('px.reg_table_label', { tableNo })}
               <button aria-label={t('px.reg_aria_clear_table')} onClick={() => { setMode('quick'); setTableId(null); setTableNo(null); }} className="ml-1 hover:text-foreground"><X className="size-3" /></button>
             </Badge>
           ) : (
             <Button variant="outline" size="sm" onClick={() => setTablePicker(true)}><Utensils className="size-4" /> {t('px.reg_attach_table')}</Button>
-          )}
+          ))}
           <Button variant="outline" size="sm" onClick={() => setHeldOpen(true)}><ListChecks className="size-4" /> {t('px.reg_held_bills')}</Button>
-          <Button asChild variant="ghost" size="sm"><Link href="/tables">{t('px.reg_tables_link')}</Link></Button>
+          {restaurant && <Button asChild variant="ghost" size="sm"><Link href="/tables">{t('px.reg_tables_link')}</Link></Button>}
         </div>
       </div>
 
@@ -249,12 +307,14 @@ export default function RegisterPage() {
               onClear={clearCart}
               onHold={hold}
               onCheckout={() => setCheckout(true)}
-              orderType={orderType}
-              onOrderType={changeOrderType}
-              pax={pax}
-              onPax={(delta) => setPax((p) => Math.max(1, p + delta))}
-              serviceChargePct={serviceChargePct}
-              onServiceCharge={setServiceChargePct}
+              {...(restaurant ? {
+                orderType,
+                onOrderType: changeOrderType,
+                pax,
+                onPax: (delta: number) => setPax((p) => Math.max(1, p + delta)),
+                serviceChargePct,
+                onServiceCharge: setServiceChargePct,
+              } : {})}
             />
           </div>
         )}

@@ -20,6 +20,8 @@ const SaleBody = z.object({
     qty: z.number().positive(), unit_price: z.number().nonnegative(),
     uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
     modifier_option_ids: z.array(z.number().int()).optional(),
+    lot_no: z.string().trim().max(64).optional(), // docs/52 Phase 3a — explicit lot for a lot-tracked item (else FEFO)
+    serial_nos: z.array(z.string().trim().min(1).max(64)).max(500).optional(), // docs/52 Phase 3b — serial/IMEI per unit for a serial-tracked item
   })).min(1),
   discount: z.number().nonnegative().optional(),
   payment_method: z.string().optional(),
@@ -31,6 +33,17 @@ const SaleBody = z.object({
   service_min_party: z.number().int().positive().optional(),
   rounding: z.number().nonnegative().optional(),
   branch_id: z.number().int().positive().optional(),
+  // docs/52 Phase 3c — age-restricted gate: cashier attests ID checked, or a customer birthdate proves age.
+  age_ack: z.boolean().optional(),
+  customer_birthdate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // docs/52 Phase 6a — split payment: settle one sale across several tenders (must sum to the total).
+  tenders: z.array(z.object({
+    method: z.string().min(1),
+    amount: z.number().positive(),
+    gateway: z.string().optional(),
+    cash_tendered: z.number().nonnegative().optional(),
+    reference: z.string().max(120).optional(),
+  })).min(1).max(10).optional(),
 });
 
 const AddInventoryBody = z.object({
@@ -69,7 +82,7 @@ const OfflineSaleOp = z.object({
 });
 const OfflineSyncBody = z.object({ sales: z.array(OfflineSaleOp).min(1).max(200) });
 
-const SubUserBody = z.object({ username: z.string().min(1), password: z.string().min(6), permissions: z.array(z.string()).optional() });
+const SubUserBody = z.object({ username: z.string().min(1), password: z.string().min(8), permissions: z.array(z.string()).optional() });
 const MyCustomerBody = z.object({ customer_name: z.string().min(1), phone: z.string().optional(), address: z.string().optional(), notes: z.string().optional() });
 const MySupplierBody = z.object({ supplier_name: z.string().min(1), contact_name: z.string().optional(), phone: z.string().optional(), address: z.string().optional() });
 const MyPoBody = z.object({

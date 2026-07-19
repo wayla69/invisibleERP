@@ -21,6 +21,8 @@ import { RestaurantOfflineSyncService } from './offline-sync.service';
 import { PosFiscalModule } from '../pos/fiscal/pos-fiscal.module';
 import { ReservationService } from './reservation.service';
 import { GuestProfileService } from './guest-profile.service';
+import { RecommendationService } from './recommendation.service';
+import { ServiceRequestService } from './service-request.service';
 import { TipService } from './tip.service';
 import { MessagingModule } from '../messaging/messaging.module';
 import { RealtimeScope } from './realtime.scope';
@@ -35,7 +37,7 @@ import { ChannelAdapterModule } from '../channel-adapter/channel-adapter.module'
 @Module({
   imports: [TaxModule, PaymentsModule, PosFiscalModule, LedgerModule, TaxDocsModule, MenuModule, MarketingModule, CampaignsModule, LoyaltyModule, GiftCardsModule, PricingModule, PrintingModule, PeripheralsModule, PosScaleModule, MessagingModule, ChannelAdapterModule],
   controllers: [RestaurantController, QrController, ChannelController],
-  providers: [DineInService, KdsService, TableService, QrService, BuffetService, ChannelOrderService, RealtimeScope, RestaurantOfflineSyncService, ReservationService, GuestProfileService, TipService],
+  providers: [DineInService, KdsService, TableService, QrService, BuffetService, ChannelOrderService, RealtimeScope, RestaurantOfflineSyncService, ReservationService, GuestProfileService, RecommendationService, ServiceRequestService, TipService],
   exports: [DineInService, TableService, RestaurantOfflineSyncService],
 })
 export class RestaurantModule {}

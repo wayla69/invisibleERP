@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Wallet, Wifi, WifiOff, RefreshCw, Banknote, QrCode, CreditCard, ScanLine } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { useOnline, useOutbox, enqueueSale } from '@/lib/offline';
 import { baht, num, thaiDate } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -28,24 +29,26 @@ interface Line { item_id: string; qty: number; unit_price: number; discount_pct:
 const VAT = 0.07;
 
 function OfflineBar() {
+  const { t } = useLang();
   const online = useOnline();
   const { count, flush } = useOutbox();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const doFlush = async () => { setBusy(true); try { const r = await flush(); setMsg(`ซิงค์แล้ว ${r.synced} · ซ้ำ ${r.duplicate} · ค้าง ${r.remaining}`); } catch (e: any) { setMsg(`❌ ${e.message}`); } finally { setBusy(false); } };
+  const doFlush = async () => { setBusy(true); try { const r = await flush(); setMsg(t('pt.pos.sync_result', { synced: r.synced, duplicate: r.duplicate, remaining: r.remaining })); } catch (e: any) { setMsg(`❌ ${e.message}`); } finally { setBusy(false); } };
   return (
     <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-sm">
       <span className={`inline-flex items-center gap-1.5 font-medium ${online ? 'text-emerald-600' : 'text-amber-600'}`}>
-        {online ? <Wifi className="size-4" /> : <WifiOff className="size-4" />} {online ? 'ออนไลน์' : 'ออฟไลน์ — บันทึกในเครื่อง'}
+        {online ? <Wifi className="size-4" /> : <WifiOff className="size-4" />} {online ? t('pt.pos.online') : t('pt.pos.offline')}
       </span>
-      {count > 0 && <Badge variant={statusVariant('open')}>ค้างซิงค์ {count}</Badge>}
-      {count > 0 && online && <Button size="sm" variant="outline" disabled={busy} onClick={doFlush}><RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} /> ซิงค์เลย</Button>}
+      {count > 0 && <Badge variant={statusVariant('open')}>{t('pt.pos.queued_n', { n: count })}</Badge>}
+      {count > 0 && online && <Button size="sm" variant="outline" disabled={busy} onClick={doFlush}><RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} /> {t('pt.pos.sync_now')}</Button>}
       {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
     </div>
   );
 }
 
 function NewSale() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const online = useOnline();
   const { refresh } = useOutbox();
@@ -95,12 +98,12 @@ function NewSale() {
     if (!cleanLines().length) return;
     // Cash short-tender guard: if a cash-received amount is entered it must cover the total.
     if (method === 'Cash' && cashReceived !== '' && Number(cashReceived) < total) {
-      setPayErr(`เงินที่รับ (${baht(Number(cashReceived))}) น้อยกว่ายอดสุทธิ (${baht(total)})`);
+      setPayErr(t('pt.pos.short_tender', { received: baht(Number(cashReceived)), total: baht(total) }));
       return;
     }
     if (online) { mut.mutate(method); return; }
     const s = enqueueSale({ captured_at: new Date().toISOString(), payment_method: method, lines: cleanLines() });
-    setQueued(`📥 บันทึกออฟไลน์แล้ว (${s.client_uuid}) — จะซิงค์เมื่อกลับมาออนไลน์`);
+    setQueued(t('pt.pos.queued_msg', { id: s.client_uuid }));
     reset(); refresh();
   };
 
@@ -119,19 +122,19 @@ function NewSale() {
   return (
     <Card className="max-w-3xl gap-4 p-5">
       <CardContent className="space-y-4 px-0">
-        <h3 className="text-base font-semibold">ขายสินค้า</h3>
+        <h3 className="text-base font-semibold">{t('pt.pos.new_sale')}</h3>
         <OfflineBar />
 
         {/* Scan field — autofocused; scan/type a SKU + Enter to add a line. */}
         <div className="grid gap-1">
-          <Label htmlFor="scan">สแกนบาร์โค้ด / รหัสสินค้า</Label>
+          <Label htmlFor="scan">{t('pt.pos.scan_label')}</Label>
           <div className="flex items-center gap-2 rounded-md border border-input px-3 focus-within:border-ring focus-within:ring-ring/50 focus-within:ring-[3px]">
             <ScanLine className="size-4 shrink-0 text-muted-foreground" />
             <input
               id="scan"
               ref={scanRef}
               autoFocus
-              placeholder="สแกนหรือพิมพ์รหัสแล้วกด Enter"
+              placeholder={t('pt.pos.scan_ph')}
               className="h-10 w-full bg-transparent text-base outline-none md:text-sm"
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onScan(e.currentTarget.value); e.currentTarget.value = ''; } }}
             />
@@ -139,10 +142,10 @@ function NewSale() {
         </div>
 
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 text-xs text-muted-foreground">
-          <span>รหัสสินค้า</span>
-          <span>จำนวน</span>
-          <span>ราคา/หน่วย</span>
-          <span>ส่วนลด %</span>
+          <span>{t('pt.pos.col_item')}</span>
+          <span>{t('pt.pos.col_qty')}</span>
+          <span>{t('pt.pos.col_unit_price')}</span>
+          <span>{t('pt.pos.col_disc')}</span>
           <span />
         </div>
         {lines.map((l, i) => (
@@ -157,12 +160,12 @@ function NewSale() {
           </div>
         ))}
         <Button variant="secondary" size="sm" onClick={() => setLines((ls) => [...ls, { item_id: '', qty: 1, unit_price: 0, discount_pct: 0 }])}>
-          <Plus className="size-4" /> เพิ่มรายการ
+          <Plus className="size-4" /> {t('pt.pos.add_line')}
         </Button>
 
         <div className="flex flex-wrap items-center gap-6">
           <div className="grid gap-2">
-            <Label htmlFor="payment">การชำระเงิน</Label>
+            <Label htmlFor="payment">{t('pt.pos.payment')}</Label>
             <Select value={payment} onValueChange={setPayment}>
               <SelectTrigger id="payment" className="w-40">
                 <SelectValue />
@@ -177,31 +180,31 @@ function NewSale() {
           </div>
           {payment === 'Cash' && (
             <div className="grid gap-2">
-              <Label htmlFor="cash">เงินที่รับ</Label>
+              <Label htmlFor="cash">{t('pt.pos.cash_received')}</Label>
               <Input id="cash" type="number" min={0} step="0.01" className="w-32 tabular text-right" placeholder="0.00" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} />
             </div>
           )}
-          <label className="flex items-center gap-1.5 self-end pb-2 text-sm" title="ใช้กฎราคา/โปรโมชั่นอัตโนมัติ (happy hour, ส่วนลด)">
-            <input type="checkbox" checked={applyPricing} onChange={(e) => setApplyPricing(e.target.checked)} /> ใช้โปรโมชั่น
+          <label className="flex items-center gap-1.5 self-end pb-2 text-sm" title={t('pt.pos.promo_hint')}>
+            <input type="checkbox" checked={applyPricing} onChange={(e) => setApplyPricing(e.target.checked)} /> {t('pt.pos.promo')}
           </label>
           <div className="flex-1 text-right">
-            <div className="text-sm text-muted-foreground">ยอดรวม {baht(subtotal)} + VAT 7% {baht(vat)}{applyPricing ? ' · ปรับตามโปรฯ ตอนชำระ' : ''}</div>
-            <div className="text-3xl font-semibold">สุทธิ <strong className="tabular">{baht(total)}</strong></div>
-            {changeDue != null && changeDue >= 0 && <div className="text-lg text-success">เงินทอน <strong className="tabular">{baht(changeDue)}</strong></div>}
+            <div className="text-sm text-muted-foreground">{t('pt.pos.subtotal_vat', { sub: baht(subtotal), vat: baht(vat) })}{applyPricing ? t('pt.pos.promo_at_pay') : ''}</div>
+            <div className="text-3xl font-semibold">{t('pt.pos.net')} <strong className="tabular">{baht(total)}</strong></div>
+            {changeDue != null && changeDue >= 0 && <div className="text-lg text-success">{t('pt.pos.change')} <strong className="tabular">{baht(changeDue)}</strong></div>}
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          <Button size="lg" disabled={mut.isPending || !hasItems} onClick={() => tender('Cash')}><Banknote className="size-4" /> เงินสด <kbd className="ml-1 text-xs opacity-70">F2</kbd></Button>
+          <Button size="lg" disabled={mut.isPending || !hasItems} onClick={() => tender('Cash')}><Banknote className="size-4" /> {t('pt.pos.cash')} <kbd className="ml-1 text-xs opacity-70">F2</kbd></Button>
           <Button size="lg" disabled={mut.isPending || !hasItems} onClick={() => tender('QR Code')}><QrCode className="size-4" /> QR <kbd className="ml-1 text-xs opacity-70">F8</kbd></Button>
-          <Button size="lg" disabled={mut.isPending || !hasItems} onClick={() => tender('Card')}><CreditCard className="size-4" /> บัตร <kbd className="ml-1 text-xs opacity-70">F4</kbd></Button>
+          <Button size="lg" disabled={mut.isPending || !hasItems} onClick={() => tender('Card')}><CreditCard className="size-4" /> {t('pt.pos.card')} <kbd className="ml-1 text-xs opacity-70">F4</kbd></Button>
         </div>
         <Button size="lg" variant="secondary" className="w-full" disabled={mut.isPending || !hasItems} onClick={() => tender(payment)}>
-          <Wallet className="size-4" /> {mut.isPending ? 'กำลังบันทึก…' : online ? `ยืนยันการขาย (${payment})` : `บันทึกออฟไลน์ (${payment})`}
+          <Wallet className="size-4" /> {mut.isPending ? t('pt.pos.saving') : t(online ? 'pt.pos.confirm_sale' : 'pt.pos.save_offline', { method: payment })}
         </Button>
         {payErr && <Msg>{payErr}</Msg>}
         {mut.error && <Msg>{(mut.error as Error).message}</Msg>}
-        {mut.data && <Msg ok>✅ ขายสำเร็จ {mut.data.sale_no} · สุทธิ {baht(mut.data.total)} · ได้แต้ม +{mut.data.points_earned}</Msg>}
+        {mut.data && <Msg ok>{t('pt.pos.sale_ok', { no: mut.data.sale_no, total: baht(mut.data.total), points: mut.data.points_earned })}</Msg>}
         {queued && <Msg ok>{queued}</Msg>}
       </CardContent>
     </Card>
@@ -209,17 +212,18 @@ function NewSale() {
 }
 
 function History() {
+  const { t } = useLang();
   const q = useQuery<any>({ queryKey: ['portal-sales'], queryFn: () => api('/api/portal/pos/sales?limit=50') });
   return (
     <StateView q={q}>
       {q.data && (
         <DataTable rows={q.data.sales} columns={[
-          { key: 'sale_no', label: 'เลขที่' },
-          { key: 'sale_date', label: 'วันที่', render: (r) => thaiDate(r.sale_date) },
-          { key: 'total', label: 'ยอดสุทธิ', align: 'right', render: (r) => baht(r.total) },
-          { key: 'points_earned', label: 'แต้ม', align: 'right', render: (r) => `+${num(r.points_earned)}` },
-          { key: 'payment_method', label: 'ชำระ' },
-          { key: 'status', label: 'สถานะ', render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
+          { key: 'sale_no', label: t('pt.col_no') },
+          { key: 'sale_date', label: t('pt.col_date'), render: (r) => thaiDate(r.sale_date) },
+          { key: 'total', label: t('pt.pos.col_total'), align: 'right', render: (r) => baht(r.total) },
+          { key: 'points_earned', label: t('pt.col_points'), align: 'right', render: (r) => `+${num(r.points_earned)}` },
+          { key: 'payment_method', label: t('pt.pos.col_pay') },
+          { key: 'status', label: t('pt.col_status'), render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge> },
         ]} />
       )}
     </StateView>
@@ -227,10 +231,11 @@ function History() {
 }
 
 export default function PortalPos() {
+  const { t } = useLang();
   return (
     <div>
-      <PageHeader title="ขายสินค้า (POS)" description="บันทึกการขายและดูประวัติ" />
-      <Tabs tabs={[{ key: 'new', label: 'ขายใหม่', content: <NewSale /> }, { key: 'hist', label: 'ประวัติการขาย', content: <History /> }]} />
+      <PageHeader title={t('pt.pos.title')} description={t('pt.pos.desc')} />
+      <Tabs tabs={[{ key: 'new', label: t('pt.pos.tab_new'), content: <NewSale /> }, { key: 'hist', label: t('pt.pos.tab_hist'), content: <History /> }]} />
     </div>
   );
 }

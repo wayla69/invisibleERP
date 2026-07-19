@@ -81,6 +81,7 @@ export const CheckoutBody = z.object({
   tip: z.number().nonnegative().optional(),             // staff tip (THB) — liability 2300, not in subtotal/VAT
   gift_card_no: z.string().optional(),                  // redeem this gift card as a tender against the sale
   gift_card_amount: z.number().positive().optional(),   // amount to draw (default = bill+tip)
+  cash_tendered: z.number().nonnegative().optional(),   // #1: cash handed over → change_due returned on the checkout
   // B4 pricing rules at the till (opt-in). When set, time/day/BOGO/qty-break/item/category rules apply,
   // plus an auto service charge for large parties (VATable, 4400) and satang rounding (4900).
   apply_pricing_rules: z.boolean().optional(),

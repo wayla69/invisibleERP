@@ -1,9 +1,32 @@
 # Go-live console & people runbook — the non-code checklist
 
-> **Date:** 2026-07-02 · **Status:** v1.0 — OPEN (every item here is blocked on a human or a console, not code) · **Owner:** CEO / CFO + Platform
+> **Date:** 2026-07-02 · **Status:** v1.5 — OPEN (every item here is blocked on a human or a console, not code) · **Owner:** CEO / CFO + Platform
 > **Purpose:** docs/27 closed every repo-tractable audit finding; this runbook consolidates the remainder —
 > each item names its owner, the exact console/legal action, the env var or command involved, and the
 > verification that proves it done. Work through it top-down; strike items in the revision table as they land.
+
+## 0. Code-side gate verification sweep — 2026-07-17 (main @ `67b6ca6`)
+
+Every item below is blocked on a human/console by design, but each one leans on a **code gate** that must
+keep holding until the human acts. This sweep re-verified every gate on current main; re-run it (grep the
+named symbol) whenever main moves materially, and strike this table's row when the console side lands.
+
+| # | Item | Code gate verified on main | Console/human side |
+|---|---|---|---|
+| 1 | Legal execution | `/legal/privacy` page present, still marked ฉบับร่าง (DRAFT) — correctly unpublished ✅ | ⏳ counsel executes + publishes |
+| 2 | Anthropic DPA | Fail-closed `AI_DPA_REQUIRED` in `common/ai-models.ts`; boot warn in `common/env.validation.ts` ✅ | ⏳ sign DPA, set `AI_DPA_ACKNOWLEDGED` |
+| 3 | SOC 2 evidence pack | `compliance` CI job writes the `EVIDENCE_OUT` artifact per run ✅ | ⏳ engage firm, archive quarterly |
+| 4 | ELC operation | Registers + `governance` harness live; `CONTROL_STATUS_HONEST.md` keeps ELC-01/02/04 honestly **Partial** ✅ | ⏳ run the campaigns/cadence/hotline |
+| 5 | PgBouncer + Redis | `tools/ops/pgbouncer/pgbouncer.ini` + `userlist.txt.example` present; `realtime-bus.ts` degrades local-only with the `realtime_redis_publish_failed` ops alert ✅ | ⏳ provision on Railway, set `REALTIME_REDIS_URL`, point `DATABASE_URL` at :6432 |
+| 6 | PII backfill | `db:backfill:pii` script (`backfill-encrypt-pii.ts`, idempotent) present ✅ | ⏳ one-time prod run with `PII_ENCRYPTION_KEY` |
+| 7 | Capacity baseline | `loadtest` manual-dispatch workflow with `pg_url` input present ✅; **§4 baseline table has no dated staging row yet** | ⏳ dispatch vs staging (after item 5), record numbers |
+| 8 | Seed credentials | Seeder refuses prod admin without `SEED_ADMIN_PASSWORD` (+ `ALLOW_PROD_SEED`); `must_change_password` on first login ✅ | ⏳ vault the password at provisioning |
+| 9 | Wave 6 business evidence | n/a (no code gate) | ⏳ CEO |
+| 10–12 | Tenant reset / delete / purge | `@PlatformAdmin` endpoints with two-step suspend-first safety + confirm-code, audit chain preserved (migration 0393) ✅ | ⏳ operate when the pilot moves to real usage |
+| 13 | SME launch gate | Deploy smoke warn-skips loudly without `SMOKE_USER`/`SMOKE_PASS` ✅; `sme_review` permission + nav-profile tests + industry stamping live ✅ | ⏳ SME defaults tab, provision edition+industry, accountant login |
+
+**Sweep verdict:** all code gates hold on `67b6ca6`; zero regressions. Every remaining opener is
+console/legal/people work — the launch-blocking engineering surface is **empty**.
 
 ## 1. Legal execution (counsel) — AUD-LGL-02
 
@@ -117,10 +140,37 @@ never log in or be restored again.
 history is still visible in the cross-company activity feed (§ god notification/audit inbox).
 Model + gates: `docs/ops/tenancy-model.md` §2 (rev 1.24), migration 0393.
 
+## 13. SME edition launch gate — docs/49 + docs/51 Track B (control_profile='sme')
+
+**Owner:** Platform (console), before provisioning the first REAL SME company.
+**Action:** the SME code paths are all live (docs/49 v1.0–1.6; docs/51 B1/B2/B3), but three launch inputs
+are console-side and per-fleet/per-company:
+1. **Platform SME defaults** — `/platform` → **ค่าเริ่มต้น SME** tab: set the **external accountant email**
+   (this is load-bearing: every new SME company's auto-provisioned monthly **SME-01** self-approval-review
+   subscription takes its recipients from this stamped copy — left empty, only the god-inbox leg operates)
+   and any fleet-wide extra hidden nav groups (the per-industry hiding/folding is automatic — docs/51 B1).
+2. **Provision with the RIGHT edition + industry** — `/platform` → บริษัท → provision form: edition **SME**
+   and the company's true industry (restaurant/retail/distribution/services). Both are **birth attributes**:
+   edition is upgrade-only afterwards, and the B1 nav profile + B3 starter kit are stamped from the industry
+   at creation (a per-company hidden-list fix later is possible via the drawer's ตั้งค่า SME, but the
+   default-open profile and starter kit are not re-derived).
+3. **SME-02 accountant leg** — in the SME company, create the external accountant a **separate limited
+   login** granting only the `sme_review` permission (per-user override in `/admin/users`) so the
+   independent-review sign-off leg (`/sme-review`) is operable from day one; the platform owner signs the
+   other leg via act-as.
+**Verify:** provision a disposable SME test company per target industry → first login shows the folded
+industry menu (โครงการ hidden for a restaurant; ~15 items) + the starter kit (sample menu/tables etc.);
+`/platform` company drawer shows the SME badge + prefs; `report_subscriptions` has the active monthly
+`sme_self_approval_review` row carrying the accountant email; the accountant login reaches `/sme-review`
+and nothing else. Then delete+purge the test company (items 11–12).
+Model: `docs/49` §6, `docs/51` Track B; code gates verified in `docs/51` Track C (rev 1.3).
+
 ## Revision history
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.5 | 2026-07-17 | Platform | Added §0 — **code-side gate verification sweep** (docs/51 Track C follow-through): every runbook item's underlying code gate re-verified on main `67b6ca6` (fail-closed AI DPA, evidence artifact, ELC honesty, pgbouncer config + realtime degrade alert, PII backfill script, loadtest workflow, seed guard, tenant reset/delete/purge, SME gates + smoke warn-skip). Verdict: all gates hold; the launch-blocking engineering surface is empty — every opener is console/legal/people work. Re-run the sweep when main moves materially. |
+| 1.4 | 2026-07-16 | Platform | Added item 13 — **SME edition launch gate** (docs/51 Track C): the three console-side inputs the delivered SME edition needs before real SME provisioning — platform SME defaults (accountant email drives SME-01 recipients), edition+industry chosen correctly at creation (birth attributes: B1 nav profile + B3 starter kit stamp from industry; edition upgrade-only), and the accountant's separate `sme_review`-only login for the SME-02 leg — plus a full per-industry provisioning verification loop using items 11–12 for cleanup. |
 | 1.0 | 2026-07-02 | Platform | Initial runbook consolidating every open human/console item from docs/27 (legal execution, Anthropic DPA → `AI_DPA_ACKNOWLEDGED`, SOC 2 engagement + quarterly evidence, ELC operation, Railway PgBouncer/Redis, prod `db:backfill:pii`, loadtest §4 baseline, `SEED_ADMIN_PASSWORD`, Wave 6) with owner + exact action + verification each. |
 | 1.1 | 2026-07-09 | Platform | Added item 10 — pilot-company test-data factory reset from the Platform Console (**suspend → reset → reactivate**): wipes a pilot's UAT data before real usage while preserving logins/plan/audit-chain; only ever possible on a suspended company, so an active company cannot be wiped in one click. |
 | 1.2 | 2026-07-13 | Platform | Added item 11 — tenant soft-delete (migration 0393, **suspend → delete**): for a pure-test company that should stop existing entirely, lighter than the factory reset (no data touched, only the company row is flagged) and reversible via Restore. Prompted by a request to fully remove a test tenant ("Amber") after the factory reset UI was confused with a full company deletion. |

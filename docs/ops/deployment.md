@@ -116,6 +116,34 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 > of reverse proxies in front of the API: without it Fastify's `req.ip` is the proxy's address, so the edge
 > limiter buckets *every* client together — the same knob fixes the spoofable audit IP (L-12).
 
+> **Tenant-isolation hardening — enable `STRICT_TENANT_PROXY` (SOX-ICFR audit #2; default OFF, enforce-ready).**
+> The app-layer fail-closed proxy (`tenancy-model.md` §1ter) turns a base-pool query issued with no tenant
+> context into a loud `503 TENANT_CONTEXT_MISSING` instead of a silent cross-tenant read. Every base-pool
+> path is now wrapped (all `@NoTx` routes at the interceptor + the direct-call entry points) and the full
+> harness suite is green with `=1`. **Rollout, one stage at a time:** (1) set `STRICT_TENANT_PROXY=warn` on
+> every API service and confirm no `[tenant-proxy] base-pool …` lines appear in the logs under real traffic;
+> (2) set `=1` in **staging** and soak; (3) set `=1` in **prod**. It is per-process and stateless — no Redis,
+> no coupling to replica count — so the three modes can be flipped independently per environment. There is no
+> data migration and rollback is just clearing the var.
+
+> **Session hardening — enable `CSRF_SIGNED_ENFORCE` (SOX-ICFR audit #4; default OFF).** The double-submit
+> CSRF token in the readable `ierp_csrf` cookie is minted **bound to the session** as `HMAC(secret, jti)`
+> (`common/cookies.ts` `signedCsrf`); guard-side enforcement of that binding is staged behind this flag
+> (`common/guards.ts`). When `=1`, a mutating cookie-auth request whose `ierp_csrf` ≠ `HMAC(secret, jti-of-
+> the-auth-cookie)` is rejected `403 CSRF` ("not bound to this session"), so a token minted for another
+> session can't be replayed. **No config prerequisite:** the secret is `CSRF_SECRET || JWT_SECRET`, and the
+> API refuses to boot in prod without `JWT_SECRET`, so the binding is always keyed and is **multi-replica
+> safe** (deterministic HMAC of the shared secret — no per-node drift). Staff and member access tokens always
+> carry a `jti`, so enforce never false-rejects a legitimate token. **Unlike `STRICT_TENANT_PROXY` there is no
+> `warn` mode — it is straight on/off**, so the staging soak is the safety net. **Rollout:** (1) wait at least
+> one **refresh-token TTL** (`REFRESH_TOKEN_TTL_DAYS`, default **7 days**) past the deploy that shipped the
+> binding (#827), so every in-flight session has rotated to a bound token — every login **and** every
+> `POST /api/auth/refresh` re-mints the bound cookie, and the readable cookie's own `Max-Age` is the access
+> TTL (`JWT_EXPIRES_IN`, default 1h), so nothing unbound outlives the refresh window; (2) set
+> `CSRF_SIGNED_ENFORCE=1` in **staging**, soak while watching for `403` with code `CSRF`; (3) set `=1` in
+> **prod**. Rollback is clearing the var. Blast radius if enabled early: a user still on a pre-binding session
+> gets one `403` on a mutation (GETs unaffected) and **self-heals on re-login**.
+
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.
   Two queue-pressure guards against the ~20-concurrent-job account limit (both root-caused from the
@@ -131,6 +159,13 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
     Add a new harness to its domain shard in `ci.yml`; split a shard if it outgrows ~9 minutes.
     NB: branch-protection **required checks** now name the shards (`harnesses (pos)`, …) — update the
     protected-check list when shard names change.
+  - **Native-crash retry**: the shard runner retries a harness **once** when it exits with a crash signal
+    (exit ≥128, e.g. `139` SIGSEGV / `134` SIGABRT) — a rare, non-deterministic PGlite / `node:sqlite`
+    (`--experimental-sqlite`) segfault at process boot that previously forced a manual re-run of the whole
+    shard. A real assertion failure (exit `1`) is **not** retried — it fails fast, so the retry can only
+    self-heal an infra flake, never mask a logic regression (a genuine failure fails both times). Node is
+    pinned to **22** across all jobs (`package.json` `engines`, `.nvmrc`, each `setup-node`); `node:sqlite`
+    requires Node ≥22, so downgrading is not an option — the retry is the mitigation for the flake.
 - `deploy.yml` — approval-gated production deploy to Railway, pinned to the GitHub `production`
   Environment (required reviewers ⇒ deployer ≠ author, ITGC-CM-03). See `change-management.md`.
   - **Post-deploy smoke (ITGC-OP-04).** After both services deploy, the job hits the API's `/healthz`
@@ -162,6 +197,9 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 |---|---|---|---|
 | 1.8 | 2026-07-10 | Platform | §5: `ci.yml` per-ref `concurrency` group (cancel superseded PR runs; main keeps in-flight + newest pending) — fixes the 2026-07-10 Actions queue freeze (26 runs / ~2,000 jobs backlogged, 0 in progress). |
 | 1.9 | 2026-07-10 | Platform | §5: harness matrix sharded ~89 jobs → 11 domain shards (balanced by measured runtime; per-harness log groups + full-shard run-through on failure preserved) — a full CI run is now ~18 jobs and fits one ~20-job concurrency wave; branch-protection required checks must reference the shard names. |
+| 1.10 | 2026-07-17 | Platform | §5: the shard runner retries a harness ONCE on a native crash signal (exit ≥128, e.g. 139 SIGSEGV) — a rare non-deterministic PGlite/`node:sqlite` segfault at boot that previously needed a manual shard re-run; a real assertion failure (exit 1) is never retried. Node stays pinned to 22 (node:sqlite requires ≥22, so a downgrade is not viable). |
+| 1.12 | 2026-07-18 | Platform / Security | §4: documented the `CSRF_SIGNED_ENFORCE` (SOX-ICFR audit #4) staged rollout — the session-bound double-submit CSRF token (`HMAC(secret, jti)`). No config prerequisite (secret rides `JWT_SECRET`, which prod requires to boot; multi-replica safe); no `warn` mode (straight on/off). Rollout: wait ≥ one refresh-token TTL (`REFRESH_TOKEN_TTL_DAYS`, default 7d) past #827's deploy so in-flight sessions rotate to a bound token (every login + `POST /api/auth/refresh` re-mints it), then `=1` in staging → prod. Blast radius if early: one `403 CSRF` on a mutation, self-heals on re-login. |
+| 1.11 | 2026-07-17 | Platform / Security | §4: `STRICT_TENANT_PROXY` (SOX-ICFR audit #2) is now enforce-ready — added the staged `warn` → `1` (staging) → `1` (prod) rollout note. Every base-pool read path is wrapped (all `@NoTx` routes at the `TenantTxInterceptor` choke point + the direct-call service entry points) and the full harness suite passes with `=1`. Per-process/stateless; no Redis, no migration, rollback = clear the var. See `tenancy-model.md` §1ter. |
 | 1.0 | 2026-06-23 | Platform | Initial topology + Docker/compose + Railway + migration/deploy notes. |
 | 1.1 | 2026-06-23 | Platform | Add Codespaces substrate (`.devcontainer/`, `docker-compose.codespaces.yml`) — single-port same-origin proxy for browser-accessible cloud runs. |
 | 1.2 | 2026-06-23 | Platform | Link the Railway first-deploy runbook (`railway-setup.md`). |

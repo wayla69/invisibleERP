@@ -1,6 +1,7 @@
 // Shared validation for the double-entry ledger forms (manual journal, recurring journal, prepaid) — they
 // all collect `{ account_code, debit, credit }` lines that must net to a balanced, non-zero entry. Kept
-// framework-free so any form can call it; messages are Thai to match those screens.
+// framework-free so any form can call it; messages resolve at the active UI locale via i18n-static.
+import { ts } from './i18n-static';
 
 export interface JeLine { account_code: string; debit: string; credit: string }
 
@@ -14,10 +15,10 @@ export function jeLineError(l: JeLine): string | null {
   if (!touched) return null;
   const d = nAmt(l.debit);
   const c = nAmt(l.credit);
-  if (d < 0 || c < 0) return 'จำนวนต้องไม่ติดลบ';
-  if (d > 0 && c > 0) return 'ใส่เดบิตหรือเครดิตอย่างใดอย่างหนึ่ง ไม่ใช่ทั้งสอง';
-  if (!hasAcct) return 'เลือกบัญชี';
-  if (d === 0 && c === 0) return 'ใส่จำนวนเดบิตหรือเครดิต';
+  if (d < 0 || c < 0) return ts('je.err_negative');
+  if (d > 0 && c > 0) return ts('je.err_both_sides');
+  if (!hasAcct) return ts('je.err_no_account');
+  if (d === 0 && c === 0) return ts('je.err_no_amount');
   return null;
 }
 
@@ -25,13 +26,13 @@ export function jeLineError(l: JeLine): string | null {
  *  The imbalance amount is shown so the user knows how far off (and which side) they are. */
 export function jeFormError(lines: JeLine[]): string | null {
   const active = lines.filter((l) => l.account_code?.trim() && (nAmt(l.debit) !== 0 || nAmt(l.credit) !== 0));
-  if (active.length < 2) return 'ต้องมีอย่างน้อย 2 บรรทัดที่มีบัญชีและจำนวน';
+  if (active.length < 2) return ts('je.err_min_lines');
   const sumD = lines.reduce((a, l) => a + nAmt(l.debit), 0);
   const sumC = lines.reduce((a, l) => a + nAmt(l.credit), 0);
-  if (!(sumD > 0)) return 'ยอดรวมต้องมากกว่า 0';
+  if (!(sumD > 0)) return ts('je.err_zero_total');
   if (Math.abs(sumD - sumC) >= 0.005) {
     const diff = Math.abs(sumD - sumC).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `เดบิตและเครดิตไม่สมดุล — ${sumD > sumC ? 'เดบิต' : 'เครดิต'}เกิน ฿${diff}`;
+    return ts('je.err_unbalanced', { side: ts(sumD > sumC ? 'je.side_debit' : 'je.side_credit'), diff });
   }
   return null;
 }

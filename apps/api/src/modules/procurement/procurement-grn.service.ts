@@ -148,32 +148,12 @@ export class ProcurementGrnService {
     const lines = (dto.items ?? []).filter((it) => n(it.received_qty) > 0);
     if (!lines.length) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'No received qty', messageTh: 'ไม่มีจำนวนรับ' });
 
-    // EXP-12 over-receipt gate — receiving more than was ordered is blocked (fictitious/duplicate receipt,
-    // uncontrolled AP exposure). Exception: a weight-basis line (kg/g/ton) may run over by up to the
-    // configurable tolerance (default 5% of the ordered qty), because weighed deliveries legitimately vary.
-    // Checked per PO line over the AGGREGATE requested in this GR (two lots of one item can't sneak past).
+    // EXP-12 over-receipt gate is enforced INSIDE the receiving tx (below) with the PO lines LOCKED — see the
+    // FOR UPDATE loop right after the transaction opens. settings/reqByItem are computed here because settings
+    // also feeds the claim-window summary and reqByItem is the per-item aggregate the gate checks.
     const settings = await this.getReceivingSettings(user.tenantId ?? null);
     const reqByItem = new Map<string, number>();
     for (const it of lines) reqByItem.set(it.item_id, (reqByItem.get(it.item_id) ?? 0) + n(it.received_qty));
-    for (const [itemId, reqQty] of reqByItem) {
-      const [poi] = await db.select().from(poItems).where(and(eq(poItems.poId, po.id), eq(poItems.itemId, itemId))).limit(1);
-      if (!poi) continue; // an off-PO line has no ordered baseline — existing behaviour (kept for non-PO receipt flows)
-      // A line closed short (closePoShort) takes no further stock — the close decision is binding.
-      if (String(poi.status) === 'Closed') {
-        throw new UnprocessableEntityException({ code: 'PO_LINE_CLOSED', message: `Item ${itemId}: the PO line was closed short — no further receipt`, messageTh: `สินค้า ${itemId}: รายการนี้ถูกปิดรับแล้ว (ปิดของขาดส่ง) รับเพิ่มไม่ได้` });
-      }
-      const ordered = n(poi.orderQty);
-      const cap = isWeightUom(poi.uom) ? ordered * (1 + settings.overReceiptWeightPct / 100) : ordered;
-      if (n(poi.receivedQty) + reqQty > cap + 1e-9) {
-        const remaining = Math.max(ordered - n(poi.receivedQty), 0);
-        throw new UnprocessableEntityException({
-          code: 'OVER_RECEIPT',
-          message: `Item ${itemId}: receiving ${reqQty} exceeds the ordered quantity (ordered ${ordered}, already received ${n(poi.receivedQty)}${isWeightUom(poi.uom) ? `, weight tolerance ${settings.overReceiptWeightPct}%` : ''})`,
-          messageTh: `สินค้า ${itemId}: จำนวนรับ ${reqQty} เกินจำนวนที่สั่ง (สั่ง ${ordered} รับแล้ว ${n(poi.receivedQty)} คงเหลือ ${remaining}${isWeightUom(poi.uom) ? ` — สินค้าชั่งน้ำหนักรับเกินได้ไม่เกิน ${settings.overReceiptWeightPct}%` : ''})`,
-          item_id: itemId, order_qty: ordered, received_qty: n(poi.receivedQty), remaining_qty: remaining,
-        });
-      }
-    }
 
     const grNo = await this.docNo.nextDaily('GR');
     const today = ymd();
@@ -181,6 +161,34 @@ export class ProcurementGrnService {
     const costingLines: any[] = []; // Phase 17A — capitalize configured items (Dr 1200 / Cr 2000)
 
     await db.transaction(async (tx: any) => {
+      // EXP-12 over-receipt gate — receiving more than was ordered is blocked (fictitious/duplicate receipt,
+      // uncontrolled AP exposure). Exception: a weight-basis line (kg/g/ton) may run over by up to the
+      // configurable tolerance (default 5% of the ordered qty), because weighed deliveries legitimately vary.
+      // Checked per PO line over the AGGREGATE requested in this GR (two lots of one item can't sneak past).
+      // Security (pentest P5): the check runs INSIDE the tx with the PO lines LOCKED (FOR UPDATE). The old
+      // pre-tx unlocked read was a TOCTOU — two concurrent receipts each read the pre-increment receivedQty and
+      // both passed the cap, booking inventory/AP for goods never ordered. The lock serializes concurrent
+      // receipts so the second sees the first's committed increment and correctly throws OVER_RECEIPT.
+      for (const [itemId, reqQty] of reqByItem) {
+        const [poi] = await tx.select().from(poItems).where(and(eq(poItems.poId, po.id), eq(poItems.itemId, itemId))).for('update').limit(1);
+        if (!poi) continue; // an off-PO line has no ordered baseline — existing behaviour (kept for non-PO receipt flows)
+        // A line closed short (closePoShort) takes no further stock — the close decision is binding.
+        if (String(poi.status) === 'Closed') {
+          throw new UnprocessableEntityException({ code: 'PO_LINE_CLOSED', message: `Item ${itemId}: the PO line was closed short — no further receipt`, messageTh: `สินค้า ${itemId}: รายการนี้ถูกปิดรับแล้ว (ปิดของขาดส่ง) รับเพิ่มไม่ได้` });
+        }
+        const ordered = n(poi.orderQty);
+        const cap = isWeightUom(poi.uom) ? ordered * (1 + settings.overReceiptWeightPct / 100) : ordered;
+        if (n(poi.receivedQty) + reqQty > cap + 1e-9) {
+          const remaining = Math.max(ordered - n(poi.receivedQty), 0);
+          throw new UnprocessableEntityException({
+            code: 'OVER_RECEIPT',
+            message: `Item ${itemId}: receiving ${reqQty} exceeds the ordered quantity (ordered ${ordered}, already received ${n(poi.receivedQty)}${isWeightUom(poi.uom) ? `, weight tolerance ${settings.overReceiptWeightPct}%` : ''})`,
+            messageTh: `สินค้า ${itemId}: จำนวนรับ ${reqQty} เกินจำนวนที่สั่ง (สั่ง ${ordered} รับแล้ว ${n(poi.receivedQty)} คงเหลือ ${remaining}${isWeightUom(poi.uom) ? ` — สินค้าชั่งน้ำหนักรับเกินได้ไม่เกิน ${settings.overReceiptWeightPct}%` : ''})`,
+            item_id: itemId, order_qty: ordered, received_qty: n(poi.receivedQty), remaining_qty: remaining,
+          });
+        }
+      }
+
       const [gh] = await tx.insert(goodsReceipts).values({
         grNo, grDate: today, poNo: dto.po_no, vendorId: po.vendorId, vendorName: po.vendorName, receivedBy: user.username, remarks: dto.remarks ?? null,
         currency: po.currency ?? 'THB', fxRate: po.fxRate ?? '1.000000', projectId: po.projectId ?? null, // M0 — inherit the PO's project dimension

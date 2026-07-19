@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { projects, projectEntries, projectTasks, projectMilestones, projectBaselines, projectTemplates, projectTemplateItems, projectRisks, projectChangeOrders, projectHealthSnapshots, projectCloseReviews, projectBoq, projectBoqLines, projectMaterialRequisitions, employeeAdvances, expenseClaims, expenseRequests, crmOpportunities, customerMaster, timesheets, journalEntries, journalLines, projectResources, resourceCalendar } from '../../database/schema';
+import { projects, projectEntries, projectTasks, projectBoq, crmOpportunities, customerMaster } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
 import { postingDefault } from '../ledger/posting-events';
 import { BiLiveService } from '../bi/bi-live.service';
@@ -9,15 +9,21 @@ import { CommitmentsService } from '../commitments/commitments.service';
 import { RetentionService } from '../retention/retention.service';
 import { ymd, n, fx } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
-import { assertMakerChecker } from '../../common/control-profile';
 import { ProjectsResourcingService } from './projects-resourcing.service';
 import { ProjectsWbsService } from './projects-wbs.service';
 import { ProjectsEvmService } from './projects-evm.service';
+import { ProjectsMaterialService } from './projects-material.service';
+import { BoqImportService, type BoqImportInput } from './boq-import.service';
 import { ProjectsPortfolioService } from './projects-portfolio.service';
 import { ProjectsGateService } from './projects-gate.service';
 import { ProgramBenefitsService } from './program-benefits.service';
-import { r2, DEFAULT_REV_PER_FTE_MONTH, r4, depsCsv, csvToList, clamp15, riskScore, ragFor, addDays } from './projects.helpers';
-import { shapeTemplateItem, shapeRisk, shapeChangeOrder, shapeBoqLine } from './projects.shapes';
+import { ProjectsBoqService } from './projects-boq.service';
+import { ProjectsTemplatesService } from './projects-templates.service';
+import { ProjectsRiskService } from './projects-risk.service';
+import { ProjectsCloseService } from './projects-close.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
+import { ProjectsPmoService } from './projects-pmo.service';
+import { r2, csvToList } from './projects.helpers';
 
 
 export interface CreateProjectDto { project_code?: string; name: string; customer_name?: string; customer_no?: string; billing_type?: 'TM' | 'Fixed'; budget_amount?: number; contract_amount?: number; start_date?: string; end_date?: string; rev_method?: 'billing' | 'poc'; estimated_cost?: number; budget_tolerance_pct?: number }
@@ -69,9 +75,16 @@ export class ProjectsService {
   private readonly resourcing: ProjectsResourcingService;
   private readonly wbs: ProjectsWbsService;
   private readonly evmSvc: ProjectsEvmService;
+  private readonly materialSvc: ProjectsMaterialService;
+  private readonly boqImportSvc: BoqImportService;
   private readonly portfolio: ProjectsPortfolioService;
   private readonly gates: ProjectsGateService;
   private readonly benefits: ProgramBenefitsService;
+  private readonly boq: ProjectsBoqService;
+  private readonly templates: ProjectsTemplatesService;
+  private readonly risks: ProjectsRiskService;
+  private readonly closeReview: ProjectsCloseService;
+  private readonly pmo: ProjectsPmoService;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
@@ -91,9 +104,43 @@ export class ProjectsService {
     this.resourcing = new ProjectsResourcingService(db, (code) => this.row(code));
     this.wbs = new ProjectsWbsService(db, (code) => this.row(code), (code, dto, user) => this.bill(code, dto, user));
     this.evmSvc = new ProjectsEvmService(db, this.wbs, (code) => this.row(code), (code) => this.get(code), (pr, nb) => this.fmt(pr, nb), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
+    // A3 (docs/50 Wave 3) — material control tower read models (ctor-body plain class, ratchet pattern).
+    // A5 (docs/50 Wave 5) — + the facade evm() port for the EVM-by-category lens.
+    this.materialSvc = new ProjectsMaterialService(db, (code) => this.row(code), this.commitments, (code) => this.evm(code));
+    // A4 (docs/50 Wave 4) — BoQ takeoff import (ctor-body plain class, ratchet pattern).
+    this.boqImportSvc = new BoqImportService(db, (code) => this.row(code), (code) => this.getBoq(code));
     this.portfolio = new ProjectsPortfolioService(db);
     this.gates = new ProjectsGateService(db, (code) => this.row(code));
     this.benefits = new ProgramBenefitsService(db);
+    // docs/46 Phase-4 projects round: four more ctor-body sub-services. CO approval re-baselines through the
+    // facade's captureBaseline delegator (→ evmSvc); template apply returns via the WBS listTasks delegator;
+    // the close review reads GL 1260/2390 through a locally-constructed LedgerReadService (kept out of DI so
+    // the goldenmaster's positional (db, ledger) construction stays valid).
+    this.boq = new ProjectsBoqService(db, (code) => this.row(code), (c, d, u) => this.captureBaseline(c, d, u), this.commitments);
+    this.templates = new ProjectsTemplatesService(db, (code) => this.row(code), (code) => this.listTasks(code));
+    this.risks = new ProjectsRiskService(db, (code) => this.row(code), (t, k, sev, c, x) => this.emitAction(t, k, sev, c, x));
+    this.closeReview = new ProjectsCloseService(db, new LedgerReadService(db));
+    // docs/46 round 5 — the read-only PMO command-center aggregators (portfolio EVM / action center /
+    // forecast / governance pack / resource leveling) compose across the sub-services THROUGH the facade's
+    // delegators, so the ports simply loop back into `this`.
+    this.pmo = new ProjectsPmoService(db, {
+      row: (code) => this.row(code),
+      list: (user) => this.list(user),
+      get: (code) => this.get(code),
+      evm: (code, asOf) => this.evm(code, asOf),
+      schedule: (code) => this.schedule(code),
+      earnedSchedule: (code, asOf) => this.earnedSchedule(code, asOf),
+      evmByCategory: (code) => this.evmByCategory(code),
+      healthHistory: (code) => this.healthHistory(code),
+      getBaseline: (code, user) => this.getBaseline(code, user),
+      listRisks: (code) => this.listRisks(code),
+      listMilestones: (code) => this.listMilestones(code),
+      listChangeOrders: (code) => this.listChangeOrders(code),
+      topRisks: (user) => this.topRisks(user),
+      resourceUtilization: (user) => this.resourceUtilization(user),
+      resourceCapacity: (user, dto) => this.resourceCapacity(user, dto),
+      ragOf: (cpi, spi) => this.evmSvc.ragOf(cpi, spi),
+    }, this.retention);
   }
 
   // Best-effort proactive push to the live bus (PMO-1). Never throws — a missing/failed bus must not break
@@ -342,6 +389,13 @@ export class ProjectsService {
   // the project's WIP actuals. `as_of` defaults to the business day; PV counts tasks scheduled to finish by then.
   // ── docs/38 projects PR-4: EVM/schedule/programs/baselines/health live in ProjectsEvmService. ──
   async evm(code: string, asOf?: string) { return this.evmSvc.evm(code, asOf); }
+  // A3 (docs/50 Wave 3) — thin delegators; logic in projects-material.service.ts (ratchet).
+  async boqByWbs(code: string) { return this.materialSvc.boqByWbs(code); }
+  async materialDrawCurve(code: string) { return this.materialSvc.drawCurve(code); }
+  async evmByCategory(code: string) { return this.materialSvc.evmByCategory(code); } // A5 (docs/50 Wave 5)
+  // A4 (docs/50 Wave 4) — thin delegators; logic in boq-import.service.ts (ratchet).
+  async importBoq(code: string, input: BoqImportInput, user: JwtUser) { return this.boqImportSvc.importBoq(code, input, user); }
+  boqImportTemplate() { return this.boqImportSvc.template(); }
   // PPM-B2 (PROJ-22): manual bottom-up ETC entry + the EAC-scenario comparison (formulaic vs bottom-up).
   async submitEtc(code: string, dto: EtcDto, user: JwtUser) { return this.evmSvc.submitEtc(code, dto, user); }
   async eacScenarios(code: string) { return this.evmSvc.eacScenarios(code); }
@@ -408,795 +462,40 @@ export class ProjectsService {
   async listResourceCalendar(user: JwtUser, resourceName?: string) { return this.resourcing.listResourceCalendar(user, resourceName); }
   async roleSupplyDemand(user: JwtUser, dto?: { months?: number; from?: string }) { return this.resourcing.roleSupplyDemand(user, dto); }
 
-  // ── Resource leveling (PPM-A2, PROJ-23) ───────────────────────────────────
-  // Detects a month where a named resource is over-allocated WITHIN this project's own assignments (the
-  // same calendar-aware ceiling as the tenant-wide resourceCapacity heatmap — default 100% absent a
-  // resource_calendar override), then cross-references the CPM schedule's per-task SLACK (schedule(),
-  // PROJ-06/21) to suggest which task-linked assignment could be shifted later — by up to its slack, in
-  // days — without delaying the critical path. An over-allocated resource-month where every contributing
-  // task is already on the critical path (slack 0) is flagged NO_SLACK: genuinely unresolvable without
-  // accepting a project delay. Project-scoped (unlike the tenant-wide resourceCapacity) because slack is a
-  // property of THIS project's own schedule. Read-only/detective — suggests, never moves anything; a
-  // project with no over-allocated resource carries empty over_allocations/suggestions/unresolvable.
-  // Composed directly in the facade (spans both evmSvc's schedule and the resourcing sub-service's data),
-  // mirroring the existing forecast() cross-sub-service composition.
-  async resourceLeveling(code: string, _user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const sched = await this.evmSvc.schedule(code);
-    const slackByTask = new Map<number, number>(sched.tasks.map((t: any) => [t.id, Number(t.slack) || 0]));
-    const taskById = new Map<number, any>(sched.tasks.map((t: any) => [t.id, t]));
+  // ── PMO command-center aggregators (docs/46 round 5) — ProjectsPmoService; thin delegators. ──
+  // Resource leveling (PPM-A2, PROJ-23), portfolio command center (A1), action center (PMO-1, PROJ-11),
+  // forward resource & cash forecast (PMO-2), period governance pack (PMO-3, incl. the per-project pack).
+  async resourceLeveling(code: string, user: JwtUser) { return this.pmo.resourceLeveling(code, user); }
+  async portfolioEvm(user: JwtUser) { return this.pmo.portfolioEvm(user); }
+  async actionCenter(user: JwtUser, dto?: { stale_days?: number }) { return this.pmo.actionCenter(user, dto); }
+  async forecast(user: JwtUser, dto?: { months?: number; from?: string; rev_per_fte_month?: number }) { return this.pmo.forecast(user, dto); }
+  async governancePack(user: JwtUser, opts?: { code?: string; period?: string }) { return this.pmo.governancePack(user, opts); }
 
-    const assignments = (await db.select().from(projectResources).where(eq(projectResources.projectId, Number(p.id))))
-      .filter((r: any) => r.taskId != null)
-      .map((r: any) => {
-        const t = taskById.get(Number(r.taskId));
-        return { ...r, effStart: r.periodStart ?? t?.planned_start ?? null, effEnd: r.periodEnd ?? t?.planned_end ?? null };
-      });
+  // ── BoQ / change orders / site cash (docs/32 M0–M4, PROJ-10/12/14) — ProjectsBoqService ──
+  async createBoq(code: string, dto: BoqDto, user: JwtUser) { return this.boq.createBoq(code, dto, user); }
+  async getBoq(code: string) { return this.boq.getBoq(code); }
+  async siteCash(code: string) { return this.boq.siteCash(code); }
+  async listCommitments(code: string) { return this.boq.listCommitments(code); }
+  async addBoqLine(boqId: number, dto: BoqLineDto, user: JwtUser) { return this.boq.addBoqLine(boqId, dto, user); }
+  async approveBoq(boqId: number, user: JwtUser, selfApprovalReason?: string | null) { return this.boq.approveBoq(boqId, user, selfApprovalReason); }
+  async lockBoq(boqId: number, user: JwtUser) { return this.boq.lockBoq(boqId, user); }
+  async remeasureBoqLine(lineId: number, dto: RemeasureDto, user: JwtUser) { return this.boq.remeasureBoqLine(lineId, dto, user); }
+  async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) { return this.boq.createChangeOrder(code, dto, user); }
+  async approveChangeOrder(coId: number, user: JwtUser, selfApprovalReason?: string | null) { return this.boq.approveChangeOrder(coId, user, selfApprovalReason); }
+  async rejectChangeOrder(coId: number, user: JwtUser) { return this.boq.rejectChangeOrder(coId, user); }
+  async listChangeOrders(code: string) { return this.boq.listChangeOrders(code); }
 
-    const calendarRows = await db.select().from(resourceCalendar);
-    const availByResMonth = new Map<string, number>();
-    for (const c of calendarRows) availByResMonth.set(`${c.resourceName}|${String(c.month).slice(0, 7)}`, n(c.availablePct));
+  // ── Project templates (B2) — ProjectsTemplatesService ───────────────────
+  async createTemplate(dto: TemplateDto, user: JwtUser) { return this.templates.createTemplate(dto, user); }
+  async listTemplates(user: JwtUser) { return this.templates.listTemplates(user); }
+  async getTemplate(code: string) { return this.templates.getTemplate(code); }
+  async applyTemplate(code: string, tplCode: string, dto: ApplyTemplateDto, user: JwtUser) { return this.templates.applyTemplate(code, tplCode, dto, user); }
 
-    const activeIn = (ps: string | null, pe: string | null, month: string) => {
-      const mStart = `${month}-01`, mEnd = `${month}-31`;
-      return (ps == null || ps <= mEnd) && (pe == null || pe >= mStart);
-    };
-    const months = new Set<string>();
-    for (const r of assignments) {
-      if (r.effStart) months.add(String(r.effStart).slice(0, 7));
-      if (r.effEnd) months.add(String(r.effEnd).slice(0, 7));
-    }
-
-    const byResMonth = new Map<string, { alloc: number; contributors: { taskId: number; allocPct: number }[] }>();
-    for (const month of months) {
-      for (const r of assignments) {
-        if (!activeIn(r.effStart, r.effEnd, month)) continue;
-        const key = `${r.resourceName}|${month}`;
-        const bucket = byResMonth.get(key) ?? { alloc: 0, contributors: [] };
-        bucket.alloc = r2(bucket.alloc + n(r.allocPct));
-        bucket.contributors.push({ taskId: Number(r.taskId), allocPct: n(r.allocPct) });
-        byResMonth.set(key, bucket);
-      }
-    }
-
-    const overAllocations: any[] = [], suggestions: any[] = [], unresolvable: any[] = [];
-    for (const [key, bucket] of byResMonth) {
-      const [resourceName, month] = key.split('|');
-      const available = availByResMonth.get(key) ?? 100;
-      if (bucket.alloc <= available) continue;
-      overAllocations.push({ resource_name: resourceName, month, allocated_pct: r2(bucket.alloc), available_pct: available, over_by_pct: r2(bucket.alloc - available) });
-      const candidates = bucket.contributors
-        .map((c) => ({ ...c, slack: slackByTask.get(c.taskId) ?? 0, task: taskById.get(c.taskId) }))
-        .filter((c) => c.slack > 0)
-        .sort((a, b) => b.slack - a.slack);
-      const top = candidates[0];
-      if (!top) { unresolvable.push({ resource_name: resourceName, month, reason: 'NO_SLACK' }); continue; }
-      const newStart = top.task?.planned_start ? addDays(top.task.planned_start, top.slack) : null;
-      suggestions.push({
-        resource_name: resourceName, month, task_id: top.taskId, task_name: top.task?.name ?? null,
-        alloc_pct: top.allocPct, slack_days: top.slack, suggested_shift_days: top.slack,
-        shifted_to_month: newStart ? newStart.slice(0, 7) : null,
-      });
-    }
-    return {
-      project_code: code,
-      over_allocations: overAllocations.sort((a, b) => a.month.localeCompare(b.month) || a.resource_name.localeCompare(b.resource_name)),
-      suggestions: suggestions.sort((a, b) => a.month.localeCompare(b.month)),
-      unresolvable: unresolvable.sort((a, b) => a.month.localeCompare(b.month)),
-      over_allocated_count: overAllocations.length,
-    };
-  }
-
-
-
-
-
-
-  // Portfolio command center (A1): an executive cross-project rollup — EVM totals, project-health buckets,
-  // status + financial totals, the at-risk list, resource capacity, and the pipeline→delivery funnel. Also
-  // backs the schedulable `project_evm` BI report. Read-only — rides evm() / resourceUtilization() / crm.
-  async portfolioEvm(user: JwtUser) {
-    const db = this.db;
-    const list = await this.list(user);
-    const rows: any[] = [];
-    let bac = 0, ev = 0, ac = 0, eac = 0, contract = 0, billed = 0, wip = 0, margin = 0, costToDate = 0;
-    const status_counts: Record<string, number> = {};
-    const health = { on_track: 0, at_risk: 0, no_data: 0 };
-    for (const p of list.projects) {
-      const e = await this.evm(p.project_code);
-      const hasData = e.cpi != null || e.spi != null;
-      const risky = (e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9);
-      if (!hasData) health.no_data++; else if (risky) health.at_risk++; else health.on_track++;
-      rows.push({ project_code: p.project_code, name: p.name, status: p.status, customer_name: p.customer_name, billing_type: p.billing_type, cpi: e.cpi, spi: e.spi, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, wip: p.wip, margin: p.margin, on_track: hasData && !risky });
-      bac = r2(bac + e.bac); ev = r2(ev + e.ev); ac = r2(ac + e.ac); eac = r2(eac + e.eac);
-      contract = r2(contract + n(p.contract_amount)); billed = r2(billed + n(p.billed_to_date)); wip = r2(wip + n(p.wip)); margin = r2(margin + n(p.margin)); costToDate = r2(costToDate + n(p.cost_to_date));
-      status_counts[p.status] = (status_counts[p.status] ?? 0) + 1;
-    }
-    const at_risk = rows
-      .filter((r) => (r.cpi != null && r.cpi < 0.9) || (r.spi != null && r.spi < 0.9))
-      .map((r) => ({ project_code: r.project_code, name: r.name, cpi: r.cpi, spi: r.spi }))
-      .sort((a, b) => (a.cpi ?? 9) - (b.cpi ?? 9));
-    const cap = await this.resourceUtilization(user);
-    // Pipeline → delivery funnel: open + won opportunities (crm), and projects originated from a won deal.
-    const OPEN = ['prospecting', 'qualification', 'proposal', 'negotiation'];
-    const opps = await db.select().from(crmOpportunities);
-    let open_count = 0, open_amount = 0, won_count = 0, won_amount = 0;
-    for (const o of opps) {
-      const amt = n(o.amount);
-      if (OPEN.includes(o.stage)) { open_count++; open_amount = r2(open_amount + amt); }
-      else if (o.stage === 'won') { won_count++; won_amount = r2(won_amount + amt); }
-    }
-    const converted_count = list.projects.filter((p: any) => p.crm_opp_no).length;
-    return {
-      as_of: ymd(), count: rows.length,
-      status_counts,
-      financials: { contract, billed, wip, margin, cost_to_date: costToDate },
-      totals: { bac, ev, ac, eac, cpi: ac > 0 ? r4(ev / ac) : null },
-      health,
-      capacity: { over_allocated_count: cap.over_allocated_count, top: cap.utilization.slice(0, 5) },
-      funnel: { open_count, open_amount, won_count, won_amount, converted_count },
-      at_risk, projects: rows,
-    };
-  }
-
-  // ── Action center / exception inbox (PMO-1, PROJ-11) ─────────────────────
-  // One severity-ranked "what needs me now" worklist across all the caller's projects, assembled from the
-  // signals the modules already produce — pure aggregation, posts nothing (detective control PROJ-11):
-  //  • maker-checker queues awaiting a *different* approver: pending change orders, pending project timesheets;
-  //  • risk governance: open HIGH risks with no mitigation plan (PROJ-08);
-  //  • performance: red projects (CPI/SPI < 0.9) and over-budget projects;
-  //  • schedule: milestones past their due date and not yet reached;
-  //  • governance gaps: an Open project with no change-controlled baseline (PROJ-07) or a stale health
-  //    snapshot (none in `stale_days`, default 14). Each item deep-links to the offending project tab.
-  async actionCenter(user: JwtUser, dto?: { stale_days?: number }) {
-    const db = this.db;
-    const today = ymd();
-    const staleDays = dto?.stale_days != null && Number(dto.stale_days) > 0 ? Math.floor(Number(dto.stale_days)) : 14;
-    const staleCutoff = addDays(today, -staleDays);
-    // Project universe the caller can see (RLS-scoped); everything below is bounded to this id set so the
-    // cross-project queries never leak another tenant's rows.
-    const pRows = await db.select().from(projects).orderBy(desc(projects.id)).limit(100);
-    const codeById = new Map<number, string>(pRows.map((p: any) => [Number(p.id), p.projectCode]));
-    const ids = new Set<number>(pRows.map((p: any) => Number(p.id)));
-    const fmtByCode = new Map<string, any>((await this.list(user)).projects.map((p: any) => [p.project_code, p]));
-
-    const items: any[] = [];
-    const SEV_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
-    const push = (kind: string, severity: 'high' | 'medium' | 'low', projectId: number | null, code: string | null, titleTh: string, titleEn: string, ref: string | null, tab: string, meta: Record<string, any> = {}) => {
-      items.push({ kind, severity, project_id: projectId, project_code: code, title_th: titleTh, title_en: titleEn, ref, href: code ? `/projects/${code}?tab=${tab}` : '/projects', as_of: today, meta });
-    };
-
-    // Per-project performance + governance signals.
-    const baseRows = await db.select({ pid: projectBaselines.projectId }).from(projectBaselines).where(eq(projectBaselines.status, 'active'));
-    const hasBaseline = new Set<number>(baseRows.map((b: any) => Number(b.pid)));
-    const snapRows = await db.select({ pid: projectHealthSnapshots.projectId, last: sql<string>`max(${projectHealthSnapshots.snapshotDate})` }).from(projectHealthSnapshots).groupBy(projectHealthSnapshots.projectId);
-    const lastSnap = new Map<number, string>(snapRows.map((s: any) => [Number(s.pid), s.last]));
-    for (const p of pRows) {
-      const pid = Number(p.id); const code = p.projectCode;
-      const f = fmtByCode.get(code);
-      if (f?.over_budget) push('over_budget', 'high', pid, code, `เกินงบประมาณ (${f.budget_used_pct}%)`, `Over budget (${f.budget_used_pct}%)`, `${f.budget_used_pct}%`, 'costs', { budget_used_pct: f.budget_used_pct, budget_variance: f.budget_variance });
-      const e = await this.evm(code);
-      const isRed = (e.cpi != null && e.cpi < 0.9) || (e.spi != null && e.spi < 0.9);
-      if (isRed) push('project_red', 'high', pid, code, `สุขภาพโครงการแดง (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `Project health red (CPI ${e.cpi ?? '—'} / SPI ${e.spi ?? '—'})`, `CPI ${e.cpi ?? '—'}`, 'overview', { cpi: e.cpi, spi: e.spi });
-      // Earned-schedule slip (PROJ-19): late in a project the classic SPI (EV/PV) converges to 1 even when
-      // delivery is late — the time-based SPI(t) keeps degrading, so it catches slips the PV-based red check
-      // above no longer sees. Suppressed when the project already reads red (no duplicate worklist item).
-      if (!isRed) {
-        const esm = await this.earnedSchedule(code).catch(() => null);
-        if (esm?.spi_t != null && esm.spi_t < 0.9)
-          push('schedule_slip_es', 'medium', pid, code, `เวลาหลุดแผนตาม Earned Schedule (SPI(t) ${esm.spi_t})`, `Schedule slipping by earned schedule (SPI(t) ${esm.spi_t})`, `SPI(t) ${esm.spi_t}`, 'overview', { spi_t: esm.spi_t, sv_t_months: esm.sv_t_months, spi: e.spi });
-      }
-      const inFlight = p.status !== 'Closed'; // an in-flight (Open/Active) project should be baselined + tracked
-      if (inFlight && !hasBaseline.has(pid)) push('no_baseline', 'medium', pid, code, 'ยังไม่มีเส้นฐาน (baseline)', 'No change-controlled baseline', null, 'overview', {});
-      const ls = lastSnap.get(pid);
-      if (inFlight && (!ls || ls < staleCutoff)) push('stale_health', 'low', pid, code, ls ? `สุขภาพล่าสุด ${ls} (เก่ากว่า ${staleDays} วัน)` : 'ยังไม่เคยบันทึกสุขภาพ', ls ? `Last health ${ls} (older than ${staleDays}d)` : 'No health snapshot captured', ls ?? null, 'overview', { last_snapshot: ls ?? null, stale_days: staleDays });
-    }
-
-    // Pending change orders awaiting a different approver (maker-checker, PROJ-10).
-    const coRows = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.status, 'pending'));
-    for (const c of coRows) {
-      const pid = Number(c.projectId); if (!ids.has(pid)) continue;
-      const code = codeById.get(pid) ?? null;
-      push('change_order_pending', 'medium', pid, code, `ใบสั่งเปลี่ยนแปลงรออนุมัติ (${c.coNo})`, `Change order awaiting approval (${c.coNo})`, c.coNo, 'overview', { co_no: c.coNo, requested_by: c.requestedBy, contract_delta: n(c.contractDelta) });
-    }
-
-    // Over-budget material requisitions awaiting an authoriser (maker-checker, PROJ-13 — M2).
-    const pmrRows = await db.select().from(projectMaterialRequisitions).where(eq(projectMaterialRequisitions.status, 'pending'));
-    for (const m of pmrRows) {
-      const pid = Number(m.projectId); if (!ids.has(pid)) continue;
-      const code = codeById.get(pid) ?? null;
-      push('pmr_over_budget', 'high', pid, code, `ใบขอเบิกวัสดุเกินงบรออนุมัติ (${m.pmrNo})`, `Over-budget material requisition awaiting approval (${m.pmrNo})`, m.pmrNo, 'boq', { pmr_no: m.pmrNo, requested_by: m.requestedBy, over_amount: n(m.overAmount) });
-    }
-
-    // Pending project timesheets awaiting independent approval (maker-checker labor, PROJ-04).
-    const tsRows = await db.select().from(timesheets).where(eq(timesheets.status, 'Pending'));
-    const tsByProject = new Map<number, number>();
-    for (const t of tsRows) {
-      const pid = t.projectId != null ? Number(t.projectId) : null;
-      if (pid == null || !ids.has(pid)) continue;
-      tsByProject.set(pid, (tsByProject.get(pid) ?? 0) + 1);
-    }
-    for (const [pid, count] of tsByProject) {
-      const code = codeById.get(pid) ?? null;
-      push('timesheet_pending', 'medium', pid, code, `ใบลงเวลารออนุมัติ (${count})`, `Project timesheets awaiting approval (${count})`, String(count), 'costs', { count });
-    }
-
-    // Milestones past due and not yet reached (schedule slip).
-    const msRows = await db.select().from(projectMilestones).where(eq(projectMilestones.status, 'pending'));
-    for (const m of msRows) {
-      const pid = Number(m.projectId); if (!ids.has(pid)) continue;
-      if (!m.dueDate || String(m.dueDate) >= today) continue;
-      const code = codeById.get(pid) ?? null;
-      push('milestone_slipping', 'medium', pid, code, `หมุดหมายเลยกำหนด: ${m.name} (${m.dueDate})`, `Milestone overdue: ${m.name} (${m.dueDate})`, m.dueDate, 'milestones', { milestone: m.name, due_date: m.dueDate });
-    }
-
-    // Open HIGH risks with no mitigation plan (PROJ-08) — reuse the portfolio top-risk roll-up.
-    const risks = await this.topRisks(user);
-    for (const r of risks.top) {
-      if (r.rag !== 'red' || r.mitigation) continue;
-      push('risk_unmitigated_high', 'high', r.project_id ?? null, r.project_code ?? null, `ความเสี่ยงสูงยังไม่มีแผนรับมือ: ${r.title}`, `Unmitigated high risk: ${r.title}`, r.title, 'risks', { risk_id: r.id, score: r.score });
-    }
-
-    // Retention release tranches whose due date has passed (docs/35 Depth-1) — the withheld retention is now
-    // collectible (customer) / payable (subcontractor) and should be released. Bounded to the caller's projects.
-    if (this.retention) {
-      const due = await this.retention.due(today).catch(() => null);
-      for (const d of due?.due ?? []) {
-        const pid = d.project_id != null ? Number(d.project_id) : null;
-        if (pid == null || !ids.has(pid)) continue;
-        const code = codeById.get(pid) ?? null;
-        const th = d.party_type === 'subcontractor' ? 'เงินประกันผลงานผู้รับเหมาช่วงถึงกำหนดคืน' : 'เงินประกันผลงานลูกค้าถึงกำหนดคืน';
-        const en = d.party_type === 'subcontractor' ? 'Subcontractor retention due for release' : 'Customer retention due for release';
-        push('retention_due', 'medium', pid, code, `${th} (${d.source_doc_no}, ${n(d.amount)})`, `${en} (${d.source_doc_no}, ${n(d.amount)})`, d.source_doc_no, 'billing', { tranche_id: d.tranche_id, retention_id: d.retention_id, amount: n(d.amount), due_date: d.due_date, party_type: d.party_type });
-      }
-    }
-
-    items.sort((a, b) => (SEV_RANK[a.severity]! - SEV_RANK[b.severity]!) || String(a.project_code ?? '').localeCompare(String(b.project_code ?? '')) || a.kind.localeCompare(b.kind));
-    const by_kind: Record<string, number> = {};
-    for (const it of items) by_kind[it.kind] = (by_kind[it.kind] ?? 0) + 1;
-    const summary = {
-      total: items.length,
-      high: items.filter((i) => i.severity === 'high').length,
-      medium: items.filter((i) => i.severity === 'medium').length,
-      low: items.filter((i) => i.severity === 'low').length,
-      by_kind,
-    };
-    return { as_of: today, stale_days: staleDays, summary, items };
-  }
-
-  // ── Forward resource & cash forecast (PMO-2) ─────────────────────────────
-  // Makes the capacity calendar forward-looking: committed capacity demand per month, alongside a
-  // BILLINGS/CASH forecast that overlays committed contractual billing with the probability-weighted pipeline —
-  // "if we win the deals in the pipeline, when does the cash land (and where are we already over-allocated)?".
-  // Read-only — rides PROJ-05 (resource governance) / PROJ-06 (EVM). Sources, all already in the system:
-  //  • committed billing = Fixed-price pending MILESTONES with a billing_percent, dated in-horizon (× contract),
-  //    plus each POC project's earned-but-unbilled contract asset (expected to invoice in the first month);
-  //  • weighted pipeline = each OPEN opportunity's amount × probability%, placed at its expected close month;
-  //  • committed demand = the resource capacity calendar's per-month allocation roll-up.
-  async forecast(user: JwtUser, dto?: { months?: number; from?: string; rev_per_fte_month?: number }) {
-    const db = this.db;
-    const months = Math.max(1, Math.min(24, Math.round(dto?.months ?? 6)));
-    const start = (dto?.from && /^\d{4}-\d{2}$/.test(dto.from)) ? dto.from : ymd().slice(0, 7);
-    // Configurable value→FTE rate: the revenue one full-time-equivalent delivers per month — used to turn the
-    // probability-weighted pipeline VALUE into projected resourcing DEMAND (FTE) so the forecast shows not just
-    // "when does cash land" but "how many people would winning the pipeline need". Default if unset/invalid.
-    const revPerFte = dto?.rev_per_fte_month != null && Number(dto.rev_per_fte_month) > 0 ? r2(dto.rev_per_fte_month) : DEFAULT_REV_PER_FTE_MONTH;
-    const cap = await this.resourceCapacity(user, { months, from: start });
-    const horizon: string[] = cap.horizon;
-    const hset = new Set(horizon);
-    const firstMonth = horizon[0];
-
-    // Committed contractual billing per month.
-    const committedBill = new Map<string, number>(horizon.map((m) => [m, 0]));
-    const projRows = await db.select().from(projects).orderBy(desc(projects.id)).limit(200);
-    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
-    const ms = await db.select().from(projectMilestones).where(eq(projectMilestones.status, 'pending'));
-    for (const m of ms) {
-      if (m.billingPercent == null || !m.dueDate) continue;
-      const mo = String(m.dueDate).slice(0, 7);
-      if (!hset.has(mo)) continue;
-      const proj = pById.get(Number(m.projectId)); if (!proj) continue;
-      const bill = r2(n(proj.contractAmount) * n(m.billingPercent) / 100);
-      if (bill > 0) committedBill.set(mo, r2((committedBill.get(mo) ?? 0) + bill));
-    }
-    // POC earned-but-unbilled (contract asset) is billable now → place in the first horizon month.
-    let pocAsset = 0;
-    for (const f of (await this.list(user)).projects) if (f.rev_method === 'poc' && (f.contract_asset ?? 0) > 0) pocAsset = r2(pocAsset + (f.contract_asset ?? 0));
-    if (pocAsset > 0) committedBill.set(firstMonth!, r2((committedBill.get(firstMonth!) ?? 0) + pocAsset));
-
-    // Probability-weighted pipeline per month (expected close).
-    const weightedPipe = new Map<string, number>(horizon.map((m) => [m, 0]));
-    const OPEN = ['prospecting', 'qualification', 'proposal', 'negotiation'];
-    const opps = await db.select().from(crmOpportunities);
-    let openCount = 0, openAmount = 0, weightedForecast = 0;
-    for (const o of opps) {
-      if (!OPEN.includes(o.stage)) continue;
-      openCount++; openAmount = r2(openAmount + n(o.amount));
-      const w = r2(n(o.amount) * Number(o.probability ?? 0) / 100);
-      weightedForecast = r2(weightedForecast + w);
-      const mo = o.expectedCloseDate ? String(o.expectedCloseDate).slice(0, 7) : null;
-      if (mo && hset.has(mo)) weightedPipe.set(mo, r2((weightedPipe.get(mo) ?? 0) + w));
-    }
-
-    const billingMonthly = horizon.map((month) => {
-      const committed = r2(committedBill.get(month) ?? 0);
-      const weighted = r2(weightedPipe.get(month) ?? 0);
-      return { month, committed_billing: committed, weighted_pipeline: weighted, total_expected: r2(committed + weighted) };
-    });
-    const committedTotal = r2(billingMonthly.reduce((s, m) => s + m.committed_billing, 0));
-    const weightedTotal = r2(billingMonthly.reduce((s, m) => s + m.weighted_pipeline, 0));
-    // Resourcing demand per month: committed (today's allocation, % → FTE) + the pipeline's projected FTE draw
-    // (weighted pipeline value that month / rev_per_fte_month). total = committed + pipeline.
-    const resourcingMonthly = cap.monthly.map((m: any) => {
-      const committedFte = r2(m.total_demand_pct / 100);
-      const pipelineFte = r2((weightedPipe.get(m.month) ?? 0) / revPerFte);
-      return { month: m.month, committed_demand_pct: m.total_demand_pct, resources_over: m.resources_over, committed_demand_fte: committedFte, pipeline_demand_fte: pipelineFte, total_demand_fte: r2(committedFte + pipelineFte) };
-    });
-    const peakDemand = resourcingMonthly.reduce((mx: number, m: any) => Math.max(mx, m.committed_demand_pct), 0);
-    const peakTotalFte = resourcingMonthly.reduce((mx: number, m: any) => Math.max(mx, m.total_demand_fte), 0);
-    const pipelineFteTotal = r2(resourcingMonthly.reduce((s: number, m: any) => s + m.pipeline_demand_fte, 0));
-
-    return {
-      from: start, months, horizon, rev_per_fte_month: revPerFte,
-      resourcing: { monthly: resourcingMonthly, over_allocated_count: cap.over_allocated_count, peak_demand_pct: r2(peakDemand), peak_total_demand_fte: r2(peakTotalFte), pipeline_demand_fte_total: pipelineFteTotal },
-      billing: { monthly: billingMonthly, committed_total: committedTotal, weighted_pipeline_total: weightedTotal, expected_total: r2(committedTotal + weightedTotal) },
-      pipeline: { open_count: openCount, open_amount: openAmount, weighted_forecast: weightedForecast },
-    };
-  }
-
-  // ── Period governance / status pack (PMO-3) ──────────────────────────────
-  // Assembles the recurring PMO status report so it isn't hand-built each period. For ONE project it returns
-  // the full pack — header + EVM + the health-snapshot **trend** (PPM-4) + baseline variance (PROJ-07) +
-  // open-HIGH risks (PROJ-08) + milestone status + the change-order log (PROJ-10); for the PORTFOLIO it
-  // returns a RAG-ranked status row per project plus a roll-up. Read-only/detective — rides PROJ-06; also a
-  // schedulable BI report type (`project_governance_pack`).
-  async governancePack(user: JwtUser, opts?: { code?: string; period?: string }) {
-    const period = opts?.period && /^\d{4}-\d{2}$/.test(opts.period) ? opts.period : ymd().slice(0, 7);
-    if (opts?.code) return { scope: 'project', as_of: ymd(), period, project: await this.projectPack(opts.code, period, user) };
-    const today = ymd();
-    const ragRank: Record<string, number> = { red: 0, amber: 1, no_data: 2, green: 3 };
-    const list = await this.list(user);
-    const rows: any[] = [];
-    const sum = { red: 0, amber: 0, green: 0, no_data: 0, unmitigated_high: 0, open_high_risks: 0, overdue_milestones: 0, pending_change_orders: 0 };
-    for (const f of list.projects) {
-      const code = f.project_code;
-      const e = await this.evm(code);
-      const rag = this.evmSvc.ragOf(e.cpi, e.spi);
-      sum[rag as 'red' | 'amber' | 'green' | 'no_data']++;
-      const risks = await this.listRisks(code);
-      const ms = await this.listMilestones(code);
-      const overdue = ms.milestones.filter((m: any) => m.status === 'pending' && m.due_date && String(m.due_date) < today).length;
-      const co = await this.listChangeOrders(code);
-      sum.unmitigated_high += risks.summary.unmitigated_high; sum.open_high_risks += risks.summary.high_open;
-      sum.overdue_milestones += overdue; sum.pending_change_orders += co.summary.pending;
-      rows.push({ project_code: code, name: f.name, status: f.status, rag, cpi: e.cpi, spi: e.spi, margin: f.margin, wip: f.wip,
-        open_high_risks: risks.summary.high_open, unmitigated_high: risks.summary.unmitigated_high, overdue_milestones: overdue, pending_change_orders: co.summary.pending });
-    }
-    rows.sort((a, b) => (ragRank[a.rag]! - ragRank[b.rag]!) || String(a.project_code).localeCompare(String(b.project_code)));
-    return { scope: 'portfolio', as_of: today, period, count: rows.length, summary: sum, projects: rows };
-  }
-
-
-  private async projectPack(code: string, period: string, user: JwtUser) {
-    const today = ymd();
-    const detail = await this.get(code);
-    const e = await this.evm(code);
-    const health = (await this.healthHistory(code)).history;
-    const baseline = await this.getBaseline(code, user);
-    const risks = await this.listRisks(code);
-    const ms = await this.listMilestones(code);
-    const co = await this.listChangeOrders(code);
-    return {
-      project_code: code, name: detail.name, status: detail.status, customer_name: detail.customer_name, period,
-      rag: this.evmSvc.ragOf(e.cpi, e.spi), pct_complete: detail.pct_complete,
-      contract_amount: detail.contract_amount, billed_to_date: detail.billed_to_date, wip: detail.wip, margin: detail.margin,
-      evm: { cpi: e.cpi, spi: e.spi, bac: e.bac, ev: e.ev, ac: e.ac, eac: e.eac, cost_variance: e.cost_variance, schedule_variance: e.schedule_variance },
-      health_trend: health,
-      baseline: { active: baseline.baseline, variance: baseline.variance },
-      risks: { summary: risks.summary, open_high: risks.risks.filter((r: any) => r.rag === 'red' && r.status !== 'closed') },
-      milestones: {
-        count: ms.count,
-        overdue: ms.milestones.filter((m: any) => m.status === 'pending' && m.due_date && String(m.due_date) < today),
-        reached: ms.milestones.filter((m: any) => m.status === 'reached').length,
-        list: ms.milestones,
-      },
-      change_orders: { summary: co.summary, list: co.change_orders },
-    };
-  }
-
-
-
-
-  // ── Change orders / contract variations (PROJ-10) ────────────────────────
-  // Request a change order — a governed amendment to the contract value / budget / EAC. Posts/applies NOTHING;
-  // it stays `pending` until a DIFFERENT user approves it (maker-checker), so a project can't move its
-  // contract goalposts unilaterally.
-  // ── Bill of Quantities (BoQ) — M0, docs/32 ────────────────────────────────
-  // The project's measured-works requirement & budget baseline. A draft BoQ is authored with rate-built
-  // lines (budget_amount = budget_qty × rate); an independent approver signs it off (maker-checker) — on
-  // approval the project's budget_amount is synced to the sum of line budgets (the enforceable baseline that
-  // M1's commitment ledger draws against). A locked BoQ is frozen. Line amount computed server-side.
-  private boqLineAmount(dto: BoqLineDto) {
-    return dto.budget_amount != null ? r2(dto.budget_amount) : r2(n(dto.budget_qty) * n(dto.rate));
-  }
-
-  async createBoq(code: string, dto: BoqDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const boqNo = dto.boq_no?.trim() || `BOQ${String(Date.now()).slice(-8)}`;
-    const [h] = await db.insert(projectBoq).values({
-      projectId: Number(p.id), tenantId, boqNo, title: dto.title ?? null, status: 'draft', createdBy: user.username,
-    }).returning({ id: projectBoq.id });
-    const lines = dto.lines ?? [];
-    for (let i = 0; i < lines.length; i++) {
-      const it = lines[i]!;
-      await db.insert(projectBoqLines).values({
-        boqId: Number(h!.id), projectId: Number(p.id), tenantId, lineNo: i + 1,
-        category: it.category ?? 'material', itemNo: it.item_no ?? null, taskId: it.task_id ?? null, wbsCode: it.wbs_code ?? null,
-        description: it.description ?? null, uom: it.uom ?? null,
-        budgetQty: fx(it.budget_qty ?? 0, 4), rate: fx(it.rate ?? 0, 2), budgetAmount: fx(this.boqLineAmount(it), 2),
-      });
-    }
-    return this.getBoq(code);
-  }
-
-  // Latest BoQ for a project + its lines + budget rollup (total, by category, count).
-  async getBoq(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const [boq] = await db.select().from(projectBoq).where(eq(projectBoq.projectId, Number(p.id))).orderBy(desc(projectBoq.id)).limit(1);
-    if (!boq) return { project_code: code, boq: null, lines: [], count: 0, budget_total: 0, by_category: {} };
-    const lines = await db.select().from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boq.id))).orderBy(projectBoqLines.lineNo);
-    const budgetTotal = r2(lines.reduce((s: number, l: any) => s + n(l.budgetAmount), 0));
-    const byCategory: Record<string, number> = {};
-    for (const l of lines) byCategory[l.category] = r2((byCategory[l.category] ?? 0) + n(l.budgetAmount));
-    // M1 (PROJ-12) — per-line committed (open+consumed encumbrance) and remaining = budget − committed.
-    const committedByLine = this.commitments ? await this.commitments.committedByLine(lines.map((l: any) => Number(l.id))) : new Map<number, number>();
-    const shaped = lines.map((l: any) => {
-      const committed = committedByLine.get(Number(l.id)) ?? 0;
-      return { ...shapeBoqLine(l), committed, remaining: r2(n(l.budgetAmount) - committed) };
-    });
-    const committedTotal = r2(shaped.reduce((s: number, l: any) => s + n(l.committed), 0));
-    return {
-      project_code: code,
-      boq: { id: Number(boq.id), boq_no: boq.boqNo, version: boq.version, title: boq.title, status: boq.status, budget_total: n(boq.budgetTotal), approved_by: boq.approvedBy, approved_at: boq.approvedAt, created_by: boq.createdBy },
-      lines: shaped, count: lines.length, budget_total: budgetTotal,
-      committed_total: committedTotal, remaining_total: r2(budgetTotal - committedTotal),
-      by_category: byCategory,
-    };
-  }
-
-  // Project site-cash (M4, docs/32, PROJ-14) — the advances, expense-reimbursement claims and petty-cash
-  // requests raised AGAINST this project, so site cash is managed on the project. Read-only rollup.
-  async siteCash(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const pid = Number(p.id);
-    const advances = await db.select().from(employeeAdvances).where(eq(employeeAdvances.projectId, pid)).orderBy(desc(employeeAdvances.id));
-    const claims = await db.select().from(expenseClaims).where(eq(expenseClaims.projectId, pid)).orderBy(desc(expenseClaims.id));
-    const petty = await db.select().from(expenseRequests).where(eq(expenseRequests.projectId, pid)).orderBy(desc(expenseRequests.id));
-    const sum = (rows: any[]) => r2(rows.reduce((s: number, r: any) => s + n(r.amount), 0));
-    const advTotal = sum(advances), claimTotal = sum(claims), pettyTotal = sum(petty);
-    return {
-      project_code: code,
-      advances: advances.map((a: any) => ({ advance_no: a.advanceNo, payee: a.payee, amount: n(a.amount), status: a.status, settled_expense: n(a.settledExpense), issued_date: a.issuedDate })),
-      reimbursements: claims.map((c: any) => ({ id: Number(c.id), category: c.category, amount: n(c.amount), status: c.status, entry_no: c.entryNo, ap_txn_no: c.apTxnNo, claim_date: c.claimDate })),
-      petty_cash: petty.map((r: any) => ({ req_no: r.reqNo, kind: r.kind, payee: r.payee, amount: n(r.amount), status: r.status, gl_ref: r.glRef })),
-      totals: { advances: advTotal, reimbursements: claimTotal, petty_cash: pettyTotal, total: r2(advTotal + claimTotal + pettyTotal) },
-      count: advances.length + claims.length + petty.length,
-    };
-  }
-
-  // Project commitments read model (M1, PROJ-12) — the encumbrance ledger for a project + a status summary.
-  async listCommitments(code: string) {
-    const p = await this.row(code);
-    if (!this.commitments) return { project_code: code, commitments: [], count: 0, summary: { open: 0, consumed: 0, released: 0, committed: 0 } };
-    return { project_code: code, ...(await this.commitments.listForProject(Number(p.id))) };
-  }
-
-  private async boqRow(boqId: number) {
-    const [boq] = await this.db.select().from(projectBoq).where(eq(projectBoq.id, Number(boqId))).limit(1);
-    if (!boq) throw new NotFoundException({ code: 'BOQ_NOT_FOUND', message: `BoQ ${boqId} not found`, messageTh: 'ไม่พบ BoQ' });
-    return boq;
-  }
-
-  // Append a line to a DRAFT BoQ (an approved/locked BoQ is frozen — change it via a change order in M1+).
-  async addBoqLine(boqId: number, dto: BoqLineDto, user: JwtUser) {
-    const db = this.db;
-    const boq = await this.boqRow(boqId);
-    if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is ${boq.status}; only a draft BoQ accepts new lines`, messageTh: 'เพิ่มรายการได้เฉพาะ BoQ สถานะร่าง' });
-    const [mx] = await db.select({ m: sql<string>`coalesce(max(${projectBoqLines.lineNo}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
-    await db.insert(projectBoqLines).values({
-      boqId: Number(boqId), projectId: Number(boq.projectId), tenantId: boq.tenantId ?? user.tenantId ?? null, lineNo: Number(mx?.m ?? 0) + 1,
-      category: dto.category ?? 'material', itemNo: dto.item_no ?? null, taskId: dto.task_id ?? null, wbsCode: dto.wbs_code ?? null,
-      description: dto.description ?? null, uom: dto.uom ?? null,
-      budgetQty: fx(dto.budget_qty ?? 0, 4), rate: fx(dto.rate ?? 0, 2), budgetAmount: fx(this.boqLineAmount(dto), 2),
-    });
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
-    return this.getBoq(proj!.c);
-  }
-
-  // Approve a BoQ (maker-checker: approver ≠ author, SOD_SELF_APPROVAL). On approval the sum of line budgets
-  // is snapshotted onto the BoQ and synced to the project's budget_amount — the enforceable material budget
-  // baseline (M1's commitment ledger draws remaining = budget − actual − commitments against it).
-  async approveBoq(boqId: number, user: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const boq = await this.boqRow(boqId);
-    if (boq.status !== 'draft') throw new BadRequestException({ code: 'BOQ_NOT_DRAFT', message: `BoQ is already ${boq.status}`, messageTh: 'BoQ ถูกดำเนินการแล้ว' });
-    await assertMakerChecker(db, { user, maker: boq.createdBy, event: 'proj.boq.approve', ref: String(boqId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a BoQ you authored', messageTh: 'ผู้จัดทำ BoQ อนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
-    const [tot] = await db.select({ v: sql<string>`coalesce(sum(${projectBoqLines.budgetAmount}),0)` }).from(projectBoqLines).where(eq(projectBoqLines.boqId, Number(boqId)));
-    const budgetTotal = r2(n(tot?.v));
-    await db.update(projectBoq).set({ status: 'approved', budgetTotal: fx(budgetTotal, 2), approvedBy: user.username, approvedAt: new Date() }).where(eq(projectBoq.id, Number(boqId)));
-    // Sync the project's budget baseline to the approved BoQ total (the material/works budget).
-    await db.update(projects).set({ budgetAmount: fx(budgetTotal, 2) }).where(eq(projects.id, Number(boq.projectId)));
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
-    return { ...(await this.getBoq(proj!.c)), budget_synced: budgetTotal };
-  }
-
-  // Lock an approved BoQ — freeze it (no further re-measurement edits; the definitive baseline of record).
-  async lockBoq(boqId: number, user: JwtUser) {
-    const db = this.db;
-    const boq = await this.boqRow(boqId);
-    if (boq.status !== 'approved') throw new BadRequestException({ code: 'BOQ_NOT_APPROVED', message: `Only an approved BoQ can be locked (is ${boq.status})`, messageTh: 'ล็อกได้เฉพาะ BoQ ที่อนุมัติแล้ว' });
-    await db.update(projectBoq).set({ status: 'locked' }).where(eq(projectBoq.id, Number(boqId)));
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(boq.projectId))).limit(1);
-    return this.getBoq(proj!.c);
-  }
-
-  // Record the actual measured quantity for a line (re-measurement). Allowed while the BoQ is approved (not
-  // yet locked); records remeasured_qty vs the budgeted qty — the basis for re-measurement variance.
-  async remeasureBoqLine(lineId: number, dto: RemeasureDto, user: JwtUser) {
-    const db = this.db;
-    const [line] = await db.select().from(projectBoqLines).where(eq(projectBoqLines.id, Number(lineId))).limit(1);
-    if (!line) throw new NotFoundException({ code: 'BOQ_LINE_NOT_FOUND', message: `BoQ line ${lineId} not found`, messageTh: 'ไม่พบรายการ BoQ' });
-    const boq = await this.boqRow(Number(line.boqId));
-    if (boq.status === 'draft') throw new BadRequestException({ code: 'BOQ_NOT_APPROVED', message: 'Re-measure an approved BoQ, not a draft', messageTh: 're-measure ได้เมื่อ BoQ อนุมัติแล้ว' });
-    if (boq.status === 'locked') throw new BadRequestException({ code: 'BOQ_LOCKED', message: 'BoQ is locked — re-measurement is frozen', messageTh: 'BoQ ถูกล็อก แก้ไขไม่ได้' });
-    await db.update(projectBoqLines).set({ remeasuredQty: fx(dto.remeasured_qty, 4) }).where(eq(projectBoqLines.id, Number(lineId)));
-    const [proj] = await db.select({ c: projects.projectCode }).from(projects).where(eq(projects.id, Number(line.projectId))).limit(1);
-    return this.getBoq(proj!.c);
-  }
-
-  async createChangeOrder(code: string, dto: ChangeOrderDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const contractDelta = r2(dto.contract_delta ?? 0), budgetDelta = r2(dto.budget_delta ?? 0), estDelta = r2(dto.estimated_cost_delta ?? 0);
-    if (contractDelta === 0 && budgetDelta === 0 && estDelta === 0) throw new BadRequestException({ code: 'EMPTY_CHANGE_ORDER', message: 'A change order must change the contract, budget, or estimated cost', messageTh: 'ใบเปลี่ยนแปลงต้องเปลี่ยนมูลค่าสัญญา งบประมาณ หรือประมาณการต้นทุน' });
-    const coNo = `CO${String(Date.now()).slice(-8)}`;
-    await db.insert(projectChangeOrders).values({
-      projectId: Number(p.id), tenantId: p.tenantId ?? user.tenantId ?? null, coNo, description: dto.description ?? null,
-      contractDelta: fx(contractDelta, 2), budgetDelta: fx(budgetDelta, 2), estimatedCostDelta: fx(estDelta, 2),
-      reason: dto.reason ?? null, status: 'pending', requestedBy: user.username,
-    });
-    return this.listChangeOrders(code);
-  }
-
-  // Approve a change order (maker-checker): the approver MUST differ from the requester (SOD_SELF_APPROVAL).
-  // On approval the contract/budget/EAC deltas are applied to the project AND a new baseline is auto-captured
-  // (reason = the CO), so the scope/contract change is authorised, segregated, and re-baselined (ties to PROJ-07).
-  async approveChangeOrder(coId: number, user: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
-    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
-    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
-    await assertMakerChecker(db, { user, maker: co.requestedBy, event: 'proj.change-order.approve', ref: String(coId), reason: selfApprovalReason, code: 'SOD_SELF_APPROVAL', message: 'Maker-checker: you cannot approve a change order you requested', messageTh: 'ผู้ขอเปลี่ยนแปลงอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)', httpStatus: 400 });
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
-    const newContract = r2(Math.max(0, n(proj!.contractAmount) + n(co.contractDelta)));
-    const newBudget = r2(Math.max(0, n(proj!.budgetAmount) + n(co.budgetDelta)));
-    const newEst = r2(Math.max(0, n(proj!.estimatedCost) + n(co.estimatedCostDelta)));
-    await db.update(projects).set({ contractAmount: fx(newContract, 2), budgetAmount: fx(newBudget, 2), estimatedCost: fx(newEst, 2) }).where(eq(projects.id, Number(proj!.id)));
-    await db.update(projectChangeOrders).set({ status: 'approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
-    // Re-baseline so the variance trail records the authorised change (PROJ-07). Best-effort.
-    let baseline: any = null;
-    try { baseline = await this.captureBaseline(proj!.projectCode, { label: `Change order ${co.coNo}`, reason: `Change order ${co.coNo}` }, user); } catch { /* baseline optional */ }
-    return { change_order: co.coNo, project_code: proj!.projectCode, status: 'approved', contract_amount: newContract, budget_amount: newBudget, estimated_cost: newEst, baseline: baseline?.baseline ?? null };
-  }
-
-  async rejectChangeOrder(coId: number, user: JwtUser) {
-    const db = this.db;
-    const [co] = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.id, Number(coId))).limit(1);
-    if (!co) throw new NotFoundException({ code: 'CHANGE_ORDER_NOT_FOUND', message: `Change order ${coId} not found`, messageTh: 'ไม่พบใบเปลี่ยนแปลง' });
-    if (co.status !== 'pending') throw new BadRequestException({ code: 'CHANGE_ORDER_DECIDED', message: `Change order is already ${co.status}`, messageTh: 'ใบเปลี่ยนแปลงถูกตัดสินแล้ว' });
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(co.projectId))).limit(1);
-    await db.update(projectChangeOrders).set({ status: 'rejected', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectChangeOrders.id, Number(coId)));
-    return this.listChangeOrders(proj!.projectCode);
-  }
-
-  async listChangeOrders(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = await db.select().from(projectChangeOrders).where(eq(projectChangeOrders.projectId, Number(p.id))).orderBy(desc(projectChangeOrders.id));
-    const approved = rows.filter((r: any) => r.status === 'approved');
-    return {
-      project_code: code, change_orders: rows.map(shapeChangeOrder), count: rows.length,
-      summary: {
-        pending: rows.filter((r: any) => r.status === 'pending').length,
-        approved: approved.length,
-        approved_contract_delta: r2(approved.reduce((s: number, r: any) => s + n(r.contractDelta), 0)),
-      },
-    };
-  }
-
-  // ── Project templates (B2) ───────────────────────────────────────────────
-  // Create a reusable WBS/milestone scaffold. Items default their seq to declaration order (1-based) so a
-  // template can omit explicit seqs; parent_seq / depends_on_seq reference those ordinals.
-  async createTemplate(dto: TemplateDto, user: JwtUser) {
-    const db = this.db;
-    const code = dto.code?.trim() || `TPL${String(Date.now()).slice(-6)}`;
-    const [existing] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, code)).limit(1);
-    if (existing) throw new BadRequestException({ code: 'TEMPLATE_EXISTS', message: `Template ${code} already exists`, messageTh: 'รหัสแม่แบบซ้ำ' });
-    const tenantId = user.tenantId ?? null;
-    const [tpl] = await db.insert(projectTemplates).values({
-      tenantId, code, name: dto.name, description: dto.description ?? null, status: 'active', createdBy: user.username,
-    }).returning({ id: projectTemplates.id });
-    const items = dto.items ?? [];
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      await db.insert(projectTemplateItems).values({
-        templateId: Number(tpl!.id), tenantId, itemType: it!.item_type ?? 'task', seq: it!.seq ?? i + 1, name: it!.name,
-        parentSeq: it!.parent_seq ?? null, wbsCode: it!.wbs_code ?? null,
-        plannedHours: fx(it!.planned_hours ?? 0, 2), plannedCost: fx(it!.planned_cost ?? 0, 2),
-        offsetStartDays: Math.round(n(it!.offset_start_days)), offsetEndDays: Math.round(n(it!.offset_end_days)),
-        dependsOnSeq: depsCsv(it!.depends_on_seq),
-        billingPercent: it!.billing_percent != null ? fx(it!.billing_percent, 2) : null,
-        owner: it!.owner ?? null, assignee: it!.assignee ?? null,
-      });
-    }
-    return this.getTemplate(code);
-  }
-
-  async listTemplates(_user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(projectTemplates).orderBy(desc(projectTemplates.id)).limit(200);
-    const counts = await db.select({ tid: projectTemplateItems.templateId, c: sql<string>`count(*)` }).from(projectTemplateItems).groupBy(projectTemplateItems.templateId);
-    const cBy = new Map<number, number>(counts.map((x: any) => [Number(x.tid), Number(x.c)]));
-    return { templates: rows.map((t: any) => ({ id: Number(t.id), code: t.code, name: t.name, description: t.description, status: t.status, item_count: cBy.get(Number(t.id)) ?? 0, created_at: t.createdAt })), count: rows.length };
-  }
-
-  async getTemplate(code: string) {
-    const db = this.db;
-    const [tpl] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, code)).limit(1);
-    if (!tpl) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: `Template ${code} not found`, messageTh: 'ไม่พบแม่แบบ' });
-    const items = await db.select().from(projectTemplateItems).where(eq(projectTemplateItems.templateId, Number(tpl.id))).orderBy(projectTemplateItems.seq);
-    return {
-      id: Number(tpl.id), code: tpl.code, name: tpl.name, description: tpl.description, status: tpl.status, created_at: tpl.createdAt,
-      items: items.map(shapeTemplateItem), count: items.length,
-    };
-  }
-
-  // Apply a template to a project: scaffold its task + milestone items in one step, dated relative to the
-  // project start (the project's start_date, an explicit start_date override, or today). Tasks are created
-  // first to map seq→id, then a second pass wires parent_id and depends_on; milestones are dated off the same
-  // start. Idempotent-ish guard: refuses if the project already has tasks (so re-apply can't duplicate a WBS).
-  async applyTemplate(code: string, tplCode: string, dto: ApplyTemplateDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const [tpl] = await db.select().from(projectTemplates).where(eq(projectTemplates.code, tplCode)).limit(1);
-    if (!tpl) throw new NotFoundException({ code: 'TEMPLATE_NOT_FOUND', message: `Template ${tplCode} not found`, messageTh: 'ไม่พบแม่แบบ' });
-    const existing = await db.select({ id: projectTasks.id }).from(projectTasks).where(eq(projectTasks.projectId, Number(p.id))).limit(1);
-    if (existing.length) throw new BadRequestException({ code: 'PROJECT_HAS_TASKS', message: 'Apply a template only to a project with no tasks yet', messageTh: 'ใช้แม่แบบได้เฉพาะโครงการที่ยังไม่มีงาน' });
-    const items = await db.select().from(projectTemplateItems).where(eq(projectTemplateItems.templateId, Number(tpl.id))).orderBy(projectTemplateItems.seq);
-    const start = dto.start_date ?? p.startDate ?? ymd();
-
-    const taskItems = items.filter((it: any) => (it.itemType ?? 'task') !== 'milestone');
-    const seqToId = new Map<number, number>();
-    // Pass 1 — insert tasks, capturing seq→new id.
-    for (const it of taskItems) {
-      const [t] = await db.insert(projectTasks).values({
-        projectId: Number(p.id), tenantId, parentId: null, wbsCode: it.wbsCode ?? null, name: it.name, status: 'open',
-        plannedStart: addDays(start, n(it.offsetStartDays)), plannedEnd: addDays(start, n(it.offsetEndDays)),
-        plannedHours: fx(n(it.plannedHours), 2), plannedCost: fx(n(it.plannedCost), 2), pctComplete: fx(0, 2),
-        dependsOn: null, assignee: it.assignee ?? null, createdBy: user.username,
-      }).returning({ id: projectTasks.id });
-      seqToId.set(Number(it.seq), Number(t!.id));
-    }
-    // Pass 2 — wire parent_id + depends_on now that every seq has a real id.
-    for (const it of taskItems) {
-      const id = seqToId.get(Number(it.seq));
-      if (id == null) continue;
-      const set: any = {};
-      if (it.parentSeq != null && seqToId.has(Number(it.parentSeq))) set.parentId = seqToId.get(Number(it.parentSeq));
-      const deps = (it.dependsOnSeq ? String(it.dependsOnSeq).split(',') : [])
-        .map((s: string) => seqToId.get(Number(s))).filter((x: any) => x != null);
-      if (deps.length) set.dependsOn = deps.join(',');
-      if (Object.keys(set).length) await db.update(projectTasks).set(set).where(eq(projectTasks.id, id));
-    }
-    // Milestones — dated off the same start (offset_end_days = due offset).
-    const msItems = items.filter((it: any) => (it.itemType ?? 'task') === 'milestone');
-    for (const it of msItems) {
-      await db.insert(projectMilestones).values({
-        projectId: Number(p.id), tenantId, name: it.name, dueDate: addDays(start, n(it.offsetEndDays)), owner: it.owner ?? null,
-        status: 'pending', billingPercent: it.billingPercent != null ? fx(n(it.billingPercent), 2) : null, createdBy: user.username,
-      });
-    }
-    return { ...(await this.listTasks(code)), template: tplCode, tasks_created: taskItems.length, milestones_created: msItems.length, start_date: start };
-  }
-
-  // ── Risk & issue register (B4, PROJ-08) ──────────────────────────────────
-  // Log a risk (future threat) or issue (materialised problem). Score = prob×impact (risk) / 5×impact (issue);
-  // RAG is derived from the score band. A HIGH (red) risk with no mitigation is the governance signal.
-  async addRisk(code: string, dto: RiskDto, user: JwtUser) {
-    const db = this.db;
-    const p = await this.row(code);
-    const tenantId = p.tenantId ?? user.tenantId ?? null;
-    const kind = dto.kind === 'issue' ? 'issue' : 'risk';
-    const impact = clamp15(dto.impact ?? 1);
-    const probability = kind === 'issue' ? null : clamp15(dto.probability ?? 1);
-    const score = riskScore(kind, probability, impact);
-    await db.insert(projectRisks).values({
-      projectId: Number(p.id), tenantId, kind, title: dto.title, status: 'open',
-      probability, impact, score, rag: ragFor(score), owner: dto.owner ?? null,
-      mitigation: dto.mitigation ?? null, dueDate: dto.due_date ?? null, createdBy: user.username,
-    });
-    // PMO-1: an open HIGH risk with no mitigation plan (PROJ-08 exposure) pushes to the action center.
-    if (ragFor(score) === 'red' && !dto.mitigation) this.emitAction(tenantId, 'risk_unmitigated_high', 'high', code, { title: dto.title, score });
-    return this.listRisks(code);
-  }
-
-  async listRisks(code: string) {
-    const db = this.db;
-    const p = await this.row(code);
-    const rows = (await db.select().from(projectRisks).where(eq(projectRisks.projectId, Number(p.id))).orderBy(desc(projectRisks.score), desc(projectRisks.id))).map(shapeRisk);
-    const open = rows.filter((r: any) => r.status !== 'closed');
-    const high_open = open.filter((r: any) => r.rag === 'red');
-    return {
-      project_code: code, risks: rows, count: rows.length,
-      summary: {
-        open: open.length, closed: rows.length - open.length,
-        risks: rows.filter((r: any) => r.kind === 'risk').length, issues: rows.filter((r: any) => r.kind === 'issue').length,
-        high_open: high_open.length,
-        // PROJ-08: open HIGH items with no mitigation plan — the unmitigated exposure that must be surfaced.
-        unmitigated_high: high_open.filter((r: any) => !r.mitigation).length,
-      },
-    };
-  }
-
-  // Update a risk/issue: status (closing stamps closed_at), mitigation, owner, due, or a re-score (prob/impact →
-  // score + rag recomputed). Returns the refreshed register.
-  async patchRisk(riskId: number, dto: RiskPatchDto, user: JwtUser) {
-    const db = this.db;
-    const [r] = await db.select().from(projectRisks).where(eq(projectRisks.id, Number(riskId))).limit(1);
-    if (!r) throw new NotFoundException({ code: 'RISK_NOT_FOUND', message: `Risk ${riskId} not found`, messageTh: 'ไม่พบความเสี่ยง' });
-    const set: any = {};
-    if (dto.title != null) set.title = dto.title;
-    if (dto.owner != null) set.owner = dto.owner;
-    if (dto.mitigation != null) set.mitigation = dto.mitigation;
-    if (dto.due_date != null) set.dueDate = dto.due_date;
-    if (dto.status != null) {
-      set.status = dto.status;
-      set.closedAt = dto.status === 'closed' ? new Date() : null;
-    }
-    if (dto.probability != null || dto.impact != null) {
-      const impact = clamp15(dto.impact ?? r.impact);
-      const probability = r.kind === 'issue' ? null : clamp15(dto.probability ?? r.probability ?? 1);
-      const score = riskScore(r.kind, probability, impact);
-      set.impact = impact; set.probability = probability; set.score = score; set.rag = ragFor(score);
-    }
-    await db.update(projectRisks).set(set).where(eq(projectRisks.id, Number(riskId)));
-    const [proj] = await db.select().from(projects).where(eq(projects.id, Number(r.projectId))).limit(1);
-    return this.listRisks(proj!.projectCode);
-  }
-
-  // Portfolio top-risks roll-up (Track A tie-in): every open risk/issue across the caller's projects, ranked by
-  // score; `high` are the red (HIGH) ones and `unmitigated_high` the subset with no mitigation plan (PROJ-08).
-  async topRisks(user: JwtUser) {
-    const db = this.db;
-    const rows = (await db.select().from(projectRisks).where(sql`${projectRisks.status} <> 'closed'`)).map(shapeRisk);
-    const projRows = await db.select().from(projects);
-    const pById = new Map<number, any>(projRows.map((p: any) => [Number(p.id), p]));
-    const enriched = rows
-      .map((r: any) => ({ ...r, project_code: pById.get(r.project_id)?.projectCode ?? null, project_name: pById.get(r.project_id)?.name ?? null }))
-      .sort((a: any, b: any) => b.score - a.score);
-    const high = enriched.filter((r: any) => r.rag === 'red');
-    return {
-      as_of: ymd(), open_count: enriched.length, high_count: high.length,
-      unmitigated_high_count: high.filter((r: any) => !r.mitigation).length,
-      top: enriched.slice(0, 20),
-    };
-  }
+  // ── Risk & issue register (B4, PROJ-08) — ProjectsRiskService ────────────
+  async addRisk(code: string, dto: RiskDto, user: JwtUser) { return this.risks.addRisk(code, dto, user); }
+  async listRisks(code: string) { return this.risks.listRisks(code); }
+  async patchRisk(riskId: number, dto: RiskPatchDto, user: JwtUser) { return this.risks.patchRisk(riskId, dto, user); }
+  async topRisks(user: JwtUser) { return this.risks.topRisks(user); }
 
 
 
@@ -1244,75 +543,11 @@ export class ProjectsService {
   }
 
   // ───────────────── PROJ-03 — period-end project-close WIP/clearing review + sign-off ─────────────────
-  // Snapshot unbilled-WIP (GL 1260) + the applied-costs clearing balance (GL 2390) + open-project count.
-  private async closeSnapshot() {
-    const db = this.db;
-    const [wip] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.debit}) - sum(${journalLines.credit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '1260'), eq(journalEntries.status, 'Posted')));
-    const [clr] = await db.select({ v: sql<string>`coalesce(sum(${journalLines.credit}) - sum(${journalLines.debit}),0)` })
-      .from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(eq(journalLines.accountCode, '2390'), eq(journalEntries.status, 'Posted')));
-    const [op] = await db.select({ c: sql<string>`count(*)` }).from(projects).where(sql`${projects.status} not in ('Closed','Completed','Cancelled')`);
-    return { wipTotal: r2(n(wip?.v)), clearingBalance: r2(n(clr?.v)), openProjects: Number(op?.c ?? 0) };
-  }
-
-  // Preparer: snapshot + sign the period's WIP/clearing review (upsert per tenant/period; a prior
-  // Rejected/Prepared is refreshed). A control account that gets reviewed at close (PROJ-03, detective).
-  async prepareCloseReview(period: string, user: JwtUser) {
-    if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'BAD_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
-    const db = this.db;
-    const snap = await this.closeSnapshot();
-    const [existing] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (existing?.status === 'Approved') throw new BadRequestException({ code: 'ALREADY_APPROVED', message: `Project close review for ${period} is already approved`, messageTh: 'งวดนี้อนุมัติแล้ว' });
-    const values: any = {
-      tenantId: user.tenantId ?? null, period, status: 'Prepared',
-      wipTotal: String(snap.wipTotal), clearingBalance: String(snap.clearingBalance), openProjects: snap.openProjects,
-      preparedBy: user.username, preparedAt: new Date(), approvedBy: null, approvedAt: null, rejectionReason: null,
-    };
-    if (existing) await db.update(projectCloseReviews).set(values).where(eq(projectCloseReviews.id, existing.id));
-    else await db.insert(projectCloseReviews).values(values);
-    return this.getCloseReview(period, user);
-  }
-
-  // Checker: sign off (SoD — approver ≠ preparer). Detective review, so no hard numeric gate; the independent
-  // sign-off IS the control.
-  async approveCloseReview(period: string, user: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: `Project close review for ${period} has not been prepared`, messageTh: 'ยังไม่ได้จัดทำการสอบทาน' });
-    if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    await assertMakerChecker(db, { user, maker: rp.preparedBy, event: 'proj.close-review.approve', ref: period, reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: the approver must differ from the preparer', messageTh: 'ผู้อนุมัติต้องไม่ใช่ผู้จัดทำ (แบ่งแยกหน้าที่)' });
-    await db.update(projectCloseReviews).set({ status: 'Approved', approvedBy: user.username, approvedAt: new Date() }).where(eq(projectCloseReviews.id, rp.id));
-    return this.getCloseReview(period, user);
-  }
-
-  async rejectCloseReview(period: string, reason: string, user: JwtUser) {
-    const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (!rp) throw new NotFoundException({ code: 'NOT_PREPARED', message: 'Project close review has not been prepared', messageTh: 'ยังไม่ได้จัดทำ' });
-    if (rp.status !== 'Prepared') throw new BadRequestException({ code: 'NOT_PREPARED', message: `Project close review is ${rp.status}, not Prepared`, messageTh: 'สถานะไม่ใช่ Prepared' });
-    await db.update(projectCloseReviews).set({ status: 'Rejected', rejectionReason: reason ?? null }).where(eq(projectCloseReviews.id, rp.id));
-    return this.getCloseReview(period, user);
-  }
-
-  async getCloseReview(period: string, user: JwtUser) {
-    const db = this.db;
-    const [rp] = await db.select().from(projectCloseReviews).where(and(eq(projectCloseReviews.tenantId, user.tenantId!), eq(projectCloseReviews.period, period))).limit(1);
-    if (!rp) return { period, status: 'None' };
-    return this.shapeCloseReview(rp);
-  }
-
-  async listCloseReviews(user: JwtUser) {
-    const db = this.db;
-    const rows = await db.select().from(projectCloseReviews).where(user.tenantId != null ? eq(projectCloseReviews.tenantId, user.tenantId) : undefined).orderBy(desc(projectCloseReviews.period)).limit(60);
-    return { reviews: rows.map((r: any) => this.shapeCloseReview(r)), count: rows.length };
-  }
-
-  private shapeCloseReview(r: any) {
-    return {
-      period: r.period, status: r.status, wip_total: n(r.wipTotal), clearing_balance: n(r.clearingBalance), open_projects: Number(r.openProjects ?? 0),
-      prepared_by: r.preparedBy, prepared_at: r.preparedAt, approved_by: r.approvedBy, approved_at: r.approvedAt, rejection_reason: r.rejectionReason,
-    };
-  }
+  // Extracted to ProjectsCloseService (docs/46 Phase-4 projects round); GL 1260/2390 snapshots go through
+  // LedgerReadService there, so this facade no longer touches the journal tables.
+  async prepareCloseReview(period: string, user: JwtUser) { return this.closeReview.prepareCloseReview(period, user); }
+  async approveCloseReview(period: string, user: JwtUser, selfApprovalReason?: string | null) { return this.closeReview.approveCloseReview(period, user, selfApprovalReason); }
+  async rejectCloseReview(period: string, reason: string, user: JwtUser) { return this.closeReview.rejectCloseReview(period, reason, user); }
+  async getCloseReview(period: string, user: JwtUser) { return this.closeReview.getCloseReview(period, user); }
+  async listCloseReviews(user: JwtUser) { return this.closeReview.listCloseReviews(user); }
 }

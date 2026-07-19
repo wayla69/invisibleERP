@@ -1,16 +1,20 @@
 import { Inject, Injectable, Optional, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, locations, journalEntries, journalLines } from '../../database/schema';
+import { invMoves, invBalances, invCostLayers, invWriteoffRequests, itemCosting, items, itemCategories, locations } from '../../database/schema';
 import { LedgerService } from '../ledger/ledger.service';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { postingDefault } from '../ledger/posting-events';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
 import { n, ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
+import { round4, EPS, isLayered, createLayer, consumeLayers, type CostingMethod, type LayerSlice } from './inventory-cost-layers';
+import { InventoryWriteoffService } from './inventory-writeoff.service';
 
-const round4 = (x: number) => Math.round((Number(x) || 0) * 10000) / 10000;
-const EPS = 1e-6;
+// FIFO/FEFO cost-layer mechanics live in inventory-cost-layers.ts; old import sites keep working.
+export type { LayerSlice } from './inventory-cost-layers';
+
 const bad = (code: string, message: string, messageTh: string) =>
   new BadRequestException({ code, message, messageTh });
 
@@ -27,15 +31,11 @@ const ACCT_ADJ = '5810';
 // GL 1200 (the 1255 balance sits outside the inventory set).
 const ACCT_GIT = '1255';
 const INV_SOURCES = ['INV-RCV', 'INV-ISS', 'INV-ADJ', 'INV-GIT', 'INV-LC'];
-const COSTING_METHODS = ['moving_avg', 'fifo', 'fefo'] as const;
-type CostingMethod = (typeof COSTING_METHODS)[number];
-const isLayered = (m?: string | null): boolean => m === 'fifo' || m === 'fefo';
-
-export interface LayerSlice { qty: number; unitCost: number; lotNo: string | null; expiry: string | null }
 
 export interface ReceiveDto { item_id: string; item_description?: string; uom?: string; location_id?: string; qty: number; unit_cost: number; ref_type?: string; ref_id?: string; costing_method?: CostingMethod; lot_no?: string; expiry_date?: string }
 export interface IssueDto { item_id: string; location_id?: string; qty: number; ref_type?: string; ref_id?: string }
 export interface IssueToProjectDto { item_id: string; location_id?: string; qty: number; project_id: number; ref_type?: string; ref_id?: string }
+export interface ReturnFromProjectDto { item_id: string; location_id?: string; qty: number; unit_cost: number; project_id: number; ref_type?: string; ref_id?: string }
 export interface AdjustDto { item_id: string; location_id?: string; qty_delta: number; reason?: string }
 
 /**
@@ -49,12 +49,26 @@ export interface AdjustDto { item_id: string; location_id?: string; qty_delta: n
  */
 @Injectable()
 export class InventoryLedgerService {
+  // GL tie-out read rides the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly ledger: LedgerService,
     // Optional so a partially-constructed harness still builds; absent ⇒ determination off (literal parity).
     @Optional() private readonly determination?: AccountDeterminationService,
-  ) {}
+  ) {
+    this.ledgerRead = new LedgerReadService(db);
+    // Ctor-body plain class (god-service ratchet pattern) — the INV-07 write-off maker-checker register.
+    this.writeoffs = new InventoryWriteoffService(db, {
+      tenantOf: (u) => this.tenant(u),
+      locFor: (t, i, l) => this.locFor(t, i, l),
+      balanceRow: (t, i, l) => this.balanceRow(t, i, l),
+      applyAdjust: (dto, u) => this.applyAdjust(dto, u),
+    });
+  }
+  private readonly writeoffs: InventoryWriteoffService;
 
   private tenant(user: JwtUser): number {
     if (user.tenantId == null) throw bad('NO_TENANT', 'A tenant context is required', 'ต้องอยู่ในบริบทผู้เช่า');
@@ -156,39 +170,6 @@ export class InventoryLedgerService {
     });
   }
 
-  // ── FIFO/FEFO cost-layer helpers (0131) ───────────────────────────────────────────────────
-  private async createLayer(tenantId: number, itemId: string, loc: string, qty: number, unitCost: number, lotNo: string | null, expiry: string | null, refType: string | null, refId: string | null, by: string) {
-    if (!(qty > EPS)) return;
-    await this.db.insert(invCostLayers).values({
-      tenantId, itemId, locationId: loc, lotNo: lotNo ?? null, expiryDate: expiry ?? null,
-      origQty: String(qty), remainingQty: String(qty), unitCost: String(unitCost),
-      refType: refType ?? null, refId: refId ?? null, createdBy: by,
-    });
-  }
-
-  // Consume `qty` from a fifo/fefo item's open layers in cost order; mutates remaining_qty and returns the
-  // actual cost consumed + the per-layer slices (so a transfer can recreate them at the destination).
-  private async consumeLayers(tenantId: number, itemId: string, loc: string, qty: number, method: CostingMethod): Promise<{ cost: number; slices: LayerSlice[] }> {
-    const order = method === 'fefo'
-      ? [sql`${invCostLayers.expiryDate} asc nulls last`, asc(invCostLayers.id)]
-      : [asc(invCostLayers.id)]; // fifo = oldest receipt first (id is monotonic)
-    const layers = await this.db.select().from(invCostLayers)
-      .where(and(eq(invCostLayers.tenantId, tenantId), eq(invCostLayers.itemId, itemId), eq(invCostLayers.locationId, loc), sql`${invCostLayers.remainingQty} > 0`))
-      .orderBy(...order);
-    let remaining = round4(qty), cost = 0;
-    const slices: LayerSlice[] = [];
-    for (const l of layers) {
-      if (remaining <= EPS) break;
-      const take = Math.min(n(l.remainingQty), remaining);
-      cost = round4(cost + take * n(l.unitCost));
-      slices.push({ qty: round4(take), unitCost: n(l.unitCost), lotNo: l.lotNo ?? null, expiry: l.expiryDate ?? null });
-      await this.db.update(invCostLayers).set({ remainingQty: String(round4(n(l.remainingQty) - take)) }).where(eq(invCostLayers.id, l.id));
-      remaining = round4(remaining - take);
-    }
-    if (remaining > EPS) throw bad('LAYER_SHORT', `Insufficient cost layers for ${itemId} (${remaining} uncosted)`, 'ชั้นต้นทุนไม่พอสำหรับการเบิก');
-    return { cost, slices };
-  }
-
   // ── Goods receipt → valued stock-in + GL (Dr 1200 / Cr 2000) ──────────────────────────────
   async receive(dto: ReceiveDto, user: JwtUser) {
     const tenantId = this.tenant(user);
@@ -228,7 +209,7 @@ export class InventoryLedgerService {
     });
     await this.upsertBalance(tenantId, dto.item_id, dto.item_description, loc, newQty, newAvg, newVal, method);
     // fifo/fefo: this receipt opens a cost layer (lot/expiry carried for FEFO ordering).
-    if (isLayered(method)) await this.createLayer(tenantId, dto.item_id, loc, qty, unitCost, dto.lot_no ?? null, dto.expiry_date ?? null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
+    if (isLayered(method)) await createLayer(this.db, tenantId, dto.item_id, loc, qty, unitCost, dto.lot_no ?? null, dto.expiry_date ?? null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
     return { move_no: moveNo, move_type: 'receipt', item_id: dto.item_id, qty, unit_cost: unitCost, value, balance_qty: newQty, avg_cost: newAvg, costing_method: method, gl_entry_no: je?.entry_no ?? null };
   }
 
@@ -248,7 +229,7 @@ export class InventoryLedgerService {
     // INV-01 — negative-stock guard: cannot issue more than is on hand.
     if (qty > oldQty + EPS) throw bad('NEG_STOCK', `Cannot issue ${qty} of ${dto.item_id}; only ${oldQty} on hand`, 'สต๊อกไม่พอสำหรับการเบิก');
     // COGS = actual consumed layer cost (fifo/fefo) or qty × moving-average.
-    const value = isLayered(method) ? (await this.consumeLayers(tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
+    const value = isLayered(method) ? (await consumeLayers(this.db, tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
     const issueUnit = qty > EPS ? round4(value / qty) : avg;
     const newQty = round4(oldQty - qty);
     const newVal = round4(oldVal - value);
@@ -286,7 +267,7 @@ export class InventoryLedgerService {
     const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue), avg = n(cur?.avgCost);
     const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
     if (qty > oldQty + EPS) throw bad('NEG_STOCK', `Cannot issue ${qty} of ${dto.item_id}; only ${oldQty} on hand`, 'สต๊อกไม่พอสำหรับการเบิก');
-    const value = isLayered(method) ? (await this.consumeLayers(tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
+    const value = isLayered(method) ? (await consumeLayers(this.db, tenantId, dto.item_id, loc, qty, method)).cost : round4(qty * avg);
     const issueUnit = qty > EPS ? round4(value / qty) : avg;
     const newQty = round4(oldQty - qty);
     const newVal = round4(oldVal - value);
@@ -307,6 +288,46 @@ export class InventoryLedgerService {
     return { move_no: moveNo, move_type: 'issue_to_project', item_id: dto.item_id, qty, unit_cost: issueUnit, value, balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
   }
 
+  // ── Return unused material FROM A PROJECT (A1, docs/50 Wave 2 — the inverse of issueToProject; INV-19).
+  // Receives the qty back on hand at the ORIGINAL issue unit cost (passed by the return flow, which reads it
+  // off the issue movement — never re-valued at today's average) and relieves project WIP: Dr inventory /
+  // Cr 1260 (project_id dimension). Layered items reopen a cost layer at that unit cost. Lives beside
+  // issueToProject because both are the valued sub-ledger's core (module-private balance/layer helpers).
+  async returnFromProject(dto: ReturnFromProjectDto, user: JwtUser) {
+    const tenantId = this.tenant(user);
+    const qty = round4(dto.qty);
+    const unitCost = round4(dto.unit_cost);
+    if (!(qty > 0)) throw bad('BAD_QTY', 'qty must be > 0', 'จำนวนต้องมากกว่าศูนย์');
+    if (unitCost < 0) throw bad('BAD_COST', 'unit_cost must be ≥ 0', 'ต้นทุนต้องไม่ติดลบ');
+    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
+    if (dto.ref_type && dto.ref_id) {
+      const dup = await this.findByRef(tenantId, dto.ref_type, dto.ref_id);
+      if (dup) return { move_no: dup.moveNo, move_type: 'return_from_project', deduped: true, balance_qty: n(dup.balanceQty), avg_cost: n(dup.avgCost) };
+    }
+    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
+    const method: CostingMethod = (cur?.costingMethod as CostingMethod) ?? 'moving_avg';
+    const oldQty = n(cur?.onHandQty), oldVal = n(cur?.totalValue);
+    const value = round4(qty * unitCost);
+    const newQty = round4(oldQty + qty);
+    const newVal = round4(oldVal + value);
+    const newAvg = newQty > EPS ? round4(newVal / newQty) : 0;
+    const moveNo = this.mkNo('INV-PRJR');
+    const acc = await this.invAccounts(tenantId, dto.item_id, loc);
+    const je = value > EPS ? await this.ledger.postEntry({
+      date: ymd(), source: 'INV-RCV', sourceRef: dto.ref_type && dto.ref_id ? `${dto.ref_type}:${dto.ref_id}` : moveNo,
+      tenantId, memo: `Return from project ${moveNo} — ${dto.item_id}`, createdBy: user.username,
+      lines: [{ account_code: acc.inventory, debit: value }, { account_code: '1260', credit: value, project_id: dto.project_id, memo: `WIP return ${dto.item_id}` }],
+    }) : null;
+    await this.writeMove({
+      tenantId, moveNo, moveType: 'receipt', itemId: dto.item_id, locationId: loc,
+      qtySigned: qty, unitCost, valueSigned: value, balanceQty: newQty, avgCost: newAvg,
+      refType: dto.ref_type, refId: dto.ref_id, glNo: je?.entry_no ?? null, by: user.username,
+    });
+    await this.upsertBalance(tenantId, dto.item_id, cur?.itemDescription, loc, newQty, newAvg, newVal, method);
+    if (isLayered(method)) await createLayer(this.db, tenantId, dto.item_id, loc, qty, unitCost, null, null, dto.ref_type ?? null, dto.ref_id ?? null, user.username);
+    return { move_no: moveNo, move_type: 'return_from_project', item_id: dto.item_id, qty, unit_cost: unitCost, value, balance_qty: newQty, avg_cost: newAvg, gl_entry_no: je?.entry_no ?? null };
+  }
+
   // ── Stock adjustment (count variance / shrinkage) + GL (loss Dr 5810 / Cr 1200; gain reversed) ──
   // Stock adjustment. INV-04 — must carry a reason; authority gated to wh_adjust at the route. INV-07 —
   // a NEGATIVE adjustment (a write-off) is maker-checker: it becomes a REQUEST that posts nothing until a
@@ -315,55 +336,15 @@ export class InventoryLedgerService {
     const delta = round4(dto.qty_delta);
     if (!delta) throw bad('NO_CHANGE', 'qty_delta must be non-zero', 'ต้องระบุส่วนต่างที่ไม่เป็นศูนย์');
     if (!dto.reason || !dto.reason.trim()) throw bad('REASON_REQUIRED', 'A reason is required for stock adjustments', 'ต้องระบุเหตุผลในการปรับสต๊อก');
-    if (delta < 0) return this.requestWriteOff(dto, delta, user);
+    if (delta < 0) return this.writeoffs.requestWriteOff(dto, delta, user);
     return this.applyAdjust(dto, user);
   }
 
-  // INV-07: a write-off REQUEST — validates (incl. NEG_STOCK against current stock) and records the intent;
-  // posts no JE, consumes no layer, moves no balance. One write-off may be pending per item/location.
-  private async requestWriteOff(dto: AdjustDto, delta: number, user: JwtUser) {
-    const tenantId = this.tenant(user);
-    const db = this.db;
-    const loc = await this.locFor(tenantId, dto.item_id, dto.location_id);
-    const cur = await this.balanceRow(tenantId, dto.item_id, loc);
-    const oldQty = n(cur?.onHandQty), avg = n(cur?.avgCost);
-    if (round4(oldQty + delta) < -EPS) throw bad('NEG_STOCK', `Adjustment would drive ${dto.item_id} below zero (${round4(oldQty + delta)})`, 'การปรับทำให้สต๊อกติดลบ');
-    const [pending] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.tenantId, tenantId), eq(invWriteoffRequests.itemId, dto.item_id), eq(invWriteoffRequests.locationId, loc), eq(invWriteoffRequests.status, 'PendingApproval'))).limit(1);
-    if (pending) throw bad('WRITEOFF_PENDING', `A write-off of ${dto.item_id} is already pending approval`, 'มีรายการตัดสต๊อกของรายการนี้รออนุมัติอยู่แล้ว');
-    const estValue = round4(Math.abs(delta) * avg);
-    const [row] = await db.insert(invWriteoffRequests).values({ tenantId, itemId: dto.item_id, locationId: loc, qtyDelta: String(delta), estValue: String(estValue), reason: dto.reason!, status: 'PendingApproval', requestedBy: user.username }).returning({ id: invWriteoffRequests.id });
-    return { request_id: Number(row!.id), item_id: dto.item_id, location_id: loc, qty_delta: delta, estimated_value: -estValue, status: 'pending_approval' };
-  }
-
-  // INV-07: a DIFFERENT user approves → the real valued adjustment runs atomically against current state.
-  async approveWriteOff(requestId: number, user: JwtUser, selfApprovalReason?: string | null) {
-    const tenantId = this.tenant(user); const db = this.db;
-    const [req] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.id, requestId), eq(invWriteoffRequests.tenantId, tenantId))).limit(1);
-    if (!req || req.status !== 'PendingApproval') throw bad('NO_PENDING_WRITEOFF', `No write-off pending approval (#${requestId})`, 'ไม่พบรายการตัดสต๊อกที่รออนุมัติ');
-    await assertMakerChecker(db, { user, maker: req.requestedBy, event: 'inv.writeoff.approve', ref: String(requestId), amount: n(req.estValue), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot approve a write-off you requested', messageTh: 'ผู้บันทึกอนุมัติรายการของตนเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    const res = await this.applyAdjust({ item_id: req.itemId, location_id: req.locationId, qty_delta: n(req.qtyDelta), reason: req.reason }, user);
-    await db.update(invWriteoffRequests).set({ status: 'Posted', approvedBy: user.username, approvedAt: new Date(), moveNo: res.move_no, glEntryNo: res.gl_entry_no ?? null }).where(eq(invWriteoffRequests.id, requestId));
-    return { ...res, request_id: requestId, status: 'Posted', approved_by: user.username, requested_by: req.requestedBy };
-  }
-
-  async rejectWriteOff(requestId: number, user: JwtUser, reason?: string) {
-    const tenantId = this.tenant(user);
-    const db = this.db;
-    const [req] = await db.select().from(invWriteoffRequests).where(and(eq(invWriteoffRequests.id, requestId), eq(invWriteoffRequests.tenantId, tenantId))).limit(1);
-    if (!req || req.status !== 'PendingApproval') throw bad('NO_PENDING_WRITEOFF', `No write-off pending approval (#${requestId})`, 'ไม่พบรายการตัดสต๊อกที่รออนุมัติ');
-    await db.update(invWriteoffRequests).set({ status: 'Rejected', reason: reason ? `${req.reason} [REJECTED: ${reason}]` : req.reason }).where(eq(invWriteoffRequests.id, requestId));
-    return { request_id: requestId, status: 'Rejected', rejected_by: user.username };
-  }
-
-  // Write-off register: pending + history for the caller's tenant, with the outstanding-pending count.
-  async listWriteOffs(user: JwtUser, status?: string) {
-    const tenantId = this.tenant(user);
-    const conds: any[] = [eq(invWriteoffRequests.tenantId, tenantId)];
-    if (status) conds.push(eq(invWriteoffRequests.status, status));
-    const rows = await this.db.select().from(invWriteoffRequests).where(and(...conds)).orderBy(desc(invWriteoffRequests.id)).limit(200);
-    const writeoffs = rows.map((r: any) => ({ request_id: Number(r.id), item_id: r.itemId, location_id: r.locationId, qty_delta: n(r.qtyDelta), est_value: n(r.estValue), reason: r.reason, status: r.status, requested_by: r.requestedBy, approved_by: r.approvedBy, move_no: r.moveNo, gl_entry_no: r.glEntryNo, created_at: r.createdAt }));
-    return { writeoffs, count: writeoffs.length, pending: writeoffs.filter((r: any) => r.status === 'PendingApproval').length };
-  }
+  // INV-07 write-off maker-checker — extracted to InventoryWriteoffService (god-service ratchet round);
+  // the approve path still runs the valued adjustment through this facade's applyAdjust port.
+  async approveWriteOff(requestId: number, user: JwtUser, selfApprovalReason?: string | null) { return this.writeoffs.approveWriteOff(requestId, user, selfApprovalReason); }
+  async rejectWriteOff(requestId: number, user: JwtUser, reason?: string) { return this.writeoffs.rejectWriteOff(requestId, user, reason); }
+  async listWriteOffs(user: JwtUser, status?: string) { return this.writeoffs.listWriteOffs(user, status); }
 
   private async applyAdjust(dto: AdjustDto, user: JwtUser) {
     const tenantId = this.tenant(user);
@@ -382,10 +363,10 @@ export class InventoryLedgerService {
     let moveVal: number;
     if (isLayered(method)) {
       if (delta < 0) {
-        moveVal = (await this.consumeLayers(tenantId, dto.item_id, loc, Math.abs(delta), method)).cost;
+        moveVal = (await consumeLayers(this.db, tenantId, dto.item_id, loc, Math.abs(delta), method)).cost;
       } else {
         moveVal = round4(delta * avg);
-        await this.createLayer(tenantId, dto.item_id, loc, delta, avg, null, null, 'ADJ', moveNo, user.username);
+        await createLayer(this.db, tenantId, dto.item_id, loc, delta, avg, null, null, 'ADJ', moveNo, user.username);
       }
     } else {
       moveVal = round4(Math.abs(delta) * avg);
@@ -443,17 +424,8 @@ export class InventoryLedgerService {
     // GL inventory attributable to the sub-ledger's own postings, for this tenant. Sums the whole inventory
     // account SET (control 1200 + any item/category overrides) so determination routing can't break the tie.
     const invAccts = await this.inventoryAccountSet(tenantId);
-    const [g] = await this.db.select({
-      d: sql<string>`coalesce(sum(${journalLines.debit}),0)`,
-      c: sql<string>`coalesce(sum(${journalLines.credit}),0)`,
-    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
-      .where(and(
-        inArray(journalLines.accountCode, invAccts),
-        eq(journalLines.tenantId, tenantId),
-        eq(journalEntries.status, 'Posted'),
-        inArray(journalEntries.source, INV_SOURCES),
-      ));
-    const glInventory = round4(n(g?.d) - n(g?.c));
+    const g = await this.ledgerRead.accountGross(invAccts, { tenantId, tenantOn: 'line', sources: [...INV_SOURCES] });
+    const glInventory = round4(g.net);
     const difference = round4(subLedger - glInventory);
     return { sub_ledger_value: subLedger, gl_inventory: glInventory, difference, reconciled: Math.abs(difference) < 0.01 };
   }
@@ -506,9 +478,9 @@ export class InventoryLedgerService {
     // moving-average: move value at the from-location's average. Value-neutral overall — no GL.
     let moveVal: number;
     if (isLayered(method)) {
-      const consumed = await this.consumeLayers(tenantId, p.item_id, p.from_location, qty, method);
+      const consumed = await consumeLayers(this.db, tenantId, p.item_id, p.from_location, qty, method);
       moveVal = consumed.cost;
-      for (const sl of consumed.slices) await this.createLayer(tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TRF', moveNo, user.username);
+      for (const sl of consumed.slices) await createLayer(this.db, tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TRF', moveNo, user.username);
     } else {
       moveVal = round4(qty * avg);
     }
@@ -539,7 +511,7 @@ export class InventoryLedgerService {
     const method: CostingMethod = (from.costingMethod as CostingMethod) ?? 'moving_avg';
     const moveNo = this.mkNo('INV-GIT');
     let moveVal: number; let slices: LayerSlice[] = [];
-    if (isLayered(method)) { const c = await this.consumeLayers(tenantId, p.item_id, p.from_location, qty, method); moveVal = c.cost; slices = c.slices; }
+    if (isLayered(method)) { const c = await consumeLayers(this.db, tenantId, p.item_id, p.from_location, qty, method); moveVal = c.cost; slices = c.slices; }
     else moveVal = round4(qty * avg);
     const unit = qty > EPS ? round4(moveVal / qty) : avg;
     const fromQty = round4(fromOld - qty), fromVal = round4(n(from.totalValue) - moveVal);
@@ -572,7 +544,7 @@ export class InventoryLedgerService {
     const toQty = round4(toOldQty + qty), toVal = round4(toOldVal + value);
     const toAvg = toQty > EPS ? round4(toVal / toQty) : round4(p.unit_cost ?? 0);
     await this.upsertBalance(tenantId, p.item_id, p.item_description ?? to?.itemDescription, p.to_location, toQty, toAvg, toVal, method);
-    if (isLayered(method) && p.slices?.length) for (const sl of p.slices) await this.createLayer(tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TO', p.ref_id ?? null, user.username);
+    if (isLayered(method) && p.slices?.length) for (const sl of p.slices) await createLayer(this.db, tenantId, p.item_id, p.to_location, sl.qty, sl.unitCost, sl.lotNo, sl.expiry, 'TO', p.ref_id ?? null, user.username);
     const acc = await this.invAccounts(tenantId, p.item_id, p.to_location);
     const je = value > EPS ? await this.ledger.postEntry({
       date: ymd(), source: 'INV-GIT', sourceRef: p.ref_type && p.ref_id ? `${p.ref_type}:${p.ref_id}:RECV` : `${p.item_id}:RECV`,

@@ -199,12 +199,12 @@ describe('CommitmentsService — glResolveAccounts', () => {
 
 describe('CommitmentsService — glAvailability (budget − actual − open commitments)', () => {
   it('a budgeted account: available = ytd budget − (debit−credit) − open commitments; no cost centre; tenant-scoped', async () => {
-    const { svc } = comEnv([[{ v: '1000', c: '2' }], [{ v: '600' }], [{ d: '400', c: '50' }], [{ v: '100' }]]);
+    const { svc } = comEnv([[{ v: '1000', c: '2' }], [{ v: '600' }], [{ debit: '400', credit: '50' }], [{ v: '100' }]]);
     const a = await svc.glAvailability(1, '6000', null, '2026-06');
     expect(a).toMatchObject({ fiscal_year: 2026, period: '2026-06', account_code: '6000', cost_center: null, has_budget: true, budget_year: 1000, budget_ytd: 600, actual_ytd: 350, open_commitments: 100, available: 150 });
   });
   it('no approved budget line → has_budget false; a cost centre + null tenant take their branches', async () => {
-    const { svc } = comEnv([[{ v: '0', c: '0' }], [{ v: '0' }], [{ d: '0', c: '0' }], [{ v: '0' }]]);
+    const { svc } = comEnv([[{ v: '0', c: '0' }], [{ v: '0' }], [{ debit: '0', credit: '0' }], [{ v: '0' }]]);
     const a = await svc.glAvailability(null, '6000', 'CC1', '2026-06');
     expect(a).toMatchObject({ has_budget: false, cost_center: 'CC1', available: 0 });
   });
@@ -398,5 +398,55 @@ describe('CommitmentsService — glListCommitments (audit read model)', () => {
   it('no filters (null tenant, empty query) still lists (undefined WHERE branch)', async () => {
     const { svc } = comEnv([[]]);
     expect(await svc.glListCommitments(null, {})).toEqual({ commitments: [], count: 0 });
+  });
+});
+
+// ── A5 (docs/50 Wave 5): the project-scrap guards — wipDrawn (net drawn value + BOLA/line validation)
+//    and projectIdByCode (code→id with the combined id+tenant check). Route order inside wipDrawn:
+//    project row → (BoQ line when given) → consumed RES/MRET sum.
+describe('CommitmentsService — wipDrawn (A5 net drawn value for project scrap)', () => {
+  const PRJ = { id: 5, tenantId: 1 };
+  it('project scope: sums consumed RES + MRET (returns net down) with no line read', async () => {
+    const { svc } = comEnv([[PRJ], [{ v: '450.5' }]]);
+    expect(await svc.wipDrawn(5, null, 1)).toEqual({ net_issued: 450.5 });
+  });
+  it('line scope: validates the line belongs to the project, then sums line-scoped', async () => {
+    const { svc } = comEnv([[PRJ], [{ pid: 5 }], [{ v: '300' }]]);
+    expect(await svc.wipDrawn(5, 7, 1)).toEqual({ net_issued: 300 });
+  });
+  it('a line of ANOTHER project is BOQ_LINE_MISMATCH', async () => {
+    const { svc } = comEnv([[PRJ], [{ pid: 99 }]]);
+    expect((await code(() => svc.wipDrawn(5, 7, 1)))?.response?.code).toBe('BOQ_LINE_MISMATCH');
+  });
+  it('a missing line is BOQ_LINE_MISMATCH too (fail-closed)', async () => {
+    const { svc } = comEnv([[PRJ], []]);
+    expect((await code(() => svc.wipDrawn(5, 7, 1)))?.response?.code).toBe('BOQ_LINE_MISMATCH');
+  });
+  it('an unknown project is PROJECT_NOT_FOUND', async () => {
+    const { svc } = comEnv([[]]);
+    expect((await code(() => svc.wipDrawn(999, null, 1)))?.response?.code).toBe('PROJECT_NOT_FOUND');
+  });
+  it("another tenant's project is PROJECT_NOT_FOUND (combined id+tenant BOLA check)", async () => {
+    const { svc } = comEnv([[{ id: 5, tenantId: 2 }]]);
+    expect((await code(() => svc.wipDrawn(5, null, 1)))?.response?.code).toBe('PROJECT_NOT_FOUND');
+  });
+  it('an HQ caller (null tenant) may read any project; a null-tenant project row passes any caller', async () => {
+    const { svc } = comEnv([[{ id: 5, tenantId: 2 }], [{ v: '0' }]]);
+    expect(await svc.wipDrawn(5, null, null)).toEqual({ net_issued: 0 });
+    const { svc: svc2 } = comEnv([[{ id: 5, tenantId: null }], [{ v: null }]]);
+    expect(await svc2.wipDrawn(5, null, 1)).toEqual({ net_issued: 0 });
+  });
+});
+
+describe('CommitmentsService — projectIdByCode (A5 code→id resolution)', () => {
+  it('resolves a code to its numeric id', async () => {
+    const { svc } = comEnv([[{ id: 42, tenantId: 1 }]]);
+    expect(await svc.projectIdByCode('PRJ-A', 1)).toBe(42);
+  });
+  it("an unknown code, or another tenant's code, is PROJECT_NOT_FOUND", async () => {
+    const { svc } = comEnv([[]]);
+    expect((await code(() => svc.projectIdByCode('NOPE', 1)))?.response?.code).toBe('PROJECT_NOT_FOUND');
+    const { svc: svc2 } = comEnv([[{ id: 42, tenantId: 2 }]]);
+    expect((await code(() => svc2.projectIdByCode('PRJ-B', 1)))?.response?.code).toBe('PROJECT_NOT_FOUND');
   });
 });

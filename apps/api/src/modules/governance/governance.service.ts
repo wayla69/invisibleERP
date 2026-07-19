@@ -109,8 +109,8 @@ export class GovernanceService {
   // ───────────────── ELC-05 — Fraud-risk register ─────────────────
   async fileFraudRisk(user: JwtUser, dto: { area: string; description: string; likelihood?: string; impact?: string; mitigating_controls?: string; owner?: string }) {
     const db = this.db;
-    const lk = LEVELS.includes((dto.likelihood ?? 'medium') as any) ? dto.likelihood : 'medium';
-    const im = LEVELS.includes((dto.impact ?? 'medium') as any) ? dto.impact : 'medium';
+    const lk = (LEVELS as readonly string[]).includes(dto.likelihood ?? 'medium') ? dto.likelihood : 'medium';
+    const im = (LEVELS as readonly string[]).includes(dto.impact ?? 'medium') ? dto.impact : 'medium';
     const riskRef = `FR-${randomUUID().slice(0, 8).toUpperCase()}`;
     const [row] = await db.insert(fraudRisks).values({
       tenantId: user.tenantId ?? null, riskRef, area: dto.area, description: dto.description, likelihood: lk, impact: im,

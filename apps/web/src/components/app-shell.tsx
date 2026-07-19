@@ -79,6 +79,9 @@ const PREFS_PUSH_MS = 600; // debounce for syncing pref changes to the server
 // collide with a real group/subgroup title (those are all `nav.group.*` / `nav.sub.*`). Excluded from the
 // group render because no NavGroup carries this title.
 const ADVANCED_FOLD_KEY = '__show_advanced__';
+// B2 (docs/50): reserved fold-map key for the SME "show hidden menus" escape hatch — reveals the
+// industry-hidden nav domains (B1) without needing the platform owner. Same synced-navFold mechanics.
+const SME_HIDDEN_FOLD_KEY = '__show_sme_hidden__';
 
 type SyncedPrefs = { favorites: string[]; navFold: Record<string, boolean> };
 
@@ -351,6 +354,7 @@ export function AppShell({
    *  non-serializable Lucide icon component refs — never crosses the RSC boundary; the layout can then
    *  stay a server component and pass only serializable props. */
   variant: 'internal' | 'portal';
+  /** Brand heading — a literal string, or a message-catalog key (resolved via t(); unknown keys pass through). */
   brand: string;
   filterPerms?: boolean;
   /** Show the ERP/POS workspace switcher and filter the sidebar to the active workspace. */
@@ -591,12 +595,19 @@ export function AppShell({
   const isGod = me.data?.is_platform_owner ?? false;
   // SME edition (docs/49): hide the group title-keys the tenant was stamped with at provisioning.
   const smeHidden = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_hidden_nav_groups ?? [] : []), [me.data]);
+  // B1 (docs/50): industry-derived default-OPEN group/subgroup keys stamped at provisioning. When present,
+  // listed keys start open and every other subgroup starts folded; a user's own navFold toggle always wins,
+  // and the domain/subgroup holding the active route still opens. Empty set = enterprise behaviour.
+  const smeOpen = React.useMemo(() => new Set(me.data?.control_profile === 'sme' ? me.data.sme_open_nav_groups ?? [] : []), [me.data]);
+  // B2 (docs/50): the industry fold is a default, not a cage — an SME user can reveal the hidden domains
+  // themselves via the sidebar-footer toggle (synced navFold reserved key, like "show advanced").
+  const showSmeHidden = navFold[SME_HIDDEN_FOLD_KEY] ?? false;
   const groups = React.useMemo(() => {
-    const filtered = filterByPerm(wsNav).filter((g) => !smeHidden.has(g.title));
+    const filtered = filterByPerm(wsNav).filter((g) => showSmeHidden || !smeHidden.has(g.title));
     const base = filtered.length ? filtered : wsNav; // fall back while loading
     const ordered = orderGroups(base, groupOrder); // admin-curated system-wide category order
     return isGod ? [...ordered, PLATFORM_GROUP] : ordered; // platform console — god only
-  }, [filterByPerm, wsNav, groupOrder, isGod, smeHidden]);
+  }, [filterByPerm, wsNav, groupOrder, isGod, smeHidden, showSmeHidden]);
   // "Show advanced menus" — kept in the synced fold map under a reserved key (see ADVANCED_FOLD_KEY). Off by
   // default: infrequent/expert domains (Controls, Customise, Integrations, Intercompany) stay hidden.
   const showAdvanced = navFold[ADVANCED_FOLD_KEY] ?? false;
@@ -772,8 +783,11 @@ export function AppShell({
               IE
             </div>
             <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="truncate text-sm font-semibold">{brand}</span>
-              <span className="truncate text-xs text-muted-foreground">Enterprise ERP</span>
+              <span className="truncate text-sm font-semibold">{t(brand)}</span>
+              {/* Active company name so users always know which company they're signed into (tenant code as fallback). */}
+              <span className="truncate text-xs text-muted-foreground" title={me.data?.company_name ?? undefined}>
+                {me.data?.company_name || me.data?.customer_name || 'Enterprise ERP'}
+              </span>
             </div>
           </div>
           {enableWorkspaces && (
@@ -824,7 +838,8 @@ export function AppShell({
             // Only-active-open default: the domain holding the current route opens on load; an explicit user
             // toggle (navFold[group.title]) persists and overrides. Count feeds the collapsed badge.
             const groupActive = allGroupItems(group).some((it) => isActive(it.href));
-            const open = navFold[group.title] ?? groupActive;
+            const groupDefault = groupActive || smeOpen.has(group.title);
+            const open = navFold[group.title] ?? groupDefault;
             const count = allGroupItems(group).length;
             return (
               <NavGroupSection
@@ -833,19 +848,23 @@ export function AppShell({
                 count={count}
                 open={open}
                 active={groupActive}
-                onToggle={() => toggleFold(group.title, groupActive)}
+                onToggle={() => toggleFold(group.title, groupDefault)}
               >
                 {group.items && group.items.length > 0 && (
                   <SidebarMenu>{orderItems(group.items, itemOrder?.[group.title]).map(renderItem)}</SidebarMenu>
                 )}
                 {group.subgroups?.map((sub) => {
-                  const subOpen = navFold[sub.title] ?? sub.defaultOpen ?? true;
+                  // B1: under an SME industry profile subgroups default FOLDED unless listed (or active);
+                  // without a profile the pre-B1 default (defaultOpen ?? true) is unchanged.
+                  const subActive = sub.items.some((it) => isActive(it.href));
+                  const subDefault = smeOpen.size > 0 ? smeOpen.has(sub.title) || subActive : (sub.defaultOpen ?? true);
+                  const subOpen = navFold[sub.title] ?? subDefault;
                   return (
                     <NavSubSection
                       key={sub.title}
                       title={t(sub.title)}
                       open={subOpen}
-                      onToggle={() => toggleFold(sub.title, sub.defaultOpen ?? true)}
+                      onToggle={() => toggleFold(sub.title, subDefault)}
                     >
                       <SidebarMenu>{orderItems(sub.items, itemOrder?.[sub.title]).map(renderItem)}</SidebarMenu>
                     </NavSubSection>
@@ -878,6 +897,27 @@ export function AppShell({
               </span>
             </button>
           )}
+          {pinsEnabled && smeHidden.size > 0 && (
+            <button
+              type="button"
+              onClick={() => toggleFold(SME_HIDDEN_FOLD_KEY, false)}
+              aria-pressed={showSmeHidden}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground group-data-[collapsible=icon]:hidden"
+            >
+              <span className="flex items-center gap-1.5">
+                <SlidersHorizontal className="size-3.5 shrink-0" />
+                {t('nav.show_sme_hidden')}
+              </span>
+              <span
+                className={cn(
+                  'flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  showSmeHidden ? 'bg-primary' : 'bg-muted-foreground/30',
+                )}
+              >
+                <span className={cn('size-3 rounded-full bg-white transition-transform', showSmeHidden && 'translate-x-3')} />
+              </span>
+            </button>
+          )}
           {me.data && (
             <div className="flex items-center gap-2 rounded-md px-1 py-1.5 group-data-[collapsible=icon]:hidden">
               <Avatar className="size-8">
@@ -887,7 +927,7 @@ export function AppShell({
                 <span className="truncate text-sm font-medium">{me.data.username}</span>
                 <span className="truncate text-xs text-muted-foreground">
                   {me.data.role}
-                  {me.data.customer_name ? ` · ${me.data.customer_name}` : ''}
+                  {me.data.company_name || me.data.customer_name ? ` · ${me.data.company_name || me.data.customer_name}` : ''}
                 </span>
               </div>
             </div>
@@ -899,7 +939,7 @@ export function AppShell({
         <header className="sticky top-0 z-20 flex min-h-14 shrink-0 items-center gap-2 border-b bg-background/95 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] safe-pt backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-1 h-5" />
-          <h2 className="text-sm font-medium">{activeItemLabel ? t(activeItemLabel) : brand}</h2>
+          <h2 className="text-sm font-medium">{activeItemLabel ? t(activeItemLabel) : t(brand)}</h2>
 
           <div className="ml-auto flex items-center gap-1.5">
             <Button
@@ -936,7 +976,7 @@ export function AppShell({
                     <span className="truncate font-medium">{me.data?.username ?? '—'}</span>
                     <span className="truncate text-xs font-normal text-muted-foreground">
                       {me.data?.role}
-                      {me.data?.customer_name ? ` · ${me.data.customer_name}` : ''}
+                      {me.data?.company_name || me.data?.customer_name ? ` · ${me.data?.company_name || me.data?.customer_name}` : ''}
                     </span>
                   </div>
                 </DropdownMenuLabel>

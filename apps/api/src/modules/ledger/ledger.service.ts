@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { eq, and, desc } from 'drizzle-orm';
 import type { JwtUser } from '../../common/decorators';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { accounts, journalEntries, ledgers, tenantAccounts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 
@@ -10,6 +10,7 @@ import { assertPostingEventDefaults } from './posting-events';
 import { resolvePostingOverrides, resolvePostingAccountSet, resolvePostingOverridesMany } from './posting-overrides-cache';
 
 import { LEADING, LEDGERS, COA } from './ledger-constants';
+import { coaSortOrder } from './ledger-statement-sections';
 import { LedgerCashflowService } from './ledger-cashflow.service';
 import { LedgerRecurringService } from './ledger-recurring.service';
 import { LedgerAllocationService } from './ledger-allocation.service';
@@ -46,6 +47,9 @@ export interface RecurringJournalDto {
   currency?: string;
   tenantId?: number | null;
   startDate?: string; // first run date (YYYY-MM-DD); defaults to today
+  // GL-08/GL-17 (docs/50 Wave 1 B2): auto-reverse the posted accrual in the next business month.
+  // Monthly-frequency templates only (AUTO_REVERSE_MONTHLY_ONLY at create).
+  autoReverse?: boolean;
   lines: JournalLineDto[];
 }
 
@@ -139,7 +143,9 @@ export class LedgerService implements OnModuleInit {
     // canonical account, so a registry typo can never become a silent mis-posting fallback.
     assertPostingEventDefaults(COA.map((a) => a.code));
     const db = this.db;
-    await db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code });
+    // Global boot seed of the canonical (shared) chart of accounts — runs at onModuleInit outside any
+    // request. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool insert.
+    await runGlobalDb('ledger:seed-coa', () => db.insert(accounts).values(COA).onConflictDoNothing({ target: accounts.code }));
     return { seeded: COA.length };
   }
 
@@ -153,6 +159,8 @@ export class LedgerService implements OnModuleInit {
     // Canonical accounts are read from the DB (the authoritative universe — includes any account a
     // migration inserts beyond the COA constant), so 'general' mirrors the live chart exactly.
     const canon: any[] = await db.select().from(accounts).orderBy(accounts.code);
+    // P2: present the chart in class → statement-section order (not raw code) — computed, no stored column.
+    canon.sort((a, b) => coaSortOrder(a) - coaSortOrder(b) || String(a.code).localeCompare(String(b.code)));
     const typeOf = new Map<string, string>(canon.map((a) => [a.code, a.type] as const));
     const rows: CoaTemplateRow[] =
       key === 'general' ? canon.map((a) => ({ code: a.code, name: a.name, nameTh: '' })) : COA_TEMPLATES[key];
@@ -178,6 +186,8 @@ export class LedgerService implements OnModuleInit {
     const db = this.db;
     const tid = resolveTenantId(opts?.tenantId ?? null);
     const canon = await db.select().from(accounts).orderBy(accounts.code);
+    // P2: metadata-driven display order (class → statement section → code); frozen natural codes never reorder.
+    canon.sort((a: any, b: any) => coaSortOrder(a) - coaSortOrder(b) || String(a.code).localeCompare(String(b.code)));
     if (opts?.all || tid == null) return { accounts: canon, count: canon.length, source: 'canonical' };
     const overlay = await db.select().from(tenantAccounts).where(eq(tenantAccounts.tenantId, tid));
     if (!overlay.length) return { accounts: canon, count: canon.length, source: 'canonical' };
@@ -207,9 +217,14 @@ export class LedgerService implements OnModuleInit {
   // ───────────────────── Ledgers (multi-GAAP) ─────────────────────
   // idempotent seed of the parallel ledgers (TFRS leading + TAX + IFRS).
   async seedLedgers() {
-    const db = this.db;
-    await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
-    return { seeded: LEDGERS.length };
+    // Boot seed of the GLOBAL parallel-ledgers catalogue (`ledgers` has no tenant_id). Runs at startup
+    // (main.ts) with no request/tenant context, so it's declared global for STRICT_TENANT_PROXY (mirrors
+    // seedChartOfAccounts).
+    return runGlobalDb('ledger:seed-ledgers', async () => {
+      const db = this.db;
+      await db.insert(ledgers).values(LEDGERS).onConflictDoNothing({ target: ledgers.code });
+      return { seeded: LEDGERS.length };
+    });
   }
 
   async listLedgers() {
@@ -283,7 +298,7 @@ export class LedgerService implements OnModuleInit {
   // has a GL entry already been posted for this source+ref? (used by AR/AP hooks + closeYear)
   // tenantId scopes the check so two tenants can share a ref (e.g. 'FY2026') without colliding.
   async alreadyPosted(source: string, sourceRef: string, tenantId?: number | null, outerTx?: any): Promise<boolean> {
-    const db = (outerTx ?? this.db) as any;
+    const db = outerTx ?? this.db;
     const conds = [eq(journalEntries.source, source), eq(journalEntries.sourceRef, sourceRef)];
     if (tenantId !== undefined && tenantId !== null) conds.push(eq(journalEntries.tenantId, tenantId));
     const [r] = await db.select({ id: journalEntries.id }).from(journalEntries).where(and(...conds)).limit(1);

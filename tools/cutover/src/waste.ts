@@ -45,6 +45,7 @@ async function main() {
     { username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq },
     { username: 'wh1', passwordHash: await pw.hash('pw1'), role: 'Warehouse', tenantId: t1 },
     { username: 'wh2', passwordHash: await pw.hash('pw2'), role: 'Warehouse', tenantId: t2 },
+    { username: 'arc1', passwordHash: await pw.hash('pw'), role: 'ArClerk', tenantId: t1 }, // PE-10: order_mgt (sales) but no wh_adjust/exec
   ]).onConflictDoNothing();
   // seed ingredient stock for T1: 100 units of PORK on hand
   await db.insert(s.customerInventory).values({ tenantId: t1, itemId: 'PORK', itemDescription: 'หมูสับ', uom: 'kg', currentStock: '100' });
@@ -82,6 +83,10 @@ async function main() {
   const stock = async () => Number(((await pg.query(`SELECT current_stock v FROM customer_inventory WHERE tenant_id=${t1} AND item_id='PORK'`)).rows as any[])[0].v);
 
   // ── 1. costed waste → Dr 5810 / Cr 1200, stock down, waste_no ──
+  // PE-10 — a sales-duty user (order_mgt, no wh_adjust/exec) must NOT post an inventory write-off.
+  const arc1 = await login('arc1', 'pw');
+  const wSales = await inj('POST', '/api/inventory/waste', arc1, { item_id: 'PORK', qty: 1, reason_code: 'spoilage', unit_cost: 80 });
+  ok('PE-10: a sales role (order_mgt, no wh_adjust) cannot post a waste write-off (403)', wSales.status === 403, `${wSales.status} ${wSales.json?.error?.code}`);
   const w1 = await inj('POST', '/api/inventory/waste', wh1, { item_id: 'PORK', qty: 5, reason_code: 'spoilage', unit_cost: 80 });
   ok('Waste: spoilage 5×80 → total 400, WASTE- + JE-', /^WASTE-/.test(w1.json.waste_no ?? '') && near(w1.json.total_cost, 400) && /^JE-/.test(w1.json.journal_no ?? ''), JSON.stringify(w1.json).slice(0, 110));
   ok('Waste: GL Dr 5810 Waste 400 / Cr 1200 Inventory 400', near(await gl('5810'), 400) && near(await gl('1200'), -400), `5810=${await gl('5810')} 1200=${await gl('1200')}`);

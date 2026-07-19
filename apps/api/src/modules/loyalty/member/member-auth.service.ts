@@ -2,7 +2,7 @@ import { Inject, Injectable, UnauthorizedException, ConflictException } from '@n
 import { JwtService } from '@nestjs/jwt';
 import { eq, and, desc, gt, isNull, sql } from 'drizzle-orm';
 import { randomInt, randomUUID } from 'node:crypto';
-import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../../database/database.module';
 import { tenants, posMembers, memberOtps, messageLog, revokedTokens } from '../../../database/schema';
 import { n } from '../../../database/queries';
 import { PasswordService } from '../../auth/password.service';
@@ -68,6 +68,9 @@ export class MemberAuthService {
   }
 
   async verifyOtp(dto: { phone: string; tenant_code: string; code: string }) {
+    // @NoTx cross-tenant auth resolution on the base pool (resolve tenant by code → explicitly tenant-scoped
+    // reads/writes). Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('member-auth:verify-otp', async () => {
     const db = this.db;
     const fail = () => new UnauthorizedException({ code: 'OTP_INVALID', message: 'Invalid or expired code', messageTh: 'รหัสไม่ถูกต้องหรือหมดอายุ' });
     const resolved = await this.resolveMember(dto.tenant_code, dto.phone);
@@ -92,6 +95,7 @@ export class MemberAuthService {
     // revocable (logout/incident denylist) and the guard re-checks pos_members.active each request; 7-day life.
     const token = await this.jwt.signAsync({ sub: `member:${member.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(member.id), permissions: [], customerName: null, jti: randomUUID() }, { expiresIn: '7d' });
     return { token, member: { id: Number(member.id), member_code: member.memberCode, name: member.name, tier: member.tier, balance: n(member.balance) } };
+    });
   }
 
   // ── ITGC-AC-15: member session revocation ────────────────────────────────────
@@ -104,7 +108,9 @@ export class MemberAuthService {
     try { payload = await this.jwt.verifyAsync(token); } catch { return { revoked: false }; }
     if (!payload?.jti) return { revoked: false };
     const expiresAt = payload.exp ? new Date(payload.exp * 1000) : new Date(Date.now() + 7 * 24 * 3600_000);
-    await this.db.insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing();
+    // @NoTx logout: the denylist insert auto-commits on the base pool (global — revocation is auth-infra, not tenant data).
+    await runGlobalDb('member-auth:revoke-token', () =>
+      this.db.insert(revokedTokens).values({ jti: payload.jti, username: payload.sub ?? null, expiresAt }).onConflictDoNothing());
     return { revoked: true };
   }
 
@@ -128,6 +134,8 @@ export class MemberAuthService {
   // token for the member whose line_user_id matches WITHIN the tenant. @Public + @NoTx → RLS bypassed, so we
   // filter by tenant + lineUserId explicitly.
   async loginWithLine(dto: { tenant_code: string; id_token: string }) {
+    // @NoTx cross-tenant LINE-login resolution on the base pool — declared global for STRICT_TENANT_PROXY.
+    return runGlobalDb('member-auth:login-line', async () => {
     const db = this.db;
     const notLinked = () => new UnauthorizedException({ code: 'LINE_NOT_LINKED', message: 'No member linked to this LINE account', messageTh: 'ยังไม่ได้ผูกบัญชี LINE กับสมาชิก' });
     const { lineUserId } = await verifyLineIdToken(dto.id_token); // throws LINE_VERIFY_FAILED / LINE_NOT_CONFIGURED
@@ -138,5 +146,6 @@ export class MemberAuthService {
     if (!m) throw notLinked();
     const token = await this.jwt.signAsync({ sub: `member:${m.id}`, kind: 'member', role: 'Member', tenantId, memberId: Number(m.id), permissions: [], customerName: null, jti: randomUUID() }, { expiresIn: '7d' });
     return { token, member: { id: Number(m.id), member_code: m.memberCode, name: m.name, tier: m.tier, balance: n(m.balance) } };
+    });
   }
 }

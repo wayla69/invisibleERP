@@ -10,6 +10,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { ymd } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 
 const n = (v: unknown) => Number(v ?? 0);
 const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -254,6 +255,10 @@ export class BomService {
     const db = this.db;
     const [sub] = await db.select().from(bomSubmissions).where(eq(bomSubmissions.id, id)).limit(1);
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Submission not found', messageTh: 'ไม่พบคำขอ' });
+    // SoD maker-checker (audit #6): a BoM submission drives product-costing master data, so the approver must
+    // differ from the submitter — a user holding both cust_bom (submit) and bom_master (approve) can no longer
+    // self-approve. Enterprise ⇒ 403 SOD_SELF_APPROVAL; an SME tenant records a justified self-approval.
+    await assertMakerChecker(db, { user, maker: sub.submittedBy, event: 'bom.submission.approve', ref: sub.bomCode ?? String(id), code: 'SOD_SELF_APPROVAL' });
     const subLines = await db.select().from(bomSubmissionLines).where(eq(bomSubmissionLines.submissionId, id));
 
     await db.transaction(async (tx: any) => {
@@ -359,7 +364,7 @@ export class BomService {
         yieldQty: String(n(dto.yield_qty) || 1), yieldUom: dto.yield_uom ?? null,
         laborCost: String(n(dto.labor_cost)), overheadCost: String(n(dto.overhead_cost)),
         otherCost: String(n(dto.other_cost)), sellingPrice: String(n(dto.selling_price)),
-        notes: dto.notes ?? null, submittedAt: new Date(), status: 'Pending',
+        notes: dto.notes ?? null, submittedAt: new Date(), submittedBy: user.username, status: 'Pending',
       }).returning({ id: bomSubmissions.id });
       submissionId = Number(sub.id);
       if (linePayload.length) {

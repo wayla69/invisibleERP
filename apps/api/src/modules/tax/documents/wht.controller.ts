@@ -37,7 +37,7 @@ export class WhtController {
   async pdfDoc(@Param('docNo') docNo: string, @Query('copy') copy: string | undefined, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const cert = await this.svc.getByDocNo(u, docNo);
     const c = (copy === 'copy2' || copy === 'copy3') ? copy : 'copy1';
-    const html = this.pdf.whtCertificateHtml(cert, c as any);
+    const html = this.pdf.whtCertificateHtml(cert, c);
     const buf = await this.pdf.renderToPdf(html, false);
     if (buf) {
       reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${docNo}.pdf"`).header('Content-Length', buf.length).send(buf);

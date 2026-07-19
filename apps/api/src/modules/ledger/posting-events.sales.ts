@@ -7,6 +7,15 @@ import { type PostingEventDef, r, DR, CR } from './posting-events.types';
 export const SALES_POSTING_EVENTS: Record<string, PostingEventDef> = {
   'SALE.FOOD':        { name: 'Sale — revenue',                description: 'POS/AR sale revenue leg (composes UNDER item-determination when the flag is on)', wired: true, roles: {
     revenue: r(CR, '4000', 'free', 'Sales revenue'), cash: r(DR, '1000', 'pinned', 'Cash (CASH set)'), ar_control: r(DR, '1100', 'pinned', 'AR control (REC-04 permanent)') } },
+  // docs/52 Phase 1 — business-type-neutral revenue events for a UNIVERSAL POS. The generic (non-restaurant)
+  // checkout posts revenue via the business-type profile's revenue_event (SALE.GOODS for retail, SALE.SERVICE
+  // for services) instead of the restaurant-flavoured SALE.FOOD. Both DEFAULT to 4000 — byte-identical to the
+  // current generic-sale GL — so a business can remap SALE.SERVICE to a distinct service-income account via a
+  // GL-24 posting override (`free` tier) without a code change, and existing books never drift.
+  'SALE.GOODS':       { name: 'Sale — goods revenue',          description: 'Generic retail-goods sale revenue leg (universal POS; profile revenue_event)', wired: true, roles: {
+    revenue: r(CR, '4000', 'free', 'Sales revenue — goods') } },
+  'SALE.SERVICE':     { name: 'Sale — service revenue',        description: 'Generic service sale revenue leg (universal POS; remap to a service-income account via override)', wired: true, roles: {
+    revenue: r(CR, '4000', 'free', 'Sales revenue — services') } },
   'SALE.VAT':         { name: 'Sale — output VAT',             description: 'Output-VAT leg of a sale/CN/DN', wired: true, roles: {
     vat_output: r(CR, '2100', 'widen', 'Output VAT — PP30 tie sums the VAT-account set') } },
   'SALE.DELIVERY':    { name: 'Sale — delivery income',        description: 'Delivery-fee income on channel orders', wired: true, roles: {
@@ -15,6 +24,21 @@ export const SALES_POSTING_EVENTS: Record<string, PostingEventDef> = {
     service_charge_income: r(CR, '4400', 'free', 'Service-charge income') } },
   'POS.ROUNDING':     { name: 'Sale — satang rounding',        description: 'Cash rounding adjustment (sign-conditional legs)', wired: true, roles: {
     rounding: r(CR, '4900', 'free', 'Rounding adjustment (gain=credit, loss=debit)') } },
+  // docs/52 Phase 6a — split payment: the asset (cash) debit leg per tender METHOD. A split sale posts one Dr
+  // per resolved tender account; ALL default to 1000 (Cash), so an all-default split collapses to the same
+  // single Dr 1000 = total as the legacy single-tender path (net GL byte-identical). A shop that banks card /
+  // QR proceeds into a clearing account (or draws a gift-card redemption down its 2200 liability) remaps the
+  // relevant event via a GL-24 override — no code change (mirrors SALE.GOODS/SERVICE all defaulting to 4000).
+  'TENDER.CASH':      { name: 'Tender — cash',                 description: 'Split-payment cash leg (asset debit)', wired: true, roles: {
+    tender_asset: r(DR, '1000', 'pinned', 'Cash (CASH set)') } },
+  'TENDER.CARD':      { name: 'Tender — card',                 description: 'Split-payment card leg (remap to a card-clearing/bank account via GL-24)', wired: true, roles: {
+    tender_asset: r(DR, '1000', 'free', 'Cash/clearing for card proceeds') } },
+  'TENDER.QR':        { name: 'Tender — QR / e-wallet',        description: 'Split-payment QR/PromptPay/e-wallet leg (remap to a clearing account via GL-24)', wired: true, roles: {
+    tender_asset: r(DR, '1000', 'free', 'Cash/clearing for QR/e-wallet proceeds') } },
+  'TENDER.VOUCHER':   { name: 'Tender — voucher / gift card',  description: 'Split-payment voucher/gift-card leg (remap to the 2200 gift-card liability via GL-24)', wired: true, roles: {
+    tender_asset: r(DR, '1000', 'free', 'Cash/liability drawdown for voucher redemption') } },
+  'TENDER.OTHER':     { name: 'Tender — other',                description: 'Split-payment fallback leg for any other method (asset debit)', wired: true, roles: {
+    tender_asset: r(DR, '1000', 'free', 'Cash/clearing for other tender') } },
   'SURCHARGE.INCOME': { name: 'Card surcharge income',         description: 'Card surcharge collected at settlement', wired: true, roles: {
     surcharge_income: r(CR, '4500', 'free', 'Card surcharge income') } },
   'TIP.COLLECT':      { name: 'Tip collected',                 description: 'Tip pass-through collected with a payment', wired: false, roles: {

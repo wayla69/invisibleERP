@@ -1448,7 +1448,9 @@
    "cost": 27.18,
    "price": 95.0,
    "station": "hot",
-   "sort": 1
+   "sort": 1,
+   "priority": 2,
+   "recommended": true
   },
   {
    "code": "B0107",
@@ -1466,7 +1468,9 @@
    "cost": 14.28,
    "price": 50.0,
    "station": "hot",
-   "sort": 2
+   "sort": 2,
+   "priority": 2,
+   "recommended": true
   },
   {
    "code": "B0108",
@@ -1484,7 +1488,9 @@
    "cost": 7.54,
    "price": 30.0,
    "station": "hot",
-   "sort": 3
+   "sort": 3,
+   "priority": 2,
+   "recommended": true
   },
   {
    "code": "B0109",
@@ -1502,7 +1508,8 @@
    "cost": 8.3,
    "price": 30.0,
    "station": "hot",
-   "sort": 4
+   "sort": 4,
+   "priority": 2
   },
   {
    "code": "B0110",
@@ -1520,7 +1527,8 @@
    "cost": 57.81,
    "price": 195.0,
    "station": "hot",
-   "sort": 5
+   "sort": 5,
+   "priority": 2
   },
   {
    "code": "B0111",
@@ -1538,7 +1546,8 @@
    "cost": 2.7,
    "price": 25.0,
    "station": "hot",
-   "sort": 6
+   "sort": 6,
+   "priority": 2
   },
   {
    "code": "B0112",
@@ -1556,7 +1565,8 @@
    "cost": 30.93,
    "price": 105.0,
    "station": "hot",
-   "sort": 7
+   "sort": 7,
+   "priority": 2
   },
   {
    "code": "B0113",
@@ -1574,7 +1584,8 @@
    "cost": 10.91,
    "price": 40.0,
    "station": "hot",
-   "sort": 8
+   "sort": 8,
+   "priority": 2
   },
   {
    "code": "B0114",
@@ -1591,7 +1602,8 @@
    "cost": 3.14,
    "price": 25.0,
    "station": "hot",
-   "sort": 9
+   "sort": 9,
+   "priority": 2
   },
   {
    "code": "B0115",
@@ -1608,7 +1620,8 @@
    "cost": 2.62,
    "price": 25.0,
    "station": "hot",
-   "sort": 10
+   "sort": 10,
+   "priority": 2
   },
   {
    "code": "B0116",
@@ -1625,7 +1638,8 @@
    "cost": 9.74,
    "price": 35.0,
    "station": "hot",
-   "sort": 11
+   "sort": 11,
+   "priority": 2
   },
   {
    "code": "B0117",
@@ -1642,7 +1656,8 @@
    "cost": 52.5,
    "price": 180.0,
    "station": "hot",
-   "sort": 12
+   "sort": 12,
+   "priority": 2
   },
   {
    "code": "B0118",
@@ -1659,7 +1674,8 @@
    "cost": 34.18,
    "price": 115.0,
    "station": "hot",
-   "sort": 13
+   "sort": 13,
+   "priority": 2
   },
   {
    "code": "B0119",
@@ -1676,7 +1692,8 @@
    "cost": 12.48,
    "price": 45.0,
    "station": "hot",
-   "sort": 14
+   "sort": 14,
+   "priority": 2
   },
   {
    "code": "B0120",
@@ -1693,7 +1710,8 @@
    "cost": 31.49,
    "price": 105.0,
    "station": "hot",
-   "sort": 15
+   "sort": 15,
+   "priority": 2
   },
   {
    "code": "B0121",
@@ -1710,7 +1728,8 @@
    "cost": 30.45,
    "price": 105.0,
    "station": "hot",
-   "sort": 16
+   "sort": 16,
+   "priority": 2
   },
   {
    "code": "B0122",
@@ -1727,7 +1746,8 @@
    "cost": 37.94,
    "price": 130.0,
    "station": "hot",
-   "sort": 17
+   "sort": 17,
+   "priority": 2
   },
   {
    "code": "B0123",
@@ -1743,7 +1763,8 @@
    "cost": 30.95,
    "price": 105.0,
    "station": "hot",
-   "sort": 18
+   "sort": 18,
+   "priority": 2
   },
   {
    "code": "B0135",

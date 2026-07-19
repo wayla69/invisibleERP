@@ -49,7 +49,7 @@ export class TaxUtpController {
   @HttpCode(200)
   @Permissions('gl_close', 'gl_post')
   runVa(@Body(new ZodValidationPipe(RunVaBody)) b: RunVaBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.runValuationAllowance({ period: b.period, asOfDate: b.as_of_date, dtaGross: b.dta_gross, mltnRecoverable: b.mltn_recoverable, basis: b.basis, tenantId: b.tenant_id ?? null, runBy: u.username });
+    return this.svc.runValuationAllowance({ period: b.period, asOfDate: b.as_of_date, dtaGross: b.dta_gross, mltnRecoverable: b.mltn_recoverable, basis: b.basis, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null, runBy: u.username });
   }
 
   @Post('valuation-allowance/:id/post')
@@ -67,7 +67,7 @@ export class TaxUtpController {
   @Post('utp')
   @Permissions('gl_close', 'gl_post')
   createUtp(@Body(new ZodValidationPipe(CreateUtpBody)) b: CreateUtpBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.createUtp({ taxYear: b.tax_year, description: b.description, grossExposure: b.gross_exposure, recognizedBenefit: b.recognized_benefit, interestPenalty: b.interest_penalty, tenantId: b.tenant_id ?? null, createdBy: u.username });
+    return this.svc.createUtp({ taxYear: b.tax_year, description: b.description, grossExposure: b.gross_exposure, recognizedBenefit: b.recognized_benefit, interestPenalty: b.interest_penalty, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null, createdBy: u.username });
   }
 
   @Post('utp/:id/settle')
