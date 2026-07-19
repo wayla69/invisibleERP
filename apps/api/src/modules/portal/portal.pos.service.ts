@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { UsageMeterService } from '../usage/usage-meter.service';
 import {
   custPosSales, custPosItems, customerInventory, custStockLog, branchStock,
-  loyaltyConfig, loyaltyPoints, loyaltyTxn, branches, items,
+  loyaltyConfig, loyaltyPoints, loyaltyTxn, branches, items, itemRelationships,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n, fx } from '../../database/queries';
@@ -85,9 +85,31 @@ export class PortalPosService {
     // 'service' line (e.g. a haircut, a consultation) is NOT a stocked good: it skips the inventory/COGS
     // moves below and its revenue posts to the service revenue event. Goods-only sales are unchanged.
     const itemIds = [...new Set(lines.map((l) => String(l.item_id)))];
-    const masterRows = itemIds.length ? await db.select({ itemId: items.itemId, supplyType: items.supplyType }).from(items).where(inArray(items.itemId, itemIds)) : [];
+    const masterRows = itemIds.length ? await db.select({ id: items.id, itemId: items.itemId, supplyType: items.supplyType }).from(items).where(inArray(items.itemId, itemIds)) : [];
     const supplyByItem = new Map<string, string>(masterRows.map((r: any) => [String(r.itemId), String(r.supplyType ?? 'goods')]));
     const isSvc = (l: { item_id: string }) => supplyByItem.get(String(l.item_id)) === 'service';
+    // docs/52 Phase 2c — a 'service' OR 'non_inventory' line moves no stock and books no COGS; the only
+    // difference is revenue routing (service → SALE.SERVICE via isSvc; non-inventory → the goods event).
+    const skipStock = (l: { item_id: string }) => { const s = supplyByItem.get(String(l.item_id)); return s === 'service' || s === 'non_inventory'; };
+    // docs/52 Phase 2c — kits/bundles: a kit PARENT sells as one line at one price but consumes its COMPONENT
+    // stock/COGS on sale (the kit SKU itself is not stocked). Components are tenant-scoped item_relationships
+    // rows (rel_type='kit_component', from=kit → to=component) carrying the per-kit qty. Map: kit code →
+    // [{ componentId, qty }]. A goods line with no kit_component rows is a plain line (byte-identical path).
+    const kitByItem = new Map<string, { componentId: string; qty: number }[]>();
+    if (masterRows.length) {
+      const codeById = new Map<number, string>(masterRows.map((r: any) => [Number(r.id), String(r.itemId)]));
+      const relRows = await db.select({ fromId: itemRelationships.fromItemId, compCode: items.itemId, qty: itemRelationships.qty })
+        .from(itemRelationships)
+        .innerJoin(items, eq(itemRelationships.toItemId, items.id))
+        .where(and(eq(itemRelationships.tenantId, t.id), eq(itemRelationships.relType, 'kit_component'), inArray(itemRelationships.fromItemId, [...codeById.keys()])));
+      for (const rr of relRows) {
+        const kitCode = codeById.get(Number(rr.fromId));
+        if (!kitCode) continue;
+        const arr = kitByItem.get(kitCode) ?? [];
+        arr.push({ componentId: String(rr.compCode), qty: Number(rr.qty ?? 1) });
+        kitByItem.set(kitCode, arr);
+      }
+    }
     // wiring: opt-in pricing engine — fold rule discounts (happy-hour/BOGO/qty-break/order) into the
     // order discount. GL stays balanced (cash leg = total = taxable + vat). Advisory: never block a sale.
     let pricingDiscount = 0;
@@ -144,30 +166,43 @@ export class PortalPosService {
         discountPct: String(n(l.discount_pct)), amount: fx(l.amount, 2), isCustom: false,
       })));
 
-      // decrement customer inventory (MAX(0,...)) + stock log
-      for (const l of lines) {
-        // Phase 2a: a service line is not stocked — no inventory decrement, no recipe/BOM, no COGS.
-        if (isSvc(l)) continue;
+      // decrement customer inventory (MAX(0,...)) + stock log. Phase 2c: extracted per-physical-quantity so a
+      // kit/bundle line can explode into its components and a plain goods line stays byte-identical.
+      const processStockQty = async (itemId: string, qty: number) => {
         const [inv] = await tx.select().from(customerInventory)
-          .where(and(eq(customerInventory.tenantId, t.id), eq(customerInventory.itemId, l.item_id))).limit(1);
+          .where(and(eq(customerInventory.tenantId, t.id), eq(customerInventory.itemId, itemId))).limit(1);
         if (inv) {
-          const newStock = Math.max(0, n(inv.currentStock) - n(l.qty));
+          const newStock = Math.max(0, n(inv.currentStock) - qty);
           await tx.update(customerInventory).set({ currentStock: String(newStock), lastUpdated: now }).where(eq(customerInventory.id, inv.id));
           await tx.insert(custStockLog).values({
-            tenantId: t.id, branchId, itemId: l.item_id, itemDescription: inv.itemDescription, logDate: now, logType: 'Sale',
-            qtyChange: String(-n(l.qty)), balanceAfter: String(newStock), refDoc: saleNo, notes: null, createdBy: user.username,
+            tenantId: t.id, branchId, itemId, itemDescription: inv.itemDescription, logDate: now, logType: 'Sale',
+            qtyChange: String(-qty), balanceAfter: String(newStock), refDoc: saleNo, notes: null, createdBy: user.username,
           });
           // mirror into the per-branch ledger (branch-aware replenishment). Same MAX(0) clamp as the rollup above.
           if (branchId != null) {
-            const [bs] = await tx.select().from(branchStock).where(and(eq(branchStock.tenantId, t.id), eq(branchStock.branchId, branchId), eq(branchStock.itemId, l.item_id))).for('update').limit(1);
-            if (bs) await tx.update(branchStock).set({ onHand: String(Math.max(0, n(bs.onHand) - n(l.qty))), lastUpdated: now }).where(eq(branchStock.id, bs.id));
-            else await tx.insert(branchStock).values({ tenantId: t.id, branchId, itemId: l.item_id, itemDescription: inv.itemDescription, uom: inv.uom ?? null, onHand: '0', lastUpdated: now });
+            const [bs] = await tx.select().from(branchStock).where(and(eq(branchStock.tenantId, t.id), eq(branchStock.branchId, branchId), eq(branchStock.itemId, itemId))).for('update').limit(1);
+            if (bs) await tx.update(branchStock).set({ onHand: String(Math.max(0, n(bs.onHand) - qty)), lastUpdated: now }).where(eq(branchStock.id, bs.id));
+            else await tx.insert(branchStock).values({ tenantId: t.id, branchId, itemId, itemDescription: inv.itemDescription, uom: inv.uom ?? null, onHand: '0', lastUpdated: now });
           }
         }
         // recipe/BOM: deduct ingredients for a recipe-backed menu line (ingredient item_ids differ from the dish SKU)
-        const ded = await this.recipe.applyDeduction(tx, t.id, String(l.item_id), n(l.qty), saleNo, user, branchId);
+        const ded = await this.recipe.applyDeduction(tx, t.id, itemId, qty, saleNo, user, branchId);
         recipeCogs = roundCurrency(recipeCogs + ded.cost, 'THB');
-        if (!ded.deducted) nonRecipeLines.push({ itemId: String(l.item_id), qty: n(l.qty) }); // non-recipe → costed COGS
+        if (!ded.deducted) nonRecipeLines.push({ itemId, qty }); // non-recipe → costed COGS
+      };
+      const roundQty = (x: number) => Math.round(x * 1000) / 1000; // numeric(14,3) — avoid float drift on qty math
+
+      for (const l of lines) {
+        // Phase 2a/2c: a service or non-inventory line is not stocked — no inventory decrement, no recipe/BOM, no COGS.
+        if (skipStock(l)) continue;
+        // Phase 2c: a kit/bundle line explodes into its components (component stock + COGS); a plain goods line
+        // processes its own SKU exactly as before. The kit SKU itself is never decremented/costed.
+        const kit = kitByItem.get(String(l.item_id));
+        if (kit && kit.length) {
+          for (const c of kit) await processStockQty(c.componentId, roundQty(c.qty * n(l.qty)));
+        } else {
+          await processStockQty(String(l.item_id), n(l.qty));
+        }
         // Step 1 — modifier COGS: chosen options ("extra patty") add their standard cost to the line's COGS
         // (Dr 5300 / Cr 1200), so menu modifiers no longer move price without moving cost of goods.
         const modCogs = await this.recipe.modifierCogs(tx, t.id, l.modifier_option_ids ?? [], n(l.qty));
