@@ -179,7 +179,7 @@ export class LessorLeasesService {
   }
 
   // Idempotent periodic run: for each ACTIVE lessor lease whose next_run_date has arrived, post one period.
-  //   FINANCE: interest income on the net investment (Cr 4600) + cash collected (Dr 1000), the principal
+  //   FINANCE: interest income on the net investment (Cr 4620) + cash collected (Dr 1000), the principal
   //            portion reducing the receivable (Cr 1610); the last period clears the receivable exactly.
   //   OPERATING: straight-line rental income (Dr 1000 / Cr 4610) + continued asset depreciation
   //            (Dr 5200 / Cr 1590) over the asset's economic life.

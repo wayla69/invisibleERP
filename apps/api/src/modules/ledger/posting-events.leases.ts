@@ -18,7 +18,7 @@ export const LEASES_POSTING_EVENTS: Record<string, PostingEventDef> = {
   'LEASE.LESSOR_COMMENCE': { name: 'Lessor finance-lease commencement', description: 'Derecognise asset → net investment (LSE-02)', wired: true, roles: {
     selling_pl: r(CR, '1510', 'free', 'Selling profit/loss'), net_investment: r(DR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
   'LEASE.LESSOR_FINANCE': { name: 'Lessor finance-lease receipt', description: 'Collection: interest income + principal', wired: true, roles: {
-    interest_income: r(CR, '4600', 'free', 'Finance-lease interest income'), net_investment: r(CR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
+    interest_income: r(CR, '4620', 'free', 'Finance-lease interest income'), net_investment: r(CR, '1610', 'pinned', 'Net-investment control (LSE-02)') } },
   'LEASE.LESSOR_OPERATING': { name: 'Lessor operating-lease receipt', description: 'Straight-line rental + continued depreciation', wired: true, roles: {
     rental_income: r(CR, '4610', 'free', 'Operating-lease rental income'), dep_expense: r(DR, '5200', 'free', 'Depreciation expense') } },
 };

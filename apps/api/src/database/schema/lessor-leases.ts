@@ -8,7 +8,7 @@ import { tenants } from './tenants';
 // and a DIFFERENT user approves it (SoD) before any GL is booked.
 //   FINANCE lease: at commencement the lessor DERECOGNISES the underlying asset (Cr 1500) and recognises a
 //   NET INVESTMENT IN LEASE / lease receivable at the PV of the payments (Dr 1610), any selling profit/loss
-//   to 1510. Each period the scheduled run recognises INTEREST INCOME (Cr 4600) on the running receivable
+//   to 1510. Each period the scheduled run recognises INTEREST INCOME (Cr 4620) on the running receivable
 //   and collects the cash (Dr 1000), reducing the receivable by the principal portion.
 //   OPERATING lease: the lessor KEEPS the asset, recognises STRAIGHT-LINE RENTAL INCOME (Dr 1000 / Cr 4610)
 //   and CONTINUES DEPRECIATING the asset (Dr 5200 / Cr 1590) over its economic life.
