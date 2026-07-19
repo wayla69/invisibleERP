@@ -120,7 +120,7 @@ export default function RegisterPage() {
 
   // ── settle: create the order (re-priced + 86-checked server-side), fire kitchen for dine-in, checkout,
   //    then drive the hardware (customer display → print → drawer). Returns the authoritative sale. ──
-  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string }): Promise<SettleResult> => {
+  const settle = useCallback(async ({ method, discountPct, cashReceived, voucherCode, tenders }: { method: Method; discountPct: number; cashReceived?: number; voucherCode?: string; tenders?: { method: string; amount: number }[] }): Promise<SettleResult> => {
     const items = lines.map((l) => ({ sku: l.sku, qty: l.qty, modifier_option_ids: l.modifier_option_ids, notes: l.notes }));
 
     // ── offline path: queue a QUICK (no-table) cash sale, or — for dine-in (POS-6) — capture the order
@@ -158,7 +158,9 @@ export default function RegisterPage() {
       try {
         gsale = await api<{ sale_no: string; total: number }>('/api/pos/sales', {
           method: 'POST',
-          body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
+          // docs/52 Phase 6a — split payment: forward the tenders[] on the generic path (restaurant checkout,
+          // below, doesn't support split yet). Absent → single-tender payment_method (unchanged).
+          body: JSON.stringify({ items: genericItems, discount: genericDiscount, payment_method: method, apply_pricing: true, party_size: pax, ...(tenders ? { tenders } : {}), ...(serviceChargePct > 0 ? { service_charge_pct: serviceChargePct, service_min_party: 1 } : {}) }),
         });
       } catch (e) {
         // network died mid-checkout while the browser still reports online → queue the sale offline instead

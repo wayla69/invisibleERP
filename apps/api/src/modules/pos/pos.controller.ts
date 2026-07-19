@@ -43,6 +43,14 @@ const PosSaleBody = z.object({
   service_min_party: z.number().int().positive().optional(),
   rounding: z.number().nonnegative().optional(),
   branch_id: z.number().int().positive().optional(),
+  // docs/52 Phase 6a — split payment: settle one sale across several tenders (must sum to the total).
+  tenders: z.array(z.object({
+    method: z.string().min(1),
+    amount: z.number().positive(),
+    gateway: z.string().optional(),
+    cash_tendered: z.number().nonnegative().optional(),
+    reference: z.string().max(120).optional(),
+  })).min(1).max(10).optional(),
 });
 
 @Controller('api/pos')
