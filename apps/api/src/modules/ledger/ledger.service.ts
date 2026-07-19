@@ -10,6 +10,7 @@ import { assertPostingEventDefaults } from './posting-events';
 import { resolvePostingOverrides, resolvePostingAccountSet, resolvePostingOverridesMany } from './posting-overrides-cache';
 
 import { LEADING, LEDGERS, COA } from './ledger-constants';
+import { coaSortOrder } from './ledger-statement-sections';
 import { LedgerCashflowService } from './ledger-cashflow.service';
 import { LedgerRecurringService } from './ledger-recurring.service';
 import { LedgerAllocationService } from './ledger-allocation.service';
@@ -158,6 +159,8 @@ export class LedgerService implements OnModuleInit {
     // Canonical accounts are read from the DB (the authoritative universe — includes any account a
     // migration inserts beyond the COA constant), so 'general' mirrors the live chart exactly.
     const canon: any[] = await db.select().from(accounts).orderBy(accounts.code);
+    // P2: present the chart in class → statement-section order (not raw code) — computed, no stored column.
+    canon.sort((a, b) => coaSortOrder(a) - coaSortOrder(b) || String(a.code).localeCompare(String(b.code)));
     const typeOf = new Map<string, string>(canon.map((a) => [a.code, a.type] as const));
     const rows: CoaTemplateRow[] =
       key === 'general' ? canon.map((a) => ({ code: a.code, name: a.name, nameTh: '' })) : COA_TEMPLATES[key];
@@ -183,6 +186,8 @@ export class LedgerService implements OnModuleInit {
     const db = this.db;
     const tid = resolveTenantId(opts?.tenantId ?? null);
     const canon = await db.select().from(accounts).orderBy(accounts.code);
+    // P2: metadata-driven display order (class → statement section → code); frozen natural codes never reorder.
+    canon.sort((a: any, b: any) => coaSortOrder(a) - coaSortOrder(b) || String(a.code).localeCompare(String(b.code)));
     if (opts?.all || tid == null) return { accounts: canon, count: canon.length, source: 'canonical' };
     const overlay = await db.select().from(tenantAccounts).where(eq(tenantAccounts.tenantId, tid));
     if (!overlay.length) return { accounts: canon, count: canon.length, source: 'canonical' };

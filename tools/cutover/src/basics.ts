@@ -1877,6 +1877,25 @@ async function main() {
       && near(isWin.summary.revenue - isWin.summary.cogs, isWin.summary.gross_profit),
     JSON.stringify(isWin.summary));
 
+  // (2b) P2 — built-in Thai DBD/TFRS default layouts render out of the box (no tenant definition authored)
+  // and tie to the canonical statements. DBD-PL is a multi-step P&L (gross → operating → PBT → net); DBD-BS
+  // groups by งบดุล section and folds the unclosed result into equity so total assets = total liab+equity.
+  const dbdPl = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${fsTo}&from=${fsFrom}`, admin)).json;
+  ok('P2/DBD: default งบกำไรขาดทุน renders without a tenant definition (gross profit ties)',
+    near(rowVal(dbdPl.rows, 'gross_profit'), isWin.summary.gross_profit), `gp=${rowVal(dbdPl.rows, 'gross_profit')} is=${isWin.summary.gross_profit}`);
+  ok('P2/DBD: default P&L net profit = income-statement net income',
+    near(rowVal(dbdPl.rows, 'net_profit'), isWin.net_income), `np=${rowVal(dbdPl.rows, 'net_profit')} ni=${isWin.net_income}`);
+  const dbdBs = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${fsTo}`, admin)).json;
+  ok('P2/DBD: default งบแสดงฐานะการเงิน total assets ties to the balance sheet',
+    near(rowVal(dbdBs.rows, 'total_assets'), bsWin.assets), `ta=${rowVal(dbdBs.rows, 'total_assets')} bs=${bsWin.assets}`);
+  ok('P2/DBD: default balance sheet balances (total assets = total liabilities + equity)',
+    near(rowVal(dbdBs.rows, 'total_assets'), rowVal(dbdBs.rows, 'total_liab_equity')),
+    `ta=${rowVal(dbdBs.rows, 'total_assets')} tle=${rowVal(dbdBs.rows, 'total_liab_equity')}`);
+  const dbdList = (await inj('GET', '/api/reports/fs/definitions', admin)).json;
+  ok('P2/DBD: the built-in DBD-BS / DBD-PL defaults are discoverable in the definition list',
+    (dbdList.definitions ?? []).some((d: any) => d.code === 'DBD-BS' && d.is_default) && (dbdList.definitions ?? []).some((d: any) => d.code === 'DBD-PL' && d.is_default),
+    JSON.stringify((dbdList.definitions ?? []).map((d: any) => d.code)));
+
   // (3) SOCE roll-forward — baseline, then a share issue + a dividend (both maker-checker approved), re-read.
   const socePart = (soce: any, code: string) => soce.components.find((c: any) => c.account_code === code) ?? { opening: 0, movements: 0, profit: 0, closing: 0 };
   const soce0 = (await inj('GET', `/api/reports/fs/changes-in-equity?from=${fsFrom}&to=${fsTo}`, admin)).json;

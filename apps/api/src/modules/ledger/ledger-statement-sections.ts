@@ -89,3 +89,25 @@ export function resolveIsGroup(a: AccountLike): IsGroup | null {
 
 export function isBsGroup(v: unknown): v is BsGroup { return typeof v === 'string' && (BS_GROUPS as string[]).includes(v); }
 export function isIsGroup(v: unknown): v is IsGroup { return typeof v === 'string' && (IS_GROUPS as string[]).includes(v); }
+
+// ── Canonical display order (P2 — CoA numbering is frozen; ordering is metadata-driven) ──────────────
+// The natural account codes grew feature-by-feature (next-free-number), so a raw code sort interleaves
+// classes (a P&L account like 1510 sits in the 1xxx range, banks after fixed assets, …). Rather than
+// renumber the natural keys — 1,000+ hard-coded posting sites depend on them — we compute a stable
+// sort_order from the account's CLASS and its statement section, so every account lists in proper
+// accountant order (assets → liabilities → equity → revenue → COGS → opex → other → finance → tax) and
+// nests under its correct statement heading regardless of the literal code. Purely presentational: it
+// never touches postings, balances, or the code itself.
+const TYPE_RANK: Record<string, number> = { Asset: 1, Liability: 2, Equity: 3, Revenue: 4, Expense: 5 };
+const BS_RANK: Record<BsGroup, number> = { current_asset: 1, noncurrent_asset: 2, current_liability: 3, noncurrent_liability: 4, equity: 5 };
+const IS_RANK: Record<IsGroup, number> = { revenue: 1, cogs: 2, selling_admin: 3, other_income: 4, other_expense: 5, finance_cost: 6, tax: 7 };
+
+/** Stable presentational sort key: class → statement section → numeric code. Independent of code hygiene. */
+export function coaSortOrder(a: AccountLike): number {
+  const t = TYPE_RANK[a.type] ?? 9;
+  const bs = resolveBsGroup(a);
+  const is = resolveIsGroup(a);
+  const sub = bs ? BS_RANK[bs] : is ? IS_RANK[is] : 0;
+  const num = Number.parseInt(a.code, 10) || 0; // canonical codes are 4-digit (< 1e6 even for a 6-digit sub-account)
+  return t * 100_000_000 + sub * 1_000_000 + num;
+}
