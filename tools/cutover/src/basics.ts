@@ -1227,6 +1227,26 @@ async function main() {
   ok('P3: the DBD balance sheet renders + balances for the construction tenant (sub-accounts integrate cleanly)',
     conBs.rows?.some((r: any) => r.key === 'current_assets') && near(conTA, conTLE), `ta=${conTA} tle=${conTLE}`);
 
+  // P5 — the remaining verticals curate their own genuine sub-accounts too (nonprofit has the unusual
+  // equity + functional-expense split; logistics has cost-of-service-by-resource). A restaurant never sees them.
+  const sgNpo = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'Npo Co', tenant_code: 'NPOCO', admin_username: 'npo_admin', admin_password: 'npo1234567', email: 'a@npo.example', industry: 'nonprofit',
+  });
+  const npoTok = (await inj('POST', '/api/login', undefined, { username: 'npo_admin', password: 'npo1234567' })).json.token;
+  const npoCodes = new Set(((await inj('GET', '/api/ledger/accounts', npoTok)).json.accounts ?? []).map((a: any) => a.code));
+  ok('P5: nonprofit chart curates restricted/unrestricted net assets + functional-expense + grant/donation sub-accounts',
+    ['310010', '310011', '510020', '510021', '510022', '430030', '430031'].every((c) => npoCodes.has(c)),
+    `have=${['310010', '510020', '430030'].filter((c) => npoCodes.has(c)).join(',')}`);
+  const sgLog = await inj('POST', '/api/auth/signup', undefined, {
+    company_name: 'Log Co', tenant_code: 'LOGCO', admin_username: 'log_admin', admin_password: 'log1234567', email: 'a@log.example', industry: 'logistics',
+  });
+  const logTok = (await inj('POST', '/api/login', undefined, { username: 'log_admin', password: 'log1234567' })).json.token;
+  const logCodes = new Set(((await inj('GET', '/api/ledger/accounts', logTok)).json.accounts ?? []).map((a: any) => a.code));
+  ok('P5: logistics chart curates cost-of-service-by-resource sub-accounts (fuel/driver/subcontract/R&M/warehousing)',
+    ['580020', '580021', '580022', '580023', '580024'].every((c) => logCodes.has(c)), `have=${['580020', '580024'].filter((c) => logCodes.has(c)).join(',')}`);
+  ok('P5: an unrelated (restaurant) chart shows none of the nonprofit or logistics sub-accounts (per-industry curation)',
+    !restoAcc.accounts?.some((a: any) => ['310010', '510020', '430030', '580020'].includes(a.code)), 'restaurant clean');
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.
