@@ -33,7 +33,24 @@ export interface PortalSaleDto {
   service_min_party?: number;   // B4: party threshold for service charge (default 6)
   rounding?: number;            // B4: satang rounding step (0 = disabled) → acct 4900
   branch_id?: number;           // multi-branch: tag the sale to an outlet (must belong to this tenant)
+  // docs/52 Phase 6a — split payment: settle one sale with several tenders (cash + card + QR + voucher …).
+  // Each leg's `amount` is what it APPLIES to the sale; the legs must sum EXACTLY to the total. A cash leg may
+  // carry `cash_tendered` > amount to record change (mirrors #1). ABSENT ⇒ the single-tender path (unchanged).
+  tenders?: { method: string; amount: number; gateway?: string; cash_tendered?: number; reference?: string }[];
 }
+
+// docs/52 Phase 6a — map a tender method label to its GL posting event. Each TENDER.* event defaults its
+// asset debit to 1000 (Cash) and is GL-24-remappable, so a shop that banks card/QR proceeds into a clearing
+// account remaps them without a code change (mirrors SALE.GOODS/SERVICE all defaulting to 4000).
+export function tenderEvent(method: string): string {
+  const m = (method || '').toLowerCase();
+  if (/cash|เงินสด/.test(m)) return 'TENDER.CASH';
+  if (/card|บัตร|credit|debit|visa|master|amex|jcb/.test(m)) return 'TENDER.CARD';
+  if (/qr|promptpay|prompt|wallet|วอลเล็ท|โอน|transfer|linepay|truemoney/.test(m)) return 'TENDER.QR';
+  if (/voucher|gift|coupon|คูปอง|บัตรกำนัล|เครดิตร้าน/.test(m)) return 'TENDER.VOUCHER';
+  return 'TENDER.OTHER';
+}
+const isCashMethod = (method: string): boolean => /cash|เงินสด/.test((method || '').toLowerCase());
 
 @Injectable()
 export class PortalPosService {
@@ -135,6 +152,21 @@ export class PortalPosService {
     const total = roundTo > 0 ? roundCurrency(Math.round(preRoundTotal / roundTo) * roundTo, 'THB') : preRoundTotal;
     const roundingAdj = roundCurrency(total - preRoundTotal, 'THB');
 
+    // docs/52 Phase 6a — split payment: validate the tenders BEFORE persisting anything (fail fast). Each leg
+    // applies its `amount` to the sale; the legs must sum EXACTLY to the total. A cash leg may over-tender
+    // (change), but a non-cash leg must be exact — you can't over-charge a card. ABSENT ⇒ single-tender path.
+    const splitTenders = dto.tenders?.length ? dto.tenders : null;
+    if (splitTenders) {
+      for (const leg of splitTenders) {
+        if (!(n(leg.amount) > 0)) throw new BadRequestException({ code: 'BAD_TENDER', message: 'Each tender amount must be positive', messageTh: 'จำนวนเงินแต่ละรายการต้องมากกว่าศูนย์' });
+        if (!isCashMethod(leg.method) && leg.cash_tendered != null && roundCurrency(n(leg.cash_tendered), 'THB') !== roundCurrency(n(leg.amount), 'THB'))
+          throw new BadRequestException({ code: 'NONCASH_OVERTENDER', message: 'Only a cash tender can over-tender (change)', messageTh: 'มีเพียงเงินสดเท่านั้นที่ทอนเงินได้' });
+      }
+      const applied = roundCurrency(splitTenders.reduce((a, l) => a + n(l.amount), 0), 'THB');
+      if (Math.abs(applied - total) > 0.001)
+        throw new BadRequestException({ code: 'TENDER_MISMATCH', message: `Tenders apply ${applied} but the sale total is ${total}`, messageTh: `ยอดชำระรวม (${applied}) ไม่ตรงกับยอดที่ต้องชำระ (${total})` });
+    }
+
     // SALE- number, collision-safe: the second-precision stamp can clash for rapid sales → retry on a
     // bumped second until cust_pos_sales.sale_no (UNIQUE) is free.
     let saleNo = this.docNo.nextTenantStamped('SALE', t.code);
@@ -229,6 +261,7 @@ export class PortalPosService {
     // and the GL posting (recordTender rejects amount<=0 and an all-zero journal has nothing to post).
     let tender: any = null;
     let je: any = null;
+    let splitTenderResults: any[] | null = null;
     // recipe COGS (gated by post_cogs): Dr 5300 / Cr 1200 — posted alongside the sale's GL (same request tx)
     if (recipeCogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS', saleNo))) {
       await this.ledger.postEntry({ date: today, source: 'POS-COGS', sourceRef: saleNo, tenantId: t.id, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
@@ -238,10 +271,27 @@ export class PortalPosService {
     if (total > 0) {
       // Link this tender to the shop's open till (if any) so closeTill sees POS cash (move #5 reconciliation).
       const openTill = await this.payments.currentOpenTill(t.id);
-      tender = await this.payments.recordTender(
-        { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id },
-        user,
-      );
+      // Phase 6a: a split sale records ONE tender per leg (all linked to sale_no + till → each shows in the
+      // pending-settlement worklist + drawer count); a stable per-leg idempotency key makes a retry safe. The
+      // single-tender path is unchanged (no key → byte-identical).
+      if (splitTenders) {
+        splitTenderResults = [];
+        for (const [i, leg] of splitTenders.entries()) {
+          const r = await this.payments.recordTender(
+            { sale_no: saleNo, tenant_id: t.id, method: leg.method, amount: roundCurrency(n(leg.amount), 'THB'),
+              cash_tendered: leg.cash_tendered != null ? n(leg.cash_tendered) : undefined,
+              currency: 'THB', gateway: leg.gateway ?? 'mock', till_session_id: openTill?.id, idempotency_key: `${saleNo}#${i}` },
+            user,
+          );
+          splitTenderResults.push({ ...r, method: leg.method });
+        }
+        tender = splitTenderResults[0];
+      } else {
+        tender = await this.payments.recordTender(
+          { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id },
+          user,
+        );
+      }
       // docs/43 PR-6: revenue/service-charge/rounding legs follow the tenant posting-rules (batched,
       // cached read); cash/VAT legs stay pinned/widen-gated.
       // revenue posts under the business-type profile's event (SALE.GOODS/SALE.SERVICE for a generic POS),
@@ -260,10 +310,29 @@ export class PortalPosService {
       const pSvcRev = hasService ? (povr['SALE.SERVICE']?.revenue ?? postingDefault('SALE.SERVICE', 'revenue')) : pRev;
       const pSvc = povr['SVC.CHARGE']?.service_charge_income ?? postingDefault('SVC.CHARGE', 'service_charge_income');
       const pRnd = povr['POS.ROUNDING']?.rounding ?? postingDefault('POS.ROUNDING', 'rounding');
+      // Phase 6a: the asset (cash) debit. Single-tender → one Dr 1000 = total (unchanged). Split → one Dr per
+      // resolved TENDER.<METHOD> asset account, legs grouped + summed. All methods default to 1000, so an
+      // all-default split collapses to the same single Dr 1000 = total (net GL byte-identical); a tenant that
+      // remaps card/QR to a clearing account gets a proper multi-account debit. Legs sum to `taxableTotal + vat`
+      // = the pre-rounding total; the rounding legs below reconcile to the rounded cash `total`.
+      let tenderLines: { account_code: string; debit: number }[];
+      if (splitTenders) {
+        const events = [...new Set(splitTenders.map((l) => tenderEvent(l.method)))];
+        const tpovr = await this.ledger.postingOverridesMany(events, t.id);
+        const byAcct = new Map<string, number>();
+        for (const leg of splitTenders) {
+          const ev = tenderEvent(leg.method);
+          const acct = tpovr[ev]?.tender_asset ?? postingDefault(ev, 'tender_asset');
+          byAcct.set(acct, roundCurrency((byAcct.get(acct) ?? 0) + n(leg.amount), 'THB'));
+        }
+        tenderLines = [...byAcct.entries()].map(([account_code, debit]) => ({ account_code, debit }));
+      } else {
+        tenderLines = [{ account_code: '1000', debit: total }];
+      }
       je = await this.ledger.postEntry({
         date: today, source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
         lines: [
-          { account_code: '1000', debit: total },    // Dr Cash (rounded total)
+          ...tenderLines,                             // Dr Cash / tender assets (sum = rounded total)
           ...(roundingAdj < 0 ? [{ account_code: pRnd, debit: roundCurrency(-roundingAdj, 'THB') }] : []),
           ...(goodsTaxable > 0 ? [{ account_code: pRev, credit: goodsTaxable }] : []),      // Cr Sales Revenue (goods)
           ...(serviceTaxable > 0 ? [{ account_code: pSvcRev, credit: serviceTaxable }] : []), // Cr Service Revenue
@@ -282,7 +351,13 @@ export class PortalPosService {
     // 1.5 — meter one billable POS transaction per completed sale (idempotent per sale_no; best-effort).
     await this.usage?.record(t.id, 'pos_txns', saleNo);
 
-    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, service_charge: serviceCharge, rounding_adjustment: roundingAdj, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, journal_no: je?.entry_no ?? null };
+    // Phase 6a: a split sale returns every leg (payment_no/method/amount/change) + the total change handed
+    // back; a single-tender sale keeps the flat `payment_no` (back-compat) and `tenders: null`.
+    const tenders = splitTenderResults
+      ? splitTenderResults.map((r) => ({ payment_no: r.payment_no, method: r.method ?? null, amount: n(r.amount), status: r.status, change_due: r.change_due ?? null }))
+      : null;
+    const changeDue = splitTenderResults ? roundCurrency(splitTenderResults.reduce((a, r) => a + n(r.change_due), 0), 'THB') : (tender?.change_due ?? null);
+    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, service_charge: serviceCharge, rounding_adjustment: roundingAdj, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, tenders, change_due: changeDue, journal_no: je?.entry_no ?? null };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)
