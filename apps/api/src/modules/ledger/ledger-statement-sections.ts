@@ -50,7 +50,7 @@ const IS_CLASSIFY: Record<string, IsGroup> = {
   // Cost of sales
   '5000': 'cogs', '5300': 'cogs', '5500': 'cogs', '5800': 'cogs', '5810': 'cogs',
   // Other income (non-operating / financial income + the odd disposal gain account 1510)
-  '1510': 'other_income', '4600': 'other_income', '4700': 'other_income', '4800': 'other_income', '4810': 'other_income', '4900': 'other_income',
+  '1510': 'other_income', '4600': 'other_income', '4620': 'other_income', '4700': 'other_income', '4800': 'other_income', '4810': 'other_income', '4900': 'other_income',
   // Other expenses (FX / hedge / impairment / bad debt / donation / SBT / cash variance / misc)
   '5400': 'other_expense', '5410': 'other_expense', '5430': 'other_expense', '5440': 'other_expense', '5450': 'other_expense',
   '5720': 'other_expense', '5820': 'other_expense', '5830': 'other_expense', '5840': 'other_expense', '5760': 'other_expense', '5870': 'other_expense',

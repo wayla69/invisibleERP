@@ -596,7 +596,7 @@ async function main() {
   ok('Lessor: classification boundary — term 75/100 (75%) → FINANCE (major part of economic life)', clsFin.status === 200 && clsFin.json?.classification === 'finance' && clsFin.json?.reasons?.includes('major_part_of_economic_life'), JSON.stringify(clsFin.json));
 
   // FINANCE lease: derecognise the asset + book the net investment (lease receivable) at PV, interest income over the term.
-  const lsr1610Before = await tbDebit('1610'), lsr1500Before = await tbCredit2('1500'), lsr4600Before = await tbCredit2('4600');
+  const lsr1610Before = await tbDebit('1610'), lsr1500Before = await tbCredit2('1500'), lsr4620Before = await tbCredit2('4620');
   const mkFin = await inj('POST', '/api/lessor-leases', admin, { name: 'Excavator finance lease', lessee: 'BuildCo', term_months: 12, monthly_payment: 1000, annual_rate_pct: 12, asset_cost: 11000, fair_value: 12000, transfer_ownership: true });
   ok('Lessor finance: create classifies FINANCE + net investment = PV of payments, PENDING (no GL yet)',
     mkFin.status === 201 && mkFin.json?.classification === 'finance' && mkFin.json?.net_investment > 11200 && mkFin.json?.net_investment < 11300 && mkFin.json?.status === 'pending' && near(await tbDebit('1610'), lsr1610Before),
@@ -612,8 +612,8 @@ async function main() {
   const runFin = await inj('POST', '/api/lessor-leases/run', admin);
   const fe = (runFin.json?.entries ?? []).find((e: any) => e.lease_no === finNo);
   ok('Lessor finance: periodic run recognises interest income + collects cash (interest + principal = payment)',
-    runFin.status === 200 && fe && near(fe.interest_income + fe.principal, 1000) && fe.interest_income > 0 && near(await tbCredit2('4600'), lsr4600Before + fe.interest_income),
-    `int=${fe?.interest_income} prin=${fe?.principal} 4600Δ=${(await tbCredit2('4600')) - lsr4600Before}`);
+    runFin.status === 200 && fe && near(fe.interest_income + fe.principal, 1000) && fe.interest_income > 0 && near(await tbCredit2('4620'), lsr4620Before + fe.interest_income),
+    `int=${fe?.interest_income} prin=${fe?.principal} 4620Δ=${(await tbCredit2('4620')) - lsr4620Before}`);
   const lsrList = (await inj('GET', '/api/lessor-leases', admin)).json;
   const finRow = (lsrList.leases ?? []).find((x: any) => x.lease_no === finNo);
   ok('Lessor finance: net investment (receivable) reduced by the principal after the period', finRow && finRow.receivable_balance < ni && finRow.receivable_balance > 0, `recv=${finRow?.receivable_balance} ni=${ni}`);
