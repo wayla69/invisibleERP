@@ -132,7 +132,7 @@ export class CoaService {
       const parent = (dto as { parentCode?: string; type?: string } | undefined)?.parentCode;
       if (parent) {
         if (parent === code) throw new BadRequestException({ code: 'PARENT_SELF', message: `Account ${code} cannot be its own parent`, messageTh: `บัญชี ${code} เป็นบัญชีแม่ของตัวเองไม่ได้` });
-        const [p] = await this.db.select({ code: accounts.code, type: accounts.type }).from(accounts).where(eq(accounts.code, parent)).limit(1);
+        const [p] = await this.db.select({ code: accounts.code, type: accounts.type, parentCode: accounts.parentCode, requireDimension: accounts.requireDimension }).from(accounts).where(eq(accounts.code, parent)).limit(1);
         if (!p) throw new BadRequestException({ code: 'PARENT_NOT_FOUND', message: `Parent account ${parent} does not exist`, messageTh: `ไม่พบบัญชีแม่ ${parent}` });
         // COA-SUB: a sub-account must share its parent's account type — a sub-account of an Expense header
         // (e.g. 5150 ค่าเดินทาง → 51501 ค่าเครื่องบิน) is itself an Expense, and an AR debtor sub-type
@@ -142,6 +142,25 @@ export class CoaService {
           code: 'PARENT_TYPE_MISMATCH',
           message: `Sub-account type ${childType} must match its parent ${parent} (${p.type})`,
           messageTh: `ประเภทบัญชีย่อย (${childType}) ต้องตรงกับบัญชีแม่ ${parent} (${p.type})`,
+        });
+        // P4 (sub-account vs dimension guardrails). The chart keeps ONE level of sub-accounts — a genuine
+        // sub-ledger account that needs its own statement line/balance. Deeper analytical breakdowns
+        // (by department, project, branch, cost centre) belong to the accounting DIMENSIONS on the posting
+        // line (cost_center / branch_id / project_id — GET /api/ledger/dimensions), not to an ever-deeper
+        // code tree. Two fail-closed rules:
+        // (1) Depth cap — a sub-account of a sub-account is refused; the parent must be a top-level account.
+        if (p.parentCode) throw new BadRequestException({
+          code: 'SUBACCOUNT_TOO_DEEP',
+          message: `Parent ${parent} is itself a sub-account; the chart keeps one level of sub-accounts — slice deeper detail with a dimension (cost centre / project / branch), not a nested code`,
+          messageTh: `บัญชีแม่ ${parent} เป็นบัญชีย่อยอยู่แล้ว ผังบัญชีรองรับบัญชีย่อยชั้นเดียว — หากต้องการแยกละเอียดกว่านี้ให้ใช้มิติ (ศูนย์ต้นทุน/โครงการ/สาขา) แทนการเพิ่มรหัสซ้อน`,
+        });
+        // (2) A dimension-sliced account already breaks its detail out by a dimension — adding sub-accounts
+        // on top double-slices the same balance; use the dimension instead.
+        const reqDim = p.requireDimension as Record<string, unknown> | null | undefined;
+        if (reqDim && typeof reqDim === 'object' && Object.keys(reqDim).length > 0) throw new BadRequestException({
+          code: 'SUBACCOUNT_ON_DIMENSION_ACCOUNT',
+          message: `Parent ${parent} is analysed by a dimension (${Object.keys(reqDim).join('/')}); record the detail on that dimension at posting time, not as a sub-account`,
+          messageTh: `บัญชีแม่ ${parent} วิเคราะห์ตามมิติ (${Object.keys(reqDim).join('/')}) อยู่แล้ว ให้บันทึกรายละเอียดผ่านมิตินั้นตอนลงบัญชี ไม่ใช่สร้างเป็นบัญชีย่อย`,
         });
       }
     } else {
