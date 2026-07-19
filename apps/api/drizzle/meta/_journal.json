@@ -2892,6 +2892,13 @@
       "when": 2023820000378,
       "tag": "0439_sale_service_event_types",
       "breakpoints": true
+    },
+    {
+      "idx": 414,
+      "version": "7",
+      "when": 2023820000379,
+      "tag": "0440_item_variants",
+      "breakpoints": true
     }
   ]
 }

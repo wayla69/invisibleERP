@@ -21,6 +21,14 @@ expiry, locations / bins, mobile scanning, and cycle counts / stocktakes.
 > of goods** — its revenue books to the service-revenue account. A regular
 > **goods** item is unchanged (selling it reduces stock as before).
 
+> **Variants / matrix items (size × color).** On `/setup/items`, load an item and
+> use the **ตัวเลือกสินค้า (Variants)** panel to generate a matrix: type the axes
+> (e.g. *Size* = `S, M, L` and *Color* = `Red, Blue`) and press **สร้างตัวเลือก
+> (Generate)**. Each combination becomes its **own product** (`PARENT-S-RED`, …)
+> with its own barcode, price and stock — so you can **scan a specific size/color
+> barcode** at the till and count it separately. Re-generating after adding a new
+> colour only creates the new cells (nothing is duplicated).
+
 1. Go to **Inventory** (`/inventory`).
 2. Search for an item (**ค้นหา** by Item ID or name — typing is debounced, and the
    list stays on screen while it refreshes), or toggle **เฉพาะสต๊อกต่ำ** to show

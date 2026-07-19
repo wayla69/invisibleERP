@@ -53,8 +53,26 @@ export const items = pgTable('items', {
   mergedInto: bigint('merged_into', { mode: 'number' }),
   mergedBy: text('merged_by'),
   mergedAt: timestamp('merged_at', { withTimezone: true }),
+  // Variants / matrix items (docs/52 Phase 2b) — a matrix PARENT (is_matrix_parent) owns child variant rows
+  // (e.g. a T-shirt → Size×Color SKUs). Each variant is a real `items` row with its own item_id / barcode /
+  // unit_price / stock, pointing at its parent via parent_item_id (→ items.id). `items` is a SHARED master
+  // (no tenant_id) so these stay tenant-neutral (no RLS loop). NULL parent = a plain item (unchanged).
+  parentItemId: bigint('parent_item_id', { mode: 'number' }),
+  isMatrixParent: boolean('is_matrix_parent').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+// docs/52 Phase 2b — the attribute values (Size=M, Color=Red) of a variant SKU. One row per (variant, axis).
+// Shared master (no tenant_id), mirroring `items`; the variant's own item_id is the natural link.
+export const itemVariantAttributes = pgTable('item_variant_attributes', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  itemId: text('item_id').notNull(),   // the variant's item_id (→ items.item_id)
+  axis: text('axis').notNull(),        // e.g. 'Size', 'Color'
+  value: text('value').notNull(),      // e.g. 'M', 'Red'
+}, (t) => ({
+  byItem: index('idx_item_variant_attrs_item').on(t.itemId),
+  uqAxis: unique('uq_item_variant_attr').on(t.itemId, t.axis),
+}));
 
 // Stock fact — append-only snapshots (tbl_raw_inventory, 1.48M rows). current = latest generate_date.
 // Phase 1.5: แปลงเป็น PARTITION BY RANGE(generate_date) ผ่าน custom SQL.

@@ -92,9 +92,15 @@ This is what makes the other nine dimensions deliverable **without forking the U
     to before (golden/writeflow unchanged). `supplyType` is now editable in item-setup; migration `0439`
     registers `SALE.GOODS`/`SALE.SERVICE` in `posting_event_types` so a services tenant can remap
     `SALE.SERVICE` to its own service-income account via GL-24 (closing a Phase 1 gap). Harness `item-service`.
-  - **Phase 2b — variants / matrix items (NEXT).** `items.parent_item_id` + attribute (size×color) model,
-    matrix editor, barcode-scan-to-variant.
-  - **Phase 2c — kits/bundles + non-inventory items (later).**
+  - **Phase 2b — variants / matrix items (DELIVERED).** Each variant is a real `items` row (own SKU /
+    barcode / price / stock) linked by **`items.parent_item_id`** with **`item_variant_attributes`** (axis,
+    value); the parent is flagged **`is_matrix_parent`**. `POST /api/item-setup/items/:id/variants` generates
+    the size×color matrix from axes (cartesian product → child SKUs `PARENT-S-RED`, inherited price, optional
+    per-cell barcode; idempotent — re-running only adds new cells); `GET …/variants` lists them. A variant
+    **barcode scans to the exact SKU** for free (variants are `items` rows → `/api/procurement/catalog?barcode=`).
+    A **Variants panel** on `/setup/items`. Migration `0440`; harness `item-variants`; catalog-only → golden
+    unchanged.
+  - **Phase 2c — kits/bundles + non-inventory items (NEXT).**
 - **Phase 3 — Regulated-goods capture.** **Serial/IMEI** and **lot/expiry** on the sale line (electronics,
   pharmacy, grocery); **age-restricted** prompt.
 - **Phase 4 — Pricing depth.** Customer-tier & per-branch **price books**; per-line manual-discount approval.
@@ -125,6 +131,7 @@ filtering, and docs synced in the same change (narratives, user manual, UAT, RCM
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 0.5 | 2026-07-18 | Platform | **Phase 2b delivered — product variants / matrix items.** Migration `0440` adds `items.parent_item_id` (self-ref) + `is_matrix_parent` + the shared `item_variant_attributes(item_id, axis, value)` table (no tenant_id, like `items`). `POST /api/item-setup/items/:id/variants` generates the matrix from axes (cartesian product → child `items` rows `${parentSku}-${vals}`, inherited price, optional per-SKU barcode, attribute rows; idempotent) + `GET …/variants`. A variant **barcode resolves via `/api/procurement/catalog?barcode=`** (variants are `items` rows). Minimal **Variants panel** on `/setup/items`. Catalog-only — golden 534 / writeflow 36 / basics / item-service unchanged. Harness `item-variants` (7: 2×2 matrix → 4 linked child SKUs + attributes + inherited price; GET lists; idempotent +colour adds only new cells; barcode scans to the exact variant; non-setup 403; empty-axes 400). No new control (census 298). |
 | 0.4 | 2026-07-18 | Platform | **Phase 2a delivered — sale-line resolve + service items.** `createSale` now resolves each `item_id` against the shared `items` master to read `supplyType`; a `service` line skips the inventory/`cust_stock_log`/recipe/`costing.onIssue` COGS moves and its revenue posts to `SALE.SERVICE` (mixed carts split revenue by line; the two revenue legs sum exactly to the taxable base). An `item_id` with no master row defaults to goods → byte-identical (golden 534 / writeflow 36 / returns / basics unchanged). `supplyType` editable in item-setup (`ItemProfileDto`). Migration `0439` seeds `SALE.GOODS`/`SALE.SERVICE` into `posting_event_types` so they are GL-24-overridable (a services tenant can remap `SALE.SERVICE` to its service-income account). Harness `item-service` (7): service sale = no stock/COGS + revenue to the remapped account; goods sale unchanged; mixed cart splits; unknown item_id → goods; non-seller 403. No new control (census 298). |
 | 0.3 | 2026-07-18 | Platform | **Phase 1b delivered — generic sale-path cutover.** `POST /api/pos/sales` (`PosSaleService`, `pos_sell`) rings a non-restaurant sale through the reused `PortalPosService.createSale` engine — extended with optional `tenant` (internal caller passes the resolved tenant, since its `customerName` ≠ the tenant code) + `revenueEvent` (default `SALE.FOOD`, byte-identical GL). The register's `settle` branches on `sale_path` (generic → `/api/pos/sales`, no `dine_in_orders`; restaurant → unchanged). `PortalModule` exports `PortalPosService`; `PosModule` imports it (no cycle). Harness `pos-profile` 8→13 (generic sale: no dine_in_orders, revenue→4000 via SALE.GOODS, VAT→2100, stock decrement, non-seller 403). golden 534 / writeflow 36 unchanged (defaults preserve the existing money path). No migration, no new control. |
 | 0.2 | 2026-07-18 | Platform | **Phase 1a delivered — business-type POS profile + de-restaurant the register.** New `PosProfileService` + `GET /api/pos/profile` derives `{tables,kds,courses,buffet,recipe_deduction,revenue_event,sale_path}` from `tenants.industry` (unset → restaurant, non-breaking). Neutral revenue events `SALE.GOODS`/`SALE.SERVICE` added to `SALES_POSTING_EVENTS` (both default `4000` → no GL drift). The internal register reads the profile and hides table/dine-in affordances for a non-restaurant tenant. No money-path change (golden/writeflow untouched). Harness `pos-profile` (8 checks). Phase 1 split into 1a (this) + 1b (generic sale-path cutover, next). |

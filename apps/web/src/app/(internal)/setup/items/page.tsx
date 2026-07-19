@@ -253,6 +253,7 @@ export default function ItemPostingSetupPage() {
               buildBody={(target, relType) => ({ to_item_id: target, rel_type: relType })}
             />
             <ScheduledChangesSection entity="item" entityKey={itemId} fields={['unit_price', 'status']} />
+            <VariantsSection itemId={itemId} />
           </Card>
         )}
 
@@ -269,4 +270,48 @@ export default function ItemPostingSetupPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="grid gap-2"><Label>{label}</Label>{children}</div>;
+}
+
+// docs/52 Phase 2b — generate a size×color (etc.) variant matrix under this item. Minimal: enter up to two
+// axes as comma-separated values, generate the child SKUs, and list them.
+interface VariantRow { item_id: string; description: string | null; barcode: string | null; unit_price: number; attributes: { axis: string; value: string }[] }
+function VariantsSection({ itemId }: { itemId: string }) {
+  const qc = useQueryClient();
+  const [axis1, setAxis1] = useState('Size');
+  const [vals1, setVals1] = useState('');
+  const [axis2, setAxis2] = useState('Color');
+  const [vals2, setVals2] = useState('');
+  const q = useQuery<{ is_matrix_parent: boolean; count: number; variants: VariantRow[] }>({ queryKey: ['item-variants', itemId], queryFn: () => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/variants`) });
+  const gen = useMutation({
+    mutationFn: () => {
+      const split = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+      const axes = [{ axis: axis1.trim(), values: split(vals1) }, { axis: axis2.trim(), values: split(vals2) }].filter((a) => a.axis && a.values.length);
+      return api(`/api/item-setup/items/${encodeURIComponent(itemId)}/variants`, { method: 'POST', body: JSON.stringify({ axes }) });
+    },
+    onSuccess: (r: any) => { notifySuccess(`สร้างตัวเลือกใหม่ ${r.generated} รายการ (Generated ${r.generated})`); setVals1(''); setVals2(''); qc.invalidateQueries({ queryKey: ['item-variants', itemId] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  return (
+    <div className="grid gap-2 border-t pt-4">
+      <Label className="text-sm font-semibold">ตัวเลือกสินค้า (Variants — size × color)</Label>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Input value={axis1} onChange={(e) => setAxis1(e.target.value)} placeholder="Axis 1 (e.g. Size)" />
+        <Input value={vals1} onChange={(e) => setVals1(e.target.value)} placeholder="S, M, L" />
+        <Input value={axis2} onChange={(e) => setAxis2(e.target.value)} placeholder="Axis 2 (e.g. Color)" />
+        <Input value={vals2} onChange={(e) => setVals2(e.target.value)} placeholder="Red, Blue" />
+      </div>
+      <div><Button size="sm" disabled={gen.isPending || (!vals1.trim() && !vals2.trim())} onClick={() => gen.mutate()}>สร้างตัวเลือก (Generate)</Button></div>
+      {(q.data?.variants ?? []).length > 0 && (
+        <div className="mt-1 grid gap-1 text-sm">
+          {q.data!.variants.map((v) => (
+            <div key={v.item_id} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1">
+              <span className="font-mono text-xs">{v.item_id}</span>
+              <span className="text-muted-foreground">{v.attributes.map((a) => `${a.axis}: ${a.value}`).join(' · ')}</span>
+              {v.barcode && <span className="ml-auto font-mono text-xs text-muted-foreground">⏛ {v.barcode}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
