@@ -1,11 +1,12 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { eq, and, asc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { fsReportDefinitions, accounts } from '../../database/schema';
+import { fsReportDefinitions, accounts, tenants } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { LedgerService } from '../ledger/ledger.service';
 import { resolveBsGroup, resolveIsGroup } from '../ledger/ledger-statement-sections';
 import { THAI_DBD_DEFS } from './thai-dbd-fs';
+import { INDUSTRY_FS_DEFS } from './industry-fs';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const dayBefore = (ymd: string) => { const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
@@ -74,13 +75,33 @@ export class StatutoryFsService {
     return { definitions, count: definitions.length };
   }
 
+  // The active tenant's industry (drives the per-industry default statutory layout). Null off-tenant.
+  private async tenantIndustry(): Promise<string | null> {
+    const tid = this.tid();
+    if (tid == null) return null;
+    const [row] = await this.db.select({ industry: tenants.industry }).from(tenants).where(eq(tenants.id, tid)).limit(1);
+    return (row?.industry as string | null) ?? null;
+  }
+
   async getDefinition(code: string) {
     const [row] = await this.db.select().from(fsReportDefinitions).where(eq(fsReportDefinitions.code, code)).limit(1);
     if (row) return this.shapeDef(row);
     // Fall back to a built-in Thai DBD/TFRS default so the standard statements render out of the box; a
     // tenant that authors its own definition of the same code (the DB row above) overrides it.
     const def = THAI_DBD_DEFS[code];
-    if (def) return { code: def.code, name: def.name, statement_type: def.statementType, config: def.config, active: true, created_by: 'system', is_default: true };
+    if (def) {
+      let name = def.name;
+      let config = def.config;
+      // P6: some industries have a genuinely different P&L SHAPE (nonprofit Statement of Activities,
+      // manufacturing COGS-by-element, construction cost-of-work, hospitality departmental). Resolve the
+      // caller's industry to its bespoke DBD-PL layout; everything else keeps the generic multi-step P&L.
+      if (code === 'DBD-PL') {
+        const ind = await this.tenantIndustry();
+        const ic = ind ? INDUSTRY_FS_DEFS[ind]?.pl : undefined;
+        if (ic) { name = ic.name; config = ic.config; }
+      }
+      return { code: def.code, name, statement_type: def.statementType, config, active: true, created_by: 'system', is_default: true };
+    }
     throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
   }
 
