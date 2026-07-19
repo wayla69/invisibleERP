@@ -1247,6 +1247,26 @@ async function main() {
   ok('P5: an unrelated (restaurant) chart shows none of the nonprofit or logistics sub-accounts (per-industry curation)',
     !restoAcc.accounts?.some((a: any) => ['310010', '510020', '430030', '580020'].includes(a.code)), 'restaurant clean');
 
+  // P6 — the default DBD-PL render resolves the caller's industry to a bespoke statement SHAPE that still
+  // ties to the canonical income statement. Construction → cost-of-work layout (net_profit); nonprofit →
+  // a Statement of Activities (change_in_net_assets); a generic tenant keeps the standard multi-step P&L.
+  const fsFromP6 = '2000-01-01';
+  const conIs = (await inj('GET', `/api/ledger/income-statement?from=${fsFromP6}&to=${asOfP3}`, conTok)).json;
+  const conPl = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}`, conTok)).json;
+  const rowKey = (rows: any[], key: string) => rows?.find((r: any) => r.key === key)?.current;
+  ok('P6: a construction tenant’s default DBD-PL is the cost-of-work layout (labour/materials/subcontract lines) + ties to net income',
+    conPl.rows?.some((r: any) => r.key === 'cw_labor') && conPl.rows?.some((r: any) => r.key === 'cw_subcontract') && near(rowKey(conPl.rows, 'net_profit'), conIs.net_income),
+    `hasCW=${conPl.rows?.some((r: any) => r.key === 'cw_labor')} np=${rowKey(conPl.rows, 'net_profit')} ni=${conIs.net_income}`);
+  const npoIs = (await inj('GET', `/api/ledger/income-statement?from=${fsFromP6}&to=${asOfP3}`, npoTok)).json;
+  const npoPl = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}`, npoTok)).json;
+  ok('P6: a nonprofit tenant’s default DBD-PL is a Statement of Activities (program/admin/fundraising + change in net assets) + ties to net income',
+    npoPl.rows?.some((r: any) => r.key === 'exp_program') && npoPl.rows?.some((r: any) => r.key === 'change_in_net_assets') && near(rowKey(npoPl.rows, 'change_in_net_assets'), npoIs.net_income),
+    `hasFunc=${npoPl.rows?.some((r: any) => r.key === 'exp_program')} cna=${rowKey(npoPl.rows, 'change_in_net_assets')} ni=${npoIs.net_income}`);
+  const genPl = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}`, genTok)).json;
+  ok('P6: a generic (non-specialised) tenant keeps the standard multi-step DBD-PL (gross_profit → net_profit)',
+    genPl.rows?.some((r: any) => r.key === 'gross_profit') && genPl.rows?.some((r: any) => r.key === 'net_profit') && !genPl.rows?.some((r: any) => r.key === 'change_in_net_assets'),
+    JSON.stringify((genPl.rows ?? []).map((r: any) => r.key)));
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.
