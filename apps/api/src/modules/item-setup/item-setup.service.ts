@@ -35,6 +35,7 @@ export interface ItemProfileDto {
   // scan-to-add, MRP lot-sizing, FA-10 capital routing) but had no maintenance surface on this screen.
   barcode?: string | null; uom?: string | null; base_uom?: string | null; conversion_factor?: number | null;
   unit_price?: number | null; temperature_type?: string | null; bu_id?: string | null;
+  supply_type?: string | null; // 'goods' | 'service' — a service item sells with no stock move / no COGS (docs/52 Phase 2a)
   min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
@@ -163,7 +164,7 @@ export class ItemSetupService {
       inventoryAccount: dto.inventory_account, valuationAccount: dto.valuation_account,
       vatCode: dto.vat_code, whtIncomeType: dto.wht_income_type, defaultLocationId: dto.default_location_id,
       barcode: dto.barcode, uom: dto.uom, baseUom: dto.base_uom, conversionFactor: num(dto.conversion_factor),
-      unitPrice: num(dto.unit_price), temperatureType: dto.temperature_type, buId: dto.bu_id,
+      unitPrice: num(dto.unit_price), temperatureType: dto.temperature_type, buId: dto.bu_id, supplyType: dto.supply_type ?? undefined,
       minStock: num(dto.min_stock), maxStock: num(dto.max_stock), avgDailyUsage: num(dto.avg_daily_usage), leadTimeDays: num(dto.lead_time_days),
       minOrderQty: num(dto.min_order_qty), orderMultiple: num(dto.order_multiple), orderCost: num(dto.order_cost), holdingCost: num(dto.holding_cost),
       isFixedAsset: dto.is_fixed_asset, defaultAssetCategoryId: dto.default_asset_category_id,
@@ -389,7 +390,7 @@ function shapeItem(i: any) {
     revenue_account: i.revenueAccount, cogs_account: i.cogsAccount, inventory_account: i.inventoryAccount,
     valuation_account: i.valuationAccount, vat_code: i.vatCode, wht_income_type: i.whtIncomeType, default_location_id: i.defaultLocationId,
     barcode: i.barcode, uom: i.uom, base_uom: i.baseUom, conversion_factor: n(i.conversionFactor),
-    unit_price: n(i.unitPrice), temperature_type: i.temperatureType, bu_id: i.buId,
+    unit_price: n(i.unitPrice), temperature_type: i.temperatureType, bu_id: i.buId, supply_type: i.supplyType ?? 'goods',
     min_stock: n(i.minStock), max_stock: n(i.maxStock), avg_daily_usage: n(i.avgDailyUsage), lead_time_days: n(i.leadTimeDays),
     min_order_qty: n(i.minOrderQty), order_multiple: n(i.orderMultiple), order_cost: n(i.orderCost), holding_cost: n(i.holdingCost),
     is_fixed_asset: i.isFixedAsset === true, default_asset_category_id: i.defaultAssetCategoryId != null ? Number(i.defaultAssetCategoryId) : null,
