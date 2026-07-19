@@ -1,4 +1,4 @@
--- 0440: each account can be BOUND to a section/line of the Balance Sheet (bs_group) and the Income
+-- 0441: each account can be BOUND to a section/line of the Balance Sheet (bs_group) and the Income
 -- Statement (is_group), mirroring cf_bucket (0346) for the Cash-Flow statement. The report generators
 -- resolve the account's OWN column first, then a canonical default map, then a type-based fallback
 -- (ledger-statement-sections.ts) — so statements group nicely out of the box and a company can re-bind any

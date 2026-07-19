@@ -1,8 +1,8 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ne, or, sql, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { itemCategories, taxCodes, items, accounts, locations, itemRelationships } from '../../database/schema';
+import { itemCategories, taxCodes, items, accounts, locations, itemRelationships, itemVariantAttributes } from '../../database/schema';
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
@@ -171,6 +171,53 @@ export class ItemSetupService {
     }).where(eq(items.itemId, itemId)).returning();
     if (!row) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: `Item ${itemId} not found`, messageTh: 'ไม่พบสินค้า' });
     return shapeItem(row);
+  }
+
+  // ── Product variants / matrix items (docs/52 Phase 2b) ──────────────────────────────────────────
+  // Generate the size×color (any axes) matrix under a PARENT item. Each combination becomes a real `items`
+  // row (its own item_id / barcode / unit_price / stock), linked by parent_item_id, plus its attribute rows.
+  // Idempotent: an existing variant SKU is skipped, so re-running to add a new colour only creates the new
+  // cells. The parent is flagged is_matrix_parent. Price inherits the parent (edit per-variant afterwards on
+  // the item posting screen); an optional per-SKU barcode may be supplied.
+  async generateVariants(parentItemId: string, dto: { axes?: { axis: string; values: string[] }[]; barcodes?: Record<string, string> }, user: JwtUser) {
+    const parent = await this.itemRow(parentItemId);
+    const axes = (dto.axes ?? []).map((a) => ({ axis: String(a.axis ?? '').trim(), values: [...new Set((a.values ?? []).map((v) => String(v).trim()).filter(Boolean))] })).filter((a) => a.axis && a.values.length);
+    if (!axes.length) throw new BadRequestException({ code: 'NO_AXES', message: 'Provide at least one axis with values (e.g. Size: S,M,L)', messageTh: 'ระบุอย่างน้อยหนึ่งแกน (เช่น ไซซ์ / สี) พร้อมค่า' });
+    // cartesian product of the axis values
+    let combos: { axis: string; value: string }[][] = [[]];
+    for (const ax of axes) combos = combos.flatMap((c) => ax.values.map((v) => [...c, { axis: ax.axis, value: v }]));
+    if (combos.length > 500) throw new BadRequestException({ code: 'TOO_MANY_VARIANTS', message: `That matrix would create ${combos.length} variants (max 500)`, messageTh: 'จำนวนตัวเลือกมากเกินไป (สูงสุด 500)' });
+    const sanitize = (s: string) => s.replace(/[^A-Za-z0-9ก-๙]+/g, '').toUpperCase();
+    let generated = 0;
+    for (const combo of combos) {
+      const childId = `${parent.itemId}-${combo.map((c) => sanitize(c.value)).join('-')}`;
+      const [ins] = await this.db.insert(items).values({
+        itemId: childId, itemDescription: `${parent.itemDescription ?? parent.itemId} ${combo.map((c) => c.value).join(' ')}`.trim(),
+        supplyType: parent.supplyType, uom: parent.uom, unitPrice: parent.unitPrice, barcode: dto.barcodes?.[childId] ?? null,
+        parentItemId: Number(parent.id), category: parent.category, categoryId: parent.categoryId,
+        revenueAccount: parent.revenueAccount, cogsAccount: parent.cogsAccount, inventoryAccount: parent.inventoryAccount, vatCode: parent.vatCode,
+      }).onConflictDoNothing({ target: items.itemId }).returning({ id: items.id });
+      if (ins) {
+        await this.db.insert(itemVariantAttributes).values(combo.map((c) => ({ itemId: childId, axis: c.axis, value: c.value }))).onConflictDoNothing();
+        generated++;
+      }
+    }
+    if (!parent.isMatrixParent) await this.db.update(items).set({ isMatrixParent: true }).where(eq(items.id, Number(parent.id)));
+    const listed = await this.listVariants(parentItemId, user);
+    return { parent_item_id: parent.itemId, generated, ...listed };
+  }
+
+  // List every variant under a parent (+ its attribute values).
+  async listVariants(parentItemId: string, _user: JwtUser) {
+    const parent = await this.itemRow(parentItemId);
+    const rows = await this.db.select().from(items).where(eq(items.parentItemId, Number(parent.id))).orderBy(asc(items.itemId));
+    const attrs = rows.length ? await this.db.select().from(itemVariantAttributes).where(inArray(itemVariantAttributes.itemId, rows.map((r: any) => r.itemId))) : [];
+    const byItem = new Map<string, { axis: string; value: string }[]>();
+    for (const a of attrs) { const l = byItem.get(a.itemId) ?? []; l.push({ axis: a.axis, value: a.value }); byItem.set(a.itemId, l); }
+    return {
+      is_matrix_parent: parent.isMatrixParent, count: rows.length,
+      variants: rows.map((r: any) => ({ item_id: r.itemId, description: r.itemDescription, barcode: r.barcode, unit_price: Number(r.unitPrice ?? 0), status: r.status, attributes: byItem.get(r.itemId) ?? [] })),
+    };
   }
 
   // ── Item lifecycle + relationships (master-data audit Phase 10) ─────────────────────────────────
