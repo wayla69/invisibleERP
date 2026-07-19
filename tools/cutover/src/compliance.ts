@@ -1190,6 +1190,13 @@ async function main() {
     apprAcct.status === 200 && apprAcct.json.code === '9990' && apprAcct.json.normalBalance === 'D' && apprAcct.json.isPostable === true,
     `${apprAcct.status} ${JSON.stringify(apprAcct.json)}`);
 
+  // 1d-bis. P4 guardrail: the chart keeps ONE level of sub-accounts — a create under a code that is ITSELF
+  // a sub-account (126001 WIP-Earthwork, whose parent is 1260) is refused fail-closed at request time;
+  // deeper analytical detail belongs to a posting dimension (cost centre / project / branch), not a code.
+  const deepSub = await inj('POST', '/api/ledger/accounts', admin, { code: '126099', name: 'WIP earthwork — zone A', type: 'Asset', parentCode: '126001' });
+  ok('P4/GL-27: a sub-account of a sub-account → 400 SUBACCOUNT_TOO_DEEP (use a dimension for deeper detail)',
+    deepSub.status === 400 && deepSub.json.error?.code === 'SUBACCOUNT_TOO_DEEP', `${deepSub.status} ${deepSub.json.error?.code}`);
+
   // 1e. A rejected request leaves the chart untouched.
   const rejReq = await inj('POST', '/api/ledger/accounts', admin, { code: '9993', name: 'to be rejected', type: 'Expense' });
   const govCoa = await inj('GET', '/api/finance/approvals/pending', admin);

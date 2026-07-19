@@ -91,4 +91,19 @@ describe('CoaService — GL-27 canonical CoA maker-checker', () => {
     expect(res.status).toBe('PendingApproval');
     expect(inserts.find((v) => v.action === 'create')?.accountCode).toBe('515001');
   });
+
+  // P4 — sub-account vs dimension guardrails. The chart keeps ONE level of sub-accounts; deeper analytical
+  // detail belongs to the posting dimensions (cost centre / project / branch), not an ever-deeper code tree.
+  it('a sub-account of a sub-account → SUBACCOUNT_TOO_DEEP (depth cap; use a dimension for deeper detail)', async () => {
+    // parent 515001 is ITSELF a sub-account (its parentCode is set) → a grandchild is refused.
+    const svc = new CoaService(fakeDb([[], [{ code: '515001', type: 'Expense', parentCode: '5150' }]], []) as any);
+    const GRANDCHILD = { code: '51500101', name: 'Airfare — Domestic', type: 'Expense', parentCode: '515001' } as any;
+    expect(await code(() => svc.requestChange('create', '51500101', GRANDCHILD, { username: 'maker' }))).toBe('SUBACCOUNT_TOO_DEEP');
+  });
+
+  it('a sub-account under a dimension-analysed account → SUBACCOUNT_ON_DIMENSION_ACCOUNT (use the dimension)', async () => {
+    // parent 5150 already requires a dimension (e.g. cost_center) → detail goes on that dimension, not a sub-account.
+    const svc = new CoaService(fakeDb([[], [{ code: '5150', type: 'Expense', parentCode: null, requireDimension: { cost_center: true } }]], []) as any);
+    expect(await code(() => svc.requestChange('create', '515001', SUB_DTO, { username: 'maker' }))).toBe('SUBACCOUNT_ON_DIMENSION_ACCOUNT');
+  });
 });
