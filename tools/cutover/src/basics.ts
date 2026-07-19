@@ -1312,6 +1312,36 @@ async function main() {
     (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}`, conTok)).json.rows?.some((r: any) => r.key === 'contract_wip') && npoBsGen.rows?.some((r: any) => r.key === 'total_equity') && !npoBsGen.rows?.some((r: any) => r.key === 'na_restricted'),
     `conWip=ok npoGenEquity=${npoBsGen.rows?.some((r: any) => r.key === 'total_equity')}`);
 
+  // P8 — each rendered statutory statement carries the KPIs it is read by, computed from its OWN group rows
+  // (numerator ÷ denominator) so they inherit the statement's tie-out, and adapt to the resolved industry shape.
+  const kpiBy = (j: any, key: string) => (j.kpis ?? []).find((k: any) => k.key === key);
+  const npoPlK = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}`, npoTok)).json;
+  const per = kpiBy(npoPlK, 'program_expense_ratio');
+  ok('P8: nonprofit P&L program-expense ratio computed from its own rows',
+    per && per.format === 'pct' && near(per.numerator, rowKey(npoPlK.rows, 'exp_program')) && near(per.denominator, rowKey(npoPlK.rows, 'total_expenses')) && near(per.value, rowKey(npoPlK.rows, 'exp_program') / rowKey(npoPlK.rows, 'total_expenses')),
+    `val=${per?.value} num=${per?.numerator} den=${per?.denominator}`);
+  // A margin KPI whose rows are absent is OMITTED (nonprofit P&L has no revenue/gross_profit rows).
+  ok('P8: a KPI whose referenced rows are absent is omitted (no gross/net margin on the nonprofit statement of activities)',
+    !kpiBy(npoPlK, 'gross_margin') && !kpiBy(npoPlK, 'net_margin') && !!per,
+    `gm=${!!kpiBy(npoPlK, 'gross_margin')} nm=${!!kpiBy(npoPlK, 'net_margin')}`);
+  // Construction P&L relabels gross margin as "contract gross margin"; a generic tenant gets the plain gross/net margins.
+  const conPlK = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}`, conTok)).json;
+  const cgm = kpiBy(conPlK, 'contract_gross_margin');
+  ok('P8: construction P&L carries a contract gross margin (gross profit ÷ revenue); the generic gross_margin is replaced by it',
+    cgm && !kpiBy(conPlK, 'gross_margin') && near(cgm.value, rowKey(conPlK.rows, 'gross_profit') / rowKey(conPlK.rows, 'revenue')),
+    `cgm=${cgm?.value} hasGeneric=${!!kpiBy(conPlK, 'gross_margin')}`);
+  const genPlK = (await inj('GET', `/api/reports/fs/render/DBD-PL?as_of=${asOfP3}&from=${fsFromP6}`, genTok)).json;
+  ok('P8: a generic tenant P&L carries the plain gross + net margins',
+    kpiBy(genPlK, 'gross_margin') && kpiBy(genPlK, 'net_margin'),
+    `gm=${!!kpiBy(genPlK, 'gross_margin')} nm=${!!kpiBy(genPlK, 'net_margin')}`);
+  // The balance sheet carries a current ratio; it ties when current liabilities are non-zero, and is omitted when zero.
+  const conBsK2 = (await inj('GET', `/api/reports/fs/render/DBD-BS?as_of=${asOfP3}`, conTok)).json;
+  const clv = rowKey(conBsK2.rows, 'current_liabilities');
+  const cr = kpiBy(conBsK2, 'current_ratio');
+  ok('P8: the balance sheet carries a current ratio (assets ÷ liabilities) that ties, or is omitted when liabilities are zero',
+    clv && clv !== 0 ? (cr && cr.format === 'ratio' && near(cr.value, rowKey(conBsK2.rows, 'current_assets') / clv)) : cr === undefined,
+    `cl=${clv} cr=${cr?.value} ca=${rowKey(conBsK2.rows, 'current_assets')}`);
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.

@@ -602,7 +602,8 @@ interface DbdResp {
 }
 interface FsDef { code: string; name: string; statement_type: string; active: boolean }
 interface RenderRow { key: string; label?: string; label_th?: string | null; account_name?: string; level: number; is_subtotal?: boolean; current: number; prior?: number }
-interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; industry: string | null; comparative: boolean; rows: RenderRow[] }
+interface FsKpi { key: string; label: string; label_th: string; format: 'pct' | 'ratio'; value: number; numerator: number; denominator: number; prior?: number | null }
+interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; industry: string | null; comparative: boolean; rows: RenderRow[]; kpis?: FsKpi[] }
 interface IndustryLayout { industry: string; name: string }
 interface IndustryStmtLayouts { generic_name: string; own_has_layout: boolean; layouts: IndustryLayout[] }
 interface IndustryLayoutsResp { own_industry: string | null; statements: Record<string, IndustryStmtLayouts> }
@@ -771,8 +772,10 @@ function DbdExport({ lp }: { lp: string }) {
 }
 
 // ── Definition-driven statement + note-schedule viewer ──
+const fmtKpi = (k: FsKpi) => (k.format === 'pct' ? `${(k.value * 100).toFixed(1)}%` : `${k.value.toFixed(2)}×`);
+
 function CustomStatements({ lp }: { lp: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const defsQ = useQuery<{ definitions: FsDef[]; count: number }>({ queryKey: ['fs-defs'], queryFn: () => api('/api/reports/fs/definitions') });
   const layoutsQ = useQuery<IndustryLayoutsResp>({ queryKey: ['fs-industry-layouts'], queryFn: () => api('/api/reports/fs/industry-layouts') });
   const [code, setCode] = useState('');
@@ -854,23 +857,40 @@ function CustomStatements({ lp }: { lp: string }) {
               {run != null && !isNotes && (
                 <StateView q={renderQ}>
                   {renderQ.data && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead><tr className="text-left text-muted-foreground">
-                          <th className="py-1">{renderQ.data.name}</th>
-                          <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
-                          {renderQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
-                        </tr></thead>
-                        <tbody>
-                          {renderQ.data.rows.map((r) => (
-                            <tr key={r.key} className={`border-t ${r.is_subtotal ? 'font-semibold' : ''}`}>
-                              <td className="py-1" style={{ paddingLeft: `${(r.level ?? 0) * 16}px` }}>{r.label ?? r.account_name}</td>
-                              <td className="py-1 text-right tabular">{baht(r.current)}</td>
-                              {renderQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(r.prior ?? 0)}</td>}
-                            </tr>
+                    <div className="space-y-4">
+                      {(renderQ.data.kpis ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-3">
+                          {renderQ.data.kpis!.map((k) => (
+                            <div key={k.key} className="min-w-[140px] flex-1 rounded-lg border bg-muted/30 px-3 py-2">
+                              <div className="text-xs text-muted-foreground">{lang === 'th' ? k.label_th : k.label}</div>
+                              <div className="text-lg font-semibold tabular">{fmtKpi(k)}</div>
+                              {k.prior != null && (
+                                <div className="text-xs text-muted-foreground">
+                                  {t('fnx.fs.stat.col_prior')}: {k.format === 'pct' ? `${(k.prior * 100).toFixed(1)}%` : `${k.prior.toFixed(2)}×`}
+                                </div>
+                              )}
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                      )}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-left text-muted-foreground">
+                            <th className="py-1">{renderQ.data.name}</th>
+                            <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
+                            {renderQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
+                          </tr></thead>
+                          <tbody>
+                            {renderQ.data.rows.map((r) => (
+                              <tr key={r.key} className={`border-t ${r.is_subtotal ? 'font-semibold' : ''}`}>
+                                <td className="py-1" style={{ paddingLeft: `${(r.level ?? 0) * 16}px` }}>{r.label ?? r.account_name}</td>
+                                <td className="py-1 text-right tabular">{baht(r.current)}</td>
+                                {renderQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(r.prior ?? 0)}</td>}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </StateView>
