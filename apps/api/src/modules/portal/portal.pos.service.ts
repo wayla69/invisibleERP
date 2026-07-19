@@ -1,10 +1,10 @@
 import { Inject, Injectable, Optional, BadRequestException } from '@nestjs/common';
-import { sql, eq, ne, and, desc } from 'drizzle-orm';
+import { sql, eq, ne, and, desc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { UsageMeterService } from '../usage/usage-meter.service';
 import {
   custPosSales, custPosItems, customerInventory, custStockLog, branchStock,
-  loyaltyConfig, loyaltyPoints, loyaltyTxn, branches,
+  loyaltyConfig, loyaltyPoints, loyaltyTxn, branches, items,
 } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { ymd, n, fx } from '../../database/queries';
@@ -80,6 +80,14 @@ export class PortalPosService {
       return { ...it, amount: roundCurrency(gross - lineDisc, 'THB') };
     });
     const subtotal = roundCurrency(lines.reduce((a, l) => a + l.amount, 0), 'THB');
+    // docs/52 Phase 2a — resolve each line against the shared `items` master to read its supplyType. A line
+    // whose item_id has NO master row defaults to 'goods' (byte-identical to the prior uncontrolled path). A
+    // 'service' line (e.g. a haircut, a consultation) is NOT a stocked good: it skips the inventory/COGS
+    // moves below and its revenue posts to the service revenue event. Goods-only sales are unchanged.
+    const itemIds = [...new Set(lines.map((l) => String(l.item_id)))];
+    const masterRows = itemIds.length ? await db.select({ itemId: items.itemId, supplyType: items.supplyType }).from(items).where(inArray(items.itemId, itemIds)) : [];
+    const supplyByItem = new Map<string, string>(masterRows.map((r: any) => [String(r.itemId), String(r.supplyType ?? 'goods')]));
+    const isSvc = (l: { item_id: string }) => supplyByItem.get(String(l.item_id)) === 'service';
     // wiring: opt-in pricing engine — fold rule discounts (happy-hour/BOGO/qty-break/order) into the
     // order discount. GL stays balanced (cash leg = total = taxable + vat). Advisory: never block a sale.
     let pricingDiscount = 0;
@@ -138,6 +146,8 @@ export class PortalPosService {
 
       // decrement customer inventory (MAX(0,...)) + stock log
       for (const l of lines) {
+        // Phase 2a: a service line is not stocked — no inventory decrement, no recipe/BOM, no COGS.
+        if (isSvc(l)) continue;
         const [inv] = await tx.select().from(customerInventory)
           .where(and(eq(customerInventory.tenantId, t.id), eq(customerInventory.itemId, l.item_id))).limit(1);
         if (inv) {
@@ -202,8 +212,17 @@ export class PortalPosService {
       // revenue posts under the business-type profile's event (SALE.GOODS/SALE.SERVICE for a generic POS),
       // default SALE.FOOD — all three default to 4000, so the GL is unchanged unless a tenant remaps via GL-24.
       const revEvent = opts?.revenueEvent ?? 'SALE.FOOD';
-      const povr = await this.ledger.postingOverridesMany([revEvent, 'SVC.CHARGE', 'POS.ROUNDING'], t.id);
+      // Phase 2a: split the item revenue by supplyType — goods lines post to the caller's revenue event, service
+      // lines to SALE.SERVICE. The service base gets the proportional share of the (rounded) taxable amount; goods
+      // takes the residual so the two legs sum EXACTLY to `taxable` (a goods-only sale → serviceTaxable 0 → a single
+      // goods leg == the prior behaviour, byte-identical). SALE.SERVICE is only read/posted when a service line exists.
+      const hasService = lines.some(isSvc);
+      const serviceSubtotal = hasService ? roundCurrency(lines.filter(isSvc).reduce((a, l) => a + l.amount, 0), 'THB') : 0;
+      const serviceTaxable = hasService && subtotal > 0 ? roundCurrency(taxable * serviceSubtotal / subtotal, 'THB') : 0;
+      const goodsTaxable = roundCurrency(taxable - serviceTaxable, 'THB');
+      const povr = await this.ledger.postingOverridesMany(hasService ? [revEvent, 'SALE.SERVICE', 'SVC.CHARGE', 'POS.ROUNDING'] : [revEvent, 'SVC.CHARGE', 'POS.ROUNDING'], t.id);
       const pRev = povr[revEvent]?.revenue ?? postingDefault(revEvent, 'revenue');
+      const pSvcRev = hasService ? (povr['SALE.SERVICE']?.revenue ?? postingDefault('SALE.SERVICE', 'revenue')) : pRev;
       const pSvc = povr['SVC.CHARGE']?.service_charge_income ?? postingDefault('SVC.CHARGE', 'service_charge_income');
       const pRnd = povr['POS.ROUNDING']?.rounding ?? postingDefault('POS.ROUNDING', 'rounding');
       je = await this.ledger.postEntry({
@@ -211,7 +230,8 @@ export class PortalPosService {
         lines: [
           { account_code: '1000', debit: total },    // Dr Cash (rounded total)
           ...(roundingAdj < 0 ? [{ account_code: pRnd, debit: roundCurrency(-roundingAdj, 'THB') }] : []),
-          { account_code: pRev, credit: taxable }, // Cr Sales Revenue (goods)
+          ...(goodsTaxable > 0 ? [{ account_code: pRev, credit: goodsTaxable }] : []),      // Cr Sales Revenue (goods)
+          ...(serviceTaxable > 0 ? [{ account_code: pSvcRev, credit: serviceTaxable }] : []), // Cr Service Revenue
           ...(serviceCharge > 0 ? [{ account_code: pSvc, credit: serviceCharge }] : []),
           { account_code: '2100', credit: vat },     // Cr Tax Payable
           ...(roundingAdj > 0 ? [{ account_code: pRnd, credit: roundingAdj }] : []),
