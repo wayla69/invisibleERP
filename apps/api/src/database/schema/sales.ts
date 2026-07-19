@@ -61,6 +61,7 @@ export const custPosSales = pgTable('cust_pos_sales', {
   pointsEarned: numeric('points_earned').default('0'),
   status: posStatusEnum('status').default('Completed'),
   notes: text('notes'),
+  ageVerified: boolean('age_verified').notNull().default(false), // docs/52 Phase 3c — the sale passed the age-restricted check (audit)
   createdBy: text('created_by'),
 }, (t) => ({
   // Highest-volume retail table. Daily/period sales reports filter tenant + sale_date (+ branch).
