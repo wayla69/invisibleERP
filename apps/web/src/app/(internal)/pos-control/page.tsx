@@ -98,15 +98,16 @@ function DiscountAuthority() {
     onError: (e: any) => notifyError(e.message),
   });
   const [maxPct, setMaxPct] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
   const [reason, setReason] = useState('');
-  const [issued, setIssued] = useState<{ override_no: string; max_pct: number } | null>(null);
+  const [issued, setIssued] = useState<{ override_no: string; max_pct: number; max_amount: number | null } | null>(null);
   const [copied, setCopied] = useState(false);
   const overrides = useQuery<{ overrides: any[] }>({ queryKey: ['pos-overrides'], queryFn: () => api('/api/pos/overrides?limit=20') });
   // just the supervisor-issued discount authorizations (action=discount WITH an authorized %) — newest first.
   const issuedCodes = (overrides.data?.overrides ?? []).filter((o) => o.action === 'discount' && o.authorized_pct != null);
   const authorize = useMutation({
-    mutationFn: () => api<{ override_no: string; max_pct: number }>('/api/pos/discount-authorize', { method: 'POST', body: JSON.stringify({ max_pct: Number(maxPct), reason: reason || undefined }) }),
-    onSuccess: (r) => { setIssued({ override_no: r.override_no, max_pct: r.max_pct }); setCopied(false); setMaxPct(''); setReason(''); qc.invalidateQueries({ queryKey: ['pos-overrides'] }); },
+    mutationFn: () => api<{ override_no: string; max_pct: number; max_amount: number | null }>('/api/pos/discount-authorize', { method: 'POST', body: JSON.stringify({ max_pct: Number(maxPct), max_amount: maxAmount === '' ? undefined : Number(maxAmount), reason: reason || undefined }) }),
+    onSuccess: (r) => { setIssued({ override_no: r.override_no, max_pct: r.max_pct, max_amount: r.max_amount }); setCopied(false); setMaxPct(''); setMaxAmount(''); setReason(''); qc.invalidateQueries({ queryKey: ['pos-overrides'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const copyCode = async (code: string) => {
@@ -130,9 +131,12 @@ function DiscountAuthority() {
         <CardHeader><CardTitle className="text-base">{t('px.disc_auth_title')}</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">{t('px.disc_auth_desc')}</p>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <Field label={t('px.disc_auth_maxpct')} htmlFor="da-pct">
               <Input id="da-pct" type="number" inputMode="decimal" min={0} max={100} placeholder="0" value={maxPct} onChange={(e) => setMaxPct(e.target.value)} />
+            </Field>
+            <Field label={t('px.disc_auth_maxamt')} htmlFor="da-amt" hint={t('px.disc_auth_maxamt_hint')}>
+              <Input id="da-amt" type="number" inputMode="decimal" min={0} placeholder="—" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
             </Field>
             <Field label={t('px.disc_auth_reason')} htmlFor="da-reason">
               <Input id="da-reason" value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -144,7 +148,7 @@ function DiscountAuthority() {
           {/* the freshly-issued code, front-and-centre + one-tap copy so the supervisor can hand it over reliably */}
           {issued && (
             <div className="rounded-md border border-success/40 bg-success/10 p-3">
-              <p className="text-xs text-muted-foreground">{t('px.disc_issued_hint', { pct: issued.max_pct })}</p>
+              <p className="text-xs text-muted-foreground">{t('px.disc_issued_hint', { pct: issued.max_pct })}{issued.max_amount != null ? ` · ${t('px.disc_issued_hint_amt', { amt: baht(issued.max_amount) })}` : ''}</p>
               <div className="mt-1.5 flex items-center gap-3">
                 <span className="font-mono text-xl font-semibold tracking-wide">{issued.override_no}</span>
                 <Button size="sm" variant="outline" onClick={() => copyCode(issued.override_no)}>
@@ -166,6 +170,7 @@ function DiscountAuthority() {
               columns={[
                 { key: 'override_no', label: t('px.disc_recent_code'), render: (r: any) => <span className="font-mono">{r.override_no}</span> },
                 { key: 'authorized_pct', label: t('px.disc_recent_upto'), align: 'right', render: (r: any) => `${r.authorized_pct}%` },
+                { key: 'amount', label: t('px.disc_recent_maxamt'), align: 'right', render: (r: any) => r.amount != null ? baht(r.amount) : <span className="text-muted-foreground">—</span> },
                 { key: 'approved_by', label: t('px.disc_recent_by'), render: (r: any) => r.approved_by || '—' },
                 { key: 'created_at', label: t('px.disc_recent_when'), render: (r: any) => thaiDate(r.created_at) },
                 { key: 'used', label: t('px.disc_recent_status'), sortable: false, render: (r: any) => r.sale_no

@@ -125,7 +125,17 @@ async function main() {
   ok('30% bill discount over the cap → REQUIRED, then sells with a supervisor authorization',
     s11req.status === 400 && s11req.json.error?.code === 'DISCOUNT_APPROVAL_REQUIRED' && /^SALE-/.test(s11.json.sale_no ?? ''), JSON.stringify({ req: s11req.json.error?.code, sale: s11.json.sale_no }));
 
-  // ── 12. cross-tenant: a SHOP2 authorization is invisible to SHOP ──
+  // ── 12. an authorization with a BAHT cap: a discount exceeding the ฿ amount is refused (fail-closed) ──
+  // authorize up to 60% AND up to ฿40; the check runs BEFORE consumption, so the code survives a rejected over.
+  const a12a = await inj('POST', '/api/pos/discount-authorize', sup, { max_pct: 60, max_amount: 40, reason: 'capped giveaway' });
+  ok('authorize up to 60% AND ฿40 → OVR- number carries max_amount 40', /^OVR-/.test(a12a.json.override_no ?? '') && near(a12a.json.max_amount, 40), JSON.stringify(a12a.json));
+  const s12a = await sale({ line_pct: 50, approval: a12a.json.override_no }); // 50% of ฿100 = ฿50 discount > ฿40
+  ok('฿50 discount vs a ฿40 authorization → 400 DISCOUNT_APPROVAL_AMOUNT_EXCEEDED', s12a.status === 400 && s12a.json.error?.code === 'DISCOUNT_APPROVAL_AMOUNT_EXCEEDED', `${s12a.status} ${s12a.json.error?.code}`);
+  // ── 13. the SAME code (not consumed by the rejected over) now covers a within-฿ discount → sells ──
+  const s12b = await sale({ line_pct: 30, approval: a12a.json.override_no }); // 30% > 20% cap, ≤60%, ฿30 ≤ ฿40
+  ok('฿30 discount (≤ ฿40, over the % cap) reuses the un-consumed code → sells, subtotal 70', /^SALE-/.test(s12b.json.sale_no ?? '') && near(s12b.json.subtotal, 70), JSON.stringify({ sale: s12b.json.sale_no, subtotal: s12b.json.subtotal }));
+
+  // ── 14. cross-tenant: a SHOP2 authorization is invisible to SHOP ──
   const a12 = await authorize(sup2, 60);
   const s12 = await sale({ line_pct: 50, approval: a12.json.override_no });
   ok("a SHOP2 authorization used on a SHOP sale → 400 DISCOUNT_APPROVAL_NOT_FOUND (tenant isolation)", s12.status === 400 && s12.json.error?.code === 'DISCOUNT_APPROVAL_NOT_FOUND', `${s12.status} ${s12.json.error?.code}`);

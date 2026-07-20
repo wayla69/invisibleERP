@@ -11,7 +11,7 @@ import { assertMakerChecker } from '../../../common/control-profile';
 export interface HoldDto { label?: string; customer_name?: string; cart?: any }
 export interface OverrideDto { action: string; sale_no?: string; reason_code?: string; reason?: string; amount?: number; approved_by?: string }
 export interface DiscountSettingsDto { max_line_discount_pct?: number | null; max_bill_discount_pct?: number | null }
-export interface AuthorizeDiscountDto { max_pct: number; reason?: string; cashier?: string }
+export interface AuthorizeDiscountDto { max_pct: number; max_amount?: number; reason?: string; cashier?: string }
 export interface DiscountCaps { maxLinePct: number | null; maxBillPct: number | null }
 
 // Park/recall held carts + manager-override audit. Cart is opaque JSON owned by the POS client.
@@ -105,14 +105,18 @@ export class PosControlService {
   // authorizer as `approved_by`; the cashier references its `override_no` on the sale (consumed there).
   async authorizeDiscount(dto: AuthorizeDiscountDto, user: JwtUser) {
     if (!(n(dto.max_pct) > 0 && n(dto.max_pct) <= 100)) throw new BadRequestException({ code: 'BAD_DISCOUNT_PCT', message: 'max_pct must be between 0 and 100', messageTh: 'เปอร์เซ็นต์ส่วนลดต้องอยู่ระหว่าง 0 ถึง 100' });
+    if (dto.max_amount != null && !(n(dto.max_amount) > 0)) throw new BadRequestException({ code: 'BAD_DISCOUNT_AMOUNT', message: 'max_amount must be greater than 0', messageTh: 'จำนวนเงินส่วนลดสูงสุดต้องมากกว่า 0' });
     const db = this.db;
     const overrideNo = await this.docNo.nextDaily('OVR');
+    // The optional baht cap rides the existing `amount` column — the authorization bounds BOTH the % and the
+    // absolute discount value, so a code can't be reused to give away more money than the supervisor intended.
     await db.insert(posOverrides).values({
       tenantId: user.tenantId ?? null, overrideNo, saleNo: null, action: 'discount',
-      reason: dto.reason ?? null, authorizedPct: String(dto.max_pct), requestedBy: dto.cashier ?? null, approvedBy: user.username,
+      reason: dto.reason ?? null, authorizedPct: String(dto.max_pct), amount: dto.max_amount != null ? String(dto.max_amount) : null,
+      requestedBy: dto.cashier ?? null, approvedBy: user.username,
     });
-    await this.audit.record({ action: 'discount_authorize', entity: 'sale', entityId: undefined, meta: { override_no: overrideNo, max_pct: dto.max_pct, cashier: dto.cashier, approved_by: user.username } }, user);
-    return { override_no: overrideNo, action: 'discount', max_pct: n(dto.max_pct), approved_by: user.username };
+    await this.audit.record({ action: 'discount_authorize', entity: 'sale', entityId: undefined, meta: { override_no: overrideNo, max_pct: dto.max_pct, max_amount: dto.max_amount ?? null, cashier: dto.cashier, approved_by: user.username } }, user);
+    return { override_no: overrideNo, action: 'discount', max_pct: n(dto.max_pct), max_amount: dto.max_amount != null ? n(dto.max_amount) : null, approved_by: user.username };
   }
 
   // Validate + CONSUME a discount authorization inside the caller's sale transaction (so a rolled-back sale
@@ -120,7 +124,7 @@ export class PosControlService {
   // approved by someone OTHER than the selling cashier (the canonical maker-checker gate — SoD R08), cover the
   // requested over-cap %, and be unconsumed — the guarded UPDATE (WHERE sale_no IS NULL) makes consumption
   // atomic against a concurrent sale. `user` is the selling cashier.
-  async consumeDiscountApproval(tx: any, opts: { tenantId: number; user: JwtUser; overrideNo: string; requestedPct: number; saleNo: string }): Promise<void> {
+  async consumeDiscountApproval(tx: any, opts: { tenantId: number; user: JwtUser; overrideNo: string; requestedPct: number; discountAmount: number; saleNo: string }): Promise<void> {
     const [ov] = await tx.select().from(posOverrides).where(and(eq(posOverrides.tenantId, opts.tenantId), eq(posOverrides.overrideNo, opts.overrideNo))).limit(1);
     if (!ov) throw new BadRequestException({ code: 'DISCOUNT_APPROVAL_NOT_FOUND', message: `Discount authorization ${opts.overrideNo} not found`, messageTh: 'ไม่พบใบอนุมัติส่วนลด' });
     if (ov.action !== 'discount' || ov.authorizedPct == null || !ov.approvedBy)
@@ -129,6 +133,10 @@ export class PosControlService {
     await assertMakerChecker(tx, { user: opts.user, maker: ov.approvedBy, event: 'pos.discount.consume', ref: opts.overrideNo, code: 'SOD_VIOLATION', message: 'The discount approver must differ from the selling cashier', messageTh: 'ผู้อนุมัติส่วนลดต้องไม่ใช่แคชเชียร์ที่ขาย (แบ่งแยกหน้าที่)' });
     if (n(ov.authorizedPct) + 1e-6 < opts.requestedPct)
       throw new BadRequestException({ code: 'DISCOUNT_APPROVAL_INSUFFICIENT', message: `Authorization covers ${n(ov.authorizedPct)}% but the discount is ${opts.requestedPct.toFixed(2)}%`, messageTh: `ใบอนุมัติครอบคลุม ${n(ov.authorizedPct)}% แต่ส่วนลดคือ ${opts.requestedPct.toFixed(2)}%` });
+    // Absolute-value bound: if the authorization carries a baht cap, the sale's total manual discount may not
+    // exceed it (fail-closed) — so a "25% up to ฿500" code can't be spent for ฿5,000 off on a huge bill.
+    if (ov.amount != null && opts.discountAmount > n(ov.amount) + 1e-6)
+      throw new BadRequestException({ code: 'DISCOUNT_APPROVAL_AMOUNT_EXCEEDED', message: `Authorization covers up to ฿${n(ov.amount)} but the discount is ฿${opts.discountAmount.toFixed(2)}`, messageTh: `ใบอนุมัติครอบคลุมสูงสุด ฿${n(ov.amount)} แต่ส่วนลดคือ ฿${opts.discountAmount.toFixed(2)}` });
     const claimed = await tx.update(posOverrides).set({ saleNo: opts.saleNo }).where(and(eq(posOverrides.id, ov.id), isNull(posOverrides.saleNo))).returning({ id: posOverrides.id });
     if (!claimed.length)
       throw new BadRequestException({ code: 'DISCOUNT_APPROVAL_CONSUMED', message: `Discount authorization ${opts.overrideNo} was already used`, messageTh: 'ใบอนุมัติส่วนลดนี้ถูกใช้ไปแล้ว' });
