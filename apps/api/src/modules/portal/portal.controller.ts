@@ -49,6 +49,8 @@ const SaleBody = z.object({
   customer_code: z.string().max(120).optional(),
   // docs/52 Phase 4b — discount authority: a supervisor's authorization (OVR-…) for an over-cap manual discount.
   discount_approval_no: z.string().max(60).optional(),
+  // docs/52 Phase 4e — store-credit tender: draw part/all of the sale from a gift-card / store-credit balance.
+  store_credit_card_no: z.string().max(60).optional(),
 });
 
 const AddInventoryBody = z.object({

@@ -6,6 +6,7 @@ import { qint } from '../../common/query';
 import { PosService, type CreateOrderDto } from './pos.service';
 import { PosProfileService } from './pos-profile.service';
 import { PosSaleService } from './pos-sale.service';
+import { ExchangeService, type ExchangeDto } from './exchange.service';
 import { type PortalSaleDto } from '../portal/portal.pos.service';
 import { ConvertAbbBody, type ConvertAbbDto } from '../tax/documents/dto';
 
@@ -61,11 +62,42 @@ const PosSaleBody = z.object({
   customer_code: z.string().max(120).optional(),
   // docs/52 Phase 4b — discount authority: a supervisor's authorization (OVR-…) for an over-cap manual discount.
   discount_approval_no: z.string().max(60).optional(),
+  // docs/52 Phase 4e — store-credit tender: draw part/all of the sale from a gift-card / store-credit balance.
+  store_credit_card_no: z.string().max(60).optional(),
+});
+
+// docs/52 Phase 4e — POS exchange (even / partial): return the original line(s) + ring the replacement line(s)
+// in one atomic transaction, settled by netting through store credit (only the difference moves in cash).
+const ExchangeBody = z.object({
+  sale_no: z.string().min(1),
+  return_items: z.array(z.object({
+    sale_item_id: z.number().int().optional(),
+    item_id: z.string().optional(),
+    qty: z.number().positive(),
+  }).refine((b) => b.sale_item_id != null || b.item_id != null, { message: 'sale_item_id or item_id required' })).min(1),
+  new_items: z.array(z.object({
+    item_id: z.string().min(1), item_description: z.string().optional(),
+    qty: z.number().positive(), unit_price: z.number().nonnegative(),
+    uom: z.string().optional(), discount_pct: z.number().min(0).max(100).optional(),
+  })).min(1),
+  reason: z.string().min(1).max(500),
+  price_tier: z.string().max(60).optional(),
+  customer_code: z.string().max(120).optional(),
+  branch_id: z.number().int().positive().optional(),
 });
 
 @Controller('api/pos')
 export class PosController {
-  constructor(private readonly svc: PosService, private readonly profile: PosProfileService, private readonly saleSvc: PosSaleService) {}
+  constructor(private readonly svc: PosService, private readonly profile: PosProfileService, private readonly saleSvc: PosSaleService, private readonly exchange: ExchangeService) {}
+
+  // docs/52 Phase 4e — even/partial exchange at the counter: returns the original line(s) (restock + GL
+  // reversal + ใบลดหนี้ credit note → store credit) and rings the replacement line(s) paid from that credit,
+  // atomically — the customer settles only the difference (even swap = no cash). Reason-coded. Same duties
+  // as a return (a refund is involved), which are segregated from plain selling.
+  @Post('exchange') @Permissions('returns', 'pos_refund', 'exec')
+  createExchange(@Body(new ZodValidationPipe(ExchangeBody)) b: ExchangeDto, @CurrentUser() u: JwtUser) {
+    return this.exchange.createExchange(b, u);
+  }
 
   // docs/52 Phase 1b — generic (non-restaurant) checkout for the internal register: rings a plain retail/
   // service sale through the shared engine (cust_pos_sales + stock move + VAT + tender), NO dine_in_orders /

@@ -126,8 +126,8 @@ jobs:
           - shard: pos
             run: >-
               cutover:pos-p0 cutover:pos-p1 cutover:pos-p2 cutover:pos-wiring
-              cutover:pos-discount cutover:pricing cutover:splitbill cutover:cashreport
-              cutover:returns
+              cutover:pos-discount cutover:pricing cutover:pos-pricebook cutover:splitbill
+              cutover:cashreport cutover:returns cutover:pos-exchange
           # ── restaurant ──
           - shard: restaurant
             run: >-

@@ -3,7 +3,9 @@ import { PosController, OrdersController } from './pos.controller';
 import { PosService } from './pos.service';
 import { PosProfileService } from './pos-profile.service';
 import { PosSaleService } from './pos-sale.service';
+import { ExchangeService } from './exchange.service';
 import { PortalModule } from '../portal/portal.module';
+import { ReturnsModule } from '../returns/returns.module';
 import { SplitController } from './split.controller';
 import { SplitBillService } from './split.service';
 import { ReceiptController } from './receipt.controller';
@@ -29,10 +31,10 @@ import { PosTerminalModule } from './terminal/pos-terminal.module';
 // the satellites directly, never this umbrella.
 @Module({
   // MessagingModule: POS-2 LINE e-receipt rides the existing messaging LINE client (no second client).
-  imports: [RestaurantModule, PaymentsModule, TaxModule, MessagingModule, PortalModule, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
+  imports: [RestaurantModule, PaymentsModule, TaxModule, MessagingModule, PortalModule, ReturnsModule, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
   controllers: [PosController, OrdersController, SplitController, ReceiptController],
   // TaxDocsPdfService + RealtimeScope have no own deps (DRIZZLE is global) → provide directly.
-  providers: [PosService, PosProfileService, PosSaleService, SplitBillService, ReceiptService, ReceiptDeliveryService, NoopReceiptProvider, CfdService, TaxDocsPdfService, RealtimeScope],
+  providers: [PosService, PosProfileService, PosSaleService, ExchangeService, SplitBillService, ReceiptService, ReceiptDeliveryService, NoopReceiptProvider, CfdService, TaxDocsPdfService, RealtimeScope],
   exports: [PosService, PosProfileService, PosAuditModule, PosControlModule, PosFiscalModule, PosLoyaltyLaborModule, PosScaleModule, PosTerminalModule],
 })
 export class PosModule {}
