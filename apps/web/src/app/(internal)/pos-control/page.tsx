@@ -55,28 +55,64 @@ export default function PosControlPage() {
 
 // docs/52 Phase 4b — discount authority: set the cashier discount caps + issue a supervisor authorization
 // code (OVR-…) for an over-cap discount. Both maintained by the supervisor duty (pos_refund/exec).
+// A cap field with an explicit "no limit" toggle — so leaving a blank field can't SILENTLY grant a cashier
+// unlimited self-discount; unlimited must be ticked on purpose (fail-safe default is a real, entered cap).
+function CapField({ id, label, unlimited, value, onUnlimited, onValue }: { id: string; label: string; unlimited: boolean; value: string; onUnlimited: (v: boolean) => void; onValue: (v: string) => void }) {
+  const { t } = useLang();
+  return (
+    <Field label={label} htmlFor={id}>
+      <div className="flex items-center gap-2">
+        <Input id={id} type="number" inputMode="decimal" min={0} max={100} placeholder="0" value={unlimited ? '' : value} disabled={unlimited} onChange={(e) => onValue(e.target.value)} className={cn(unlimited && 'opacity-50')} />
+        <label className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
+          <input type="checkbox" className="size-4 accent-primary" checked={unlimited} onChange={(e) => onUnlimited(e.target.checked)} />
+          {t('px.disc_unlimited')}
+        </label>
+      </div>
+    </Field>
+  );
+}
+
 function DiscountAuthority() {
   const { t } = useLang();
   const qc = useQueryClient();
   const caps = useQuery<{ maxLinePct: number | null; maxBillPct: number | null }>({ queryKey: ['pos-discount-settings'], queryFn: () => api('/api/pos/discount-settings') });
   const [line, setLine] = useState('');
   const [bill, setBill] = useState('');
-  // hydrate the inputs once the current caps load
+  const [lineUnlimited, setLineUnlimited] = useState(false);
+  const [billUnlimited, setBillUnlimited] = useState(false);
+  // hydrate the inputs once the current caps load (null cap ⇒ the "no limit" box is already ticked)
   const capsData = caps.data;
   const [seeded, setSeeded] = useState(false);
-  if (capsData && !seeded) { setSeeded(true); setLine(capsData.maxLinePct != null ? String(capsData.maxLinePct) : ''); setBill(capsData.maxBillPct != null ? String(capsData.maxBillPct) : ''); }
+  if (capsData && !seeded) {
+    setSeeded(true);
+    setLine(capsData.maxLinePct != null ? String(capsData.maxLinePct) : '');
+    setBill(capsData.maxBillPct != null ? String(capsData.maxBillPct) : '');
+    setLineUnlimited(capsData.maxLinePct == null);
+    setBillUnlimited(capsData.maxBillPct == null);
+  }
+  const capValid = (unlimited: boolean, v: string) => unlimited || (v !== '' && Number(v) >= 0 && Number(v) <= 100);
+  const capsSavable = capValid(lineUnlimited, line) && capValid(billUnlimited, bill);
   const saveCaps = useMutation({
-    mutationFn: () => api('/api/pos/discount-settings', { method: 'PUT', body: JSON.stringify({ max_line_discount_pct: line === '' ? null : Number(line), max_bill_discount_pct: bill === '' ? null : Number(bill) }) }),
+    mutationFn: () => api('/api/pos/discount-settings', { method: 'PUT', body: JSON.stringify({ max_line_discount_pct: lineUnlimited ? null : Number(line), max_bill_discount_pct: billUnlimited ? null : Number(bill) }) }),
     onSuccess: () => { notifySuccess(t('px.disc_caps_saved')); qc.invalidateQueries({ queryKey: ['pos-discount-settings'] }); },
     onError: (e: any) => notifyError(e.message),
   });
   const [maxPct, setMaxPct] = useState('');
   const [reason, setReason] = useState('');
+  const [issued, setIssued] = useState<{ override_no: string; max_pct: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const overrides = useQuery<{ overrides: any[] }>({ queryKey: ['pos-overrides'], queryFn: () => api('/api/pos/overrides?limit=20') });
+  // just the supervisor-issued discount authorizations (action=discount WITH an authorized %) — newest first.
+  const issuedCodes = (overrides.data?.overrides ?? []).filter((o) => o.action === 'discount' && o.authorized_pct != null);
   const authorize = useMutation({
-    mutationFn: () => api<{ override_no: string }>('/api/pos/discount-authorize', { method: 'POST', body: JSON.stringify({ max_pct: Number(maxPct), reason: reason || undefined }) }),
-    onSuccess: (r) => { notifySuccess(t('px.disc_auth_issued', { no: r.override_no })); setMaxPct(''); setReason(''); },
+    mutationFn: () => api<{ override_no: string; max_pct: number }>('/api/pos/discount-authorize', { method: 'POST', body: JSON.stringify({ max_pct: Number(maxPct), reason: reason || undefined }) }),
+    onSuccess: (r) => { setIssued({ override_no: r.override_no, max_pct: r.max_pct }); setCopied(false); setMaxPct(''); setReason(''); qc.invalidateQueries({ queryKey: ['pos-overrides'] }); },
     onError: (e: any) => notifyError(e.message),
   });
+  const copyCode = async (code: string) => {
+    try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { notifyError(t('px.disc_copy_failed')); }
+  };
   return (
     <div className="space-y-4">
       <Card>
@@ -84,14 +120,10 @@ function DiscountAuthority() {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">{t('px.disc_caps_desc')}</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t('px.disc_cap_line')} htmlFor="dc-line">
-              <Input id="dc-line" type="number" inputMode="decimal" min={0} max={100} placeholder="—" value={line} onChange={(e) => setLine(e.target.value)} />
-            </Field>
-            <Field label={t('px.disc_cap_bill')} htmlFor="dc-bill">
-              <Input id="dc-bill" type="number" inputMode="decimal" min={0} max={100} placeholder="—" value={bill} onChange={(e) => setBill(e.target.value)} />
-            </Field>
+            <CapField id="dc-line" label={t('px.disc_cap_line')} unlimited={lineUnlimited} value={line} onUnlimited={setLineUnlimited} onValue={setLine} />
+            <CapField id="dc-bill" label={t('px.disc_cap_bill')} unlimited={billUnlimited} value={bill} onUnlimited={setBillUnlimited} onValue={setBill} />
           </div>
-          <Button disabled={saveCaps.isPending} onClick={() => saveCaps.mutate()}>{saveCaps.isPending ? t('hx.common.saving') : t('px.disc_caps_save')}</Button>
+          <Button disabled={saveCaps.isPending || !capsSavable} onClick={() => saveCaps.mutate()}>{saveCaps.isPending ? t('hx.common.saving') : t('px.disc_caps_save')}</Button>
         </CardContent>
       </Card>
       <Card>
@@ -109,6 +141,39 @@ function DiscountAuthority() {
           <Button disabled={!maxPct || Number(maxPct) <= 0 || authorize.isPending} onClick={() => authorize.mutate()}>
             <ShieldCheck className="size-4" /> {authorize.isPending ? t('hx.common.saving') : t('px.disc_auth_btn')}
           </Button>
+          {/* the freshly-issued code, front-and-centre + one-tap copy so the supervisor can hand it over reliably */}
+          {issued && (
+            <div className="rounded-md border border-success/40 bg-success/10 p-3">
+              <p className="text-xs text-muted-foreground">{t('px.disc_issued_hint', { pct: issued.max_pct })}</p>
+              <div className="mt-1.5 flex items-center gap-3">
+                <span className="font-mono text-xl font-semibold tracking-wide">{issued.override_no}</span>
+                <Button size="sm" variant="outline" onClick={() => copyCode(issued.override_no)}>
+                  <ClipboardList className="size-4" /> {copied ? t('px.disc_copied') : t('px.disc_copy')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-base">{t('px.disc_recent_title')}</CardTitle></CardHeader>
+        <CardContent>
+          <StateView q={overrides}>
+            <DataTable
+              rows={issuedCodes}
+              rowKey={(r: any) => r.override_no}
+              emptyState={{ icon: ShieldCheck, title: t('px.disc_recent_empty'), description: t('px.disc_recent_empty_desc') }}
+              columns={[
+                { key: 'override_no', label: t('px.disc_recent_code'), render: (r: any) => <span className="font-mono">{r.override_no}</span> },
+                { key: 'authorized_pct', label: t('px.disc_recent_upto'), align: 'right', render: (r: any) => `${r.authorized_pct}%` },
+                { key: 'approved_by', label: t('px.disc_recent_by'), render: (r: any) => r.approved_by || '—' },
+                { key: 'created_at', label: t('px.disc_recent_when'), render: (r: any) => thaiDate(r.created_at) },
+                { key: 'used', label: t('px.disc_recent_status'), sortable: false, render: (r: any) => r.sale_no
+                  ? <Badge variant="secondary">{t('px.disc_recent_used', { no: r.sale_no })}</Badge>
+                  : <Badge variant="success">{t('px.disc_recent_unused')}</Badge> },
+              ]}
+            />
+          </StateView>
         </CardContent>
       </Card>
     </div>
