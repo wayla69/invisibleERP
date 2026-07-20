@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 298,
+    "total": 299,
     "by_status": {
-      "Implemented": 295,
+      "Implemented": 296,
       "Partial": 3
     },
     "by_family": {
@@ -16,7 +16,7 @@
       "Entity-Level": 9,
       "Expenditure": 16,
       "Fixed Assets": 8,
-      "General Ledger": 28,
+      "General Ledger": 29,
       "ITGC · Access": 22,
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
@@ -4386,6 +4386,25 @@
       "tod": "Inspect the five rules, the idempotent register keying, the mandatory-reason dismissal, and the EXCEPTION_DISMISSED audit rows.",
       "toe": "Re-perform (basics ToE): seed one anomaly per rule → scan flags all five (duplicates name their peer, after-hours carries the Bangkok hour); re-scan new=0; dismiss without a reason → 400; dismiss with a reason → dismissed + gl_audit_log EXCEPTION_DISMISSED; re-dismiss → ALREADY_DISMISSED; cockpit pillar red on HIGH open; the je_exceptions BI sweep runs idempotently.",
       "evidence": "je_exceptions register (open/dismissed + reasons); gl_audit_log EXCEPTION_DISMISSED trail; cockpit pillar; sweep run log",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "GL-29",
+      "cycle": "General Ledger",
+      "category": "Application",
+      "fsli": "All (financial-statement issuance)",
+      "risk": "The formatted statutory financial-statement pack (BS + P&L + SOCE + notes + TFRS-15 disaggregation) can be exported and circulated by one person with no independent review, and nothing binds the issued figures to a point-in-time approval — a preparer could release statements that were never signed off, or the underlying GL could move AFTER a review with the issued PDF still reading as approved, so an incomplete or altered reporting basis is relied upon.",
+      "assertion": "Authorization/Accuracy/Presentation/Segregation of Duties",
+      "description": "Financial-statement issuance review & approval (FIN-4 GL-29 maker-checker; complements the GL-26 disclosure-checklist binder by governing the STATEMENT ARTIFACT + its figures). A preparer SUBMITS a fiscal year's statements for review (POST /api/reports/fs/statement-pack/submit) — the service snapshots the as-issued key figures (total assets / liabilities / equity / revenue / net income, computed from balanceSheet + incomeStatement over the year) together with a SHA-256 hash, and stages a PendingApproval review (fs_statement_reviews). A DIFFERENT user approves it (POST …/statement-reviews/:id/approve); the preparer self-approving → 403 SOD_VIOLATION (assertMakerChecker, binds even Admin), and re-approving an approved review → FS_REVIEW_NOT_PENDING. The formatted FS pack (GET …/statement-pack.pdf) then reads the latest Approved review for the period/ledger and STAMPS the cover 'Reviewed & approved by X on DATE (prepared by Y)' instead of 'Unaudited — management accounts'; if the live GL figures no longer match the approved hash the stamp flips to 'figures changed since approval — re-review required' (tamper-evident). The pending review surfaces in the GOV-01 pending-approvals center (fs_statement_review queue provider). Detective/preventive; tenant-scoped (canonical 0232 RLS + tenant-leading index, migration 0449); posts NOTHING to the GL.",
+      "prev_det": "Prev/Det",
+      "nature": "Automated",
+      "frequency": "Per statement issuance / period",
+      "owner": "Financial Controller / CFO",
+      "coso": "P10",
+      "code_reference": "reports/statutory-fs-reviews.service.ts (submit snapshots figures+SHA-256 hash → PendingApproval; approve assertMakerChecker SOD_VIOLATION + FS_REVIEW_NOT_PENDING; latestApproved live tamper check figures_changed; list); reports/statutory-fs.controller.ts (statement-pack/submit, statement-reviews/:id/approve, statement-reviews — fin_report/exec); reports/reports-pdf.service.ts financialStatementPackHtml reviewStamp (approved / re-review / unaudited); statutory-fs.controller statementPackPdf attaches latestApproved for a full-fiscal-year pack; reports/statutory-fs-review-queue.ts (GOV-01 fs_statement_review ApprovalQueueSource, control GL-29); schema/fs-reports.ts fsStatementReviews + migration 0449 (canonical 0232 RLS + app_user grants + tenant-leading index); cutover/compliance.ts (ToE)",
+      "tod": "Inspect the submit→snapshot+hash, the distinct-approver requirement, the approved-review→PDF-stamp read, the live tamper check (figures_changed), and the tenant RLS isolation.",
+      "toe": "Re-perform (compliance ToE): submit a fiscal year → PendingApproval (figures snapshotted); the preparer self-approving → 403 SOD_VIOLATION; a DIFFERENT user approves → Approved; the FS pack PDF stamps 'reviewed & approved by' (not 'unaudited'); post a further JE into the year → the pack flips to 're-review required' (hash mismatch); the pending review appears in GOV-01; another tenant sees 0 reviews (RLS).",
+      "evidence": "fs_statement_reviews register (prepared_by/approved_by sign-off + figures snapshot/hash); FS pack issuance stamp; GOV-01 queue; compliance harness ToE",
       "status": "Implemented"
     },
     {

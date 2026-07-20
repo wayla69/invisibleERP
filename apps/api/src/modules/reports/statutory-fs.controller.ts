@@ -4,7 +4,17 @@ import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { StatutoryFsService } from './statutory-fs.service';
+import { StatutoryFsReviewsService } from './statutory-fs-reviews.service';
 import { ReportPdfService } from './reports-pdf.service';
+
+const SubmitReviewBody = z.object({
+  fiscal_year: z.number().int().min(2000).max(3000),
+  ledger: z.string().optional(),
+  industry: z.string().optional(),
+});
+type SubmitReviewBodyT = z.infer<typeof SubmitReviewBody>;
+const ApproveReviewBody = z.object({ self_approval_reason: z.string().optional() });
+type ApproveReviewBodyT = z.infer<typeof ApproveReviewBody>;
 
 const GroupSchema = z.object({
   key: z.string().min(1),
@@ -47,8 +57,32 @@ type UpsertBodyT = z.infer<typeof UpsertBody>;
 export class StatutoryFsController {
   constructor(
     private readonly svc: StatutoryFsService,
+    private readonly reviews: StatutoryFsReviewsService,
     private readonly pdf: ReportPdfService,
   ) {}
+
+  // ── FS issuance review & approval (GL-29, maker-checker) ──
+  // A preparer submits a fiscal year's statements for review (snapshot + hash of the key figures); a DIFFERENT
+  // user approves it — the approved review then drives the FS pack's "reviewed & approved" stamp (vs "unaudited").
+  @Post('statement-pack/submit')
+  submitReview(@Body(new ZodValidationPipe(SubmitReviewBody)) body: SubmitReviewBodyT, @CurrentUser() user: JwtUser) {
+    return this.reviews.submit({ fiscalYear: body.fiscal_year, ledger: body.ledger || null, industry: body.industry || null }, user);
+  }
+
+  // Body is OPTIONAL (approval needs none; an SME self-approval may carry a justification).
+  @Post('statement-reviews/:id/approve')
+  approveReview(@Param('id') id: string, @Body() body: ApproveReviewBodyT | undefined, @CurrentUser() user: JwtUser) {
+    const n = parseInt(id, 10);
+    if (!n) throw new BadRequestException({ code: 'FS_REVIEW_BAD_ID', message: 'numeric review id required', messageTh: 'ต้องระบุรหัสรายการเป็นตัวเลข' });
+    const parsed = ApproveReviewBody.safeParse(body ?? {});
+    return this.reviews.approve(n, user, parsed.success ? parsed.data : {});
+  }
+
+  @Get('statement-reviews')
+  listReviews(@Query('fiscal_year') fiscalYear?: string) {
+    const fy = fiscalYear ? parseInt(fiscalYear, 10) : undefined;
+    return this.reviews.list(fy || undefined);
+  }
 
   // ── Report-definition CRUD (the buyer's own FS layouts) ──
   @Get('definitions')
@@ -119,10 +153,16 @@ export class StatutoryFsController {
     if (!p.from || !p.asOf) {
       throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'fiscal_year, or from + as_of, is required', messageTh: 'ต้องระบุปีบัญชี หรือ from และ as_of' });
     }
-    const pack = await this.svc.statementPack({
+    const pack: any = await this.svc.statementPack({
       asOf: p.asOf, from: p.from, priorAsOf: p.priorAsOf, priorFrom: p.priorFrom,
       ledger: ledger || null, industry: industry || null, notesCode: notesCode || null,
     });
+    // GL-29: stamp the pack with its issuance review, but only for a FULL fiscal-year pack (the statutory
+    // issuance case) — the review snapshot is annual, so a partial-period pack must stay "unaudited".
+    const fyy = Number(String(p.asOf).slice(0, 4));
+    if (p.from === `${fyy}-01-01` && p.asOf === `${fyy}-12-31`) {
+      pack.review = await this.reviews.latestApproved(fyy, ledger || null);
+    }
     const html = this.pdf.financialStatementPackHtml(pack);
     const pdf = await this.pdf.renderHtmlToPdf(html);
     const fname = `financial-statements-${p.asOf}.pdf`;

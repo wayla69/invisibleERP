@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck, PlayCircle, Landmark, FileText, Scale } from 'lucide-react';
 
 import { api, apiDownload } from '@/lib/api';
-import { notifyError } from '@/lib/notify';
+import { notifyError, notifySuccess } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -606,6 +606,7 @@ interface RenderRow { key: string; label?: string; label_th?: string | null; acc
 interface FsKpi { key: string; label: string; label_th: string; format: 'pct' | 'ratio'; value: number; numerator: number; denominator: number; prior?: number | null }
 interface RevDisaggCat { account_code: string; account_name: string | null; current: number; prior: number | null; timing: 'over_time' | 'point_in_time' }
 interface RevDisaggResp { industry: string | null; comparative: boolean; categories: RevDisaggCat[]; timing_summary: { over_time: { current: number; prior: number | null }; point_in_time: { current: number; prior: number | null } }; total: { current: number; prior: number | null }; ties_to_income_statement: boolean; policy: { en: string; th: string } }
+interface FsReview { id: number; fiscal_year: number; ledger: string; status: 'PendingApproval' | 'Approved'; prepared_by: string | null; approved_by: string | null; approved_at: string | null }
 interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; industry: string | null; comparative: boolean; rows: RenderRow[]; kpis?: FsKpi[] }
 interface IndustryLayout { industry: string; name: string }
 interface IndustryStmtLayouts { generic_name: string; own_has_layout: boolean; layouts: IndustryLayout[] }
@@ -829,6 +830,30 @@ function CustomStatements({ lp }: { lp: string }) {
     queryFn: () => api(`/api/reports/fs/revenue-disaggregation?as_of=${asOf}&from=${from}${priorQs}${industryQs}${lp}`),
     enabled: run != null && run.code === 'DBD-PL',
   });
+  // GL-29: financial-statement issuance review & approval (maker-checker) for the fiscal year of `as_of`.
+  const ledger = lp.startsWith('&ledger=') ? decodeURIComponent(lp.slice('&ledger='.length)) : '';
+  const fsYear = Number(String(asOf).slice(0, 4));
+  const reviewsQ = useQuery<FsReview[]>({
+    queryKey: ['fs-reviews', fsYear, ledger],
+    queryFn: () => api(`/api/reports/fs/statement-reviews?fiscal_year=${fsYear}`),
+    enabled: Number.isFinite(fsYear) && fsYear > 2000,
+  });
+  const latestReview = (reviewsQ.data ?? []).find((r) => r.ledger === (ledger || 'LEADING')) ?? (reviewsQ.data ?? [])[0];
+  const [reviewBusy, setReviewBusy] = useState(false);
+  async function submitReview() {
+    setReviewBusy(true);
+    try {
+      await api('/api/reports/fs/statement-pack/submit', { method: 'POST', body: JSON.stringify({ fiscal_year: fsYear, ledger: ledger || undefined, industry: industry || undefined }) });
+      notifySuccess(t('fnx.fs.stat.review_submitted')); await reviewsQ.refetch();
+    } catch (e: any) { notifyError(e?.message ?? 'submit failed'); } finally { setReviewBusy(false); }
+  }
+  async function approveReview(id: number) {
+    setReviewBusy(true);
+    try {
+      await api(`/api/reports/fs/statement-reviews/${id}/approve`, { method: 'POST', body: JSON.stringify({}) });
+      notifySuccess(t('fnx.fs.stat.review_approved')); await reviewsQ.refetch();
+    } catch (e: any) { notifyError(e?.message ?? 'approve failed'); } finally { setReviewBusy(false); }
+  }
 
   return (
     <Card className="space-y-4 p-5">
@@ -874,6 +899,25 @@ function CustomStatements({ lp }: { lp: string }) {
                 {prior && isPl && <div className="grid gap-2"><Label htmlFor="cs-pfrom">{t('fnx.fs.stat.prior_from')}</Label><Input id="cs-pfrom" type="date" className="max-w-[170px]" value={priorFrom} onChange={(e) => setPriorFrom(e.target.value)} /></div>}
                 <Button disabled={!selected} onClick={() => selected && setRun({ code: selected.code, type: selected.statement_type, industry: showIndustry ? industry : '' })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
                 <Button variant="outline" disabled={!asOf || !from || packBusy} onClick={downloadPack}><Download className="size-4" /> {t('fnx.fs.stat.pack_pdf')}</Button>
+              </div>
+
+              {/* GL-29: issuance review & approval (maker-checker) — governs the statement pack for the fiscal year. */}
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 p-3 text-sm">
+                <ShieldCheck className="size-4 text-muted-foreground" />
+                <span className="font-medium">{t('fnx.fs.stat.review')} · {fsYear}</span>
+                {latestReview?.status === 'Approved' ? (
+                  <Badge className="bg-green-100 text-green-800">{t('fnx.fs.stat.review_approved_by', { by: latestReview.approved_by ?? '' })}</Badge>
+                ) : latestReview?.status === 'PendingApproval' ? (
+                  <Badge className="bg-amber-100 text-amber-800">{t('fnx.fs.stat.review_pending_by', { by: latestReview.prepared_by ?? '' })}</Badge>
+                ) : (
+                  <Badge variant="outline">{t('fnx.fs.stat.review_none')}</Badge>
+                )}
+                <div className="ml-auto flex gap-2">
+                  <Button variant="outline" size="sm" disabled={reviewBusy} onClick={submitReview}>{t('fnx.fs.stat.review_submit')}</Button>
+                  {latestReview?.status === 'PendingApproval' && (
+                    <Button size="sm" disabled={reviewBusy} onClick={() => approveReview(latestReview.id)}>{t('fnx.fs.stat.review_approve')}</Button>
+                  )}
+                </div>
               </div>
 
               {run != null && !isNotes && (
