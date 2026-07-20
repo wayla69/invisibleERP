@@ -295,6 +295,10 @@ export default function LoginPage() {
           <Link href="/signup" className="font-medium text-primary hover:underline">
             {t('auth.signup_free')}
           </Link>
+          {' · '}
+          <Link href="/plans" className="font-medium text-primary hover:underline">
+            {t('auth.pricing_link')}
+          </Link>
         </p>
         <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
           <ShieldCheck className="size-3.5" />
