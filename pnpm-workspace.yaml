@@ -20,6 +20,16 @@ overrides:
   # middie 9 peers fastify 5 (now satisfied) and we use Nest guards (not middie middleware), so forcing it is safe.
   "fast-uri@<3.1.2": ">=3.1.2"
   "@fastify/middie@<9.3.2": ">=9.3.2"
+  # 2026-07-20 (GHSA-3jxr-9vmj-r5cp, GHSA-52cp-r559-cp3m): brace-expansion exponential-expansion DoS across
+  # all three major lines (transitive via exceljs→archiver/unzipper→glob, @nestjs/cli, @vitest/coverage-v8)
+  # and js-yaml 4.x merge-key quadratic CPU (via @nestjs/swagger — runtime — and @nestjs/cli). Patch-level
+  # forces to the fixed releases; see compliance/vulnerability-triage.md.
+  # NB caret-bounded values: an unbounded ">=x" here lets the resolver jump a legacy consumer (e.g.
+  # minimatch@3, CJS) onto the newest MAJOR (ESM-only) — each line must stay within its own major.
+  "brace-expansion@<1.1.16": "^1.1.16"
+  "brace-expansion@>=2.0.0 <2.1.2": "^2.1.2"
+  "brace-expansion@5": "^5.0.7"
+  "js-yaml@>=4.0.0 <4.3.0": "^4.3.0"
 
 # Known, triaged advisories accepted under documented remediation (see compliance/vulnerability-triage.md).
 # Each is either a dev/build-only dependency or gated behind a major upgrade (fastify-5 / Nest-11 / drizzle-0.45).
