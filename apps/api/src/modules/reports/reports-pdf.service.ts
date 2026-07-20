@@ -242,6 +242,21 @@ export class ReportPdfService {
     const periodLine = `สำหรับปีสิ้นสุด / For the year ended ${esc(fmtDate(pack?.period?.as_of))}`
       + (comp ? ` (เปรียบเทียบ / comparative ${esc(fmtDate(pack?.period?.prior_as_of))})` : '');
 
+    // GL-29 issuance stamp: reviewed & approved (maker-checker) vs re-review-required vs unaudited.
+    const reviewStamp = () => {
+      const rv = pack?.review;
+      if (rv && rv.figures_changed) {
+        return '<div class="rereview">ตัวเลขเปลี่ยนแปลงหลังการอนุมัติ — ต้องสอบทานใหม่ / Figures changed since approval — re-review required</div>';
+      }
+      if (rv) {
+        const by = esc(rv.approved_by ?? '');
+        const on = esc(fmtDate(String(rv.approved_at ?? '').slice(0, 10)));
+        const prep = rv.prepared_by ? ` · จัดทำโดย/prepared by ${esc(rv.prepared_by)}` : '';
+        return `<div class="approved">สอบทานและอนุมัติแล้วโดย/Reviewed &amp; approved by ${by} เมื่อ/on ${on}${prep}</div>`;
+      }
+      return '<div class="unaudited">ยังไม่ได้ตรวจสอบ — งบเพื่อการบริหาร / Unaudited — management accounts</div>';
+    };
+
     return `<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -257,6 +272,8 @@ export class ReportPdfService {
   .cover .sub { color: #555; margin-top: 2px; }
   .cover .fs { font-size: 15px; font-weight: 700; margin-top: 8px; }
   .cover .unaudited { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid #b45309; color: #b45309; border-radius: 4px; font-size: 11px; }
+  .cover .approved { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid #15803d; background: #f0fdf4; color: #15803d; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .cover .rereview { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid #b91c1c; background: #fef2f2; color: #b91c1c; border-radius: 4px; font-size: 11px; font-weight: 600; }
   h2 { font-size: 14px; color: #1E3C72; border-bottom: 1.5px solid #1E3C72; padding-bottom: 3px; margin: 0 0 8px; }
   section { margin-bottom: 16px; }
   section.break { page-break-before: always; }
@@ -282,7 +299,7 @@ export class ReportPdfService {
     ${co?.taxId ? `<div class="sub">เลขประจำตัวผู้เสียภาษี / Tax ID: ${esc(co.taxId)}</div>` : ''}
     <div class="fs">งบการเงิน / Financial Statements</div>
     <div class="sub">${periodLine}</div>
-    <div class="unaudited">ยังไม่ได้ตรวจสอบ — งบเพื่อการบริหาร / Unaudited — management accounts</div>
+    ${reviewStamp()}
   </div>
 
   <section>
