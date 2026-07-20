@@ -24,6 +24,7 @@ import { LotsService } from '../lots/lots.service';
 import { SerialsService } from '../serials/serials.service';
 import { PriceBookService } from '../pricing/price-book.service';
 import { PosControlService } from '../pos/control/pos-control.service';
+import { GiftCardService } from '../giftcards/gift-card.service';
 
 export interface PortalSaleDto {
   items: { item_id: string; item_description?: string; qty: number; unit_price: number; uom?: string; discount_pct?: number; modifier_option_ids?: number[]; lot_no?: string; serial_nos?: string[] }[];
@@ -57,6 +58,10 @@ export interface PortalSaleDto {
   // cap, the sale must reference a supervisor's discount authorization (an OVR- number from
   // POST /api/pos/discount-authorize). ABSENT caps (the default) ⇒ no gate ⇒ byte-identical.
   discount_approval_no?: string;
+  // docs/52 Phase 4e — store-credit tender: pay part/all of the sale from a gift-card / store-credit balance
+  // (draws down the 2200 deposit liability, reducing the cash leg — mirrors the dine-in gift-card tender).
+  // Used by the POS exchange flow (return → store credit → spend it on the replacement). ABSENT ⇒ byte-identical.
+  store_credit_card_no?: string;
 }
 
 // docs/52 Phase 6a — map a tender method label to its GL posting event. Each TENDER.* event defaults its
@@ -101,6 +106,7 @@ export class PortalPosService {
     @Optional() private readonly serials?: SerialsService,  // docs/52 Phase 3b — serial/IMEI capture for serial-tracked items
     @Optional() private readonly priceBooks?: PriceBookService,  // docs/52 Phase 4a — governed tier/branch base price
     @Optional() private readonly posControl?: PosControlService,  // docs/52 Phase 4b — over-cap discount authority
+    @Optional() private readonly giftCards?: GiftCardService,  // docs/52 Phase 4e — store-credit tender (2200 draw-down)
   ) {}
 
   // POST /api/portal/pos/sales — retail sale (SALE-) + stock decrement + loyalty earn.
@@ -235,6 +241,10 @@ export class PortalPosService {
       if (Math.abs(applied - total) > 0.001)
         throw new BadRequestException({ code: 'TENDER_MISMATCH', message: `Tenders apply ${applied} but the sale total is ${total}`, messageTh: `ยอดชำระรวม (${applied}) ไม่ตรงกับยอดที่ต้องชำระ (${total})` });
     }
+    // docs/52 Phase 4e — store credit tender is a SINGLE-tender path (draws the 2200 liability down before the
+    // cash leg); mixing it with an explicit split-tender list is unsupported (the split legs already sum to total).
+    if (dto.store_credit_card_no && splitTenders)
+      throw new BadRequestException({ code: 'STORE_CREDIT_WITH_SPLIT', message: 'Store credit cannot be combined with split tenders', messageTh: 'ใช้เครดิตร้านร่วมกับการแยกชำระไม่ได้' });
 
     // docs/52 Phase 4b — discount authority: a MANUAL line/bill discount above the tenant's configured cap
     // requires a supervisor's authorization (SoD R08). Both caps NULL (the default) ⇒ no gate ⇒ byte-identical.
@@ -383,6 +393,7 @@ export class PortalPosService {
     let tender: any = null;
     let je: any = null;
     let splitTenderResults: any[] | null = null;
+    let giftApplied = 0; // docs/52 Phase 4e — store-credit applied to this sale (2200 draw-down)
     // recipe COGS (gated by post_cogs): Dr 5300 / Cr 1200 — posted alongside the sale's GL (same request tx)
     if (recipeCogs > 0 && !(await this.ledger.alreadyPosted('POS-COGS', saleNo))) {
       await this.ledger.postEntry({ date: today, source: 'POS-COGS', sourceRef: saleNo, tenantId: t.id, memo: `COGS ${saleNo}`, createdBy: user.username, lines: [{ account_code: '5300', debit: recipeCogs }, { account_code: '1200', credit: recipeCogs }] });
@@ -392,6 +403,17 @@ export class PortalPosService {
     if (total > 0) {
       // Link this tender to the shop's open till (if any) so closeTill sees POS cash (move #5 reconciliation).
       const openTill = await this.payments.currentOpenTill(t.id);
+      // docs/52 Phase 4e — store-credit tender: draw the gift-card / store-credit balance down FIRST (capped at
+      // the total), so only the REMAINING cash leg reaches the till + Dr 1000. The 2200 draw-down is a GL leg
+      // below (mirrors dine-in buildSale). ABSENT card ⇒ giftApplied 0 ⇒ cashLeg = total ⇒ byte-identical.
+      if (dto.store_credit_card_no && this.giftCards) {
+        // draw min(sale total, available card balance) — a store credit smaller than the bill covers only
+        // part of it (the rest is the cash leg); a larger balance leaves a residual on the card.
+        const bal = (await this.giftCards.balance(dto.store_credit_card_no)).balance;
+        const want = roundCurrency(Math.min(total, Math.max(0, bal)), 'THB');
+        if (want > 0) { const r = await this.giftCards.redeemForSale(dto.store_credit_card_no, want, saleNo, t.id, user); giftApplied = roundCurrency(r.applied, 'THB'); }
+      }
+      const cashLeg = roundCurrency(total - giftApplied, 'THB');
       // Phase 6a: a split sale records ONE tender per leg (all linked to sale_no + till → each shows in the
       // pending-settlement worklist + drawer count); a stable per-leg idempotency key makes a retry safe. The
       // single-tender path is unchanged (no key → byte-identical).
@@ -407,9 +429,10 @@ export class PortalPosService {
           splitTenderResults.push({ ...r, method: leg.method });
         }
         tender = splitTenderResults[0];
-      } else {
+      } else if (cashLeg > 0) {
+        // single cash/card tender for the remaining leg (store credit already drew down the rest).
         tender = await this.payments.recordTender(
-          { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: total, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id },
+          { sale_no: saleNo, tenant_id: t.id, method: dto.payment_method ?? 'Cash', amount: cashLeg, currency: 'THB', gateway: 'mock', till_session_id: openTill?.id },
           user,
         );
       }
@@ -448,7 +471,12 @@ export class PortalPosService {
         }
         tenderLines = [...byAcct.entries()].map(([account_code, debit]) => ({ account_code, debit }));
       } else {
-        tenderLines = [{ account_code: '1000', debit: total }];
+        // Dr 1000 cash leg + Dr 2200 store-credit draw-down (zero legs auto-dropped by postEntry). The two sum
+        // to `total`, so a sale with no store credit collapses to the single Dr 1000 = total (byte-identical).
+        tenderLines = [
+          ...(cashLeg > 0 ? [{ account_code: '1000', debit: cashLeg }] : []),
+          ...(giftApplied > 0 ? [{ account_code: '2200', debit: giftApplied }] : []),
+        ];
       }
       je = await this.ledger.postEntry({
         date: today, source: 'POS', sourceRef: saleNo, tenantId: t.id, memo: `Retail sale ${saleNo}`, createdBy: user.username,
@@ -478,7 +506,7 @@ export class PortalPosService {
       ? splitTenderResults.map((r) => ({ payment_no: r.payment_no, method: r.method ?? null, amount: n(r.amount), status: r.status, change_due: r.change_due ?? null }))
       : null;
     const changeDue = splitTenderResults ? roundCurrency(splitTenderResults.reduce((a, r) => a + n(r.change_due), 0), 'THB') : (tender?.change_due ?? null);
-    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, service_charge: serviceCharge, rounding_adjustment: roundingAdj, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, tenders, change_due: changeDue, journal_no: je?.entry_no ?? null };
+    return { sale_no: saleNo, branch_id: branchId, subtotal, discount, pricing_discount: pricingDiscount, service_charge: serviceCharge, rounding_adjustment: roundingAdj, vat, total, points_earned: pointsEarned, lines: lines.length, payment_no: tender?.payment_no ?? null, tenders, change_due: changeDue, store_credit_applied: giftApplied, journal_no: je?.entry_no ?? null };
   }
 
   // GET /api/portal/pos/sales — history (this tenant)
