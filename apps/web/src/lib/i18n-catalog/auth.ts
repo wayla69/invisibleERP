@@ -94,4 +94,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // ── SSO callback ──────────────────────────────────────────────────────────
   'auth.sso_verifying': { th: 'กำลังตรวจสอบ SSO…', en: 'Verifying SSO…' },
   'auth.sso_failed': { th: 'เข้าสู่ระบบด้วย SSO ไม่สำเร็จ', en: 'SSO sign-in failed' },
+
+  // ── Public pricing page link (/pricing) ───────────────────────────────────
+  'auth.pricing_link': { th: 'ดูแพ็กเกจและราคา', en: 'View plans & pricing' },
 };

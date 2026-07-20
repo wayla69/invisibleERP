@@ -147,6 +147,10 @@ export default function SignupPage() {
           <Link href="/login" className="font-medium text-primary hover:underline">
             {t('auth.sign_in')}
           </Link>
+          {' · '}
+          <Link href="/plans" className="font-medium text-primary hover:underline">
+            {t('auth.pricing_link')}
+          </Link>
         </p>
       </Card>
     </main>
