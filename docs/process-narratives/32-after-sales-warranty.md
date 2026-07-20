@@ -40,7 +40,7 @@ cost recognition is future work); customer/inbound sales claims on order lines (
 ## 4. References
 
 - ISO 9001:2015 cl. 8.5.5 (post-delivery activities — incl. warranty), cl. 8.2 (customer communication).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — SVC-01.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — SVC-01.
 - Code: `apps/api/src/modules/service-warranty/service-warranty.service.ts`,
   `apps/api/src/modules/service-warranty/service-warranty.controller.ts`,
   `apps/api/src/database/schema/service-warranty.ts`, migration `apps/api/drizzle/0329_service_warranty.sql`.

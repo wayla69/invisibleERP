@@ -26,7 +26,7 @@ To define and control the end-to-end revenue cycle — from order/sale capture t
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 8.2 (requirements for products/services), cl. 8.6 (release), cl. 8.7 (nonconforming outputs).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — REV-01..11, GL-01.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — REV-01..11, GL-01.
 - `compliance/policies/03-delegation-of-authority.md` (credit and refund authority), `11-financial-close-policy.md` (revenue cutoff).
 - Code: `apps/api/src/modules/pos/pos.service.ts`, `apps/api/src/modules/payments/payments.service.ts`, `apps/api/src/modules/returns/returns.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.
 

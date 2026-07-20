@@ -36,8 +36,8 @@ This narrative documents the multi-branch operating model and the offline point-
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (QMS and its processes); cl. 8.1 (Operational planning and control); cl. 8.5.1 (Control of provision).
-- Risk & Control Matrix: `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`.
-- Segregation-of-Duties matrix: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
+- Risk & Control Matrix: `compliance/Invisible_ERP_SOX_RCM_v1.xlsx`.
+- Segregation-of-Duties matrix: `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx`.
 - Policies: `<<Branch Operations Policy>>`, `<<Offline POS / Business Continuity Procedure>>`.
 - Code:
   - `apps/api/src/modules/branch/branch.controller.ts`

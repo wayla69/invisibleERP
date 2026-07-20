@@ -68,7 +68,7 @@ This file is the heart. It is **not** a router that delegates to the sub-agent c
 
 ### 2a. `ERPAgent` class
 
-- **`SYSTEM` (Thai, lines 18–27):** Identity = "AI Assistant ของ Invisible ERP … สำหรับ Oshinei Enterprise". Rules (translated):
+- **`SYSTEM` (Thai, lines 18–27):** Identity = "AI Assistant ของ Invisible ERP … สำหรับ Invisible Enterprise". Rules (translated):
   - Use the same language as the user (Thai or English).
   - Show numbers with thousands commas + unit **THB**.
   - **Always use tools to fetch real data before answering.**

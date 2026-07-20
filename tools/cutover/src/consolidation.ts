@@ -107,8 +107,8 @@ async function main() {
   // ── Checks ──
 
   // 1. Create consolidation group
-  const grp = await inj('POST', '/api/consolidation/groups', admin, { name: 'Oshinei Group 2026', fiscal_year: 2026 });
-  ok('Create group → has id + name', grp.status === 201 && grp.json.id > 0 && grp.json.name === 'Oshinei Group 2026', JSON.stringify(grp.json));
+  const grp = await inj('POST', '/api/consolidation/groups', admin, { name: 'Invisible Group 2026', fiscal_year: 2026 });
+  ok('Create group → has id + name', grp.status === 201 && grp.json.id > 0 && grp.json.name === 'Invisible Group 2026', JSON.stringify(grp.json));
   const groupId = grp.json.id;
 
   // 2. Add T1 entity (100% ownership)

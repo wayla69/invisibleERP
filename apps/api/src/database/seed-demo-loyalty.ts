@@ -1,5 +1,5 @@
 /**
- * Demo loyalty / CRM for the Oshinei tenant: tiers, ~150 members with point
+ * Demo loyalty / CRM for the Invisible tenant: tiers, ~150 members with point
  * balances + ledger, a rewards catalogue and a few campaigns. Lights up the
  * CRM and Loyalty modules. Deterministic (seeded PRNG), idempotent.
  *
@@ -62,8 +62,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ── wipe (FK-safe) ──

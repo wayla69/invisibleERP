@@ -1,11 +1,11 @@
 # ISO 27001:2022 Gap Analysis — Invisible ERP V2
 
-**Entity:** Invisible Consulting — Oshinei Enterprise ERP
+**Entity:** Invisible Consulting — Invisible Enterprise ERP
 **System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
 **Framework:** ISO/IEC 27001:2022 — Annex A (93 controls across 4 themes)
 **Prepared:** 2026-06-28 · Version 0.1 DRAFT — for review with ISMS Lead / certification body
 **Owner:** CISO / IT Security (to assign)
-**Related:** `soc2-readiness.md` · `COSO_ICFR_Audit_Readiness_Plan.md` · `Oshinei_ERP_SOX_RCM_v1.xlsx` · `policies/`
+**Related:** `soc2-readiness.md` · `COSO_ICFR_Audit_Readiness_Plan.md` · `Invisible_ERP_SOX_RCM_v1.xlsx` · `policies/`
 
 > **Relationship to SOC 2 and SOX work:** ISO 27001:2022 Annex A maps almost one-to-one with SOC 2 CC6–CC9
 > (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->299<!-- /rcm-total -->-control RCM built for SOX

@@ -62,7 +62,7 @@ const isProd = () => process.env.NODE_ENV === 'production';
 // read the CSRF flag on the web origin and send the auth cookie to the API. Both are env-driven and
 // default to the original single-origin behaviour (no Domain, SameSite=Lax) so existing deploys are
 // unchanged.
-//   AUTH_COOKIE_DOMAIN   — e.g. ".oshinei.co" makes the cookie shared by every *.oshinei.co subdomain
+//   AUTH_COOKIE_DOMAIN   — e.g. ".invisible.co" makes the cookie shared by every *.invisible.co subdomain
 //                          (app.* + api.* are same-site under one registrable domain, so Lax still works).
 //   AUTH_COOKIE_SAMESITE — "None" for web/API on *different registrable domains* (true cross-site);
 //                          forces Secure (browsers drop SameSite=None without it). "Lax" (default) | "Strict".

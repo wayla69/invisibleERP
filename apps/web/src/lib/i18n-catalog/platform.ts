@@ -200,7 +200,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.prov_new_company_btn': { th: 'เปิดบริษัทใหม่', en: 'New company' },
   'plt.prov_dialog_desc': { th: 'สร้าง tenant + ผู้ดูแล (Admin) + ผังบัญชีตามอุตสาหกรรม ให้บริษัทใหม่ทันที', en: 'Instantly create a tenant + Admin user + an industry-tailored chart of accounts for the new company' },
   'plt.prov_company_name': { th: 'ชื่อกิจการ', en: 'Company name' },
-  'plt.prov_company_name_ph': { th: 'ร้านโอชิเนอิ', en: 'Oshinei Shop' },
+  'plt.prov_company_name_ph': { th: 'ร้านอินวิซิเบิล', en: 'Invisible Shop' },
   'plt.prov_tenant_code': { th: 'รหัส tenant', en: 'Tenant code' },
   'plt.prov_industry': { th: 'อุตสาหกรรม', en: 'Industry' },
   'plt.prov_admin_username': { th: 'ชื่อผู้ใช้ Admin', en: 'Admin username' },

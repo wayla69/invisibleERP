@@ -5,7 +5,7 @@
 > Implemented/Partial/Gap counts, (c) reconciles the panel's control IDs to the RCM (several didn't match,
 > which is why built controls read as "missing"), and (d) states a realistic ICFR-attestable timeline.
 >
-> Source of truth: `compliance/build_rcm.py` → `Oshinei_ERP_SOX_RCM_v1.xlsx` (regenerate, never hand-edit).
+> Source of truth: `compliance/build_rcm.py` → `Invisible_ERP_SOX_RCM_v1.xlsx` (regenerate, never hand-edit).
 > Last reconciled: 2026-06-30.
 
 ## 1. We are NOT "audit-ready" — and we should stop saying it

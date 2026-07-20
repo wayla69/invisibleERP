@@ -34,8 +34,8 @@ This narrative documents human-capital time and labor capture: employee timeshee
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (QMS and its processes); cl. 7.1.2 (People); cl. 8.5.1 (Control of provision).
-- Risk & Control Matrix: `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`.
-- Segregation-of-Duties matrix: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
+- Risk & Control Matrix: `compliance/Invisible_ERP_SOX_RCM_v1.xlsx`.
+- Segregation-of-Duties matrix: `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx`.
 - Policies: `<<HR / Time & Attendance Policy>>`, `<<Leave Policy>>`.
 - Code:
   - `apps/api/src/modules/hcm/hcm.controller.ts`

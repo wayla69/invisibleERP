@@ -1,11 +1,11 @@
 # SOC 2 Type II Readiness — Invisible ERP V2
 
-**Entity:** Invisible Consulting — Oshinei Enterprise ERP
+**Entity:** Invisible Consulting — Invisible Enterprise ERP
 **System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
 **Framework:** AICPA Trust Services Criteria (TSC) 2017 — Security (CC1–CC9); Availability (A1) noted
 **Prepared:** 2026-06-28 · Version 0.1 DRAFT — for review with SOC 2 auditor / CPA firm
 **Owner:** SOX PMO / Controller (to assign)
-**Related:** `COSO_ICFR_Audit_Readiness_Plan.md` · `Oshinei_ERP_SOX_RCM_v1.xlsx` · `policies/`
+**Related:** `COSO_ICFR_Audit_Readiness_Plan.md` · `Invisible_ERP_SOX_RCM_v1.xlsx` · `policies/`
 
 > **Relationship to SOX work:** SOC 2 and SOX share most of their ITGC DNA. The <!-- rcm-total -->299<!-- /rcm-total -->-control RCM
 > (<!-- rcm-implemented -->296<!-- /rcm-implemented --> Implemented; census: `build_rcm.py --counts`) built for SOX 404(a) is the primary evidence base for SOC 2. The gap between
@@ -87,7 +87,7 @@ apply; each PSP carries its own SOC 2 / PCI-DSS report.
 
 | TSC point | Existing evidence | Evidence status |
 |---|---|---|
-| CC2.1 Information to support internal control | 30-cycle ISO process narratives in `docs/process-narratives/`; RCM in `Oshinei_ERP_SOX_RCM_v1.xlsx` | ✅ Designed |
+| CC2.1 Information to support internal control | 30-cycle ISO process narratives in `docs/process-narratives/`; RCM in `Invisible_ERP_SOX_RCM_v1.xlsx` | ✅ Designed |
 | CC2.2 Communicates internally | ELC-POL-02 Whistleblower Policy; `compliance@invisible-erp.co.th` + `/compliance-reports` route | ✅ Designed |
 | CC2.3 Communicates externally (to customers) | ToS (DRAFT v0.1), DPA (DRAFT v0.2), **privacy policy (DRAFT v0.1, `docs/legal/privacy-policy.md`)** + public `/legal/privacy` page linked from signup (docs/27 R0-2) | 🟡 Drafted — counsel review + publication pending |
 

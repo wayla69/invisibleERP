@@ -150,7 +150,7 @@ cov.merge_cells("B2:C2"); cov.merge_cells("B3:C3")
 def crow(r,l,v):
     cov[f"B{r}"]=l; cov[f"B{r}"].font=f(10,True,NAVY); cov[f"B{r}"].alignment=WRAP
     cov[f"C{r}"]=v; cov[f"C{r}"].font=f(10); cov[f"C{r}"].alignment=WRAP
-crow(6,"Entity","Invisible Consulting — Oshinei Enterprise ERP (EGC)")
+crow(6,"Entity","Invisible Consulting — Invisible Enterprise ERP (EGC)")
 crow(7,"Source of truth","packages/shared/src/permissions.ts — PERMISSIONS + DEFAULT_ROLE_PERMISSIONS")
 crow(8,"Enforcement today","RBAC via @Permissions (OR-semantics) + PermissionsGuard; tenant isolation via RLS")
 crow(9,"Method","16 SoD conflict rules; a role conflicts when it holds duties on BOTH sides of a rule")
@@ -419,7 +419,7 @@ rm.freeze_panes="B3"; rm.row_dimensions[2].height=16
 
 # move Cover first
 wb.move_sheet("Cover", -wb.sheetnames.index("Cover"))
-out="compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx"
+out="compliance/Invisible_ERP_SoD_Matrix_v1.xlsx"
 wb.save(out)
 print("TO-BE residual conflicts (non-admin):", sum(len(tb_conflicts(p)) for _,p,_ in TB_ROLES if "__ALL__" not in p))
 # console summary

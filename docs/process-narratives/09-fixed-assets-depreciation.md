@@ -28,7 +28,7 @@ To define and control the fixed-asset lifecycle — acquisition/capitalization, 
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.1.3 (infrastructure), cl. 7.5 (documented information), cl. 9.1 (monitoring/measurement).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — FA-01..05, GL-01, REC-01.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — FA-01..05, GL-01, REC-01.
 - `compliance/policies/03-delegation-of-authority.md` (capital expenditure and disposal authority), `11-financial-close-policy.md` (depreciation cutoff).
 - Code: `apps/api/src/modules/assets/assets.service.ts` + `assets.controller.ts`, `apps/api/src/modules/eam/eam.service.ts` + `eam.controller.ts` (EAM), `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.
 

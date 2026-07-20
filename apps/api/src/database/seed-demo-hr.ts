@@ -1,5 +1,5 @@
 /**
- * Demo HR / payroll for the Oshinei tenant: a staff roster (kitchen, service,
+ * Demo HR / payroll for the Invisible tenant: a staff roster (kitchen, service,
  * cashier, management), timesheets with overtime, leave requests, and posted
  * monthly payroll runs with per-employee payslips. Deterministic, idempotent.
  *
@@ -64,8 +64,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ── wipe (FK-safe) ──

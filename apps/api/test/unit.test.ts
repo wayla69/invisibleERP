@@ -28,15 +28,15 @@ describe('e-Tax by Email composer (ETDA, no CA)', () => {
   const svc = new EtaxEmailService(null as never, null as never, fakePdf, null as never);
   const inv = {
     doc_no: 'TIV-202606-0009', issue_date: '2026-06-22', currency: 'THB',
-    seller: { name: 'ร้านโอชิเนอิ', tax_id: '0105551234567', address: 'กทม.' },
+    seller: { name: 'ร้านอินวิซิเบิล', tax_id: '0105551234567', address: 'กทม.' },
     buyer: { name: 'ลูกค้า' }, subtotal: 100, vat_rate: 0.07, vat_amount: 7, grand_total: 107,
     lines: [{ line_no: 1, description: 'อาหาร', amount: 100 }],
   };
   let msg: Awaited<ReturnType<typeof svc.compose>>;
-  beforeAll(async () => { msg = await svc.compose(inv as never, 'shop@oshinei.co.th', 'buyer@example.com'); });
+  beforeAll(async () => { msg = await svc.compose(inv as never, 'shop@invisible.co.th', 'buyer@example.com'); });
 
   it('CC goes to the ETDA time-stamp mailbox', () => expect(msg.cc).toBe(ETAX_TIMESTAMP_EMAIL));
-  it('from seller → to buyer', () => { expect(msg.from).toBe('shop@oshinei.co.th'); expect(msg.to).toBe('buyer@example.com'); });
+  it('from seller → to buyer', () => { expect(msg.from).toBe('shop@invisible.co.th'); expect(msg.to).toBe('buyer@example.com'); });
   it('subject carries the doc no', () => expect(msg.subject).toContain('TIV-202606-0009'));
   it('attaches the readable tax-invoice document, not the raw e-Tax XML (ETDA time-stamps the PDF/HTML, not the XML)', () => {
     expect(msg.attachments?.[0].filename).toBe('TIV-202606-0009.html');
@@ -310,7 +310,7 @@ describe('Segregation of Duties — conflict detection (ITGC-AC-09)', () => {
 describe('DocNumberService formats', () => {
   const d = new DocNumberService(undefined as never);
   it('sales order SO-YYYYMMDD-HHMM', () => expect(d.nextSalesOrder(new Date('2026-06-21T09:30:00'))).toMatch(/^SO-\d{8}-\d{4}$/));
-  it('tenant-stamped SALE-prefix', () => expect(d.nextTenantStamped('SALE', 'Oshinei')).toMatch(/^SALE-OSHI-\d{14}$/));
+  it('tenant-stamped SALE-prefix', () => expect(d.nextTenantStamped('SALE', 'Invisible')).toMatch(/^SALE-INVI-\d{14}$/));
 });
 
 describe('SME edition maker-checker seam — assertMakerChecker (docs/49, SME-01)', () => {

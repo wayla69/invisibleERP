@@ -47,7 +47,7 @@ Publish the executed privacy policy and update the served summary page (`apps/we
 ## 3. SOC 2 Type I engagement + evidence window — AUD-CMP-03
 
 **Owner:** CFO.
-**Action:** engage the audit firm (Type I first, Type II after ≥1 quarter of operating evidence). The control-evidence pack is already automated: the `compliance` CI job writes the ICFR evidence artifact (`EVIDENCE_OUT`) per run — archive one pack per quarter, plus the RCM (`compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`) and `COSO_ICFR_Audit_Readiness_Plan.md` as the auditor's PBC starting set.
+**Action:** engage the audit firm (Type I first, Type II after ≥1 quarter of operating evidence). The control-evidence pack is already automated: the `compliance` CI job writes the ICFR evidence artifact (`EVIDENCE_OUT`) per run — archive one pack per quarter, plus the RCM (`compliance/Invisible_ERP_SOX_RCM_v1.xlsx`) and `COSO_ICFR_Audit_Readiness_Plan.md` as the auditor's PBC starting set.
 **Verify:** signed engagement letter; first quarterly evidence archive folder exists.
 
 ## 4. Operate the entity-level controls — AUD-CMP-04 (R3-4)

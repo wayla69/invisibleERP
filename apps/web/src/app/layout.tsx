@@ -24,7 +24,7 @@ const sarabun = Sarabun({
 
 export const metadata: Metadata = {
   title: 'Invisible ERP V2',
-  description: 'Oshinei Enterprise ERP — V2',
+  description: 'Invisible Enterprise ERP — V2',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'Invisible ERP', statusBarStyle: 'default' },
   icons: { icon: '/icon.svg', apple: '/icon.svg' },

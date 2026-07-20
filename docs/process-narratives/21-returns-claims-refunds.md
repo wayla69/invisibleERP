@@ -26,7 +26,7 @@ To define and control the processing of merchandise returns, the issuance of ref
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 8.2 (customer communication / requirements), cl. 8.6 (release of products and services), cl. 8.7 (control of nonconforming outputs).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — RET-01, RET-02, RET-03, REV-06, GL-01.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — RET-01, RET-02, RET-03, REV-06, GL-01.
 - `compliance/policies/03-delegation-of-authority.md` (refund authority), `11-financial-close-policy.md` (cutoff of revenue reversals).
 - Code: `apps/api/src/modules/returns/returns.service.ts`, `apps/api/src/modules/claims/claims.service.ts`, `apps/api/src/modules/payments/payments.service.ts`, `apps/api/src/modules/giftcards/giftcards.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`.
 

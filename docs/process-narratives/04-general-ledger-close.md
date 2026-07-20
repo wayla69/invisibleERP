@@ -26,7 +26,7 @@ To control journal entry, the trial balance / financial statements, period and y
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4, cl. 7.5 (documented information), cl. 9.1 (monitoring/measurement).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — GL-01..06, REC-01..03, CON-01/02.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — GL-01..06, REC-01..03, CON-01/02.
 - `compliance/policies/11-financial-close-policy.md` (close calendar), `13-segregation-of-duties-policy.md` (R05, R06).
 - Code: `apps/api/src/modules/ledger/ledger.service.ts` + `ledger.controller.ts`, `apps/api/src/modules/reconciliation/reconciliation.service.ts`, `apps/api/src/modules/consolidation/`, `apps/api/src/modules/fx/fx.service.ts`.
 

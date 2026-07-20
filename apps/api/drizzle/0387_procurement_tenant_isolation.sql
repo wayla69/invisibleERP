@@ -13,7 +13,7 @@
 -- pr_items=27, purchase_orders=18, po_items=77, po_deliveries=0, goods_receipts=13, gr_items=54. Every
 -- row is attributable: purchase_orders/purchase_requests actors are either a real login (backfilled via
 -- users.tenant_id) or the 'procurement-demo' seed-script tag (database/seed-demo-procurement.ts:20),
--- which hardcodes the OSHINEI tenant. Child tables inherit their parent's tenant_id via FK. No orphaned
+-- which hardcodes the INVISIBLE tenant. Child tables inherit their parent's tenant_id via FK. No orphaned
 -- rows are expected — the final verification block below fails the migration loudly if any remain NULL,
 -- rather than silently leaving orphaned/invisible-to-everyone data.
 --
@@ -59,14 +59,14 @@ ALTER TABLE gr_items          ADD COLUMN IF NOT EXISTS tenant_id bigint REFERENC
 UPDATE purchase_requests pr SET tenant_id = u.tenant_id
   FROM users u WHERE u.username = pr.requested_by AND pr.tenant_id IS NULL;
 --> statement-breakpoint
-UPDATE purchase_requests SET tenant_id = (SELECT id FROM tenants WHERE code = 'OSHINEI')
+UPDATE purchase_requests SET tenant_id = (SELECT id FROM tenants WHERE code = 'INVISIBLE')
   WHERE tenant_id IS NULL AND requested_by = 'procurement-demo';
 --> statement-breakpoint
 
 UPDATE purchase_orders po SET tenant_id = u.tenant_id
   FROM users u WHERE u.username = po.created_by AND po.tenant_id IS NULL;
 --> statement-breakpoint
-UPDATE purchase_orders SET tenant_id = (SELECT id FROM tenants WHERE code = 'OSHINEI')
+UPDATE purchase_orders SET tenant_id = (SELECT id FROM tenants WHERE code = 'INVISIBLE')
   WHERE tenant_id IS NULL AND created_by = 'procurement-demo';
 --> statement-breakpoint
 
@@ -77,7 +77,7 @@ UPDATE goods_receipts gr SET tenant_id = u.tenant_id
 UPDATE goods_receipts gr SET tenant_id = po.tenant_id
   FROM purchase_orders po WHERE po.po_no = gr.po_no AND gr.tenant_id IS NULL;
 --> statement-breakpoint
-UPDATE goods_receipts SET tenant_id = (SELECT id FROM tenants WHERE code = 'OSHINEI')
+UPDATE goods_receipts SET tenant_id = (SELECT id FROM tenants WHERE code = 'INVISIBLE')
   WHERE tenant_id IS NULL AND received_by = 'procurement-demo';
 --> statement-breakpoint
 

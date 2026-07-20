@@ -1,6 +1,6 @@
 # PCI-DSS Scope Design — Invisible ERP V2
 
-**Entity:** Invisible Consulting — Oshinei Enterprise ERP
+**Entity:** Invisible Consulting — Invisible Enterprise ERP
 **System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
 **Framework:** PCI-DSS v4.0 — SAQ-A (merchants who have outsourced all cardholder data functions)
 **Prepared:** 2026-06-28 · Version 0.1 DRAFT — for review with QSA / acquiring bank

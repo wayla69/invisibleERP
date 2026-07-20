@@ -1,4 +1,4 @@
-## Invisible / Oshinei ERP — V2 Definitive Architecture
+## Invisible / Invisible ERP — V2 Definitive Architecture
 
 **Decision:** TypeScript end-to-end on **NestJS + Drizzle + PostgreSQL + Next.js**, deployed on Railway, integrating the Anthropic SDK natively. This is Proposal A as the backbone, grafted with Proposal C's operational pragmatism (defer Redis, introspect-first, keep plain REST as the contract) and Proposal B's type-safety discipline (tenant scoping enforced structurally, not by convention). Source-verified against the legacy: 65 tables (15 `tbl_cust_*`), 30 REST endpoints, an HMAC `username|role|customer_name|expiry|sig` token, a 15-turn ReAct loop, openpyxl Excel + **fpdf** Thai PDF, a React Native `mobile/` client, and Postgres already half-adopted in `user_store.py`.
 

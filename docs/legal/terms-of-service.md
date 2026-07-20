@@ -1,4 +1,4 @@
-# Terms of Service — Oshinei Enterprise ERP
+# Terms of Service — Invisible Enterprise ERP
 
 > **Status: DRAFT v0.1 — requires review and execution by qualified legal counsel before use.**
 > Placeholders in `<<…>>` must be completed by `<<Invisible Consulting>>` and its counsel. This document is

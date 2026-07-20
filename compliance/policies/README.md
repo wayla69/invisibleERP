@@ -1,4 +1,4 @@
-# Policy Register — Invisible ERP / Oshinei Enterprise
+# Policy Register — Invisible ERP / Invisible Enterprise
 
 **Purpose:** Central index of the entity-level and IT governance policies that support the COSO 2013 control environment and the SOX 404(a) ICFR program. Each policy is a **DRAFT template** — replace `<<placeholders>>`, then review with the SOX advisor and legal counsel before the board/management adopts it.
 

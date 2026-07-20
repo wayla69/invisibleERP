@@ -460,7 +460,7 @@ async function main() {
   await inj('POST', '/api/tenant/starter-pack', lcTok, {});
   await inj('PATCH', '/api/tenant/profile', lcTok, { address_line1: '9 ถนนรอง', province: 'กรุงเทพมหานคร', postal_code: '10120' });
   await inj('POST', '/api/ledger/journal', lcTok, { date: `${year}-06-20`, source: 'TEST', lines: [{ account_code: '1000', debit: 50 }, { account_code: '4000', credit: 50 }] });
-  // The 2026-07-13 OSHINEI reset outage: a TENANTLESS line-item child (cust_pos_items has no tenant_id
+  // The 2026-07-13 INVISIBLE reset outage: a TENANTLESS line-item child (cust_pos_items has no tenant_id
   // column) referencing a tenant-scoped parent was invisible to the wipe loop's tenant_id enumeration and
   // permanently blocked the parent's DELETE → FACTORY_RESET_BLOCKED. Seed that exact shape so the reset
   // must clear it via the FK-child walk in tenant-wipe.ts.
@@ -519,7 +519,7 @@ async function main() {
             (SELECT count(*)::int FROM approval_actions WHERE tenant_id=${lcTid}) aa,
             (SELECT count(*)::int FROM branches WHERE tenant_id=${newTid}) ob`)).rows[0] as any;
   ok('Reset wiped LifeCo data (branches + JEs = 0) and re-seeded 12 fiscal periods', post.b === 0 && post.j === 0 && post.fp === 12, JSON.stringify(post));
-  ok('Reset cleared the TENANTLESS FK child too (cust_pos_items via cust_pos_sales — the OSHINEI blocker)', post.cs === 0 && post.ci === 0, JSON.stringify({ cs: post.cs, ci: post.ci }));
+  ok('Reset cleared the TENANTLESS FK child too (cust_pos_items via cust_pos_sales — the INVISIBLE blocker)', post.cs === 0 && post.ci === 0, JSON.stringify({ cs: post.cs, ci: post.ci }));
   ok('Reset cleared the tenant-scoped FK child in child-first order (gr_items before goods_receipts — the Amber blocker)', post.gr === 0 && post.gri === 0, JSON.stringify({ gr: post.gr, gri: post.gri }));
   ok('Reset deleted APPEND-ONLY rows through the immutability guard (Posted JE + approval_actions — app.tenant_wipe bypass)', post.j === 0 && post.aa === 0, JSON.stringify({ j: post.j, aa: post.aa }));
   ok('Reset PRESERVED identity/billing/audit (users, subscription, audit_log rows survive)', post.u >= 1 && post.sub >= 1 && post.al >= 1, JSON.stringify({ u: post.u, sub: post.sub, al: post.al }));

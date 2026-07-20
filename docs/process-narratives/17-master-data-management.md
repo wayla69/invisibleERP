@@ -26,7 +26,7 @@ To define and control the maintenance of master data — items, customers, vendo
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.5 (control of documented information), cl. 8.5.1 (control of production data / configuration).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — MDM-01..03, ITGC-AC-10, ITGC-CM.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — MDM-01..03, ITGC-AC-10, ITGC-CM.
 - `compliance/policies/03-delegation-of-authority.md` (master-data authorization), `07-change-management-policy.md` (COA change management).
 - Code: `apps/api/src/modules/masterdata/masterdata.service.ts` + `masterdata.controller.ts` + `master-registry.ts`, `apps/api/src/modules/ledger/ledger.service.ts` (`seedChartOfAccounts`), `apps/api/src/database/schema/`.
 

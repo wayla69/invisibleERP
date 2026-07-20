@@ -44,7 +44,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
     if (timer) clearTimeout(timer);
   }
 }
-const SYSTEM_TH = `คุณคือ AI Assistant ของ Invisible ERP สำหรับ Oshinei Enterprise
+const SYSTEM_TH = `คุณคือ AI Assistant ของ Invisible ERP สำหรับ Invisible Enterprise
 - ตอบเป็นภาษาเดียวกับผู้ใช้ (ไทยหรืออังกฤษ)
 - แสดงตัวเลขพร้อมคอมมาคั่นหลักพัน และหน่วยเป็น THB
 - ใช้ tool ดึงข้อมูลจริงก่อนตอบเสมอ

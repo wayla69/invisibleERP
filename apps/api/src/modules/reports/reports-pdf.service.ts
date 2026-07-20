@@ -370,7 +370,7 @@ export class ReportPdfService {
 <body>
   <div class="doc">
     <div class="brand">
-      <div class="co">Invisible Consulting<small>Oshinei Enterprise ERP</small></div>
+      <div class="co">Invisible Consulting<small>Invisible Enterprise ERP</small></div>
       <div class="title">${esc(title)}</div>
     </div>
     ${body}

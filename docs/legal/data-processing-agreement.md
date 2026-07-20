@@ -1,4 +1,4 @@
-# Data Processing Agreement (DPA) — Oshinei Enterprise ERP
+# Data Processing Agreement (DPA) — Invisible Enterprise ERP
 
 > **Status: DRAFT v0.2 — requires review and execution by qualified legal counsel before use.**
 > Complete `<<…>>` placeholders. Not legal advice; not in force until executed by both parties.

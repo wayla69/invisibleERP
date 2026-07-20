@@ -24,7 +24,7 @@ Per platform, the provider resolves in this order — first complete identity wi
 **Prerequisite:** a paid Apple Developer Program account (organization).
 
 1. **Pass Type ID** — [developer.apple.com](https://developer.apple.com/account) → *Certificates, Identifiers & Profiles* →
-   *Identifiers* → **+** → *Pass Type IDs* → e.g. `pass.co.th.oshinei.member`. Note your **Team ID** (top-right of the account page).
+   *Identifiers* → **+** → *Pass Type IDs* → e.g. `pass.co.th.invisible.member`. Note your **Team ID** (top-right of the account page).
 2. **Signing certificate** — select the Pass Type ID → *Create Certificate* → upload a CSR
    (`openssl req -new -newkey rsa:2048 -nodes -keyout pass.key -out pass.csr`) → download `pass.cer` →
    bundle to `.p12`:
@@ -41,7 +41,7 @@ Per platform, the provider resolves in this order — first complete identity wi
    | `WALLET_APPLE_CERT_PASSWORD` | the .p12 export password |
    | `WALLET_APPLE_WWDR` | contents of `wwdr.pem` |
    | `WALLET_APPLE_TEAM_ID` | e.g. `A1B2C3D4E5` |
-   | `WALLET_APPLE_PASS_TYPE_ID` | e.g. `pass.co.th.oshinei.member` |
+   | `WALLET_APPLE_PASS_TYPE_ID` | e.g. `pass.co.th.invisible.member` |
 
 > **⚠️ Honest scope note:** with creds set, the API returns the complete PassKit `pass.json` content with
 > `provider: 'apple'` and `install_url: null` — **assembling and PKCS#7-signing the downloadable `.pkpass`

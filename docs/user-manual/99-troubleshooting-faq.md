@@ -351,7 +351,7 @@ revokes existing sessions.
 **Who do I contact for help?**
 Your organisation's administrator first (for access, passwords, MFA, module
 toggles). For issues they can't resolve, escalate to your support contact:
-`kittipot.c@oshinei.onmicrosoft.com`.
+`kittipot.c@invisible.onmicrosoft.com`.
 
 ---
 

@@ -34,7 +34,7 @@ export class StripeBilling {
             currency: (plan.currency ?? 'THB').toLowerCase(),
             recurring: { interval: plan.interval === 'annual' ? 'year' : 'month' }, // 1.7 — annual billing
             unit_amount: Math.round(Number(plan.amount) * 100), // smallest currency unit
-            product_data: { name: `Oshinei ERP — ${plan.name}` },
+            product_data: { name: `Invisible ERP — ${plan.name}` },
           },
         },
       ],

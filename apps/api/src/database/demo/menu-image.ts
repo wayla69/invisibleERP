@@ -1,5 +1,5 @@
 /**
- * Self-contained menu-item placeholder images for the Oshinei demo.
+ * Self-contained menu-item placeholder images for the Invisible demo.
  *
  * No object storage / network needed: each item gets a category-themed SVG
  * (gradient + food glyph + dish name) returned as a `data:image/svg+xml,…`

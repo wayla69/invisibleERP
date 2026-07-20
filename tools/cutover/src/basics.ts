@@ -1823,14 +1823,14 @@ async function main() {
   // transport wired the submission is honestly `pending` (not a fabricated `accepted`). Config body uses
   // { provider: '...' }; submit body wraps doc in { doc: { ... } }.
   const setMy = await inj('PUT', '/api/einvoice/config', admin, { provider: 'einvoice.my.myinvois' });
-  const myInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'MY-INV-C2-001', seller: 'Oshinei MY Sdn Bhd', buyer: 'Test Buyer MY', total: 106, currency: 'MYR' } });
+  const myInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'MY-INV-C2-001', seller: 'Invisible MY Sdn Bhd', buyer: 'Test Buyer MY', total: 106, currency: 'MYR' } });
   ok('C2: MY e-invoice (MyInvois UBL 2.1) prepared → status=pending (no live transport), ref EINV-, no fake QR',
     setMy.status === 200 && myInv.json?.status === 'pending' && String(myInv.json?.ref ?? '').startsWith('EINV-') && (myInv.json?.qr ?? null) === null && myInv.json?.sandbox === false,
     `set=${setMy.status} status=${myInv.json?.status} ref=${myInv.json?.ref} qr=${myInv.json?.qr} provider=${myInv.json?.provider}`);
 
   // TC-C2-08: SG e-invoice — Peppol BIS3 document prepared, honestly `pending` until a live Peppol AP is wired.
   const setSg = await inj('PUT', '/api/einvoice/config', admin, { provider: 'einvoice.sg.invoicenow' });
-  const sgInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'SG-INV-C2-001', seller: 'Oshinei SG Pte Ltd', buyer: 'Test Buyer SG', total: 109, currency: 'SGD' } });
+  const sgInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'SG-INV-C2-001', seller: 'Invisible SG Pte Ltd', buyer: 'Test Buyer SG', total: 109, currency: 'SGD' } });
   ok('C2: SG e-invoice (Peppol BIS3) prepared → status=pending (no live transport), ref EINV-, no fake QR',
     setSg.status === 200 && sgInv.json?.status === 'pending' && String(sgInv.json?.ref ?? '').startsWith('EINV-') && (sgInv.json?.qr ?? null) === null,
     `set=${setSg.status} status=${sgInv.json?.status} ref=${sgInv.json?.ref} qr=${sgInv.json?.qr} provider=${sgInv.json?.provider}`);
@@ -1838,7 +1838,7 @@ async function main() {
   // TC-C2-08b: the sandbox 'stub' provider still acknowledges locally — but is explicitly flagged sandbox
   // so it can never be mistaken for a real filing.
   const setStub = await inj('PUT', '/api/einvoice/config', admin, { provider: 'stub' });
-  const stubInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'STUB-INV-C2-001', seller: 'Oshinei', buyer: 'Test Buyer', total: 100 } });
+  const stubInv = await inj('POST', '/api/einvoice/submit', admin, { doc: { doc_ref: 'STUB-INV-C2-001', seller: 'Invisible', buyer: 'Test Buyer', total: 100 } });
   ok('C2: sandbox stub → status=accepted but sandbox=true (clearly not a real filing)',
     setStub.status === 200 && stubInv.json?.status === 'accepted' && stubInv.json?.sandbox === true,
     `set=${setStub.status} status=${stubInv.json?.status} sandbox=${stubInv.json?.sandbox}`);

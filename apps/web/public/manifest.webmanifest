@@ -1,7 +1,7 @@
 {
   "name": "Invisible ERP V2",
   "short_name": "Invisible ERP",
-  "description": "Oshinei Enterprise ERP — V2 (POS · inventory · finance)",
+  "description": "Invisible Enterprise ERP — V2 (POS · inventory · finance)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

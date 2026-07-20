@@ -1,5 +1,5 @@
 /**
- * Demo multi-branch for the Oshinei tenant: 2-3 physical outlets, with the
+ * Demo multi-branch for the Invisible tenant: 2-3 physical outlets, with the
  * existing POS sales tagged to a branch (weighted to the flagship) so the
  * consolidation / per-branch revenue report shows real numbers. Idempotent.
  *
@@ -37,8 +37,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ── branches (recreate) ──
