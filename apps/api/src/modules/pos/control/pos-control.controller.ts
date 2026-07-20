@@ -13,7 +13,7 @@ const OverrideBody = z.object({
 });
 // docs/52 Phase 4b — discount-authority policy + supervisor authorization.
 const DiscountSettingsBody = z.object({ max_line_discount_pct: z.number().min(0).max(100).nullable().optional(), max_bill_discount_pct: z.number().min(0).max(100).nullable().optional() });
-const AuthorizeDiscountBody = z.object({ max_pct: z.number().positive().max(100), reason: z.string().max(500).optional(), cashier: z.string().max(120).optional() });
+const AuthorizeDiscountBody = z.object({ max_pct: z.number().positive().max(100), max_amount: z.number().positive().optional(), reason: z.string().max(500).optional(), cashier: z.string().max(120).optional() });
 
 @Controller('api/pos')
 @Permissions('pos', 'order_mgt', 'cust_pos')

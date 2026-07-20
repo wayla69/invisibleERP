@@ -236,7 +236,7 @@ export class PortalPosService {
     // docs/52 Phase 4b — discount authority: a MANUAL line/bill discount above the tenant's configured cap
     // requires a supervisor's authorization (SoD R08). Both caps NULL (the default) ⇒ no gate ⇒ byte-identical.
     // The gate is on the manual discounts (`items[].discount_pct`, `discount`), not the pricing-engine discount.
-    let discountConsume: { overrideNo: string; requestedPct: number } | null = null;
+    let discountConsume: { overrideNo: string; requestedPct: number; discountAmount: number } | null = null;
     if (this.posControl) {
       const caps = await this.posControl.getDiscountSettings(t.id);
       if (caps.maxLinePct != null || caps.maxBillPct != null) {
@@ -246,9 +246,13 @@ export class PortalPosService {
         const billOver = caps.maxBillPct != null && billPct > caps.maxBillPct + 1e-6;
         if (lineOver || billOver) {
           const requestedPct = Math.max(lineOver ? maxLinePct : 0, billOver ? billPct : 0);
+          // total MANUAL discount ฿ (line-level markdowns folded into subtotal + the bill-level discount) —
+          // this is what an authorization's optional baht cap bounds.
+          const lineDiscountAmt = saleItems.reduce((a, it) => a + n(it.qty) * n(it.unit_price) * (n(it.discount_pct) / 100), 0);
+          const discountAmount = roundCurrency(lineDiscountAmt + n(dto.discount), 'THB');
           if (!dto.discount_approval_no)
             throw new BadRequestException({ code: 'DISCOUNT_APPROVAL_REQUIRED', message: `A ${requestedPct.toFixed(2)}% discount exceeds the cap (line ${caps.maxLinePct ?? '—'}% / bill ${caps.maxBillPct ?? '—'}%) — a supervisor must authorize it`, messageTh: `ส่วนลด ${requestedPct.toFixed(2)}% เกินเพดานที่กำหนด — ต้องให้หัวหน้าอนุมัติก่อน` });
-          discountConsume = { overrideNo: dto.discount_approval_no, requestedPct };
+          discountConsume = { overrideNo: dto.discount_approval_no, requestedPct, discountAmount };
         }
       }
     }
@@ -281,7 +285,7 @@ export class PortalPosService {
       // docs/52 Phase 4b — consume the supervisor discount authorization inside the sale tx (fail-closed +
       // single-use), so a rolled-back sale never burns it and a concurrent sale can't reuse it (SoD R08).
       if (this.posControl && discountConsume)
-        await this.posControl.consumeDiscountApproval(tx, { tenantId: t.id, user, overrideNo: discountConsume.overrideNo, requestedPct: discountConsume.requestedPct, saleNo });
+        await this.posControl.consumeDiscountApproval(tx, { tenantId: t.id, user, overrideNo: discountConsume.overrideNo, requestedPct: discountConsume.requestedPct, discountAmount: discountConsume.discountAmount, saleNo });
 
       // docs/52 Phase 3a — resolve the lot(s) for each lot-tracked line BEFORE writing the sale lines, so the
       // line carries the consumed lot and the sale fails fast (whole request rolls back) on an expired / held /
