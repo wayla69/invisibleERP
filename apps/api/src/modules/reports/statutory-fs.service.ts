@@ -7,6 +7,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { resolveBsGroup, resolveIsGroup } from '../ledger/ledger-statement-sections';
 import { THAI_DBD_DEFS } from './thai-dbd-fs';
 import { INDUSTRY_FS_DEFS } from './industry-fs';
+import { fsKpiSpecs } from './industry-fs-kpis';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const dayBefore = (ymd: string) => { const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
@@ -199,12 +200,22 @@ export class StatutoryFsService {
     }
     const groups = (def.config as FsBuilderConfig).groups ?? [];
     const built = this.buildGroups(groups, cur, prior);
+    // P8: attach the statement's own KPIs (margins / current ratio / program-expense ratio …), computed from
+    // the already-rendered group values so they inherit the statement's tie-out. Only for the built-in DBD
+    // statements (a buyer-authored layout uses arbitrary group keys the KPI registry can't assume). The KPI
+    // set follows the SAME industry the layout resolved to, so it always matches the shape on screen.
+    const appliedIndustry = (code === 'DBD-PL' || code === 'DBD-BS')
+      ? (params.industry === 'generic' ? null : (params.industry || await this.tenantIndustry()))
+      : null;
+    const kpis = (code === 'DBD-PL' || code === 'DBD-BS')
+      ? this.computeKpis(isPl ? 'pl' : 'bs', appliedIndustry, built, comparative)
+      : [];
     return {
       code: def.code, name: def.name, statement_type: def.statement_type, ledger: ledger ?? 'LEADING',
       as_of: params.asOf, from: isPl ? params.from : null,
       industry: params.industry ?? null,
       comparative, prior_as_of: params.priorAsOf ?? null, prior_from: isPl ? (params.priorFrom ?? null) : null,
-      rows: built,
+      rows: built, kpis,
     };
   }
 
@@ -270,6 +281,35 @@ export class StatutoryFsService {
         is_subtotal: !!g.sumOf,
         current: curVals[g.key] ?? 0,
         ...(prior ? { prior: priorVals[g.key] ?? 0 } : {}),
+      });
+    }
+    return out;
+  }
+
+  // P8: derive the statement's KPIs from its already-built group rows (numerator ÷ denominator by group key).
+  // A KPI is emitted only when both rows are present and the denominator is non-zero, so the set adapts to the
+  // layout that actually rendered. Percentages are returned as a fraction (0.42 = 42%); ratios as a multiple.
+  private computeKpis(statement: 'pl' | 'bs', industry: string | null, built: any[], comparative: boolean) {
+    const cur = new Map<string, number>();
+    const pri = new Map<string, number>();
+    for (const r of built) {
+      if (r.is_account) continue; // group rows only (account child rows share no stable key)
+      cur.set(r.key, r.current);
+      if (comparative && r.prior != null) pri.set(r.key, r.prior);
+    }
+    const ratio = (m: Map<string, number>, num: string, den: string): number | null => {
+      const n = m.get(num); const d = m.get(den);
+      if (n == null || d == null || d === 0) return null;
+      return Math.round((n / d) * 10000) / 10000;
+    };
+    const out: any[] = [];
+    for (const spec of fsKpiSpecs(statement, industry)) {
+      const value = ratio(cur, spec.num, spec.den);
+      if (value == null) continue;
+      out.push({
+        key: spec.key, label: spec.label, label_th: spec.labelTh, format: spec.format, value,
+        numerator: cur.get(spec.num) ?? 0, denominator: cur.get(spec.den) ?? 0,
+        ...(comparative ? { prior: ratio(pri, spec.num, spec.den) } : {}),
       });
     }
     return out;
