@@ -377,9 +377,38 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
     with several sessions burning down the same lists, treat every merge attempt as contested — the
     ancestry check (`merge-base --is-ancestor`) says main moved, but only the per-file diff says WHOSE
     change survived.
+24. **Doc-sync has TWO reflexively-missed targets: the owning PLAN/roadmap doc, and a user-manual BODY
+    walkthrough (not just the changelog header).** Shipping docs/52 Phase 4c/4d/4e (#878/#879/#880-882) I
+    updated the narrative + UAT + traceability + RCM and even wrote "docs/52 Phase 4c/4d/4e" in commits — but a
+    later "recheck the docs" caught two stale spots: (a) the PLAN doc `docs/52-universal-pos-plan.md` still
+    listed only Phase 4a/4b and said "**Phase 4 complete**" after 4b, with NO 4c/4d/4e entries or revision
+    rows; (b) the user manual had only a stacked `**Status: DRAFT vN**` changelog-header note for the exchange,
+    NO `### To do X` BODY section beside its sibling flow ("To process a return" in §5). Rules: when a change
+    extends a **phased plan/roadmap doc**, add the phase entry + its revision row THERE too (the plan is the
+    delivered-status source of truth, not just the narrative). When it's a **user-facing flow**, add a manual
+    BODY walkthrough mirroring the sibling flow's numbered steps — a header changelog line says it *happened*;
+    a body section says how to *do* it. The MANDATORY doc-sync list (narratives/manual/UAT/RCM) is the floor,
+    not the ceiling — grep the plan doc + the manual's `##`/`###` section headers for the affected flow before
+    calling docs done.
 
 ## ⚠️ Known constraints & gotchas (this environment / codebase)
 
+- **A repo-wide brand/string RENAME has escape hatches a full-word find/replace misses — sweep TRUNCATED
+  slices, REGENERATE binaries, and fix COUPLED test fixtures.** Rebranding Oshinei→Invisible (+ dropping the
+  "V2" product suffix), PRs #883: (a) doc-number code SLICES the tenant code (`SALE-` = `tenantCode[:4]`,
+  `PND-` = `[:6]`), so `oshinei`→`OSHI`/`OSHINE` survived the `OSHINEI→INVISIBLE` word-replace as literal
+  `SALE-OSHI-`/`PND-OSHINE-` in seed data + 3 tests — grep the truncations (`OSHI`, `OSHINE`) SEPARATELY and
+  update the coupled `.toBe(...)`/`.toMatch(/…/)` expectations to the NEW slice (`INVI`/`INVISI`). (b) The
+  compliance `.xlsx` (`Invisible_ERP_SOX_RCM_v1.xlsx`, `…SoD_Matrix…`) are GENERATED binaries — `git mv` them,
+  update `build_rcm.py`/`build_sod.py` output paths + embedded entity strings, then REGENERATE (never
+  hand-edit; needs `pip install openpyxl`) and verify 0 residual name INSIDE the zip (`python3 -c "import
+  zipfile…"`). (c) a historical migration hardcoding the tenant CODE (`WHERE code='OSHINEI'`, 0387) is safe to
+  change — it backfills on EMPTY tables in a fresh DB and already ran in prod, and `migrations-journaled`
+  checks the journal (tags/`when`), not migration content. (d) `basics`/`golden` are string-agnostic (no brand
+  in `goldenmaster.json`) so a pure rename can't diff them — but `apps/api` vitest DOES assert doc-number
+  formats, so run `pnpm --filter @ierp/api test:coverage`. (e) distinguish the PRODUCT NAME ("Invisible ERP
+  V2" → drop V2) from TECHNICAL `v2` identifiers (Close Manager v2, RCM v1) — replace only the brand-title
+  forms (`Invisible ERP V2`, `Invisible Enterprise ERP — V2`), never a bare `v2`.
 - **Security-review hardening (2026-07-08 third-party review — all 22 findings merged; don't regress the new
   fail-closed defaults).** Report: `docs/security-review/security-review-2026-07-08.html`.
   - **Web CSP is a per-request NONCE in `apps/web/src/middleware.ts`, NOT `next.config.mjs`** (M-1). Prod
@@ -561,6 +590,21 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   gated to the setup duties (`md_item`/`md_config`/`masterdata`/`exec`) and allow-listed to those keys so a
   narrow role gets the bulk surface without the coarse `masterdata` duty (SoD R13). Shared web island
   `components/master-io.tsx`. Coverage: `ext` harness. Narrative PN-17 §7.3b/3c.
+- **POS even/partial exchange + store-credit tender (docs/52 Phase 4e, PRs #880/#881/#882) — extend it,
+  don't re-derive.** An exchange is NOT a new money path — it's an ORCHESTRATION over the existing Return +
+  Sale services, netted through store credit. `modules/pos/exchange.service.ts` `createExchange` runs in the
+  ONE request tx (the tenant-tx interceptor wraps it, so return + replacement-sale commit/roll back together):
+  (1) `returns.createReturn({refund_method:'StoreCredit'})` → restock + GL reversal (Dr 4000/2100 / Cr **2200**)
+  + auto ใบลดหนี้; (2) `pos.createGenericSale({store_credit_card_no})` — a NEW **store-credit tender** on
+  `PortalPosService.createSale` (draws min(total, card balance) via `giftCards.redeemForSale`, posts **Dr 2200**
+  before the **Dr 1000** cash leg — mirrors dine-in `buildSale`) so only the DIFFERENCE moves in cash (even →
+  0; up-swap → cash; down-swap → residual credit). Reason-coded (`EXCHANGE_REASON_REQUIRED`), `EXC-` id, gated
+  `returns`/`pos_refund`/`exec` (SoD R08). **`store_credit_card_no` ABSENT ⇒ `createSale` is byte-identical**
+  (golden 588 / writeflow 36 / restaurant 220 / basics 498) — the store-credit block only runs when the field
+  is present. Web: `components/pos/exchange-dialog.tsx` (island WITHOUT its own `'use client'` — imported only
+  by the already-client `/pos/register`, so it does NOT bump the use-client ratchet) + a perm-gated แลกเปลี่ยน
+  button. ToE: `pos-exchange` harness (15) + `pos-exchange.mobile.spec.ts`; both `pos-exchange` and the
+  pre-existing (previously-unwired) `pos-pricebook` are in the CI `pos` shard. PN-01 §7 step 2d; manual `01` §5.
 - **Blind-count goods receiving (EXP-12, migration 0290) — extend it, don't re-derive.** All receiving
   control logic lives in `modules/procurement/procurement-grn.service.ts`: `receiveLines` (PO lines for
   `/receiving`, counted qty NEVER pre-filled by design), the `createGr` **`OVER_RECEIPT`** gate (aggregate
