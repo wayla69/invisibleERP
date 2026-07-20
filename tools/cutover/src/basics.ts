@@ -1369,6 +1369,33 @@ async function main() {
       && (await inj('GET', '/api/reports/fs/statement-pack.pdf', conTok)).status === 400,
     'gated+validated');
 
+  // P10 — TFRS 15 revenue disaggregation: the tenant's own revenue split by category + timing of transfer,
+  // classified per industry, tying to the income statement's revenue.
+  const disC = (await inj('GET', `/api/reports/fs/revenue-disaggregation?as_of=${asOfP3}&from=${fsFromP6}`, conTok)).json;
+  ok('P10: construction revenue disaggregation is all OVER TIME (POC) and ties to the income statement revenue',
+    Array.isArray(disC.categories) && disC.categories.length > 0 && disC.categories.every((c: any) => c.timing === 'over_time')
+      && disC.ties_to_income_statement === true && near(disC.total.current, disC.income_statement_revenue),
+    `n=${disC.categories?.length} ties=${disC.ties_to_income_statement} total=${disC.total?.current} isRev=${disC.income_statement_revenue}`);
+  ok('P10: the timing summary buckets the categories (over_time == total, point_in_time == 0 for construction)',
+    near(disC.timing_summary.over_time.current, disC.total.current) && near(disC.timing_summary.point_in_time.current, 0),
+    `ot=${disC.timing_summary?.over_time?.current} pit=${disC.timing_summary?.point_in_time?.current}`);
+  // The timing classification is PER INDUSTRY: forcing manufacturing recognises the SAME revenue at a point in time.
+  const disM = (await inj('GET', `/api/reports/fs/revenue-disaggregation?as_of=${asOfP3}&from=${fsFromP6}&industry=manufacturing`, conTok)).json;
+  ok('P10: industry=manufacturing reclassifies the same revenue as POINT IN TIME (timing is per-industry, total unchanged)',
+    disM.categories.length === disC.categories.length && disM.categories.every((c: any) => c.timing === 'point_in_time')
+      && near(disM.total.current, disC.total.current) && disM.ties_to_income_statement === true,
+    `otM=${disM.timing_summary?.over_time?.current} pitM=${disM.timing_summary?.point_in_time?.current}`);
+  // Comparative column present, and the P9 FS pack now embeds the disaggregation note.
+  const disCmp = (await inj('GET', `/api/reports/fs/revenue-disaggregation?as_of=${asOfP3}&from=${fsFromP6}&prior_as_of=${priorAsOfP6}&prior_from=${priorFromP6}`, conTok)).json;
+  const packWithDisagg: string = (await inj('GET', `/api/reports/fs/statement-pack.pdf?as_of=${asOfP3}&from=${fsFromP6}`, conTok)).text ?? '';
+  ok('P10: comparative prior column present; the FS pack embeds the TFRS-15 disaggregation note',
+    disCmp.comparative === true && disCmp.categories.every((c: any) => c.prior !== null) && /การจำแนกรายได้|Revenue Disaggregation/.test(packWithDisagg),
+    `cmp=${disCmp.comparative} inPack=${/การจำแนกรายได้/.test(packWithDisagg)}`);
+  ok('P10: revenue-disaggregation requires auth and a valid range (401 unauthenticated, 400 on missing range)',
+    (await inj('GET', `/api/reports/fs/revenue-disaggregation?as_of=${asOfP3}&from=${fsFromP6}`)).status === 401
+      && (await inj('GET', '/api/reports/fs/revenue-disaggregation', conTok)).status === 400,
+    'gated+validated');
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.

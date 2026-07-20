@@ -204,6 +204,28 @@ export class ReportPdfService {
         + `<tbody>${rows}<tr class="sub"><td>รวม / Total</td><td class="r">${money(t.opening)}</td><td class="r">${money(t.movements)}</td><td class="r">${money(t.profit)}</td><td class="r">${money(t.closing)}</td></tr></tbody></table>`;
     };
 
+    // TFRS 15 revenue disaggregation (P10): categories grouped by timing of transfer, tying to revenue.
+    const disaggBlock = () => {
+      const d = pack?.revenue_disaggregation;
+      if (!d?.categories?.length) return '';
+      const catRow = (c: any) => `<tr><td>${esc(c.account_name ?? c.account_code)} <span class="muted">${esc(c.account_code)}</span></td><td class="r">${money(c.current)}</td>${comp ? `<td class="r">${money(c.prior)}</td>` : ''}</tr>`;
+      const ot = d.categories.filter((c: any) => c.timing === 'over_time');
+      const pit = d.categories.filter((c: any) => c.timing === 'point_in_time');
+      const band = (label: string, rows: any[], sub: any) => rows.length
+        ? `<tr class="band"><td>${label}</td><td class="r">${money(sub.current)}</td>${comp ? `<td class="r">${money(sub.prior)}</td>` : ''}</tr>${rows.map(catRow).join('')}`
+        : '';
+      const ts = d.timing_summary;
+      return `<section class="break">
+        <h2>หมายเหตุ: การจำแนกรายได้ (TFRS 15) / Revenue Disaggregation (TFRS 15)</h2>
+        ${d.policy ? `<p class="policy">${esc(d.policy.th)} — ${esc(d.policy.en)}</p>` : ''}
+        <table class="stmt"><thead><tr><th>ประเภทรายได้ / Category</th><th class="r">${esc(curLbl)}</th>${comp ? `<th class="r">${esc(priLbl)}</th>` : ''}</tr></thead><tbody>
+          ${band('รับรู้ตลอดช่วงเวลา / Over time', ot, ts.over_time)}
+          ${band('รับรู้ ณ จุดหนึ่ง / Point in time', pit, ts.point_in_time)}
+          <tr class="sub"><td>รวมรายได้ / Total revenue</td><td class="r">${money(d.total.current)}</td>${comp ? `<td class="r">${money(d.total.prior)}</td>` : ''}</tr>
+        </tbody></table>
+      </section>`;
+    };
+
     // Notes (best-effort)
     const notesBlock = () => {
       const notes = pack?.notes?.notes;
@@ -242,6 +264,7 @@ export class ReportPdfService {
   table.stmt th { background: #1E3C72; color: #fff; font-weight: 600; padding: 5px 6px; text-align: left; }
   table.stmt td { padding: 3px 6px; border-bottom: 1px solid #eee; }
   table.stmt tr.sub td { font-weight: 700; border-top: 1px solid #1E3C72; background: #f2f6fc; }
+  table.stmt tr.band td { font-weight: 600; color: #1E3C72; background: #eef3fb; }
   table.stmt tr.acct td { color: #444; font-size: 11px; }
   .r { text-align: right; font-variant-numeric: tabular-nums; }
   .muted { color: #999; font-size: 10px; }
@@ -278,6 +301,8 @@ export class ReportPdfService {
     <h2>งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น / Statement of Changes in Equity</h2>
     ${soceTable()}
   </section>
+
+  ${disaggBlock()}
 
   ${notesBlock()}
 
