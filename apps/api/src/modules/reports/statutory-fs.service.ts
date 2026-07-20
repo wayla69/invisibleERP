@@ -8,6 +8,7 @@ import { resolveBsGroup, resolveIsGroup } from '../ledger/ledger-statement-secti
 import { THAI_DBD_DEFS } from './thai-dbd-fs';
 import { INDUSTRY_FS_DEFS } from './industry-fs';
 import { fsKpiSpecs } from './industry-fs-kpis';
+import { revenueTiming, disaggPolicy, type RevTiming } from './industry-revenue-disagg';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const dayBefore = (ymd: string) => { const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
@@ -384,6 +385,10 @@ export class StatutoryFsService {
       this.renderStatement('DBD-BS', { asOf: params.asOf, ...common }),
     ]);
     const soce = await this.statementOfChangesInEquity({ from: params.from, to: params.asOf, ledger });
+    const revenueDisagg = await this.revenueDisaggregation({
+      asOf: params.asOf, from: params.from, priorAsOf: params.priorAsOf, priorFrom: params.priorFrom,
+      ledger, industry: params.industry ?? null,
+    });
 
     // Notes are buyer-authored (no built-in defs); include only when a resolvable notes definition is named.
     let notes: Awaited<ReturnType<typeof this.noteSchedules>> | null = null;
@@ -406,7 +411,62 @@ export class StatutoryFsService {
       company,
       period: { from: params.from, as_of: params.asOf, prior_from: params.priorFrom ?? null, prior_as_of: params.priorAsOf ?? null },
       ledger: ledger ?? 'LEADING', industry: params.industry ?? null, comparative,
-      balance_sheet: bs, profit_and_loss: pl, changes_in_equity: soce, notes,
+      balance_sheet: bs, profit_and_loss: pl, changes_in_equity: soce, revenue_disaggregation: revenueDisagg, notes,
+    };
+  }
+
+  // ───────────────────── TFRS 15 revenue disaggregation note (P10) ─────────────────────
+  // Disaggregates the caller's OWN posted revenue into (a) categories — one line per revenue account, the
+  // "by type of good/service" axis — and (b) timing of transfer (point in time vs over time), classified per
+  // industry. The schedule ties to the income statement's revenue, so it is a pure presentation over the GL.
+  async revenueDisaggregation(params: {
+    asOf: string; from: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null; industry?: string | null;
+  }) {
+    if (!params.asOf || !params.from) {
+      throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'as_of and from are required', messageTh: 'ต้องระบุ as_of และ from' });
+    }
+    const ledger = params.ledger ?? null;
+    const comparative = !!(params.priorAsOf && params.priorFrom);
+    const appliedIndustry = params.industry === 'generic' ? null : (params.industry || await this.tenantIndustry());
+
+    const cur = await this.ledger.perAccountNet(params.asOf, params.from, ledger, ['CLOSE']);
+    const prior = comparative ? await this.ledger.perAccountNet(params.priorAsOf!, params.priorFrom!, ledger, ['CLOSE']) : null;
+    const priorMap = new Map((prior ?? []).map((r) => [r.account_code, r.net]));
+
+    // Revenue is credit-normal, so a positive revenue amount is −net (mirrors the SOCE creditPos convention).
+    const categories = cur
+      .filter((r) => r.account_type === 'Revenue')
+      .map((r) => ({
+        account_code: r.account_code, account_name: r.account_name,
+        current: round2(-r.net),
+        prior: prior ? round2(-(priorMap.get(r.account_code) ?? 0)) : null,
+        timing: revenueTiming(appliedIndustry, r.account_code) as RevTiming,
+      }))
+      .filter((c) => c.current !== 0 || (c.prior ?? 0) !== 0)
+      .sort((a, b) => b.current - a.current);
+
+    const sumTiming = (t: RevTiming) => ({
+      current: round2(categories.filter((c) => c.timing === t).reduce((a, c) => a + c.current, 0)),
+      prior: prior ? round2(categories.filter((c) => c.timing === t).reduce((a, c) => a + (c.prior ?? 0), 0)) : null,
+    });
+    const timing_summary = { over_time: sumTiming('over_time'), point_in_time: sumTiming('point_in_time') };
+    const total = {
+      current: round2(categories.reduce((a, c) => a + c.current, 0)),
+      prior: prior ? round2(categories.reduce((a, c) => a + (c.prior ?? 0), 0)) : null,
+    };
+
+    // Tie-out: the disaggregated total must equal the income statement's revenue for the same period/ledger.
+    const is = await this.ledger.incomeStatement(params.from, params.asOf, undefined, ledger, ['CLOSE']);
+    const isRevenue = round2(is.revenue);
+
+    return {
+      industry: appliedIndustry, from: params.from, as_of: params.asOf,
+      prior_from: params.priorFrom ?? null, prior_as_of: params.priorAsOf ?? null,
+      comparative, ledger: ledger ?? 'LEADING',
+      categories, timing_summary, total,
+      income_statement_revenue: isRevenue,
+      ties_to_income_statement: Math.abs(total.current - isRevenue) < 0.01,
+      policy: disaggPolicy(appliedIndustry),
     };
   }
 

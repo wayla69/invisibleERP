@@ -130,6 +130,20 @@ export class StatutoryFsController {
     else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
   }
 
+  // ── TFRS 15 revenue disaggregation (P10) — by category + timing of transfer, per industry ──
+  @Get('revenue-disaggregation')
+  revenueDisagg(
+    @Query('as_of') asOf?: string,
+    @Query('from') from?: string,
+    @Query('prior_as_of') priorAsOf?: string,
+    @Query('prior_from') priorFrom?: string,
+    @Query('ledger') ledger?: string,
+    @Query('industry') industry?: string,
+  ) {
+    if (!asOf || !from) throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'as_of and from are required', messageTh: 'ต้องระบุ as_of และ from' });
+    return this.svc.revenueDisaggregation({ asOf, from, priorAsOf, priorFrom, ledger: ledger || null, industry: industry || null });
+  }
+
   // ── Industry layouts a viewer can pick between for the built-in DBD-PL / DBD-BS ──
   @Get('industry-layouts')
   industryLayouts() {

@@ -7,7 +7,7 @@
 //   • งบกำไรขาดทุน     → GET /api/ledger/income-statement?from=&to=&ledger=  (+ /by-branch)
 //   • งบกระแสเงินสด    → GET /api/ledger/cash-flow{,-direct,-forecast}
 // Read-only; multi-GAAP ledger selectable (TFRS / TAX / IFRS). CSV export per statement.
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck, PlayCircle, Landmark, FileText, Scale } from 'lucide-react';
@@ -604,6 +604,8 @@ interface DbdResp {
 interface FsDef { code: string; name: string; statement_type: string; active: boolean }
 interface RenderRow { key: string; label?: string; label_th?: string | null; account_name?: string; level: number; is_subtotal?: boolean; current: number; prior?: number }
 interface FsKpi { key: string; label: string; label_th: string; format: 'pct' | 'ratio'; value: number; numerator: number; denominator: number; prior?: number | null }
+interface RevDisaggCat { account_code: string; account_name: string | null; current: number; prior: number | null; timing: 'over_time' | 'point_in_time' }
+interface RevDisaggResp { industry: string | null; comparative: boolean; categories: RevDisaggCat[]; timing_summary: { over_time: { current: number; prior: number | null }; point_in_time: { current: number; prior: number | null } }; total: { current: number; prior: number | null }; ties_to_income_statement: boolean; policy: { en: string; th: string } }
 interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; industry: string | null; comparative: boolean; rows: RenderRow[]; kpis?: FsKpi[] }
 interface IndustryLayout { industry: string; name: string }
 interface IndustryStmtLayouts { generic_name: string; own_has_layout: boolean; layouts: IndustryLayout[] }
@@ -821,6 +823,12 @@ function CustomStatements({ lp }: { lp: string }) {
     queryFn: () => api(`/api/reports/fs/notes/${run!.code}?as_of=${asOf}${priorQs}&basis=bs${lp}`),
     enabled: run != null && run.type === 'notes',
   });
+  // P10: alongside a rendered P&L, the TFRS-15 revenue-disaggregation note (by category + timing of transfer).
+  const disaggQ = useQuery<RevDisaggResp>({
+    queryKey: ['fs-revdisagg', run, asOf, from, priorQs, industryQs, lp],
+    queryFn: () => api(`/api/reports/fs/revenue-disaggregation?as_of=${asOf}&from=${from}${priorQs}${industryQs}${lp}`),
+    enabled: run != null && run.code === 'DBD-PL',
+  });
 
   return (
     <Card className="space-y-4 p-5">
@@ -908,6 +916,48 @@ function CustomStatements({ lp }: { lp: string }) {
                     </div>
                   )}
                 </StateView>
+              )}
+
+              {run?.code === 'DBD-PL' && disaggQ.data && disaggQ.data.categories.length > 0 && (
+                <div className="mt-4 space-y-2 rounded-md border p-3">
+                  <div className="text-sm font-semibold">{t('fnx.fs.stat.revdisagg')}</div>
+                  <p className="text-xs text-muted-foreground">{lang === 'th' ? disaggQ.data.policy.th : disaggQ.data.policy.en}</p>
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-left text-muted-foreground">
+                      <th className="py-1">{t('fnx.fs.stat.revdisagg_cat')}</th>
+                      <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
+                      {disaggQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
+                    </tr></thead>
+                    <tbody>
+                      {(['over_time', 'point_in_time'] as const).map((tm) => {
+                        const cats = disaggQ.data!.categories.filter((c) => c.timing === tm);
+                        if (!cats.length) return null;
+                        const sub = disaggQ.data!.timing_summary[tm];
+                        return (
+                          <Fragment key={tm}>
+                            <tr className="border-t bg-muted/40 font-medium">
+                              <td className="py-1">{t(tm === 'over_time' ? 'fnx.fs.stat.revdisagg_overtime' : 'fnx.fs.stat.revdisagg_pit')}</td>
+                              <td className="py-1 text-right tabular">{baht(sub.current)}</td>
+                              {disaggQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(sub.prior ?? 0)}</td>}
+                            </tr>
+                            {cats.map((c) => (
+                              <tr key={c.account_code} className="border-t">
+                                <td className="py-1 pl-4">{c.account_name ?? c.account_code} <span className="text-xs text-muted-foreground tabular">{c.account_code}</span></td>
+                                <td className="py-1 text-right tabular">{baht(c.current)}</td>
+                                {disaggQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(c.prior ?? 0)}</td>}
+                              </tr>
+                            ))}
+                          </Fragment>
+                        );
+                      })}
+                      <tr className="border-t font-semibold">
+                        <td className="py-1">{t('fnx.fs.stat.revdisagg_total')}</td>
+                        <td className="py-1 text-right tabular">{baht(disaggQ.data.total.current)}</td>
+                        {disaggQ.data.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(disaggQ.data.total.prior ?? 0)}</td>}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {run != null && isNotes && (
