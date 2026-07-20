@@ -41,6 +41,7 @@ export const priceBooks = pgTable('price_books', {
   name: text('name').notNull(),
   tier: text('tier'),                          // customer price tier this book serves (e.g. retail|wholesale|vip|member); NULL = any tier
   branchId: bigint('branch_id', { mode: 'number' }), // outlet this book serves; NULL = any branch
+  customerCode: text('customer_code'),         // B2B contract pricing: the specific customer this book serves; NULL = any customer. Most specific — wins over tier/branch books.
   currency: text('currency').notNull().default('THB'),
   priority: integer('priority').notNull().default(100), // lower = higher precedence when several books match
   active: boolean('active').notNull().default(false),

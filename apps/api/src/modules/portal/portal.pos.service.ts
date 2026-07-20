@@ -50,6 +50,9 @@ export interface PortalSaleDto {
   // a tier (or the branch) has an active, approved book pricing an item, that governed price OVERRIDES the
   // line's client-supplied unit_price. ABSENT (and no branch book) ⇒ the client price stands (byte-identical).
   price_tier?: string;
+  // docs/52 Phase 4d — B2B contract pricing: a negotiated per-customer book (most specific) prices the sale's
+  // items ahead of any tier/branch book. ABSENT ⇒ no customer scope ⇒ byte-identical.
+  customer_code?: string;
   // docs/52 Phase 4b — discount authority: when a manual line/bill discount exceeds the tenant's configured
   // cap, the sale must reference a supervisor's discount authorization (an OVR- number from
   // POST /api/pos/discount-authorize). ABSENT caps (the default) ⇒ no gate ⇒ byte-identical.
@@ -127,10 +130,10 @@ export class PortalPosService {
     // client-supplied unit_price (an auditable basis, not a number typed at the till). No matching book ⇒ the
     // client price stands ⇒ byte-identical. Only consulted when a tier or branch is in play (default path skips it).
     let saleItems = dto.items;
-    if (this.priceBooks && (dto.price_tier || branchId != null)) {
+    if (this.priceBooks && (dto.price_tier || dto.customer_code || branchId != null)) {
       const qtyByItem = new Map<string, number>();
       for (const it of dto.items) qtyByItem.set(String(it.item_id), (qtyByItem.get(String(it.item_id)) ?? 0) + n(it.qty));
-      const booked = await this.priceBooks.resolvePriceMany(t.id, dto.items.map((it) => String(it.item_id)), { tier: dto.price_tier ?? null, branchId, at: opts?.saleDate, qtyByItem });
+      const booked = await this.priceBooks.resolvePriceMany(t.id, dto.items.map((it) => String(it.item_id)), { tier: dto.price_tier ?? null, branchId, customerCode: dto.customer_code ?? null, at: opts?.saleDate, qtyByItem });
       if (booked.size) saleItems = dto.items.map((it) => { const b = booked.get(String(it.item_id)); return b ? { ...it, unit_price: b.unit_price } : it; });
     }
 

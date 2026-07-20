@@ -79,10 +79,11 @@ async function main() {
   const boss = await login('boss');
   const wh = await login('wh');
 
-  // sell one WIDGET (client list price 100) under an optional tier / branch — returns the sale response
-  const sale = (opts: { tier?: string; branch?: number; qty?: number } = {}) => inj('POST', '/api/pos/sales', admin, {
+  // sell one WIDGET (client list price 100) under an optional tier / branch / customer — returns the sale response
+  const sale = (opts: { tier?: string; branch?: number; qty?: number; customer?: string } = {}) => inj('POST', '/api/pos/sales', admin, {
     items: [{ item_id: 'WIDGET', qty: opts.qty ?? 1, unit_price: 100 }],
     ...(opts.tier ? { price_tier: opts.tier } : {}), ...(opts.branch ? { branch_id: opts.branch } : {}),
+    ...(opts.customer ? { customer_code: opts.customer } : {}),
   });
   const revOf = async (saleNo: string) => Number((await pg.query(`SELECT sum(credit) c FROM journal_lines jl JOIN journal_entries je ON jl.entry_id=je.id WHERE je.source='POS' AND je.source_ref='${saleNo}' AND account_code='4000'`)).rows[0]?.c ?? 0);
   const mkBook = (tok: string, body: any) => inj('POST', '/api/pricing/books', tok, body);
@@ -156,6 +157,22 @@ async function main() {
   // ── 13. R10 SoD: a non-pricing role cannot maintain a book ──
   const whBook = await mkBook(wh, { name: 'x', tier: 'wholesale' });
   ok('non-pricing role (Warehouse) POST /pricing/books → 403 (R10: price maintenance ≠ selling)', whBook.status === 403, `${whBook.status}`);
+
+  // ── 14. docs/52 Phase 4d — B2B contract pricing: a customer-scoped book prices only its own customer ──
+  // A negotiated contract (customer_code='CUS-VIP' @ 60) is an authoritative rate — it outranks tier/branch
+  // books regardless of priority. Non-matching customers fall back to the client price (byte-identical).
+  await activate({ name: 'สัญญา CUS-VIP', customer_code: 'CUS-VIP', priority: 100 }, [{ item_id: 'WIDGET', unit_price: 60 }]);
+  const s14 = await sale({ customer: 'CUS-VIP' });
+  ok('contract book for CUS-VIP (60) → a sale for CUS-VIP is 60 (customer-scoped)', near(s14.json.subtotal, 60), JSON.stringify({ subtotal: s14.json.subtotal }));
+
+  // ── 15. a non-matching customer sees no contract book → client price (byte-identical) ──
+  const s15 = await sale({ customer: 'CUS-OTHER' });
+  ok('a different customer (CUS-OTHER, no book) → subtotal 100 (fallback, byte-identical)', near(s15.json.subtotal, 100), JSON.stringify({ subtotal: s15.json.subtotal }));
+
+  // ── 16. precedence: the customer contract outranks a tier book regardless of priority ──
+  // CUS-VIP contract (60, priority 100) vs the priority-10 wholesale book (75): the contract wins.
+  const s16 = await sale({ customer: 'CUS-VIP', tier: 'wholesale' });
+  ok('CUS-VIP contract (60) beats the priority-10 wholesale book (75) → subtotal 60 (customer-match outranks priority)', near(s16.json.subtotal, 60), JSON.stringify({ subtotal: s16.json.subtotal }));
 
   await app.close();
   await pg.close();

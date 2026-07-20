@@ -58,6 +58,7 @@ const PosSaleBody = z.object({
   })).min(1).max(10).optional(),
   // docs/52 Phase 4a — price books: the customer price tier for this sale (governed base price by tier/branch).
   price_tier: z.string().max(60).optional(),
+  customer_code: z.string().max(120).optional(),
   // docs/52 Phase 4b — discount authority: a supervisor's authorization (OVR-…) for an over-cap manual discount.
   discount_approval_no: z.string().max(60).optional(),
 });

@@ -7,11 +7,11 @@ import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
 
 export interface PriceBookDto {
-  id?: number; name: string; tier?: string | null; branch_id?: number | null;
+  id?: number; name: string; tier?: string | null; branch_id?: number | null; customer_code?: string | null;
   currency?: string; priority?: number; valid_from?: string | null; valid_to?: string | null;
 }
 export interface PriceBookEntryDto { item_id: string; unit_price: number; min_qty?: number }
-export interface ResolveCtx { tier?: string | null; branchId?: number | null; at?: string; qtyByItem?: Map<string, number> }
+export interface ResolveCtx { tier?: string | null; branchId?: number | null; customerCode?: string | null; at?: string; qtyByItem?: Map<string, number> }
 
 // docs/52 Phase 4a — price-book engine. A governed, approved base-price list the POS/quote draws from,
 // resolved by CUSTOMER TIER and/or BRANCH before the promo engine (PricingService) discounts. Maker-checker
@@ -46,7 +46,7 @@ export class PriceBookService {
     const db = this.db;
     const vals = {
       tenantId: user.tenantId ?? null, name: dto.name, tier: dto.tier ?? null,
-      branchId: dto.branch_id != null ? Number(dto.branch_id) : null, currency: dto.currency ?? 'THB',
+      branchId: dto.branch_id != null ? Number(dto.branch_id) : null, customerCode: dto.customer_code ?? null, currency: dto.currency ?? 'THB',
       priority: dto.priority ?? 100, active: false, status: 'PendingApproval',
       validFrom: dto.valid_from ?? null, validTo: dto.valid_to ?? null,
     };
@@ -116,9 +116,18 @@ export class PriceBookService {
     const candidates = all
       .filter((b: any) => (b.tier == null || b.tier === (ctx.tier ?? null))
         && (b.branchId == null || Number(b.branchId) === (ctx.branchId ?? null))
+        && (b.customerCode == null || b.customerCode === (ctx.customerCode ?? null))
         && (b.validFrom == null || String(b.validFrom) <= today)
         && (b.validTo == null || String(b.validTo) >= today))
-      .sort((a: any, b: any) => (a.priority ?? 100) - (b.priority ?? 100) || specificity(b) - specificity(a) || Number(b.id) - Number(a.id));
+      // A matching CUSTOMER-scoped book is an authoritative negotiated contract → it outranks any tier/branch
+      // book regardless of priority. Among books of the same customer-scope, the existing precedence holds
+      // (priority → specificity → newest). Existing books carry customer_code = NULL, so this is a no-op tie
+      // for them → byte-identical to the pre-4d ordering.
+      .sort((a: any, b: any) =>
+        (b.customerCode != null ? 1 : 0) - (a.customerCode != null ? 1 : 0)
+        || (a.priority ?? 100) - (b.priority ?? 100)
+        || specificity(b) - specificity(a)
+        || Number(b.id) - Number(a.id));
     if (!candidates.length) return out;
     const bookIds = candidates.map((b: any) => Number(b.id));
     const entries = await db.select().from(priceBookEntries).where(and(eq(priceBookEntries.tenantId, tenantId), inArray(priceBookEntries.priceBookId, bookIds), inArray(priceBookEntries.itemId, ids)));
@@ -153,8 +162,10 @@ export class PriceBookService {
   }
 }
 
-function specificity(b: any): number { return (b.tier != null ? 1 : 0) + (b.branchId != null ? 1 : 0); }
+// A customer-scoped book is the MOST specific (weight 4 > tier+branch max of 2), so a negotiated contract
+// price for a named customer wins over that customer's tier/branch books at equal priority.
+function specificity(b: any): number { return (b.customerCode != null ? 4 : 0) + (b.tier != null ? 1 : 0) + (b.branchId != null ? 1 : 0); }
 function mapBook(b: any) {
-  return { id: b.id, name: b.name, tier: b.tier ?? null, branch_id: b.branchId != null ? Number(b.branchId) : null, currency: b.currency ?? 'THB', priority: b.priority ?? 100, active: !!b.active, status: b.status ?? 'PendingApproval', valid_from: b.validFrom ?? null, valid_to: b.validTo ?? null, created_by: b.createdBy ?? null, approved_by: b.approvedBy ?? null, created_at: b.createdAt ?? null, approved_at: b.approvedAt ?? null };
+  return { id: b.id, name: b.name, tier: b.tier ?? null, branch_id: b.branchId != null ? Number(b.branchId) : null, customer_code: b.customerCode ?? null, currency: b.currency ?? 'THB', priority: b.priority ?? 100, active: !!b.active, status: b.status ?? 'PendingApproval', valid_from: b.validFrom ?? null, valid_to: b.validTo ?? null, created_by: b.createdBy ?? null, approved_by: b.approvedBy ?? null, created_at: b.createdAt ?? null, approved_at: b.approvedAt ?? null };
 }
 function mapEntry(e: any) { return { item_id: e.itemId, unit_price: n(e.unitPrice), min_qty: Number(e.minQty ?? 1) }; }

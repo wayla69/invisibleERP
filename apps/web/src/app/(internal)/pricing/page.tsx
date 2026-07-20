@@ -269,7 +269,7 @@ function Books() {
   // tiers already in use across the tenant's books — offered as autocomplete so the same tier is spelled
   // consistently (pricing resolution matches the exact string).
   const knownTiers: string[] = Array.from(new Set((q.data?.books ?? []).map((b: any) => b.tier).filter(Boolean))) as string[];
-  const empty = { name: '', tier: '', branch_id: '', priority: '100', valid_from: '', valid_to: '' };
+  const empty = { name: '', tier: '', branch_id: '', customer_code: '', priority: '100', valid_from: '', valid_to: '' };
   const [f, setF] = useState<any>(empty);
   const [dlgOpen, setDlgOpen] = useState(false);
   // Whether an APPROVED book is actually in effect right now (vs scheduled for the future or expired) — the
@@ -289,7 +289,7 @@ function Books() {
   // create the book then set its entries — both stage it PendingApproval (a different user must activate it).
   const save = useMutation({
     mutationFn: async () => {
-      const created: any = await api('/api/pricing/books', { method: 'POST', body: JSON.stringify({ name: f.name, tier: f.tier || null, branch_id: f.branch_id ? Number(f.branch_id) : null, priority: Number(f.priority) || 100, valid_from: f.valid_from || null, valid_to: f.valid_to || null }) });
+      const created: any = await api('/api/pricing/books', { method: 'POST', body: JSON.stringify({ name: f.name, tier: f.tier || null, branch_id: f.branch_id ? Number(f.branch_id) : null, customer_code: f.customer_code || null, priority: Number(f.priority) || 100, valid_from: f.valid_from || null, valid_to: f.valid_to || null }) });
       await api(`/api/pricing/books/${created.id}/entries`, { method: 'POST', body: JSON.stringify({ entries: validEntries() }) });
     },
     onSuccess: () => { notifySuccess(t('hx.pb.saved_pending')); setF(empty); setEntries([{ item_id: '', unit_price: '', min_qty: '1' }]); setDlgOpen(false); qc.invalidateQueries({ queryKey: ['price-books'] }); },
@@ -327,6 +327,9 @@ function Books() {
                   {(branchesQ.data?.branches ?? []).map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </Field>
+            <Field label={t('hx.pb.f_customer')} htmlFor="pb-customer" hint={t('hx.pb.customer_hint')}>
+              <Input id="pb-customer" placeholder={t('hx.pb.customer_ph')} value={f.customer_code} onChange={(e) => set({ customer_code: e.target.value })} />
             </Field>
             <Field label={t('hx.pb.f_priority')} htmlFor="pb-priority" hint={t('hx.pb.priority_hint')}>
               <Input id="pb-priority" type="number" inputMode="numeric" placeholder="100" value={f.priority} onChange={(e) => set({ priority: e.target.value })} />
@@ -380,6 +383,7 @@ function Books() {
               { key: 'name', label: t('hx.pb.col_name') },
               { key: 'tier', label: t('hx.pb.col_tier'), render: (r: any) => r.tier || <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
               { key: 'branch_id', label: t('hx.pb.col_branch'), render: (r: any) => r.branch_id != null ? (branchName(r.branch_id) ?? `#${r.branch_id}`) : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'customer_code', label: t('hx.pb.col_customer'), render: (r: any) => r.customer_code ? <span className="font-mono text-xs">{r.customer_code}</span> : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
               { key: 'priority', label: t('hx.pb.f_priority'), align: 'right', render: (r: any) => <span className="tabular">{r.priority}</span> },
               { key: 'validity', label: t('hx.pb.col_validity'), sortable: false, render: (r: any) => (r.valid_from || r.valid_to)
                 ? <span className="whitespace-nowrap text-sm">{r.valid_from ? thaiDate(r.valid_from) : '—'} – {r.valid_to ? thaiDate(r.valid_to) : '—'}</span>
