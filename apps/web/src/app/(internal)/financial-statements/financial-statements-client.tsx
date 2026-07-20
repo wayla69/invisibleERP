@@ -861,7 +861,7 @@ function CustomStatements({ lp }: { lp: string }) {
                       {(renderQ.data.kpis ?? []).length > 0 && (
                         <div className="flex flex-wrap gap-3">
                           {renderQ.data.kpis!.map((k) => (
-                            <div key={k.key} className="min-w-[140px] flex-1 rounded-lg border bg-muted/30 px-3 py-2">
+                            <div key={k.key} className="min-w-[140px] flex-1 rounded-lg border bg-muted/30 px-3 py-2" title={`${baht(k.numerator)} ÷ ${baht(k.denominator)}`}>
                               <div className="text-xs text-muted-foreground">{lang === 'th' ? k.label_th : k.label}</div>
                               <div className="text-lg font-semibold tabular">{fmtKpi(k)}</div>
                               {k.prior != null && (
