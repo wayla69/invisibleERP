@@ -55,6 +55,12 @@ async function boot(page: Page) {
 
     // Phase 4b — discount authority
     if (url.includes('/api/pos/discount-settings')) return json({ maxLinePct: 10, maxBillPct: 20 });
+    if (url.includes('/api/pos/overrides')) {
+      return json({ overrides: [
+        { override_no: 'OVR-260720-003', action: 'discount', authorized_pct: 25, approved_by: 'manager', created_at: '2026-07-20T02:10:00Z', sale_no: null },
+        { override_no: 'OVR-260720-001', action: 'discount', authorized_pct: 15, approved_by: 'manager', created_at: '2026-07-20T01:30:00Z', sale_no: 'S-260720-042' },
+      ] });
+    }
     if (url.includes('/api/pos/held')) return json({ held: [] });
 
     return json({});
