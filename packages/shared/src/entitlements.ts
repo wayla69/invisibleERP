@@ -35,7 +35,15 @@ export type SuiteKey =
   | 'manufacturing'
   | 'projects'
   | 'hcm'
-  | 'realestate';
+  | 'realestate'
+  // ── À-la-carte ADD-ON suites (the /plans configurator's "Advanced add-ons"). Token-less: their
+  //    surfaces ride on generic tokens (procurement/marketing/users), so they are gated by
+  //    @RequiresSuite on the specific controllers/handlers. Granted either by the plan (see the
+  //    grandfathering in PLAN_SUITES) or per-tenant via subscriptions.addons (resolveEntitledSuites). ──
+  | 'scm_advanced' // Advanced Supply Chain & Procurement Routing (RFQ, three-way match)
+  | 'integrations' // Inbound Webhook for Chat/CRM integration (web-to-lead, email inbound)
+  | 'cdp' // Ad-network Audience Export (CDP sync)
+  | 'sandbox'; // Dedicated Sandbox/Staging (developer portal, key tiers)
 
 // suite → the coarse module permission tokens it unlocks. EVERY MODULE_KEY must appear in exactly one
 // suite (asserted by validateEntitlements()). Sub-permissions are NOT listed here — they are inherited
@@ -78,10 +86,16 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   projects: [],
   hcm: ['hr', 'hr_admin'],
   realestate: [],
+  // Add-on suites own no token (their endpoints keep their @Permissions RBAC; the suite is the
+  // commercial gate layered on top via @RequiresSuite).
+  scm_advanced: [],
+  integrations: [],
+  cdp: [],
+  sandbox: [],
 };
 
 // Suites that own no module token and are therefore gated exclusively by the @RequiresSuite decorator.
-export const TOKENLESS_SUITES: SuiteKey[] = ['projects', 'realestate'];
+export const TOKENLESS_SUITES: SuiteKey[] = ['projects', 'realestate', 'scm_advanced', 'integrations', 'cdp', 'sandbox'];
 
 // All suite keys (handy for validating @RequiresSuite arguments).
 export const SUITE_KEYS = Object.keys(SUITES) as SuiteKey[];
@@ -107,6 +121,10 @@ export const SUITE_LABELS: Record<SuiteKey, { en: string; th: string }> = {
   projects: { en: 'Projects / PPM', th: 'บริหารโครงการ' },
   hcm: { en: 'HCM & Payroll', th: 'บุคคล & เงินเดือน' },
   realestate: { en: 'Real Estate (Developer)', th: 'อสังหาริมทรัพย์' },
+  scm_advanced: { en: 'Advanced Supply Chain & Procurement Routing', th: 'ซัพพลายเชน & เส้นทางอนุมัติจัดซื้อขั้นสูง' },
+  integrations: { en: 'Inbound Webhook (Chat/CRM)', th: 'Webhook ขาเข้า (แชต/CRM)' },
+  cdp: { en: 'Audience Export (CDP Sync)', th: 'ส่งออกกลุ่มเป้าหมายโฆษณา (CDP)' },
+  sandbox: { en: 'Dedicated Sandbox/Staging', th: 'สภาพแวดล้อมทดสอบเฉพาะราย' },
 };
 
 // plan code → suites included. DEFAULT map (a plan row's features.suites JSONB overrides at runtime).
@@ -128,21 +146,72 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   starter: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice'],
   // Business (mid-tier, 1.9): Standard + procurement + multi-branch. Closes the 5× price jump between
   // Standard and Professional; planning/loyalty/AI stay the Professional differentiators.
+  // scm_advanced is GRANDFATHERED: RFQ/three-way match were reachable via the 'procurement' token
+  // before the add-on suite existed, so plans that had procurement keep them.
   business: [
     'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
-    'procurement', 'multibranch',
+    'procurement', 'multibranch', 'scm_advanced',
   ],
   // Professional (current 'pro'): adds procurement, planning, loyalty, AI, multi-branch.
+  // cdp/integrations GRANDFATHERED: audience export rode the 'marketing' token (planning suite) and
+  // web-to-lead was un-gated, so the plan that had planning keeps both.
   pro: [
     'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
+    'scm_advanced', 'integrations', 'cdp',
+  ],
+  // Franchise (multi-brand, between Professional and Enterprise — the /plans configurator's 4th pack):
+  // Professional + the central-kitchen/ops verticals (manufacturing, projects) + every add-on suite.
+  franchise: [
+    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
+    'manufacturing', 'projects',
+    'scm_advanced', 'integrations', 'cdp', 'sandbox',
   ],
   // Enterprise: everything, incl. the premium/add-on suites (custom deals tune via features.suites).
   enterprise: [
     'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
     'manufacturing', 'projects', 'hcm', 'realestate',
+    'scm_advanced', 'integrations', 'cdp', 'sandbox',
   ],
+};
+
+// ── À-la-carte add-ons (the /plans configurator) ────────────────────────────────────────────────
+// An add-on IS one of the token-less add-on suites above, purchasable per tenant on top of any plan
+// (stored on subscriptions.addons; resolveEntitledSuites unions them in). Prices are indicative THB,
+// annual = 10 × monthly like every seeded plan.
+export type AddonKey = 'scm_advanced' | 'integrations' | 'cdp' | 'sandbox';
+export const ADDON_KEYS: AddonKey[] = ['scm_advanced', 'integrations', 'cdp', 'sandbox'];
+export const ADDONS: Record<AddonKey, { priceMonthly: number; labels: { en: string; th: string } }> = {
+  scm_advanced: { priceMonthly: 1500, labels: SUITE_LABELS.scm_advanced },
+  integrations: { priceMonthly: 990, labels: SUITE_LABELS.integrations },
+  cdp: { priceMonthly: 1290, labels: SUITE_LABELS.cdp },
+  sandbox: { priceMonthly: 2900, labels: SUITE_LABELS.sandbox },
+};
+export const isAddonKey = (x: unknown): x is AddonKey => typeof x === 'string' && (ADDON_KEYS as string[]).includes(x);
+
+// What a purchased add-on actually GRANTS. Mostly just its own token-less suite, but an add-on whose
+// surfaces sit behind a module token must carry that base suite too, or buying it on a plan without the
+// token would grant nothing: scm_advanced's RFQ/three-way-match endpoints are @Permissions('procurement'),
+// so the add-on includes the procurement suite (you cannot route procurement without procurement). The
+// cdp endpoints pass via their 'exec' alternate token (finance, in every paid plan); integrations is
+// enforced in-service against the 'integrations' suite alone; sandbox rides the always-on 'users' token.
+export const ADDON_GRANTS: Record<AddonKey, SuiteKey[]> = {
+  scm_advanced: ['scm_advanced', 'procurement'],
+  integrations: ['integrations'],
+  cdp: ['cdp'],
+  sandbox: ['sandbox'],
+};
+
+// Marketing pack id (the /plans configurator tiers) → seeded plan code. The signup request stores the
+// REAL plan code so the approve flow can provision it directly.
+export const PACK_TO_PLAN: Record<string, string> = {
+  essential: 'starter',
+  growth: 'business',
+  scale: 'pro',
+  franchise: 'franchise',
+  enterprise: 'enterprise',
 };
 
 // (Resolved in 1.1b) Manufacturing/PPM/HCM/Real-estate had no coarse token; they are now sold as the
@@ -198,12 +267,15 @@ export function isPermissionEntitled(entitledSuites: readonly SuiteKey[], perm: 
  * legacy plan row without `suites` still resolves to sensible defaults), else (3) ALWAYS_ON only.
  * ALWAYS_ON suites are always included.
  */
-export function resolveEntitledSuites(planCode: string | null | undefined, featuresSuites?: unknown): SuiteKey[] {
+export function resolveEntitledSuites(planCode: string | null | undefined, featuresSuites?: unknown, addons?: unknown): SuiteKey[] {
   const valid: SuiteKey[] = Array.isArray(featuresSuites)
     ? (featuresSuites.filter((s) => typeof s === 'string' && (s as string) in SUITES) as SuiteKey[])
     : [];
   const base = valid.length ? valid : (planCode && PLAN_SUITES[planCode]) || ALWAYS_ON_SUITES;
-  return [...new Set<SuiteKey>([...ALWAYS_ON_SUITES, ...base])];
+  // Per-tenant purchased add-ons (subscriptions.addons JSONB) union in on top of whatever the plan
+  // grants — each add-on expands to its ADDON_GRANTS set (its own suite + any base suite its surfaces need).
+  const extra: SuiteKey[] = Array.isArray(addons) ? addons.filter(isAddonKey).flatMap((a) => ADDON_GRANTS[a]) : [];
+  return [...new Set<SuiteKey>([...ALWAYS_ON_SUITES, ...base, ...extra])];
 }
 
 /**

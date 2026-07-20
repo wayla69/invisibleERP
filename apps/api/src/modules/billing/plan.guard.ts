@@ -86,7 +86,7 @@ export class PlanGuard implements CanActivate {
     // Nothing to gate on this route.
     if (!feature && required.length === 0 && !reqSuite) return true;
 
-    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; currentPeriodEnd: Date | null; planCode: string | null } | undefined;
+    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; currentPeriodEnd: Date | null; planCode: string | null; addons: unknown } | undefined;
     const tid = user.tenantId; // narrowed to number by the guard above; captured so the closure keeps the narrowing
     try {
       // Runs in a guard (pre-tenant tx) → base-pool read, explicit tenant filter. Global for STRICT_TENANT_PROXY.
@@ -97,6 +97,7 @@ export class PlanGuard implements CanActivate {
           trialEndsAt: subscriptions.trialEndsAt,
           currentPeriodEnd: subscriptions.currentPeriodEnd,
           planCode: subscriptions.planCode,
+          addons: subscriptions.addons,
         })
         .from(subscriptions)
         .leftJoin(plans, eq(subscriptions.planCode, plans.code))
@@ -147,9 +148,10 @@ export class PlanGuard implements CanActivate {
       // grace === 'allow' → within grace + read: fall through to normal suite gating.
     }
 
-    // Active (or no row → fail CLOSED to ALWAYS_ON via resolveEntitledSuites's fallback).
+    // Active (or no row → fail CLOSED to ALWAYS_ON via resolveEntitledSuites's fallback). Purchased
+    // per-tenant add-ons (subscriptions.addons, 0451) union in on top of the plan's suites.
     const features = (row?.features as Record<string, unknown>) ?? {};
-    const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, features.suites);
+    const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, features.suites, row?.addons);
     const entitledPerms = new Set<Permission>(permissionsForSuites(entitledSuites));
 
     // Premium/add-on suite gate (@RequiresSuite) — a token-less suite is entitled only if the plan lists it.

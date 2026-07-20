@@ -91,9 +91,9 @@ const TIERS: Tier[] = [
 ];
 
 const ADDONS: Addon[] = [
-  { id: 'supply-chain', nameKey: 'price.a_scm', descKey: 'price.a_scm_d', icon: Truck, kind: 'erp', priceMonthly: 1500 },
-  { id: 'webhooks', nameKey: 'price.a_webhook', descKey: 'price.a_webhook_d', icon: Webhook, kind: 'erp', priceMonthly: 990 },
-  { id: 'cdp-sync', nameKey: 'price.a_cdp', descKey: 'price.a_cdp_d', icon: Share2, kind: 'erp', priceMonthly: 1290 },
+  { id: 'scm_advanced', nameKey: 'price.a_scm', descKey: 'price.a_scm_d', icon: Truck, kind: 'erp', priceMonthly: 1500 },
+  { id: 'integrations', nameKey: 'price.a_webhook', descKey: 'price.a_webhook_d', icon: Webhook, kind: 'erp', priceMonthly: 990 },
+  { id: 'cdp', nameKey: 'price.a_cdp', descKey: 'price.a_cdp_d', icon: Share2, kind: 'erp', priceMonthly: 1290 },
   { id: 'sandbox', nameKey: 'price.a_sandbox', descKey: 'price.a_sandbox_d', icon: FlaskConical, kind: 'erp', priceMonthly: 2900 },
 ];
 
@@ -138,6 +138,15 @@ export function PricingClient() {
     };
   }, [tierId, addonIds, billing]);
 
+  // Carry the prospect's selection into the signup request (read there from window.location.search),
+  // so the platform admin sees "requested: <pack> · <interval> · +add-ons" when approving (ITGC-AC-18).
+  const signupHref = React.useMemo(() => {
+    const q = new URLSearchParams({ plan: tierId, billing });
+    const addons = ADDONS.filter((a) => addonIds.has(a.id)).map((a) => a.id);
+    if (addons.length) q.set('addons', addons.join(','));
+    return `/signup?${q.toString()}`;
+  }, [tierId, billing, addonIds]);
+
   const summaryLines = (
     <>
       <ul className="space-y-2 text-sm">
@@ -173,7 +182,7 @@ export function PricingClient() {
         </div>
       </div>
       <Link
-        href="/signup"
+        href={signupHref}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground shadow transition-opacity hover:opacity-90"
       >
         {totals.tier.startingAt ? (<><Phone className="h-4 w-4" /> {t('price.contact_sales')}</>) : t('price.start_trial')}

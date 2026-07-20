@@ -27,6 +27,11 @@ const SignupBody = z.object({
   vat_registered: z.boolean().optional(),
   vat_rate: z.number().optional(),
   invite_token: z.string().optional(),
+  // Pack selection carried over from the public /plans configurator (0451). Advisory (shown to the
+  // approving platform owner + honoured at provisioning); unknown values are dropped server-side.
+  requested_plan: z.string().max(30).optional(),
+  requested_billing: z.enum(['monthly', 'annual']).optional(),
+  requested_addons: z.array(z.string().max(30)).max(10).optional(),
 });
 
 const InviteBody = z.object({
@@ -46,6 +51,8 @@ const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
+// 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
+const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 // docs/49 — control-profile transition is UPGRADE-ONLY, so the only accepted target is 'enterprise'.
@@ -146,6 +153,13 @@ export class BillingController {
   @Post('admin/tenants/:id/extend-trial') @PlatformAdmin() @HttpCode(200)
   extendTrial(@Param('id') id: string, @Body(new ZodValidationPipe(ExtendTrialBody)) b: { days: number }) {
     return this.svc.extendTrial(Number(id), b.days);
+  }
+
+  // 0451 — set a company's à-la-carte add-ons (replaces the whole set). Add-on suite keys union into the
+  // tenant's entitled suites on top of its plan (resolveEntitledSuites); unknown keys are rejected.
+  @Post('admin/tenants/:id/addons') @PlatformAdmin() @HttpCode(200)
+  setTenantAddons(@Param('id') id: string, @Body(new ZodValidationPipe(AddonsBody)) b: { addons: string[] }) {
+    return this.svc.setTenantAddons(Number(id), b.addons);
   }
 
   @Post('admin/tenants/:id/tags') @PlatformAdmin() @HttpCode(200)

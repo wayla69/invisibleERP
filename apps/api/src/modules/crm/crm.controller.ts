@@ -4,6 +4,7 @@ import { CrmService } from './crm.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 
 const RefreshAllBody = z.object({ tenant_id: z.number().int().positive().optional() }).optional();
 const AudienceRuleBody = z.object({ promo_id: z.number().int(), rfm_segment: z.string().optional(), min_lifetime: z.number().optional(), min_frequency: z.number().optional(), preferred_channel: z.string().optional() });
@@ -29,13 +30,17 @@ export class CrmController {
 
   // G3 (docs/45, PDPA-05) — preview the hashed ads-audience export: counts + the first hashed rows, so a
   // marketer can SEE the consent gate and the hash-only payload before scheduling audience_export_sync.
+  // 0451 — the ads-audience/CDP surfaces are the 'cdp' add-on suite (grandfathered into pro/franchise/
+  // enterprise, which had the marketing token; others buy it à la carte). Inert unless ENTITLEMENTS_ENFORCE.
   @Get('audience-export/preview')
+  @RequiresSuite('cdp')
   @Permissions('marketing', 'exec')
   audiencePreview(@Query('limit') limit: string | undefined, @CurrentUser() user: JwtUser) {
     return this.crm.exportForCustomerMatch(user, { limit: limit != null ? Number(limit) || 10 : 10 });
   }
   // G3 — the append-only export register (PDPA-05 evidence: every run — success, failed, or blocked).
   @Get('audience-export/register')
+  @RequiresSuite('cdp')
   @Permissions('marketing', 'exec')
   audienceRegister(@Query('limit') limit: string | undefined, @CurrentUser() user: JwtUser) {
     return this.crm.audienceExportRegister(user, limit != null ? Number(limit) || 50 : 50);
@@ -76,6 +81,7 @@ export class CrmController {
   // GET /api/crm/export — bulk customer-data export for an external CDP (identity + RFM + consent). Paginated,
   // tenant-scoped (HQ/Admin pass ?tenant_id). Read-only; ships consent flags so the CDP honours opt-outs.
   @Get('export')
+  @RequiresSuite('cdp')
   @Permissions('marketing', 'exec')
   exportForCdp(
     @Query('tenant_id') tenantId: string | undefined,
@@ -92,6 +98,7 @@ export class CrmController {
 
   // POST /api/crm/audience-rules — create/update targeting rule (AI personalization)
   @Post('audience-rules')
+  @RequiresSuite('cdp')
   @Permissions('marketing')
   upsertAudienceRule(@Body(new ZodValidationPipe(AudienceRuleBody)) dto: z.infer<typeof AudienceRuleBody>, @CurrentUser() user: JwtUser) {
     return this.crm.upsertAudienceRule(dto, user);

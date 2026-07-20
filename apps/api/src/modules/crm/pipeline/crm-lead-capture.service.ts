@@ -1,8 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { desc, eq } from 'drizzle-orm';
+import { resolveEntitledSuites } from '@ierp/shared';
 import type { DrizzleDb } from '../../../database/database.module';
-import { crmLeads } from '../../../database/schema';
+import { crmLeads, plans, subscriptions } from '../../../database/schema';
 import { tenants } from '../../../database/schema/tenants';
+import { entitlementsEnforced } from '../../billing/plan.guard';
 import { DocNumberService } from '../../../common/doc-number.service';
 import { parseCsv, parseXlsx, type ImportError } from '../../masterdata/masterdata.service';
 import type { JwtUser } from './../../../common/decorators';
@@ -36,6 +38,11 @@ export class CrmLeadCaptureService {
       if (ts.length === 1) tenantId = Number(ts[0]!.id);
       else throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'tenant_code is required on a multi-tenant install', messageTh: 'ต้องระบุ tenant_code' });
     }
+    // 0451 — web-to-lead is the 'integrations' add-on suite. The route is @Public (PlanGuard never sees
+    // it), so the entitlement is checked HERE against the resolved tenant, mirroring the guard's
+    // semantics: only when ENTITLEMENTS_ENFORCE is on; an unexpired trial grants everything; the plan's
+    // suites plus purchased subscriptions.addons decide. Grandfathered into pro/franchise/enterprise.
+    if (entitlementsEnforced()) await this.assertIntegrationsEntitled(tenantId);
     const leadNo = await this.docNo.nextDaily('LEAD');
     const source = dto.source?.trim().slice(0, 60) || 'web';
     await db.insert(crmLeads).values({
@@ -51,6 +58,31 @@ export class CrmLeadCaptureService {
       await this.emitEvent('lead.created', { lead_no: leadNo, name: dto.name, company: dto.company ?? null, source, owner: null, grade: sc.grade }, sysUser);
     } catch { /* best-effort */ }
     return { ok: true };
+  }
+
+  // 0451 — the enforce-mode entitlement read for the public webhook path (see webToLead). Fail-open on an
+  // infra error like PlanGuard (a DB blip must never drop leads); a read that succeeds decides fail-closed.
+  private async assertIntegrationsEntitled(tenantId: number): Promise<void> {
+    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; planCode: string | null; addons: unknown } | undefined;
+    try {
+      [row] = await this.db
+        .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt, planCode: subscriptions.planCode, addons: subscriptions.addons })
+        .from(subscriptions)
+        .leftJoin(plans, eq(subscriptions.planCode, plans.code))
+        .where(eq(subscriptions.tenantId, tenantId))
+        .orderBy(desc(subscriptions.createdAt))
+        .limit(1);
+    } catch { return; }
+    if (row?.status === 'Trialing' && !(row.trialEndsAt && Date.now() > new Date(row.trialEndsAt).getTime())) return;
+    const features = (row?.features as Record<string, unknown>) ?? {};
+    const entitled = resolveEntitledSuites(row?.planCode ?? null, features.suites, row?.addons);
+    if (!entitled.includes('integrations')) {
+      throw new ForbiddenException({
+        code: 'SUITE_NOT_ENTITLED',
+        message: 'This company\'s plan does not include the inbound webhook integration (integrations add-on).',
+        messageTh: 'แพ็กเกจของบริษัทนี้ไม่รวมโมดูล Webhook ขาเข้า กรุณาซื้อโมดูลเสริมหรืออัปเกรดแพ็กเกจ',
+      });
+    }
   }
 
   // Bulk lead import (CRM-2 wizard) — accepts csv / base64 xlsx / pre-parsed rows (the masterdata engine's

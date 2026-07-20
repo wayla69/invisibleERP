@@ -95,6 +95,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'auth.sso_verifying': { th: 'กำลังตรวจสอบ SSO…', en: 'Verifying SSO…' },
   'auth.sso_failed': { th: 'เข้าสู่ระบบด้วย SSO ไม่สำเร็จ', en: 'SSO sign-in failed' },
 
-  // ── Public pricing page link (/pricing) ───────────────────────────────────
+  // ── Public pricing page link (/plans) + carried-over pack selection ───────
   'auth.pricing_link': { th: 'ดูแพ็กเกจและราคา', en: 'View plans & pricing' },
+  'auth.su_requested': { th: 'แพ็กเกจที่เลือกจากหน้าราคา', en: 'Selected from the pricing page' },
 };

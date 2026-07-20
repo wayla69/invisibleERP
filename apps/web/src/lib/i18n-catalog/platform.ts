@@ -108,6 +108,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // ── Onboarding tab ──
   'plt.onb_requests_title': { th: 'คำขอเปิดบริษัท (รออนุมัติ)', en: 'Company requests (pending approval)' },
   'plt.onb_requested_at': { th: 'ขอเมื่อ', en: 'Requested' },
+  'plt.onb_requested_plan': { th: 'แพ็กเกจที่ขอ', en: 'Requested plan' },
+  'plt.onb_annual': { th: 'รายปี', en: 'annual' },
   'plt.onb_approve': { th: 'อนุมัติ', en: 'Approve' },
   'plt.onb_reject': { th: 'ปฏิเสธ', en: 'Reject' },
   'plt.onb_empty_title': { th: 'ไม่มีคำขอค้าง', en: 'No pending requests' },
