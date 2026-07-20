@@ -31,10 +31,10 @@ async function boot(page: Page) {
     if (url.includes('/api/pricing/books')) {
       return json({
         books: [
-          { id: 1, name: 'ราคาสมาชิก VIP', tier: 'vip', branch_id: null, priority: 10, status: 'Active', active: true },
-          { id: 2, name: 'ราคาขายส่ง', tier: 'wholesale', branch_id: null, priority: 20, status: 'Active', active: true },
-          { id: 3, name: 'โปรสาขาเซ็นทรัลเวิลด์', tier: null, branch_id: 3, priority: 30, status: 'PendingApproval', active: false },
-          { id: 4, name: 'ราคาพนักงาน', tier: 'staff', branch_id: null, priority: 40, status: 'Inactive', active: false },
+          { id: 1, name: 'ราคาสมาชิก VIP', tier: 'vip', branch_id: null, priority: 10, status: 'Active', active: true, valid_from: null, valid_to: null, created_by: 'somchai', approved_by: 'manager', approved_at: '2026-07-15T03:00:00Z' },
+          { id: 2, name: 'โปรสงกรานต์', tier: 'wholesale', branch_id: null, priority: 20, status: 'Active', active: true, valid_from: '2026-08-01', valid_to: '2026-08-31', created_by: 'somchai', approved_by: 'manager', approved_at: '2026-07-16T03:00:00Z' },
+          { id: 3, name: 'โปรสาขาเซ็นทรัลเวิลด์', tier: null, branch_id: 3, priority: 30, status: 'PendingApproval', active: false, valid_from: '2026-07-20', valid_to: null, created_by: 'nid', approved_by: null, approved_at: null },
+          { id: 4, name: 'ราคาพนักงาน', tier: 'staff', branch_id: null, priority: 40, status: 'Inactive', active: false, valid_from: null, valid_to: null, created_by: 'somchai', approved_by: 'manager', approved_at: '2026-06-01T03:00:00Z' },
         ],
       });
     }
