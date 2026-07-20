@@ -203,7 +203,9 @@ export class PlatformAdminService {
       tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
       control_profile: t.controlProfile === 'sme' ? 'sme' : 'enterprise',
       sme_prefs: t.controlProfile === 'sme' ? ((t.smePrefs ?? {}) as Record<string, unknown>) : null,
-      subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
+      subscription: sub
+        ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null, addons: Array.isArray(sub.addons) ? (sub.addons as string[]) : [] }
+        : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
       ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },
       recent_activity: recent.map((r) => ({ ts: r.ts, actor: r.actor, action: r.action, status: r.status })),
