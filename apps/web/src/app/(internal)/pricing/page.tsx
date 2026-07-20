@@ -69,10 +69,10 @@ function Rules() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['price-rules'], queryFn: () => api('/api/pricing/rules') });
-  const [f, setF] = useState<any>({ name: '', type: 'percent', scope: 'item', target_id: '', channel: 'any', dow: '', time_start: '', time_end: '', value: '', min_qty: '1', priority: '100', stackable: false });
+  const [f, setF] = useState<any>({ name: '', type: 'percent', scope: 'item', target_id: '', channel: 'any', dow: '', time_start: '', time_end: '', valid_from: '', valid_to: '', value: '', min_qty: '1', priority: '100', stackable: false });
   const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
   const save = useMutation({
-    mutationFn: () => api('/api/pricing/rules', { method: 'POST', body: JSON.stringify({ name: f.name, type: f.type, scope: f.scope, target_id: f.target_id || undefined, channel: f.channel, dow: f.dow || undefined, time_start: f.time_start || undefined, time_end: f.time_end || undefined, value: f.value ? Number(f.value) : 0, min_qty: Number(f.min_qty) || 1, priority: Number(f.priority) || 100, stackable: f.stackable }) }),
+    mutationFn: () => api('/api/pricing/rules', { method: 'POST', body: JSON.stringify({ name: f.name, type: f.type, scope: f.scope, target_id: f.target_id || undefined, channel: f.channel, dow: f.dow || undefined, time_start: f.time_start || undefined, time_end: f.time_end || undefined, valid_from: f.valid_from || undefined, valid_to: f.valid_to || undefined, value: f.value ? Number(f.value) : 0, min_qty: Number(f.min_qty) || 1, priority: Number(f.priority) || 100, stackable: f.stackable }) }),
     // G6 (SoD R10): a new rule is staged inactive and needs a different user to activate it.
     onSuccess: () => { notifySuccess(t('hx.pr.rule_pending')); setF({ ...f, name: '', target_id: '', value: '' }); qc.invalidateQueries({ queryKey: ['price-rules'] }); },
     onError: (e: any) => notifyError(e.message),
@@ -85,6 +85,15 @@ function Rules() {
   // The "value" field means different things per type — hint accordingly.
   const valueHint = f.type === 'percent' ? t('hx.pr.hint_percent')
     : f.type === 'amount' ? t('hx.pr.hint_amount') : f.type === 'fixed' ? t('hx.pr.hint_fixed') : t('hx.pr.hint_default');
+  // Whether an APPROVED promotion is in effect today vs scheduled for the future or expired — the engine
+  // gates on valid_from/valid_to, so a future-dated active rule isn't live yet.
+  const schedState = (r: any): 'live' | 'scheduled' | 'expired' | null => {
+    if (r.status !== 'Active' || !r.active) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (r.valid_from && r.valid_from > today) return 'scheduled';
+    if (r.valid_to && r.valid_to < today) return 'expired';
+    return 'live';
+  };
   const targetDisabled = f.scope === 'all';
 
   return (
@@ -128,6 +137,12 @@ function Rules() {
             <Field label={t('hx.pr.f_tend')} htmlFor="pr-tend">
               <Input id="pr-tend" type="time" value={f.time_end} onChange={(e) => set({ time_end: e.target.value })} />
             </Field>
+            <Field label={t('hx.pr.f_valid_from')} htmlFor="pr-vf" hint={t('hx.pr.valid_hint')}>
+              <Input id="pr-vf" type="date" value={f.valid_from} onChange={(e) => set({ valid_from: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pr.f_valid_to')} htmlFor="pr-vt">
+              <Input id="pr-vt" type="date" value={f.valid_to} onChange={(e) => set({ valid_to: e.target.value })} />
+            </Field>
             <Field label={t('hx.pr.f_priority')} htmlFor="pr-priority" hint={t('hx.pr.priority_hint')}>
               <Input id="pr-priority" type="number" inputMode="numeric" placeholder="100" value={f.priority} onChange={(e) => set({ priority: e.target.value })} />
             </Field>
@@ -160,6 +175,14 @@ function Rules() {
               { key: 'channel', label: t('hx.pr.col_channel'), render: (r: any) => t(labelOf(CHANNEL_OPTS, r.channel)) },
               { key: 'value', label: t('hx.pr.col_value'), align: 'right', render: (r: any) => <span className="tabular">{r.value ?? '—'}</span> },
               { key: 'window', label: t('hx.pr.col_window'), render: (r: any) => r.time_start ? `${r.time_start}–${r.time_end}` : '—' },
+              { key: 'schedule', label: t('hx.pr.col_schedule'), sortable: false, render: (r: any) => {
+                const w = schedState(r);
+                const range = (r.valid_from || r.valid_to) ? `${r.valid_from ? thaiDate(r.valid_from) : '—'} – ${r.valid_to ? thaiDate(r.valid_to) : '—'}` : null;
+                if (w === 'scheduled') return <div className="flex flex-col gap-0.5"><Badge variant="secondary">{t('hx.pb.st_scheduled')}</Badge><span className="text-xs text-muted-foreground">{range}</span></div>;
+                if (w === 'expired') return <div className="flex flex-col gap-0.5"><Badge variant="secondary">{t('hx.pb.st_expired')}</Badge><span className="text-xs text-muted-foreground">{range}</span></div>;
+                if (w === 'live') return range ? <div className="flex flex-col gap-0.5"><Badge variant="success">{t('hx.pb.st_live')}</Badge><span className="text-xs text-muted-foreground">{range}</span></div> : <Badge variant="success">{t('hx.pb.st_live')}</Badge>;
+                return range ? <span className="text-xs text-muted-foreground">{range}</span> : <span className="text-muted-foreground">{t('hx.pb.always')}</span>;
+              } },
               { key: 'stackable', label: t('hx.pr.col_stack'), align: 'center', render: (r: any) => r.stackable ? <Badge>{t('hx.pr.yes')}</Badge> : <span className="text-muted-foreground">—</span> },
               // G6 (SoD R10): a staged (PendingApproval) rule is inactive until a DIFFERENT user activates it.
               { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'

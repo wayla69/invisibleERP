@@ -207,6 +207,20 @@ async function main() {
   const vCpnTwice = await checkout((await order([{ sku: 'ITEMA', qty: 2 }])).order_no, { voucher_code: cpnCode });
   ok('V: the used wallet coupon again → ALREADY_USED', vCpnTwice.status === 409 && vCpnTwice.json?.error?.code === 'ALREADY_USED', `${vCpnTwice.status} ${vCpnTwice.json?.error?.code}`);
 
+  // ── Scheduled promotions (docs/52 Phase 4c): the engine gates a rule on valid_from/valid_to (calendar date
+  // window), so a future-dated or expired promo does NOT apply and an in-window one does. GX carries the 50%
+  // rule (base 200 → disc 100); a 90% promo, when in effect, wins the per-line best-discount pick (disc 180). ──
+  const dOff = (days: number) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+  await mkRule({ name: 'sched future 90', scope: 'item', target_id: 'GX', type: 'percent', value: 90, valid_from: dOff(5), valid_to: dOff(10), priority: 1 });
+  const qFut = await inj('POST', '/api/pricing/quote', sales1, { lines: [{ sku: 'GX', qty: 1 }] });
+  ok('Scheduled promo not yet started (valid_from in the future) → does NOT apply (GX stays 50% → disc 100)', near(qFut.json.line_discount_total, 100), `ld=${qFut.json.line_discount_total}`);
+  await mkRule({ name: 'sched expired 90', scope: 'item', target_id: 'GX', type: 'percent', value: 90, valid_from: dOff(-10), valid_to: dOff(-1), priority: 1 });
+  const qExp = await inj('POST', '/api/pricing/quote', sales1, { lines: [{ sku: 'GX', qty: 1 }] });
+  ok('Expired promo (valid_to in the past) → does NOT apply (GX stays 50% → disc 100)', near(qExp.json.line_discount_total, 100), `ld=${qExp.json.line_discount_total}`);
+  await mkRule({ name: 'sched live 90', scope: 'item', target_id: 'GX', type: 'percent', value: 90, valid_from: dOff(-1), valid_to: dOff(5), priority: 1 });
+  const qLive = await inj('POST', '/api/pricing/quote', sales1, { lines: [{ sku: 'GX', qty: 1 }] });
+  ok('In-window promo (valid_from ≤ today ≤ valid_to) → applies (GX best 90% → disc 180)', near(qLive.json.line_discount_total, 180), `ld=${qLive.json.line_discount_total}`);
+
   await app.close();
   await pg.close();
 
