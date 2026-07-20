@@ -1,7 +1,7 @@
 # Investor Pitch Deck (interactive, web-based)
 
 `PitchDeck.jsx` is a self-contained, single-file React component that renders an
-interactive 12-slide investor presentation for Invisible ERP:
+interactive 16-slide investor presentation for Invisible ERP:
 
 1. Title — Next-Gen Enterprise ERP
 2. The Problem — legacy ERPs: bulky, slow, weak controls, brittle integrations
@@ -14,7 +14,15 @@ interactive 12-slide investor presentation for Invisible ERP:
 9. Traction & QA — golden zero-diff parity, CI/CD ratchets, SSO/SCIM
 10. Why We Win — comparison vs. legacy ERP suites and POS point solutions
 11. Roadmap — delivered → IPO readiness → regional scale → AI-native ops
-12. Closing — ready for scale, ready for audit
+12. Project Cost — ฿60M+ replacement-cost breakdown of the built platform
+13. Use of Funds — ฿70M seed allocation, burn, and 18–20-month runway
+14. Seed Round — The Ask — ฿70M at ฿280M pre-money (~20% post) + Series A milestones
+15. Valuation Model — replacement-cost floor, seed comparables, forward-multiple
+    method with an ARR × multiple sensitivity table
+16. Closing — ready for scale, ready for audit
+
+> All seed-stage financial figures (slides 12–15) are an illustrative financing
+> model for discussion, not an offer of securities.
 
 ## 🎨 Design rule (มาตรฐานสไลด์ — ใช้กับทุกสไลด์ ทุกครั้ง)
 

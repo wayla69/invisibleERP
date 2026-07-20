@@ -502,6 +502,170 @@ function RoadmapSlide() {
   );
 }
 
+function CostBar({ tone, label, sub, pct, amount }) {
+  const fills = {
+    blue: "bg-blue-300", emerald: "bg-emerald-300", amber: "bg-amber-300",
+    violet: "bg-violet-300", rose: "bg-rose-300",
+  };
+  return (
+    <div className="flex items-center gap-4 py-2">
+      <div className="w-72 shrink-0">
+        <div className="text-sm font-bold text-slate-900">{label}</div>
+        <div className="text-xs text-slate-500">{sub}</div>
+      </div>
+      <div className="h-3.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${fills[tone]}`} style={{ width: `${pct}%` }} />
+      </div>
+      <div className="w-20 shrink-0 text-right text-base font-extrabold text-slate-900">{amount}</div>
+    </div>
+  );
+}
+
+function Milestone({ title, sub }) {
+  return (
+    <div className="flex items-start gap-1 py-2">
+      <Mark kind="yes" />
+      <div>
+        <div className="text-sm font-bold text-slate-900">{title}</div>
+        <div className="text-xs text-slate-500">{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectCostSlide() {
+  return (
+    <div className="flex h-full flex-col justify-center">
+      <SlideHeading kicker="Project Cost" title="The seed buys a platform that already exists" />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat value="฿60M+" label="Replacement cost to date (est.)" tone="blue" />
+        <Stat value="~12" label="Person-years of senior engineering" tone="violet" />
+        <Stat value="187" label="Documented controls shipped" tone="emerald" />
+      </div>
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
+        <div className="mb-3 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">
+          Where the ฿60M of build value sits (replacement-cost estimate)
+        </div>
+        <CostBar tone="blue" label="Engineering — core platform & 10 domain modules" sub="POS → GL, WMS, MRP, projects, CRM, BI" pct={72} amount="฿43M" />
+        <CostBar tone="emerald" label="Compliance & audit readiness" sub="RCM, process narratives, control-test harnesses" pct={13} amount="฿8M" />
+        <CostBar tone="amber" label="Integrations & Thai localization" sub="e-Tax, 3 payment gateways, 3 delivery channels" pct={10} amount="฿6M" />
+        <CostBar tone="rose" label="Security" sub="third-party reviews, pentests, remediation" pct={5} amount="฿3M" />
+      </div>
+      <p className="mt-4 text-center text-xs text-slate-400">
+        Replacement-cost model at blended senior-team rates — illustrative, for discussion.
+      </p>
+    </div>
+  );
+}
+
+function UseOfFundsSlide() {
+  return (
+    <div className="flex h-full flex-col justify-center">
+      <SlideHeading kicker="Use of Funds" title="An 18-month plan to Series A readiness" tone="emerald" />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat value="฿70M" label="Seed raise (~US$2.0M)" tone="emerald" />
+        <Stat value="฿3.5M" label="Average monthly burn" tone="amber" />
+        <Stat value="18–20" label="Months of runway" tone="blue" />
+      </div>
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
+        <div className="mb-3 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">
+          Allocation of the ฿70M raise
+        </div>
+        <CostBar tone="blue" label="Product & engineering — 45%" sub="AI-native ops, SEA localization, platform depth" pct={45} amount="฿31.5M" />
+        <CostBar tone="emerald" label="Go-to-market & sales — 30%" sub="mid-market chain sales team, partner channel" pct={30} amount="฿21.0M" />
+        <CostBar tone="violet" label="Compliance & external audit — 15%" sub="SOX-ICFR audit fees, ISO 27001 certification" pct={15} amount="฿10.5M" />
+        <CostBar tone="amber" label="Cloud infra & operations — 10%" sub="multi-region hosting, monitoring, support" pct={10} amount="฿7.0M" />
+      </div>
+      <p className="mt-4 text-center text-xs text-slate-400">Operating model assumptions — illustrative, for discussion.</p>
+    </div>
+  );
+}
+
+function TheAskSlide() {
+  return (
+    <div className="flex h-full flex-col justify-center">
+      <SlideHeading kicker="Seed Round — The Ask" title="฿70M to turn an audited platform into a market leader" tone="violet" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div>
+          <div className="grid grid-cols-2 gap-3">
+            <Stat value="฿70M" label="Raise (~US$2.0M)" tone="violet" />
+            <Stat value="฿280M" label="Pre-money (~US$8M)" tone="blue" />
+            <Stat value="~20%" label="Equity, post-money" tone="emerald" />
+            <Stat value="18–20" label="Months of runway" tone="amber" />
+          </div>
+          <p className="mt-3 text-xs text-slate-400">Priced equity or SAFE; terms illustrative, for discussion.</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+          <div className="mb-2 text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">
+            Milestones this round unlocks — the Series A story
+          </div>
+          <Milestone title="30+ paying companies live" sub="mid-market F&B chains on the full stack" />
+          <Milestone title="฿35M ARR run-rate (~US$1M)" sub="subscription + AI usage revenue" />
+          <Milestone title="First external SOX-ICFR audit passed" sub="controls evidence produced by the platform itself" />
+          <Milestone title="2 SEA markets localized" sub="tax, language, and payment rails beyond Thailand" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ValuationSlide() {
+  const rows = [
+    ["฿20M (bear)", 120, 160, 200],
+    ["฿35M (base)", 210, 280, 350],
+    ["฿50M (bull)", 300, 400, 500],
+  ];
+  return (
+    <div className="flex h-full flex-col justify-center">
+      <SlideHeading kicker="Valuation Model" title="Triangulated, not hand-waved" tone="amber" />
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card icon={Layers} tone="blue" title="Replacement-cost floor">
+          ฿60M+ to rebuild the platform — before the compliance moat: 187 controls, harnesses,
+          and audit artifacts a copycat must also rebuild.
+        </Card>
+        <Card icon={Scale} tone="emerald" title="Comparable seed rounds">
+          SEA B2B-SaaS seeds with live product and early revenue price at roughly US$6–12M
+          pre-money — we sit mid-range with audit-grade differentiation.
+        </Card>
+        <Card icon={TrendingUp} tone="violet" title="Forward-multiple method">
+          Series A target of ฿35M forward ARR at an 8× multiple implies ฿280M — the pre-money
+          we are asking for today.
+        </Card>
+      </div>
+      <div className="mt-5">
+        <div className="mb-2 text-center text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">
+          Implied valuation (฿M) — forward ARR at Series A × revenue multiple
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full border-collapse text-sm tabular-nums">
+            <thead>
+              <tr className="bg-slate-50 text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                <th className="px-4 py-2 text-left">Forward ARR ↓ · Multiple →</th>
+                <th className="px-4 py-2 text-center">6×</th>
+                <th className="px-4 py-2 text-center">8×</th>
+                <th className="px-4 py-2 text-center">10×</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([label, a, b, c]) => (
+                <tr key={label} className="border-t border-slate-200">
+                  <td className="px-4 py-2 font-bold text-slate-900">{label}</td>
+                  <td className="px-4 py-2 text-center text-slate-600">{a}</td>
+                  <td className={`px-4 py-2 text-center ${b === 280 ? "bg-emerald-100 font-extrabold text-emerald-700" : "text-slate-600"}`}>{b}</td>
+                  <td className="px-4 py-2 text-center text-slate-600">{c}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p className="mt-4 text-center text-xs text-slate-400">
+        All figures are an illustrative financing model, not an offer of securities.
+      </p>
+    </div>
+  );
+}
+
 function ClosingSlide() {
   return (
     <div className="flex h-full flex-col items-center justify-center text-center">
@@ -548,6 +712,10 @@ const SLIDES = [
   { id: "traction", name: "Traction", Component: TractionSlide },
   { id: "why", name: "Why We Win", Component: WhyWeWinSlide },
   { id: "roadmap", name: "Roadmap", Component: RoadmapSlide },
+  { id: "cost", name: "Project Cost", Component: ProjectCostSlide },
+  { id: "funds", name: "Use of Funds", Component: UseOfFundsSlide },
+  { id: "ask", name: "The Ask", Component: TheAskSlide },
+  { id: "valuation", name: "Valuation", Component: ValuationSlide },
   { id: "closing", name: "Closing", Component: ClosingSlide },
 ];
 
