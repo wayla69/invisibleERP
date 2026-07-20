@@ -24,7 +24,7 @@ const RuleRejectBody = z.object({ reason: z.string().max(500).optional() });
 // docs/52 Phase 4a — price books (governed base-price lists by customer tier / branch).
 const BookBody = z.object({
   id: z.number().optional(), name: z.string().min(1), tier: z.string().max(60).nullish(),
-  branch_id: z.number().int().nullish(), currency: z.string().max(3).optional(), priority: z.number().int().optional(),
+  branch_id: z.number().int().nullish(), customer_code: z.string().max(120).nullish(), currency: z.string().max(3).optional(), priority: z.number().int().optional(),
   valid_from: z.string().nullish(), valid_to: z.string().nullish(),
 });
 const BookEntriesBody = z.object({ entries: z.array(z.object({ item_id: z.string().min(1), unit_price: z.number().min(0), min_qty: z.number().int().min(1).optional() })) });

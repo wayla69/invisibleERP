@@ -2962,6 +2962,13 @@
       "when": 2023820000388,
       "tag": "0449_fs_statement_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 424,
+      "version": "7",
+      "when": 2023820000389,
+      "tag": "0450_pos_contract_pricing",
+      "breakpoints": true
     }
   ]
 }
