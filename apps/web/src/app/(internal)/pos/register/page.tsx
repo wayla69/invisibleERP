@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
-import { CloudOff, ListChecks, RefreshCw, Store, Utensils, Wifi, WifiOff, X } from 'lucide-react';
+import { ArrowLeftRight, CloudOff, ListChecks, RefreshCw, Store, Utensils, Wifi, WifiOff, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { thaiDate } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
+import { useMe, hasPerm } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useTerminal } from '@/lib/terminal';
 import { useOnline } from '@/lib/offline';
@@ -21,6 +22,7 @@ import { CheckoutPanel, type SettleResult } from '@/components/pos/checkout-pane
 import { ModifierDialog } from '@/components/pos/modifier-dialog';
 import { TerminalBar } from '@/components/pos/terminal-bar';
 import { addLine, cartTotals, newLineKey } from '@/components/pos/cart';
+import { ExchangeDialog } from '@/components/pos/exchange-dialog';
 import { lineAmount, type CartLine, type MenuItem, type MenuResp } from '@/components/pos/types';
 
 type Mode = 'quick' | 'dinein';
@@ -88,6 +90,11 @@ export default function RegisterPage() {
   const [checkout, setCheckout] = useState(false);
   const [tablePicker, setTablePicker] = useState(false);
   const [heldOpen, setHeldOpen] = useState(false);
+  const [exchangeOpen, setExchangeOpen] = useState(false);
+  // docs/52 Phase 4e — the exchange (return + re-sell, netted) involves a refund, so it's shown only to the
+  // refund/return duty (SoD R08), segregated from a plain-selling cashier — who would get a 403 anyway.
+  const me = useMe();
+  const canExchange = hasPerm(me.data, 'returns', 'pos_refund', 'exec');
 
   const tot = useMemo(() => cartTotals(lines), [lines]);
 
@@ -308,6 +315,7 @@ export default function RegisterPage() {
             <Button variant="outline" size="sm" onClick={() => setTablePicker(true)}><Utensils className="size-4" /> {t('px.reg_attach_table')}</Button>
           ))}
           <Button variant="outline" size="sm" onClick={() => setHeldOpen(true)}><ListChecks className="size-4" /> {t('px.reg_held_bills')}</Button>
+          {canExchange && <Button variant="outline" size="sm" onClick={() => setExchangeOpen(true)}><ArrowLeftRight className="size-4" /> {t('px.exc_btn')}</Button>}
           {restaurant && <Button asChild variant="ghost" size="sm"><Link href="/tables">{t('px.reg_tables_link')}</Link></Button>}
         </div>
       </div>
@@ -368,6 +376,13 @@ export default function RegisterPage() {
       )}
 
       {heldOpen && <HeldDialog onClose={() => setHeldOpen(false)} onRecall={recall} />}
+
+      {exchangeOpen && (
+        <ExchangeDialog
+          onClose={() => setExchangeOpen(false)}
+          onDone={() => { setExchangeOpen(false); qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['pos-summary'] }); }}
+        />
+      )}
     </div>
   );
 }
