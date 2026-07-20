@@ -395,7 +395,12 @@ async function main() {
 
   // ── 3d. Approval-queue onboarding (ITGC-AC-18 #3): a PUBLIC request → PENDING (no tenant); the platform
   //        owner approves (→ provisions) or rejects. ──
-  const reqBody = { company_name: 'QueueCo', tenant_code: 'queueco1', admin_username: 'queueco_admin', admin_password: 'queueco12345', email: 'q@c.com' };
+  // 0451 — the request carries the /plans pack selection: MARKETING pack id 'growth' (→ real plan code
+  // 'business' via PACK_TO_PLAN), annual billing, one real add-on + one junk value (dropped, not rejected).
+  const reqBody = {
+    company_name: 'QueueCo', tenant_code: 'queueco1', admin_username: 'queueco_admin', admin_password: 'queueco12345', email: 'q@c.com',
+    requested_plan: 'growth', requested_billing: 'annual', requested_addons: ['cdp', 'bogus_addon'],
+  };
   const sreq = await inj('POST', '/api/auth/signup-requests', undefined, reqBody);
   ok('Public "request access" → 201 pending (no tenant provisioned yet)', sreq.status === 201 && sreq.json.status === 'pending' && !!sreq.json.request_id, `${sreq.status}`);
   const reqId = sreq.json.request_id;
@@ -408,6 +413,12 @@ async function main() {
   process.env.PLATFORM_ADMIN_USERNAMES = 'owner1';
   const rlist = await inj('GET', '/api/admin/signup-requests?status=pending', owner);
   ok('Platform-admin sees the pending request in the queue', rlist.status === 200 && (rlist.json.requests ?? []).some((r: any) => r.id === reqId), `${rlist.status}`);
+  // 0451 — the queue row shows the carried pack: mapped to the REAL plan code, junk add-on dropped.
+  const rrow = (rlist.json.requests ?? []).find((r: any) => r.id === reqId) ?? {};
+  ok('Queue row carries requested plan business (mapped from pack growth) · annual · addons=[cdp]',
+    rrow.requested_plan === 'business' && rrow.requested_interval === 'annual'
+    && Array.isArray(rrow.requested_addons) && rrow.requested_addons.length === 1 && rrow.requested_addons[0] === 'cdp',
+    `plan=${rrow.requested_plan} interval=${rrow.requested_interval} addons=${JSON.stringify(rrow.requested_addons)}`);
   // Platform notification inbox (item 2) — the signup request emitted a god notification; it's unread.
   // Then mark-all-read clears the unread count.
   const inbox = await inj('GET', '/api/admin/notifications', owner);
@@ -422,6 +433,18 @@ async function main() {
   ok('Approve → provisions the company (201) + status approved', approve.status === 201 && !!approve.json.tenant_id && approve.json.status === 'approved', `${approve.status} tid=${approve.json.tenant_id}`);
   const qLogin = await login('queueco_admin', 'queueco12345');
   ok('The approved company Admin logs in with the REQUESTED password', !!qLogin.json.token, `st=${qLogin.status}`);
+  // 0451 — approve HONOURS the carried pack: the provisioned subscription is on the requested plan,
+  // billing interval, and purchased add-ons (not the legacy 'free' default).
+  const qSub = (await pg.query(
+    `SELECT s.plan_code, s.billing_interval, s.addons FROM subscriptions s JOIN tenants t ON t.id = s.tenant_id WHERE t.code='queueco1' ORDER BY s.created_at DESC LIMIT 1`,
+  )).rows as any[];
+  ok('Approve provisions the REQUESTED pack: plan business · annual · addons=[cdp] on the subscription',
+    qSub.length === 1 && qSub[0].plan_code === 'business' && qSub[0].billing_interval === 'annual'
+    && Array.isArray(qSub[0].addons) && qSub[0].addons.length === 1 && qSub[0].addons[0] === 'cdp',
+    `plan=${qSub[0]?.plan_code} interval=${qSub[0]?.billing_interval} addons=${JSON.stringify(qSub[0]?.addons)}`);
+  // 0451 — the seeded catalogue now carries the Franchise tier (the /plans configurator's 4th pack).
+  const franchisePlan = (await pg.query(`SELECT code, price_monthly::numeric n FROM plans WHERE code='franchise'`)).rows as any[];
+  ok('Plan catalogue seeds the franchise tier at ฿14,900/mo', franchisePlan.length === 1 && Number(franchisePlan[0].n) === 14900, `rows=${franchisePlan.length} price=${franchisePlan[0]?.n}`);
   const reApprove = await inj('POST', `/api/admin/signup-requests/${reqId}/approve`, owner, {});
   ok('Re-approving a handled request → 409 REQUEST_NOT_PENDING', reApprove.status === 409 && reApprove.json.error?.code === 'REQUEST_NOT_PENDING', `${reApprove.status} ${reApprove.json.error?.code}`);
   const req2 = await inj('POST', '/api/auth/signup-requests', undefined, { company_name: 'RejectCo', tenant_code: 'rejectco1', admin_username: 'rejectco_admin', admin_password: 'rejectco12345', email: 'r@c.com' });

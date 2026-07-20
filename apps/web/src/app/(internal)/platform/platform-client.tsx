@@ -64,6 +64,10 @@ interface SignupRequest {
   email: string | null;
   status: string;
   requested_at: string | null;
+  // Pack selection carried from the public /plans configurator (0451) — approve provisions this plan.
+  requested_plan?: string | null;
+  requested_interval?: string | null;
+  requested_addons?: string[];
 }
 
 // Mirrors INDUSTRY_KEYS in apps/api/src/modules/ledger/coa-templates.ts (the CoA-template packs the platform
@@ -661,6 +665,12 @@ export default function PlatformConsole({
         <span className="text-xs text-muted-foreground">{r.tenant_code} · {r.admin_username}{r.email ? ` · ${r.email}` : ''}</span>
       </div>
     ) },
+    { key: 'requested_plan', label: t('plt.onb_requested_plan'), render: (r) => (r.requested_plan ? (
+      <div className="grid leading-tight">
+        <span className="font-medium">{r.requested_plan}{r.requested_interval === 'annual' ? ` · ${t('plt.onb_annual')}` : ''}</span>
+        {(r.requested_addons?.length ?? 0) > 0 && <span className="text-xs text-muted-foreground">+ {r.requested_addons!.join(', ')}</span>}
+      </div>
+    ) : <span className="text-muted-foreground">—</span>) },
     { key: 'requested_at', label: t('plt.onb_requested_at'), render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
     { key: 'actions', label: '', align: 'right', render: (r) => (
       <div className="flex justify-end gap-1">

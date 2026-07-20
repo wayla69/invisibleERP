@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Approval-queue onboarding (ITGC-AC-18 #3). Platform-level (pre-tenant): a public "request access" form
@@ -13,6 +13,12 @@ export const signupRequests = pgTable('signup_requests', {
   passwordHash: text('password_hash').notNull(),
   email: text('email').notNull(),
   industry: text('industry'),
+  // Pack selection carried over from the public /plans configurator (0451): the REAL seeded plan code
+  // (PACK_TO_PLAN-mapped), billing interval, and add-on suite keys the prospect chose. Approve honours
+  // them (plan + interval + addons stamped on the provisioned subscription); NULL = legacy default (free).
+  requestedPlan: text('requested_plan'),
+  requestedInterval: text('requested_interval'),
+  requestedAddons: jsonb('requested_addons'),
   status: text('status').notNull().default('pending'),
   rejectReason: text('reject_reason'),
   reviewedBy: text('reviewed_by'),

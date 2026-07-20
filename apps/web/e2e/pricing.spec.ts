@@ -54,14 +54,23 @@ test('add-on switches update the itemized total live', async ({ page }) => {
   await expect(aside).not.toContainText('Advanced Supply Chain');
 });
 
-test('enterprise shows starting-at pricing and routes contact-sales to signup', async ({ page }) => {
+test('enterprise shows starting-at pricing and CTAs carry the selection into signup', async ({ page }) => {
   await page.getByRole('radio', { name: /Corporate/ }).click();
   const aside = page.locator('aside');
   await expect(aside).toContainText('(starting at)');
-  await expect(aside.getByRole('link', { name: /Contact sales/ })).toHaveAttribute('href', '/signup');
-  // Non-enterprise tiers use the start-trial CTA instead.
+  await expect(aside.getByRole('link', { name: /Contact sales/ })).toHaveAttribute('href', '/signup?plan=enterprise&billing=monthly');
+  // Non-enterprise tiers use the start-trial CTA; the href carries pack + billing + toggled add-ons.
   await page.getByRole('radio', { name: /Multi-branch/ }).click();
-  await expect(aside.getByRole('link', { name: /Start free trial/ })).toHaveAttribute('href', '/signup');
+  await page.getByRole('tab', { name: 'Annual' }).click();
+  await page.getByRole('switch', { name: /Inbound Webhook/ }).click();
+  await expect(aside.getByRole('link', { name: /Start free trial/ })).toHaveAttribute(
+    'href',
+    '/signup?plan=growth&billing=annual&addons=integrations',
+  );
+  // The signup page reads the query back and shows the carried selection to the prospect.
+  await aside.getByRole('link', { name: /Start free trial/ }).click();
+  await expect(page.getByText(/Selected from the pricing page|แพ็กเกจที่เลือกจากหน้าราคา/)).toBeVisible();
+  await expect(page.getByText('growth', { exact: true })).toBeVisible();
 });
 
 test('login page links to the public pricing page', async ({ page }) => {

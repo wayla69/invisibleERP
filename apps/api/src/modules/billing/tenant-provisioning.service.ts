@@ -7,7 +7,7 @@ import { reportSubscriptions } from '../../database/schema/bi';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
-import { smeNavProfile } from '@ierp/shared';
+import { smeNavProfile, PACK_TO_PLAN, isAddonKey } from '@ierp/shared';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
 import { isPlatformAdmin } from '../../common/decorators';
@@ -45,6 +45,12 @@ export interface SignupDto {
   admin_password: string;
   email: string;
   plan_code?: string;
+  // Pack selection carried over from the public /plans configurator (0451). requested_plan is the
+  // MARKETING pack id (essential/growth/…) — mapped to the real seeded plan code via PACK_TO_PLAN at
+  // request-persist time; requested_addons are ADDON_KEYS (unknown values dropped, never rejected).
+  requested_plan?: string;
+  requested_billing?: 'monthly' | 'annual';
+  requested_addons?: string[];
   // industry CoA template the company picks at signup (GL-10): restaurant|retail|distribution|services|
   // general. Falls back to 'general' (full canonical chart) when omitted/unknown.
   industry?: string;
@@ -157,12 +163,19 @@ export class TenantProvisioningService {
     const [u] = await this.db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (u) throw new ConflictException({ code: 'CONFLICT', message: 'Username already taken', messageTh: 'ชื่อผู้ใช้นี้ถูกใช้แล้ว' });
     const industry = isIndustryKey(dto.industry) ? dto.industry : 'general';
+    // Pack selection from /plans (0451): store the REAL seeded plan code (unknown pack → none), the
+    // billing interval, and the recognised add-on keys. Never reject the request over these — they are
+    // advisory for the approving platform owner, not part of the identity being validated.
+    const requestedPlan = dto.requested_plan ? PACK_TO_PLAN[dto.requested_plan.trim().toLowerCase()] ?? null : null;
+    const requestedInterval = requestedPlan && (dto.requested_billing === 'annual' || dto.requested_billing === 'monthly') ? dto.requested_billing : null;
+    const requestedAddons = requestedPlan ? (dto.requested_addons ?? []).filter(isAddonKey) : [];
     try {
       const [row] = await this.db.insert(signupRequests).values({
         companyName: dto.company_name, tenantCode: code, adminUsername: username,
         passwordHash: await this.password.hash(dto.admin_password), email: dto.email, industry, status: 'pending',
+        requestedPlan, requestedInterval, requestedAddons: requestedAddons.length ? requestedAddons : null,
       }).returning({ id: signupRequests.id });
-      await this.platformNotifs?.emit({ type: 'signup_request', title: `คำขอเปิดบริษัทใหม่: ${dto.company_name}`, body: `รหัส ${code} · ผู้ดูแล ${username}${dto.email ? ` · ${dto.email}` : ''}`, refType: 'signup_request', refId: String(row!.id) });
+      await this.platformNotifs?.emit({ type: 'signup_request', title: `คำขอเปิดบริษัทใหม่: ${dto.company_name}`, body: `รหัส ${code} · ผู้ดูแล ${username}${dto.email ? ` · ${dto.email}` : ''}${requestedPlan ? ` · แพ็กเกจ ${requestedPlan}${requestedInterval === 'annual' ? ' (รายปี)' : ''}` : ''}`, refType: 'signup_request', refId: String(row!.id) });
       return { request_id: Number(row!.id), status: 'pending' };
     } catch (e) {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'REQUEST_PENDING', message: 'A pending request already exists for this company/username', messageTh: 'มีคำขอเปิดบัญชีนี้รออนุมัติอยู่แล้ว' });
@@ -178,6 +191,8 @@ export class TenantProvisioningService {
       requests: rows.map((r: any) => ({
         id: Number(r.id), company_name: r.companyName, tenant_code: r.tenantCode, admin_username: r.adminUsername,
         email: r.email, industry: r.industry, status: r.status, reject_reason: r.rejectReason,
+        requested_plan: r.requestedPlan ?? null, requested_interval: r.requestedInterval ?? null,
+        requested_addons: Array.isArray(r.requestedAddons) ? r.requestedAddons : [],
         reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, requested_at: r.requestedAt,
         created_tenant_id: r.createdTenantId != null ? Number(r.createdTenantId) : null,
       })),
@@ -195,8 +210,14 @@ export class TenantProvisioningService {
       .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending'))).returning({ id: signupRequests.id });
     if (!claimed.length) throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: 'Request already handled', messageTh: 'คำขอนี้ถูกดำเนินการไปแล้ว' });
     const result = await this.provisionTenant(
-      { company_name: req.companyName, tenant_code: req.tenantCode, admin_username: req.adminUsername, admin_password: '', email: req.email, industry: req.industry ?? undefined },
-      { passwordHash: req.passwordHash },
+      // Approve honours the pack the prospect chose on /plans (0451): plan code + billing interval +
+      // add-ons stamp the provisioned subscription. Absent ⇒ the legacy default ('free', monthly).
+      { company_name: req.companyName, tenant_code: req.tenantCode, admin_username: req.adminUsername, admin_password: '', email: req.email, industry: req.industry ?? undefined, plan_code: req.requestedPlan ?? undefined },
+      {
+        passwordHash: req.passwordHash,
+        interval: req.requestedInterval === 'annual' ? 'annual' : req.requestedInterval === 'monthly' ? 'monthly' : undefined,
+        addons: Array.isArray(req.requestedAddons) ? (req.requestedAddons as string[]).filter(isAddonKey) : undefined,
+      },
     );
     await this.db.update(signupRequests).set({ createdTenantId: result.tenant_id }).where(eq(signupRequests.id, id));
     return { ...result, request_id: id, status: 'approved' };
@@ -251,7 +272,7 @@ export class TenantProvisioningService {
   // endpoint (POST /api/admin/tenants). No public-signup gate here; each caller gates as appropriate. Runs
   // under whatever RLS scope the request carries: public signup is pre-auth (bypass); the admin endpoint
   // runs with the platform-admin bypass granted by PlatformAdminGuard (both can write a brand-new tenant_id).
-  async provisionTenant(dto: SignupDto, opts?: { passwordHash?: string }) {
+  async provisionTenant(dto: SignupDto, opts?: { passwordHash?: string; interval?: 'monthly' | 'annual'; addons?: string[] }) {
     const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
@@ -326,6 +347,8 @@ export class TenantProvisioningService {
 
       await tx.insert(subscriptions).values({
         tenantId: Number(t.id), planCode, status: 'Trialing', trialEndsAt,
+        ...(opts?.interval ? { billingInterval: opts.interval } : {}),
+        ...(opts?.addons?.length ? { addons: opts.addons.filter(isAddonKey) } : {}),
       });
 
       return t;

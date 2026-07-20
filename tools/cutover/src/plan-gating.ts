@@ -128,6 +128,28 @@ async function main() {
   ok('legacy: @RequiresSuite NOT enforced when kill-switch off',
     (await run('legacy', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [planRow('starter')] })).allowed === true);
 
+  // ── 0451 — à-la-carte ADD-ON suites (scm_advanced/integrations/cdp/sandbox): granted by the plan
+  //    (grandfathered tiers) OR per-tenant via subscriptions.addons, unioned in by resolveEntitledSuites ──
+  const addonRow = (planCode: string, addons: string[]) => ({ ...planRow(planCode), addons });
+  ok('enforce: starter (no scm_advanced) blocks @RequiresSuite(scm_advanced) → SUITE_NOT_ENTITLED',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], suite: 'scm_advanced', rows: [planRow('business', 'Active')] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Procurement'), required: ['pr_raise'], suite: 'scm_advanced', rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: starter + purchased addons=[scm_advanced] allows the scm_advanced gate',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['pr_raise'], suite: 'scm_advanced', rows: [addonRow('starter', ['scm_advanced'])] })).allowed === true);
+  ok('enforce: business GRANDFATHERS scm_advanced (had the procurement token pre-add-on)',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], suite: 'scm_advanced', rows: [planRow('business')] })).allowed === true);
+  ok('enforce: pro grandfathers cdp; starter needs the purchased addon',
+    (await run('enforce', { user: tenantUser('Marketing'), required: ['exec'], suite: 'cdp', rows: [planRow('pro')] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Marketing'), required: ['exec'], suite: 'cdp', rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED'
+    && (await run('enforce', { user: tenantUser('Marketing'), required: ['exec'], suite: 'cdp', rows: [addonRow('starter', ['cdp'])] })).allowed === true);
+  ok('enforce: franchise plan includes sandbox + manufacturing (new seeded tier)',
+    (await run('enforce', { user: tenantUser(), required: ['users'], suite: 'sandbox', rows: [planRow('franchise')] })).allowed === true
+    && (await run('enforce', { user: tenantUser(), required: ['exec'], suite: 'manufacturing', rows: [planRow('franchise')] })).allowed === true);
+  ok('enforce: unknown addon key on the subscription is IGNORED (still blocked)',
+    (await run('enforce', { user: tenantUser(), required: ['users'], suite: 'sandbox', rows: [addonRow('starter', ['bogus', 'hcm'])] })).code === 'SUITE_NOT_ENTITLED');
+  ok('legacy: addon @RequiresSuite gates NOT enforced when kill-switch off',
+    (await run('legacy', { user: tenantUser(), required: ['users'], suite: 'sandbox', rows: [planRow('starter')] })).allowed === true);
+
   // ── 1.4 — PastDue grace window (pure decision) ──
   const DAY = 86400000;
   ok('grace: within window + GET → allow', evaluatePastDueGrace({ currentPeriodEnd: new Date(Date.now() - 2 * DAY), graceDays: 7, now: Date.now(), method: 'GET' }) === 'allow');
