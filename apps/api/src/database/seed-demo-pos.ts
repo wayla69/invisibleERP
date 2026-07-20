@@ -1,5 +1,5 @@
 /**
- * Demo POS polish for the Oshinei tenant: priced menu modifiers (spice level,
+ * Demo POS polish for the Invisible tenant: priced menu modifiers (spice level,
  * extra sauces, toppings, rice) attached to the relevant categories, plus a set
  * of promotion/price rules (happy hour, member %, category discount, BOGO,
  * delivery discount, set price). Idempotent (delete-by-tenant then insert).
@@ -37,8 +37,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     const cats = await tx.select().from(schema.menuCategories).where(eq(schema.menuCategories.tenantId, T));

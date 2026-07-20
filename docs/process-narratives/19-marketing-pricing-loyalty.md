@@ -37,8 +37,8 @@ This narrative documents the marketing, pricing and loyalty processes: campaign 
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (QMS and its processes); cl. 8.2 (Requirements for products and services); cl. 8.5.1 (Control of provision — pricing application).
-- Risk & Control Matrix: `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`.
-- Segregation-of-Duties matrix: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
+- Risk & Control Matrix: `compliance/Invisible_ERP_SOX_RCM_v1.xlsx`.
+- Segregation-of-Duties matrix: `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx`.
 - Policies: `<<Pricing & Discount Authority Policy>>`, `<<Promotions Policy>>`, `<<Loyalty Programme Terms>>`.
 - Code:
   - `apps/api/src/modules/marketing/marketing.controller.ts`, `apps/api/src/modules/marketing/marketing.service.ts`, `apps/api/src/modules/marketing/promo-engine.service.ts`

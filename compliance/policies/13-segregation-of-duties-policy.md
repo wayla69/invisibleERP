@@ -4,7 +4,7 @@
 **Version:** 0.1 (DRAFT) · **Effective:** `<<date>>` · **Last reviewed:** `<<date>>` · **Cadence:** Annual + quarterly conflict review
 **Related RCM controls:** ITGC-AC-09 (SoD ruleset), and the underlying rules R01–R16
 
-> DRAFT template — the rule registry, preventive block, and detective report are already implemented; this policy documents how they operate. Linked artifact: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
+> DRAFT template — the rule registry, preventive block, and detective report are already implemented; this policy documents how they operate. Linked artifact: `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx`.
 
 ## 1. Purpose
 Prevent any single individual from controlling all phases of a transaction in a way that enables error or fraud to go undetected. SoD is enforced **preventively** (conflicting access cannot be granted without a justified, logged override) and monitored **detectively** (periodic conflict reporting).
@@ -37,7 +37,7 @@ The conflict rules are codified in `packages/shared/src/permissions.ts` (`SOD_RU
 | R15 | Manual points adjustment (`crm_points_adjust`) ✗ member master maintenance (`crm_member`) | High |
 | R16 | Campaign issuance of point-bearing value (`crm_campaign`) ✗ points adjustment (`crm_points_adjust`) | High |
 
-The remediated single-duty role design (`Oshinei_ERP_SoD_Matrix_v1.xlsx`, "Remediated Matrix") yields **0 residual conflicts** (Admin inherent superuser, by compensating control).
+The remediated single-duty role design (`Invisible_ERP_SoD_Matrix_v1.xlsx`, "Remediated Matrix") yields **0 residual conflicts** (Admin inherent superuser, by compensating control).
 
 ## 4. Controls (how SoD operates)
 - **Preventive (ITGC-AC-09):** assigning a permission set that holds both sides of a rule is **blocked** (`422 SOD_CONFLICT`) unless an authorized admin records an explicit override **with a reason**, which is logged (`assertNoSodConflict` in `admin-users.service.ts`). Operating effectiveness is re-performed by the control harness (`cutover/compliance.ts`).

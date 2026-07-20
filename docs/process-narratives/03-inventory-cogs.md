@@ -29,7 +29,7 @@ To control inventory movements and cost of goods sold so that the perpetual inve
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4, cl. 8.5.1 (control of production/service provision), cl. 8.5.4 (preservation).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — INV-01..05, REV-07.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — INV-01..05, REV-07.
 - `compliance/policies/13-segregation-of-duties-policy.md` (R11 adjust vs count; INV-05 transfer-custody vs buy-approval).
 - Code: `apps/api/src/modules/wms/` (incl. `replenishment.service.ts`), `apps/api/src/modules/stock-ops/`, `apps/api/src/modules/lots/`, `apps/api/src/modules/costing/`, `apps/api/src/modules/menu/` (recipe), `apps/api/src/modules/returns/returns.service.ts`, `apps/api/src/modules/inventory/inventory-ledger.service.ts` (perpetual valued sub-ledger, **INV-06**). Schema: `branch_stock`, `item_supplier` (migration `0130`); `inv_moves`/`inv_balances`/`inv_cost_layers` (migrations `0131`/`0132`).
 

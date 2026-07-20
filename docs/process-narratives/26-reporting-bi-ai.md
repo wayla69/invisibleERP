@@ -37,8 +37,8 @@ This narrative documents the reporting, business-intelligence (BI) and AI/analyt
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (QMS and its processes); cl. 8.5.1 (Control of provision); cl. 8.6 (Release of products and services — report sign-off).
-- Risk & Control Matrix: `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`.
-- Segregation-of-Duties matrix: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`.
+- Risk & Control Matrix: `compliance/Invisible_ERP_SOX_RCM_v1.xlsx`.
+- Segregation-of-Duties matrix: `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx`.
 - Policies: `<<IPE Policy>>`, `<<Reporting & Disclosure Procedure>>`, `<<AI / Analytics Use Policy>>`, `<<Access Control Policy>>`.
 - Code:
   - `apps/api/src/modules/reports/reports.controller.ts`, `reports.service.ts`, `reports-excel.service.ts`, `reports-pdf.service.ts`, `reports-export.service.ts`

@@ -1,7 +1,7 @@
 /**
- * Set category-themed placeholder images on the Oshinei demo menu.
+ * Set category-themed placeholder images on the Invisible demo menu.
  *
- * Idempotent UPDATE of menu_items.image_url for the OSHINEI tenant — use this
+ * Idempotent UPDATE of menu_items.image_url for the INVISIBLE tenant — use this
  * to add/refresh images on an already-seeded tenant without a full re-seed
  * (db:seed:demo also sets these at insert time for fresh seeds).
  *
@@ -30,8 +30,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // map sku → category code (image theme keys off the category)

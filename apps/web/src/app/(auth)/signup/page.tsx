@@ -108,7 +108,7 @@ export default function SignupPage() {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="tenant_code">{t('auth.su_code')}</Label>
-            <Input id="tenant_code" value={f.tenant_code} onChange={set('tenant_code')} placeholder="oshinei" autoCapitalize="none" required />
+            <Input id="tenant_code" value={f.tenant_code} onChange={set('tenant_code')} placeholder="invisible" autoCapitalize="none" required />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="email">{t('auth.su_email')}</Label>

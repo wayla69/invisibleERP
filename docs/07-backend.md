@@ -113,7 +113,7 @@ export class PortalInventoryRepository {
 // คงรูปแบบแสดงผลเดิม แต่ใช้ Postgres sequence ต่อ doc_type/วัน → atomic
 async next(docType: 'PO'|'GR'|'SO'|'SALE'|..., ctx?: {tenantCode?: string}): Promise<string>
 // 'PO'  → PO-20260620-001
-// 'SALE'→ SALE-OSHI-20260620153012  (tenantCode[:4])
+// 'SALE'→ SALE-INVI-20260620153012  (tenantCode[:4])
 ```
 
 **StatusLogService** — `log(docType, docNo, from, to, by, remarks)` → `doc_status_log` (แทน `_log_status`)

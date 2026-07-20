@@ -26,7 +26,7 @@ To define and control the bill-of-materials (BOM) lifecycle, the work-order conv
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 8.1 (operational planning & control), cl. 8.5 (production & service provision), cl. 8.7 (control of nonconforming outputs).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — MFG-01..03, QC-01, GL-01, INV-01.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — MFG-01..03, QC-01, GL-01, INV-01.
 - Code (QC-01): `apps/api/src/modules/mfg-depth/ncr.service.ts` + `mfg-depth.controller.ts` (`NcrController`), `apps/api/src/database/schema/quality-ncr.ts`, migration `apps/api/drizzle/0332_quality_ncr.sql`; ToE `tools/cutover/src/quality-ncr.ts`.
 - `compliance/policies/03-delegation-of-authority.md` (BOM and work-order authority), `11-financial-close-policy.md` (manufacturing cutoff).
 - Code: `apps/api/src/modules/bom/bom.service.ts` + `bom.controller.ts`, `apps/api/src/modules/manufacturing/manufacturing.service.ts` + `manufacturing.controller.ts`, `apps/api/src/modules/costing/costing.service.ts` + `costing.controller.ts` + `atp.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/common/doc-number.service.ts`.

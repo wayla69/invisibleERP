@@ -25,7 +25,7 @@ interface ChildTarget { table: string; fkCol: string; parentSubquery: string }
 
 const q = (name: string) => `"${name.replace(/"/g, '""')}"`; // identifiers come from pg_catalog, not user input
 
-// The 2026-07-13 OSHINEI factory-reset outage: pure line-item tables WITHOUT a tenant_id column
+// The 2026-07-13 INVISIBLE factory-reset outage: pure line-item tables WITHOUT a tenant_id column
 // (cust_pos_items → cust_pos_sales, survey_answers → survey_responses) are invisible to the
 // tenant_id-column enumeration above, so their rows were never deleted and permanently blocked their
 // parents' DELETE → FACTORY_RESET_BLOCKED with zero progress. This walks the FK graph at runtime
@@ -84,7 +84,7 @@ export async function tenantlessChildTargets(
 // DELETE and ROLLBACK-TO-SAVEPOINT to recover: PGlite honours that, but **postgres-js does NOT** — once
 // any statement errors inside a drizzle/postgres-js transaction the whole tx is poisoned and the error
 // propagates out, so the retry never happened in prod (green on PGlite CI, raw FK 500 in prod — the
-// OSHINEI/Amber reset outage, same CI-vs-prod driver-divergence class as the 0387 RLS bug). With a
+// INVISIBLE/Amber reset outage, same CI-vs-prod driver-divergence class as the 0387 RLS bug). With a
 // correct delete order there are no expected failures at all, so the outcome is driver-independent.
 function topoOrderChildrenFirst(tables: string[], fks: { child: string; parent: string }[]): string[] {
   const inSet = new Set(tables);

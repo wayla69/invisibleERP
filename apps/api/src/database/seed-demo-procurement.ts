@@ -1,5 +1,5 @@
 /**
- * Demo procurement + inventory flow for the Oshinei tenant: suppliers (vendors),
+ * Demo procurement + inventory flow for the Invisible tenant: suppliers (vendors),
  * purchase orders + goods receipts (with stock movements), a posted stocktake,
  * and recipe-usage variance. Deterministic (seeded PRNG), idempotent (rows are
  * tagged created_by/received_by/counted_by = '*-demo' and wiped before re-insert).
@@ -52,8 +52,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ingredient catalogue (tenant) + on-hand

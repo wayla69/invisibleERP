@@ -1,5 +1,5 @@
 /**
- * Demo finance depth for the Oshinei tenant. Posts monthly GL journals so the
+ * Demo finance depth for the Invisible tenant. Posts monthly GL journals so the
  * P&L, trial balance and cash-flow statement show a real margin (not just
  * top-line POS revenue):
  *   • Revenue recognition  Dr Bank / Cr Sales (net) / Cr VAT output  (from actual sales)
@@ -51,8 +51,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ── chart of accounts (idempotent — never clobbers existing) ──

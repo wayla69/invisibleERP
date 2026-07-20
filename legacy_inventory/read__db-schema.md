@@ -2,7 +2,7 @@ I have everything needed. `tbl_raw_inventory` is an append-only ETL landing tabl
 
 ---
 
-# COMPLETE DATA MODEL — Oshinei Enterprise ERP (Legacy SQLite → Postgres target)
+# COMPLETE DATA MODEL — Invisible Enterprise ERP (Legacy SQLite → Postgres target)
 
 ## 0. Cross-cutting facts (parity-critical — easy to silently drop)
 

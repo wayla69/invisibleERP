@@ -1,5 +1,5 @@
 {
-  "name": "Invisible ERP V2 — full stack (Codespaces)",
+  "name": "Invisible ERP — full stack (Codespaces)",
   "image": "mcr.microsoft.com/devcontainers/base:bookworm",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}

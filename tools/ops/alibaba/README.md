@@ -1,6 +1,6 @@
 # Alibaba Cloud — การตั้งค่า Tier 0 (เครื่องเดียว) + สำรองข้อมูลขึ้น OSS
 
-> ชุดเครื่องมือสำหรับรัน Invisible ERP V2 แบบ **ลีนสุด (Tier 0)** บน Alibaba Cloud ECS เครื่องเดียว
+> ชุดเครื่องมือสำหรับรัน Invisible ERP แบบ **ลีนสุด (Tier 0)** บน Alibaba Cloud ECS เครื่องเดียว
 > ตามแผน [`docs/deployment/alibaba-cloud-plan-th.md`](../../../docs/deployment/alibaba-cloud-plan-th.md)
 > — เครื่องเดียวรัน **Caddy (TLS) → web + api → Postgres** พร้อมสำรองข้อมูลอัตโนมัติขึ้น **OSS**
 >

@@ -32,7 +32,7 @@ performance, recruiting, onboarding, compensation) attach their own sections as 
 
 ## 4. References
 
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — HR-02.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — HR-02.
 - Code: `apps/api/src/modules/hcm/` (`hcm-leave.service.ts`, `hcm.service.ts`), `apps/api/src/database/schema/hcm-leave.ts`.
 - Migration `apps/api/drizzle/0321_hcm_leave_accrual.sql`.
 - ToE harness: `tools/cutover/src/hcm-leave.ts` (17 checks).

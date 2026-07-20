@@ -953,7 +953,7 @@ one screen; the Overview tab's alerts mirror the weekly `governance_readiness` m
 the compliance / audit / exec function (`exec` or `users`). This is the single auditor-facing view of the
 whole control environment — the ~240-control Risk & Control Matrix (RCM), each control's status, and its
 test-of-effectiveness (ToE) results — that a NASDAQ audit team asks for. The catalogue is the *same* source
-as `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` (both are generated from `compliance/build_rcm.py`), so what you
+as `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` (both are generated from `compliance/build_rcm.py`), so what you
 see in-app can never drift from the spreadsheet.
 
 **Browse the catalogue.** The top cards show the census (total / Implemented / Partial / Gap). The table lists

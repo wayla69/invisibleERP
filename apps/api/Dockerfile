@@ -1,4 +1,4 @@
-# Invisible ERP V2 — API (NestJS/Fastify) production image.
+# Invisible ERP — API (NestJS/Fastify) production image.
 # Multi-stage: install workspace deps → build @ierp/shared + @ierp/api → slim runtime.
 # Mirrors the Railway NIXPACKS build (apps/api/railway.json) so container + Railway stay in lock-step.
 

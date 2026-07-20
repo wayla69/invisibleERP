@@ -683,7 +683,7 @@ export default function PlatformConsole({
         <div className="grid gap-3">
           <div className="grid gap-1"><Label>{t('plt.prov_company_name')}</Label><Input value={prov.company_name} onChange={(e) => setProv({ ...prov, company_name: e.target.value })} placeholder={t('plt.prov_company_name_ph')} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1"><Label>{t('plt.prov_tenant_code')}</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="OSHINEI" /></div>
+            <div className="grid gap-1"><Label>{t('plt.prov_tenant_code')}</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="INVISIBLE" /></div>
             <div className="grid gap-1"><Label>{t('plt.prov_industry')}</Label>
               <Select className="w-auto" value={prov.industry} onChange={(e) => setProv({ ...prov, industry: e.target.value })}>
                 {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}

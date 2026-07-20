@@ -27,7 +27,7 @@ To control cash and electronic settlement — POS till open/close, payment captu
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4, cl. 8.5.1, cl. 9.1.
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — REV-02/03/05/06/09/11, REC-02.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — REV-02/03/05/06/09/11, REC-02.
 - `compliance/policies/03-delegation-of-authority.md` (refund/void authority).
 - Code: `apps/api/src/modules/payments/payments.service.ts`, `apps/api/src/modules/pos/terminal/`, `apps/api/src/modules/bank/`, `apps/api/src/common/crypto.ts`.
 

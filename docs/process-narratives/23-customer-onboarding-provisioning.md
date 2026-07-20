@@ -28,7 +28,7 @@ To define and control the onboarding of a new tenant and its ledger provisioning
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach, including interactions), cl. 8.1 (operational planning and control), cl. 8.5 (control of provision), cl. 8.6 (release).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — ONB-01, ONB-02, ONB-03, ONB-04, GL-01, ITGC-CM, ITGC-AC.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — ONB-01, ONB-02, ONB-03, ONB-04, GL-01, ITGC-CM, ITGC-AC.
 - `compliance/policies/03-delegation-of-authority.md` (admin authorization), `11-financial-close-policy.md` (opening-balance cutover).
 - Code: `apps/api/src/modules/billing/billing.service.ts`, `apps/api/src/modules/auth/auth.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`, `apps/api/src/main.ts` (`seedChartOfAccounts`, `seedLedgers`).
 

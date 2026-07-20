@@ -1,6 +1,6 @@
 # Phase 9 — World-Class Foundations (7 highest-leverage moves)
 
-ยกระดับ Invisible ERP V2 จาก "feature-parity กับระบบเดิม" → **รากฐานระดับโลก** ที่แข่งกับ
+ยกระดับ Invisible ERP จาก "feature-parity กับระบบเดิม" → **รากฐานระดับโลก** ที่แข่งกับ
 SAP / NetSuite / Odoo (ERP) และ Square / Toast / Shopify (POS) ได้ ทั้ง 7 moves ทำพร้อมกัน
 และ **พิสูจน์ด้วย harness จริง** (Nest app จริง รันบน PGlite = Postgres จริง, RLS เปิดใช้งาน).
 

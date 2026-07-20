@@ -26,7 +26,7 @@ To control the payroll cycle so that gross-to-net pay, statutory social security
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4, cl. 7.1.2 (people), cl. 9.1.
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — PAY-01, PAY-02, PAY-03, PAY-06.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — PAY-01, PAY-02, PAY-03, PAY-06.
 - Thai statutory: Social Security Act (5%, cap THB 750), Revenue Code PIT/WHT, ภ.ง.ด.1 / 1ก.
 - Code: `apps/api/src/modules/payroll/payroll-calc.ts`, `apps/api/src/modules/hcm/`, `apps/api/src/modules/tax/reports/`.
 

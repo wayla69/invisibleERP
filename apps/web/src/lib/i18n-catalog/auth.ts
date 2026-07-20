@@ -44,7 +44,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'auth.su_title': { th: 'ขอเปิดใช้งานบริษัท', en: 'Request a company account' },
   'auth.su_subtitle': { th: 'กรอกรายละเอียดเพื่อส่งคำขอ — ผู้ดูแลแพลตฟอร์มจะอนุมัติและเปิดบัญชีให้', en: 'Fill in the details to submit a request — the platform administrator will approve and activate it' },
   'auth.su_company': { th: 'ชื่อกิจการ', en: 'Business name' },
-  'auth.su_company_ph': { th: 'ร้านโอชิเนอิ', en: 'Oshinei Shop' },
+  'auth.su_company_ph': { th: 'ร้านอินวิซิเบิล', en: 'Invisible Shop' },
   'auth.su_industry': { th: 'ประเภทธุรกิจ', en: 'Business type' },
   'auth.su_ind_restaurant': { th: 'ร้านอาหาร', en: 'Restaurant' },
   'auth.su_ind_retail': { th: 'ค้าปลีก', en: 'Retail' },

@@ -28,7 +28,7 @@ To define the controlled process for preparing, approving, and baselining budget
 ## 4. References
 
 - ISO 9001:2015 clause 4.4 (QMS and its processes); clause 8.1 (Operational planning and control); clause 9.1 (Monitoring, measurement, analysis and evaluation).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — EPM-*, GL-05 (maker-checker) families.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — EPM-*, GL-05 (maker-checker) families.
 - `compliance/policies/budgeting-and-planning-policy.md`; `compliance/policies/delegation-of-authority-policy.md`.
 - Code: `apps/api/src/modules/ledger/ledger.controller.ts` (budgets), `apps/api/src/modules/planning/planning.controller.ts`, `apps/api/src/modules/planning/planning.service.ts`, `apps/api/src/modules/workflow/` (WorkflowService).
 

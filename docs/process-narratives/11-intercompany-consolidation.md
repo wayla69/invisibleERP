@@ -26,7 +26,7 @@ To control intercompany (IC) transactions and group consolidation so that IC bal
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 5.3 (roles/authorities), cl. 7.5 (documented information), cl. 9.1 (monitoring/measurement).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — IC-01..04, CONS-01..04, GL-01, REC-03.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — IC-01..04, CONS-01..04, GL-01, REC-03.
 - `compliance/policies/03-delegation-of-authority.md`, `07-access-control-policy.md` (HQ-only authority), `11-financial-close-policy.md` (consolidation cutoff).
 - Code: `apps/api/src/modules/intercompany/intercompany.service.ts` + `intercompany.controller.ts`, `apps/api/src/modules/consolidation/consolidation.service.ts` + `consolidation.controller.ts`, `apps/api/src/modules/ledger/ledger.service.ts`.
 

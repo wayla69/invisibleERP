@@ -1,4 +1,4 @@
-# Privilege-Escalation & API-Authorization Audit — Invisible ERP V2
+# Privilege-Escalation & API-Authorization Audit — Invisible ERP
 
 **Date:** 2026-07-17
 **Scope:** `apps/api` (NestJS 11 / Fastify 5 + Drizzle ORM 0.45 + PostgreSQL, multi-tenant RLS). Focused

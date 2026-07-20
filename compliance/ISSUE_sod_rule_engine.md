@@ -5,7 +5,7 @@
 > (strip these two quote lines first, or leave them — harmless).
 
 ## Why
-Our SoD analysis (computed from `packages/shared/src/permissions.ts` → `DEFAULT_ROLE_PERMISSIONS`) found **18 role-level SoD conflicts** plus **2 design-level conflicts inside single permissions**. This is RCM control **ITGC-AC-09** and a top item the IT auditor will test for the NASDAQ/EGC ICFR program. Deliverables: `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx` (+ generator `compliance/build_sod.py`).
+Our SoD analysis (computed from `packages/shared/src/permissions.ts` → `DEFAULT_ROLE_PERMISSIONS`) found **18 role-level SoD conflicts** plus **2 design-level conflicts inside single permissions**. This is RCM control **ITGC-AC-09** and a top item the IT auditor will test for the NASDAQ/EGC ICFR program. Deliverables: `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx` (+ generator `compliance/build_sod.py`).
 
 ### Current conflicts
 - **Sales (7):** `exec`+`approvals` (post & close/certify), `pos` bundles sell+refund+till, `pricelist`/`promos`+`pos`, `crm`+`pos`, `returns`+`pos`.
@@ -14,7 +14,7 @@ Our SoD analysis (computed from `packages/shared/src/permissions.ts` → `DEFAUL
 - **Warehouse (1):** `warehouse` bundles adjust+custody+count.
 - **Admin:** inherent superuser (expected; compensating controls).
 
-> **Update (2026-06-26):** the live role-level total is now **8** (was 18 → 14 after Procurement fix → 8 after Planner fix). Regenerate `Oshinei_ERP_SoD_Matrix_v1.xlsx` via `python3 compliance/build_sod.py`.
+> **Update (2026-06-26):** the live role-level total is now **8** (was 18 → 14 after Procurement fix → 8 after Planner fix). Regenerate `Invisible_ERP_SoD_Matrix_v1.xlsx` via `python3 compliance/build_sod.py`.
 
 ## Scope
 

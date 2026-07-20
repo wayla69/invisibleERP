@@ -33,8 +33,8 @@ def crow(r, label, val, lbold=True):
 cov["B2"] = "Risk & Control Matrix (RCM)"; cov["B2"].font = f(20, True, NAVY)
 cov["B3"] = "SOX / COSO 2013 Internal-Control Readiness — IT General Controls & Application Controls"; cov["B3"].font = f(11, False, STEEL)
 for r in (2,3): cov.merge_cells(f"B{r}:C{r}")
-crow(6, "Entity", "Invisible Consulting — Oshinei Enterprise ERP")
-crow(7, "System in scope", "Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL, multi-tenant w/ RLS)")
+crow(6, "Entity", "Invisible Consulting — Invisible Enterprise ERP")
+crow(7, "System in scope", "Invisible ERP (NestJS API · Next.js web · Drizzle · PostgreSQL, multi-tenant w/ RLS)")
 crow(8, "Filer status", "Emerging Growth Company (EGC) — JOBS Act")
 crow(9, "Framework", "COSO 2013 (5 components / 17 principles) · ITGC aligned to COBIT · PCAOB AS 2201")
 crow(10, "Regulatory driver", "SOX 302 (CEO/CFO certification) · SOX 404(a) (management ICFR assessment)")
@@ -1333,6 +1333,6 @@ _catalog_json()
 
 # order tabs
 wb.move_sheet("Cover", -wb.sheetnames.index("Cover"))
-out = "compliance/Oshinei_ERP_SOX_RCM_v1.xlsx"
+out = "compliance/Invisible_ERP_SOX_RCM_v1.xlsx"
 wb.save(out)
 print("WROTE", out, "| controls:", len(R), "| gaps:", len(GAP), "| census:", _json.dumps(CENSUS["by_status"]))

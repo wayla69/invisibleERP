@@ -1,6 +1,6 @@
 # CLAUDE.md — working agreement for this repository
 
-Invisible ERP V2 — NestJS (Fastify) API + Next.js web, Drizzle ORM, PostgreSQL (multi-tenant, RLS),
+Invisible ERP — NestJS (Fastify) API + Next.js web, Drizzle ORM, PostgreSQL (multi-tenant, RLS),
 Thai-localized. This is a SOX/ICFR-and-ISO-documented codebase preparing for a NASDAQ listing, so the
 documentation is a first-class deliverable, not an afterthought.
 
@@ -633,7 +633,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   Sequence is at `0427_free_issue_custody` / idx 401 / when 2023820000366 as of the F2 wave (2026-07-17) —
   the next free is 0428 / idx 402 / when …367, but ALWAYS re-derive from the live journal tail after a
   main merge (mantra #10: concurrent PRs steal numbers).
-- **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`
+- **The RCM xlsx is a generated binary — never hand-merge it.** `compliance/Invisible_ERP_SOX_RCM_v1.xlsx`
   conflicts on essentially every merge. Edit `build_rcm.py`, take **ours** on the `.xlsx` (or `--theirs`,
   doesn't matter), then **regenerate**: `python3 compliance/build_rcm.py` (run from repo root) and stage
   the result. Currently **187 controls**. **When `main` added controls too** (a concurrent PR bumped the
@@ -777,7 +777,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   golden`) and commit the golden diff in the same PR — never re-pin to paper over unintended drift.
 
 ## Key references
-- RCM / readiness / policies: `compliance/` (`Oshinei_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
+- RCM / readiness / policies: `compliance/` (`Invisible_ERP_SOX_RCM_v1.xlsx`, `build_rcm.py`,
   `COSO_ICFR_Audit_Readiness_Plan.md`, `policies/`, `vulnerability-triage.md`).
 - Permissions / roles / SoD rules: `packages/shared/src/permissions.ts`. Web nav/workspaces: `apps/web/src/lib/nav.ts`
   (groups support collapsible `subgroups`; the sidebar `AppShell` renders ERP/POS switcher + favourites/recents).

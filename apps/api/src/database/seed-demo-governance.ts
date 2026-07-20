@@ -1,5 +1,5 @@
 /**
- * Demo entity-level governance for the Oshinei tenant — a live "first operating cycle" for the three ELC
+ * Demo entity-level governance for the Invisible tenant — a live "first operating cycle" for the three ELC
  * controls so GET /api/governance/readiness shows a healthy, current cycle:
  *   ELC-01 code-of-conduct acknowledgements (for the tenant's active staff),
  *   ELC-02 a recent audit-committee ICFR meeting (signed off, not overdue),
@@ -49,8 +49,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ── wipe (idempotent, tenant-scoped) ──
@@ -94,6 +94,6 @@ async function main() {
   });
 
   await client.end();
-  console.log('✅ Seeded ELC governance first cycle for OSHINEI (acknowledgements, oversight meeting, DoA, fraud register, sample case)');
+  console.log('✅ Seeded ELC governance first cycle for INVISIBLE (acknowledgements, oversight meeting, DoA, fraud register, sample case)');
 }
 main().catch((e) => { console.error(e); process.exit(1); });

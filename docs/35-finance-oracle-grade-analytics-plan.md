@@ -339,7 +339,7 @@ read-only analytics; ITGC-OP-04 already captures scheduled-job failures. Below i
 | **TR-01** — Cash-position review | Detective | Weekly liquidity/forecast review (if not already covered by an existing treasury control — confirm during Phase 4) |
 
 All three are **read-only monitoring** controls (no new posting authority ⇒ no new SoD conflict). Add via
-`compliance/build_rcm.py`, regenerate `Oshinei_ERP_SOX_RCM_v1.xlsx` (Phase 1 adds **ELC-07** → 184 controls), and
+`compliance/build_rcm.py`, regenerate `Invisible_ERP_SOX_RCM_v1.xlsx` (Phase 1 adds **ELC-07** → 184 controls), and
 mirror in `tools/cutover/src/compliance.ts`.
 
 ## 5. Sequencing & PR plan

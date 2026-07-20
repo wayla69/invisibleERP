@@ -1,4 +1,4 @@
-# User Acceptance Testing (UAT) Plan — Invisible ERP V2
+# User Acceptance Testing (UAT) Plan — Invisible ERP
 
 **Status: DRAFT v0.1 · 2026-06-22**
 
@@ -8,11 +8,11 @@
 
 ## 1. Objective
 
-Confirm that Invisible ERP V2 meets the business and control requirements of each financially-significant cycle **from the business user's perspective**, and that the application's preventive/detective controls actually block the risks they are designed to block. UAT is the final gate before production cutover sign-off.
+Confirm that Invisible ERP meets the business and control requirements of each financially-significant cycle **from the business user's perspective**, and that the application's preventive/detective controls actually block the risks they are designed to block. UAT is the final gate before production cutover sign-off.
 
 Each UAT case is traceable to:
 - a **process narrative** section (`docs/process-narratives/`),
-- a **Risk & Control Matrix (RCM)** control ID (`compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`), where the case exercises a control, and
+- a **Risk & Control Matrix (RCM)** control ID (`compliance/Invisible_ERP_SOX_RCM_v1.xlsx`), where the case exercises a control, and
 - the **automated control-evidence harness** (`tools/cutover/src/*.ts`) that already asserts the same expected results end-to-end, so UAT and ToE evidence agree.
 
 ## 2. Scope
@@ -45,8 +45,8 @@ Each UAT case is traceable to:
 | Process narratives (per-cycle, RCM-linked) | `docs/process-narratives/` |
 | UAT traceability matrix | [`./uat-traceability-matrix.md`](./uat-traceability-matrix.md) |
 | User manual | `<<docs/user-manual/ — link once authored>>` |
-| Risk & Control Matrix (RCM) | `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` |
-| Segregation-of-Duties matrix + ruleset (R01–R16) | `compliance/Oshinei_ERP_SoD_Matrix_v1.xlsx`, `packages/shared/src/permissions.ts` |
+| Risk & Control Matrix (RCM) | `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` |
+| Segregation-of-Duties matrix + ruleset (R01–R16) | `compliance/Invisible_ERP_SoD_Matrix_v1.xlsx`, `packages/shared/src/permissions.ts` |
 | API specification | `docs/02-api-spec.md` |
 | Cutover / control-evidence harnesses (expected-result oracles) | `tools/cutover/src/compliance.ts`, `e2e.ts`, `match.ts`, `worldclass.ts`, `payroll.ts`, `returns.ts`, `wms.ts`, `etax.ts`, `pos-p1.ts` |
 | Cutover runbook | `docs/08-cutover-runbook.md` |

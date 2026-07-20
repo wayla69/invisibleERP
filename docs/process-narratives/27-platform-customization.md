@@ -25,7 +25,7 @@ This is an **umbrella narrative** for the cross-cutting *platform-customization*
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.5 (documented information).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx`; `compliance/policies/`.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx`; `compliance/policies/`.
 - Permissions / SoD model: `packages/shared/src/permissions.ts`. Web navigation: `apps/web/src/lib/nav.ts`.
 - Control/integration harness: `tools/cutover/src/ext.ts` (the cross-feature suite — 208 checks at time of writing).
 - Per-feature owning narratives: `02` (workflows), `08` (audit viewer, webhooks), `17` (custom fields, alerts, bulk import), `23` (branding), `26` (scheduled reports, saved views, role dashboards).

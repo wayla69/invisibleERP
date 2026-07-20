@@ -5,7 +5,7 @@
  *
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover compliance
  *
- * Controls covered (see compliance/Oshinei_ERP_SOX_RCM_v1.xlsx):
+ * Controls covered (see compliance/Invisible_ERP_SOX_RCM_v1.xlsx):
  *   GL-05  — Manual journal-entry maker-checker: a manual JE posts as Draft (excluded from balances)
  *            and only a DIFFERENT user may approve it; preparer self-approval is blocked even for Admin.
  *   GL-11  — Chart-of-Accounts change control: canonical (`accounts`, shared universe) writes are a platform
