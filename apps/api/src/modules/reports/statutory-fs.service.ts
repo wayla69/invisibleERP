@@ -363,6 +363,53 @@ export class StatutoryFsService {
     };
   }
 
+  // ───────────────────── Statutory statement PACK (P9 — the full FS set for PDF export) ─────────────────────
+  // Assembles the complete annual financial-statement set — company header, Balance Sheet (with the P8 KPIs),
+  // Profit or Loss (with KPIs), Statement of Changes in Equity, and (best-effort) note schedules — over ONE
+  // consistent period + comparative, so a single call feeds the formatted PDF. Pure presentation over the
+  // canonical builders (renderStatement / statementOfChangesInEquity / noteSchedules); every section ties out
+  // exactly as it does standalone. Notes are included only when a valid notes definition is supplied.
+  async statementPack(params: {
+    asOf: string; from: string; priorAsOf?: string; priorFrom?: string;
+    ledger?: string | null; industry?: string | null; notesCode?: string | null;
+  }) {
+    if (!params.asOf || !params.from) {
+      throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'as_of and from are required', messageTh: 'ต้องระบุ as_of และ from' });
+    }
+    const ledger = params.ledger ?? null;
+    const comparative = !!(params.priorAsOf && params.priorFrom);
+    const common = { priorAsOf: params.priorAsOf, priorFrom: params.priorFrom, ledger, industry: params.industry ?? null };
+    const [pl, bs] = await Promise.all([
+      this.renderStatement('DBD-PL', { asOf: params.asOf, from: params.from, ...common }),
+      this.renderStatement('DBD-BS', { asOf: params.asOf, ...common }),
+    ]);
+    const soce = await this.statementOfChangesInEquity({ from: params.from, to: params.asOf, ledger });
+
+    // Notes are buyer-authored (no built-in defs); include only when a resolvable notes definition is named.
+    let notes: Awaited<ReturnType<typeof this.noteSchedules>> | null = null;
+    if (params.notesCode) {
+      try {
+        notes = await this.noteSchedules(params.notesCode, {
+          asOf: params.asOf, from: params.from, priorAsOf: params.priorAsOf, priorFrom: params.priorFrom, ledger, basis: 'bs',
+        });
+      } catch { notes = null; } // a missing / non-notes code just omits the section rather than failing the pack
+    }
+
+    const tid = this.tid();
+    let company: { name: string; code: string | null; taxId: string | null } | null = null;
+    if (tid != null) {
+      const [t] = await this.db.select().from(tenants).where(eq(tenants.id, tid)).limit(1);
+      if (t) company = { name: t.legalName ?? t.name ?? t.code, code: t.code ?? null, taxId: t.taxId ?? null };
+    }
+
+    return {
+      company,
+      period: { from: params.from, as_of: params.asOf, prior_from: params.priorFrom ?? null, prior_as_of: params.priorAsOf ?? null },
+      ledger: ledger ?? 'LEADING', industry: params.industry ?? null, comparative,
+      balance_sheet: bs, profit_and_loss: pl, changes_in_equity: soce, notes,
+    };
+  }
+
   // ───────────────────── Note schedules (per-note account mapping + comparative + policy text) ─────────────
   async noteSchedules(code: string, params: { asOf?: string; from?: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null; basis?: 'bs' | 'pl' }) {
     const def = await this.getDefinition(code);
