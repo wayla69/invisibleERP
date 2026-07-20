@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, integer, numeric, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // ── FIN-4: Statutory FS pack — configurable financial-report builder ────────────
@@ -25,3 +25,31 @@ export const fsReportDefinitions = pgTable('fs_report_definitions', {
 }));
 
 export type FsReportDefinition = typeof fsReportDefinitions.$inferSelect;
+
+// ── FIN-4 GL-29: financial-statement issuance review & approval (maker-checker) ──
+// A preparer submits a period's statutory statement pack for review, snapshotting the key figures + a hash
+// (the "as-issued" record); a DIFFERENT user approves it (self-approval → SOD_VIOLATION). The formatted FS
+// pack reads the latest Approved review for the period/ledger to stamp "reviewed & approved" vs "unaudited",
+// and flags a re-review when the live figures drift from the approved hash. Tenant-scoped (RLS 0232 + index).
+export const fsStatementReviews = pgTable('fs_statement_reviews', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).notNull().references(() => tenants.id),
+  fiscalYear: integer('fiscal_year').notNull(),
+  ledger: text('ledger').notNull().default('LEADING'),
+  industry: text('industry'),
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved
+  totalAssets: numeric('total_assets', { precision: 18, scale: 2 }),
+  totalLiabilities: numeric('total_liabilities', { precision: 18, scale: 2 }),
+  totalEquity: numeric('total_equity', { precision: 18, scale: 2 }),
+  revenue: numeric('revenue', { precision: 18, scale: 2 }),
+  netIncome: numeric('net_income', { precision: 18, scale: 2 }),
+  figuresHash: text('figures_hash').notNull(),
+  preparedBy: text('prepared_by'),
+  preparedAt: timestamp('prepared_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+}, (t) => ({
+  byTenant: index('idx_fs_statement_reviews_tenant').on(t.tenantId, t.fiscalYear, t.status),
+}));
+
+export type FsStatementReview = typeof fsStatementReviews.$inferSelect;

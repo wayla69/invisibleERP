@@ -67,6 +67,7 @@ async function main() {
     { username: 'fincon', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t1 }, // gl_close + approvals (checker)
     { username: 'execu', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },              // legacy 'exec' → holds BOTH gl_post and gl_close (residual-risk case maker-checker backstops)
     { username: 'finT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },        // tenant-2 finance reader (creditors/ar) — RLS isolation probe
+    { username: 'fsT2', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t2 }, // tenant-2 fin_report holder — GL-29 RLS isolation probe
     { username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 },          // creditors only — AP-PAY maker
     { username: 'apdual', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },       // creditors + approvals — residual self-approval case
     { username: 'payprep', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },            // PAY-03 payroll preparer (t1)
@@ -174,6 +175,38 @@ async function main() {
   });
   const adminSelf = await inj('POST', `/api/ledger/journal/${adminJe.json.entry_no}/approve`, admin);
   ok('GL-05: maker-checker binds even Admin (no self-approve override)', adminSelf.status === 403 && adminSelf.json.error?.code === 'SOD_VIOLATION', `${adminSelf.status} ${adminSelf.json.error?.code}`);
+
+  // ════════════════════════ GL-29 — Financial-statement issuance review & approval (maker-checker) ════════════════════════
+  // A preparer submits a fiscal year's statements (snapshot + hash of the key figures); a DIFFERENT user
+  // approves; the formatted FS pack then stamps "reviewed & approved" (vs "unaudited"), and flips to
+  // "re-review required" if the live GL figures later drift from the approved snapshot. Tenant-scoped (RLS).
+  const fsFy = Number(today.slice(0, 4));
+  const fsSubmit = await inj('POST', '/api/reports/fs/statement-pack/submit', glacct, { fiscal_year: fsFy });
+  ok('GL-29: preparer submits the FS pack → PendingApproval with a figures snapshot',
+    fsSubmit.status === 201 && fsSubmit.json.status === 'PendingApproval' && fsSubmit.json.prepared_by === 'glacct' && typeof fsSubmit.json.figures?.total_assets === 'number',
+    `${fsSubmit.status} st=${fsSubmit.json.status} by=${fsSubmit.json.prepared_by}`);
+  const fsrId = fsSubmit.json.id;
+  const fsSelf = await inj('POST', `/api/reports/fs/statement-reviews/${fsrId}/approve`, glacct);
+  ok('GL-29: preparer self-approval blocked → 403 SOD_VIOLATION (maker ≠ checker)',
+    fsSelf.status === 403 && fsSelf.json.error?.code === 'SOD_VIOLATION', `${fsSelf.status} ${fsSelf.json.error?.code}`);
+  const fsAppr = await inj('POST', `/api/reports/fs/statement-reviews/${fsrId}/approve`, fincon);
+  ok('GL-29: a DIFFERENT user approves → Approved (approved_by recorded)',
+    fsAppr.status === 201 && fsAppr.json.status === 'Approved' && fsAppr.json.approved_by === 'fincon', `${fsAppr.status} st=${fsAppr.json.status} by=${fsAppr.json.approved_by}`);
+  const fsReAppr = await inj('POST', `/api/reports/fs/statement-reviews/${fsrId}/approve`, fincon);
+  ok('GL-29: re-approving an approved review → 400 FS_REVIEW_NOT_PENDING', fsReAppr.status === 400 && fsReAppr.json.error?.code === 'FS_REVIEW_NOT_PENDING', `${fsReAppr.status} ${fsReAppr.json.error?.code}`);
+  const packApproved: string = (await inj('GET', `/api/reports/fs/statement-pack.pdf?fiscal_year=${fsFy}`, fincon)).text ?? '';
+  ok('GL-29: the FS pack stamps "reviewed & approved by <checker>" (not "unaudited")',
+    /Reviewed &amp; approved by fincon/.test(packApproved) && !/Unaudited — management accounts/.test(packApproved),
+    `approvedStamp=${/Reviewed &amp; approved by fincon/.test(packApproved)}`);
+  // Tamper: post a further JE into the fiscal year → the approved snapshot no longer matches the live figures.
+  const fsTamperJe = await inj('POST', '/api/ledger/journal', glacct, { date: today, memo: 'post-approval movement', source: 'Manual', lines: [{ account_code: '1000', debit: 555 }, { account_code: '4000', credit: 555 }] });
+  await inj('POST', `/api/ledger/journal/${fsTamperJe.json.entry_no}/approve`, fincon);
+  const packStale: string = (await inj('GET', `/api/reports/fs/statement-pack.pdf?fiscal_year=${fsFy}`, fincon)).text ?? '';
+  ok('GL-29: figures drift after approval → the pack flips to "re-review required" (tamper-evident)',
+    /re-review required/.test(packStale) && !/Reviewed &amp; approved by fincon/.test(packStale), `reReview=${/re-review required/.test(packStale)}`);
+  const fsT2 = await login('fsT2', 'pw');
+  ok('GL-29: statement reviews are tenant-isolated — another tenant sees 0 (RLS)',
+    Array.isArray((await inj('GET', '/api/reports/fs/statement-reviews', fsT2)).json) && (await inj('GET', '/api/reports/fs/statement-reviews', fsT2)).json.length === 0, 'rls');
 
   // ════════════════════════ AP-PAY — AP disbursement maker-checker ════════════════════════
   // A vendor payment must be REQUESTED by a `creditors` holder and APPROVED by a DIFFERENT user with
