@@ -1,7 +1,7 @@
-# COSO / ICFR Audit-Readiness Plan — Invisible ERP V2
+# COSO / ICFR Audit-Readiness Plan — Invisible ERP
 
 **Entity:** Invisible Consulting — Invisible Enterprise ERP
-**System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant with Row-Level Security)
+**System in scope:** Invisible ERP (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant with Row-Level Security)
 **Framework:** COSO 2013 (5 components / 17 principles) · ITGC aligned to COBIT · PCAOB AS 2201
 **Regulatory driver:** SOX 302 (CEO/CFO certification) · SOX 404(a) (management ICFR assessment)
 **Filer status:** Emerging Growth Company (EGC) — JOBS Act

@@ -1,4 +1,4 @@
-# Invisible ERP V2 — Alibaba Cloud "Tier 0" single-host production stack.
+# Invisible ERP — Alibaba Cloud "Tier 0" single-host production stack.
 # One ECS box runs: Caddy (TLS + same-origin reverse proxy) → web (Next.js) + api (NestJS) → Postgres.
 #
 # Same-origin design (important — avoids the cross-origin cookie/login trap):

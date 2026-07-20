@@ -1,4 +1,4 @@
-# Penetration Test Report — Invisible ERP V2
+# Penetration Test Report — Invisible ERP
 
 **Date:** 2026-07-16
 **Scope:** `apps/api` (NestJS 11 / Fastify 5 + Drizzle ORM 0.45 + PostgreSQL, multi-tenant RLS) and `apps/web`

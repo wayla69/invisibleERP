@@ -1,6 +1,6 @@
 # CLAUDE.md — working agreement for this repository
 
-Invisible ERP V2 — NestJS (Fastify) API + Next.js web, Drizzle ORM, PostgreSQL (multi-tenant, RLS),
+Invisible ERP — NestJS (Fastify) API + Next.js web, Drizzle ORM, PostgreSQL (multi-tenant, RLS),
 Thai-localized. This is a SOX/ICFR-and-ISO-documented codebase preparing for a NASDAQ listing, so the
 documentation is a first-class deliverable, not an afterthought.
 

@@ -2,7 +2,7 @@
   "name": "@ierp/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Invisible ERP V2 — Next.js frontend",
+  "description": "Invisible ERP — Next.js frontend",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

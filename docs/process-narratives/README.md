@@ -1,8 +1,8 @@
-# Process Narratives — Invisible ERP V2
+# Process Narratives — Invisible ERP
 
 **Status: DRAFT v0.1 · 2026-06-22**
 
-This folder holds **ISO-style documented procedures (process narratives + workflows)** for every financially-significant business cycle of the Invisible ERP V2 application. They are the human-readable companion to the control matrices in `compliance/` and are written so that an external financial auditor / IT auditor can perform a **walkthrough** of each process and tie every control step to a Risk & Control Matrix (RCM) control ID.
+This folder holds **ISO-style documented procedures (process narratives + workflows)** for every financially-significant business cycle of the Invisible ERP application. They are the human-readable companion to the control matrices in `compliance/` and are written so that an external financial auditor / IT auditor can perform a **walkthrough** of each process and tie every control step to a Risk & Control Matrix (RCM) control ID.
 
 > **Disclaimer:** These are engineering/control working drafts to accelerate SOX 404(a) / ISO 9001 audit readiness. They are not legal, accounting, or compliance advice. Validate scope, control selection, and testing with your independent audit firm and a qualified SOX advisor. All `<<placeholders>>` must be completed by the process owner before these documents are approved and made effective.
 

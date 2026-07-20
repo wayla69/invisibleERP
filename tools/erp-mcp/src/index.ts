@@ -1,5 +1,5 @@
 /**
- * Invisible ERP V2 — MCP Server
+ * Invisible ERP — MCP Server
  * Exposes key ERP endpoints as Claude tools via stdio transport.
  *
  * Config (env vars):

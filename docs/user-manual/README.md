@@ -1,8 +1,8 @@
-# Invisible ERP V2 — User Manual
+# Invisible ERP — User Manual
 
 **Status: DRAFT v0.1** · Last updated: 2026-06-22
 
-Welcome to the Invisible ERP V2 end-user manual. This guide explains, in plain
+Welcome to the Invisible ERP end-user manual. This guide explains, in plain
 language, how to perform everyday tasks in the system — selling at the till,
 taking orders, receiving stock, paying suppliers, closing the books, running
 payroll, and more.
@@ -26,7 +26,7 @@ Each task is written as numbered steps ("To do X: 1… 2… 3…") and tells you
 ## Before you start — important conventions
 
 > **The screens are in Thai by default.**
-> Invisible ERP V2 is a Thai-first application. The buttons and labels you see
+> Invisible ERP is a Thai-first application. The buttons and labels you see
 > on screen are normally in **Thai**. Throughout this manual we give the
 > **English meaning first**, followed by the **Thai label in brackets**, e.g.
 > *Confirm Order* (**ยืนยันออเดอร์**). The location of buttons and the steps are

@@ -1,4 +1,4 @@
-# Security Audit, Penetration Test & Load Test Report — Invisible ERP V2
+# Security Audit, Penetration Test & Load Test Report — Invisible ERP
 
 **Date:** 2026-06-28
 **Scope:** `apps/api` (NestJS 10 / Fastify 4 + Drizzle ORM + PostgreSQL, multi-tenant RLS)

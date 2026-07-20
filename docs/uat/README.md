@@ -1,4 +1,4 @@
-# User Acceptance Testing (UAT) Plan — Invisible ERP V2
+# User Acceptance Testing (UAT) Plan — Invisible ERP
 
 **Status: DRAFT v0.1 · 2026-06-22**
 
@@ -8,7 +8,7 @@
 
 ## 1. Objective
 
-Confirm that Invisible ERP V2 meets the business and control requirements of each financially-significant cycle **from the business user's perspective**, and that the application's preventive/detective controls actually block the risks they are designed to block. UAT is the final gate before production cutover sign-off.
+Confirm that Invisible ERP meets the business and control requirements of each financially-significant cycle **from the business user's perspective**, and that the application's preventive/detective controls actually block the risks they are designed to block. UAT is the final gate before production cutover sign-off.
 
 Each UAT case is traceable to:
 - a **process narrative** section (`docs/process-narratives/`),

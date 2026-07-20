@@ -1,7 +1,7 @@
-# Invisible ERP V2 — แผนการ Migrate (Master Plan)
+# Invisible ERP — แผนการ Migrate (Master Plan)
 
 > Invisible Enterprise ERP / Invisible Consulting
-> เป้าหมาย: ยกเครื่องระบบเดิม (Python 100%) → **Invisible ERP V2** ที่ใช้ภาษา/ฐานข้อมูล/สถาปัตยกรรมใหม่ โดยคง **ฟังก์ชันหลักครบ 100%**
+> เป้าหมาย: ยกเครื่องระบบเดิม (Python 100%) → **Invisible ERP** ที่ใช้ภาษา/ฐานข้อมูล/สถาปัตยกรรมใหม่ โดยคง **ฟังก์ชันหลักครบ 100%**
 > เอกสารนี้สังเคราะห์จากการ reverse-engineer ระบบเดิมทั้งหมด (17,000+ บรรทัด Python, 65 ตาราง, 30 REST endpoints, MCP tools, analytics)
 
 ---

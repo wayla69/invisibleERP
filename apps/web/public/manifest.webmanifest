@@ -1,7 +1,7 @@
 {
-  "name": "Invisible ERP V2",
+  "name": "Invisible ERP",
   "short_name": "Invisible ERP",
-  "description": "Invisible Enterprise ERP — V2 (POS · inventory · finance)",
+  "description": "Invisible Enterprise ERP (POS · inventory · finance)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

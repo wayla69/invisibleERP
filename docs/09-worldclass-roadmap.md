@@ -15,11 +15,11 @@
 > §0, and the per-cycle process narratives. The *roadmap framing* below (T0–T3 sequencing, go-to-market
 > tiers) remains useful as strategy history; treat every "current state" assertion as stale.
 >
-> Multi-lens architecture review (8 domain experts) of Invisible ERP V2 vs SAP/NetSuite/Odoo (ERP) and Square/Toast/Shopify (POS). Synthesized executive roadmap + per-area detail.
+> Multi-lens architecture review (8 domain experts) of Invisible ERP vs SAP/NetSuite/Odoo (ERP) and Square/Toast/Shopify (POS). Synthesized executive roadmap + per-area detail.
 
 All eight reviews independently converge on the same root cause (unenforced RLS), so I have what I need to synthesize without further file checks.
 
-# Invisible ERP V2 — Executive Upgrade Roadmap to World-Class / Global
+# Invisible ERP — Executive Upgrade Roadmap to World-Class / Global
 
 ## 1. Honest verdict
 
@@ -124,7 +124,7 @@ This is **not an accounting system** — it is two payment trackers (AR, AP) plu
 ======================================================================
 Both files read in full. Here is the grounded review.
 
-## POS Readiness Review — Invisible ERP V2
+## POS Readiness Review — Invisible ERP
 
 ### 1. What's already solid
 
@@ -281,7 +281,7 @@ I have grounded my assessment in the three required files plus the related curre
 ### 4. If you do only ONE thing
 **Introduce a currency + tax abstraction at the data and service layer before another transaction type is written.** The killer is not the missing features — it's that `VAT_RATE = 0.07` and an implicit-THB money model are *spreading*: every new order, invoice, and report (like `expressTxt`) hard-codes both. Add an ISO-4217 currency column with integer minor units to every money-bearing row, and replace the constant with a `TaxProvider` interface (even if the only initial adapter returns Thailand's 7%). This converts "global support" from a future rewrite into a future *adapter* — the single highest-leverage architectural move, and a prerequisite for the general ledger and e-invoicing work that follows.
 
-**Files cited:** `C:/Users/ASUS/Invisible ERP V2/packages/shared/src/i18n.ts`, `C:/Users/ASUS/Invisible ERP V2/apps/api/src/database/schema/enums.ts`, `C:/Users/ASUS/Invisible ERP V2/apps/api/src/modules/reports/reports-export.service.ts`.
+**Files cited:** `C:/Users/ASUS/Invisible ERP/packages/shared/src/i18n.ts`, `C:/Users/ASUS/Invisible ERP/apps/api/src/database/schema/enums.ts`, `C:/Users/ASUS/Invisible ERP/apps/api/src/modules/reports/reports-export.service.ts`.
 
 ======================================================================
 # Engineering maturity & reliability
@@ -372,7 +372,7 @@ I have enough grounding to write this section. The three files tell a clear stor
 ======================================================================
 # Product, Ecosystem & Go-To-Market — Readiness Review
 
-*Grounded in `C:/Users/ASUS/Invisible ERP V2/README.md` and `C:/Users/ASUS/Invisible ERP V2/MIGRATION_PLAN.md`, plus the verified Phase 0–8 state.*
+*Grounded in `C:/Users/ASUS/Invisible ERP/README.md` and `C:/Users/ASUS/Invisible ERP/MIGRATION_PLAN.md`, plus the verified Phase 0–8 state.*
 
 ## 1. What's already solid
 

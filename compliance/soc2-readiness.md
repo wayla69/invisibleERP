@@ -1,7 +1,7 @@
-# SOC 2 Type II Readiness — Invisible ERP V2
+# SOC 2 Type II Readiness — Invisible ERP
 
 **Entity:** Invisible Consulting — Invisible Enterprise ERP
-**System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
+**System in scope:** Invisible ERP (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
 **Framework:** AICPA Trust Services Criteria (TSC) 2017 — Security (CC1–CC9); Availability (A1) noted
 **Prepared:** 2026-06-28 · Version 0.1 DRAFT — for review with SOC 2 auditor / CPA firm
 **Owner:** SOX PMO / Controller (to assign)

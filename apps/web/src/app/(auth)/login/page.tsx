@@ -27,7 +27,7 @@ export default function LoginPage() {
   // "เข้าสู่ระบบ" button re-submits with the code.
   const [totp, setTotp] = useState('');
   const [mfaRequired, setMfaRequired] = useState(false);
-  const [company, setCompany] = useState('Invisible ERP V2');
+  const [company, setCompany] = useState('Invisible ERP');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [ssoOpen, setSsoOpen] = useState(false);

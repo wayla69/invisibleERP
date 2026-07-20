@@ -118,7 +118,7 @@ async function bootstrap() {
       throw e;
     }
   }
-  new Logger('Bootstrap').log(`Invisible ERP V2 API listening on http://${boundHost === '::' ? '[::]' : boundHost}:${port} (pid ${process.pid})`);
+  new Logger('Bootstrap').log(`Invisible ERP API listening on http://${boundHost === '::' ? '[::]' : boundHost}:${port} (pid ${process.pid})`);
 }
 
 // Opt-in multi-process clustering. A single Node process is single-threaded for JS and saturates ~1 core

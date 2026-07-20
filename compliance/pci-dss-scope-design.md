@@ -1,13 +1,13 @@
-# PCI-DSS Scope Design — Invisible ERP V2
+# PCI-DSS Scope Design — Invisible ERP
 
 **Entity:** Invisible Consulting — Invisible Enterprise ERP
-**System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
+**System in scope:** Invisible ERP (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
 **Framework:** PCI-DSS v4.0 — SAQ-A (merchants who have outsourced all cardholder data functions)
 **Prepared:** 2026-06-28 · Version 0.1 DRAFT — for review with QSA / acquiring bank
 **Owner:** CISO / Head of Engineering (to assign)
 **Related:** `soc2-readiness.md` · `iso27001-gap-analysis.md` · `policies/`
 
-> **Key design decision:** Invisible ERP V2 is architected as a **tokenization-only** payment system.
+> **Key design decision:** Invisible ERP is architected as a **tokenization-only** payment system.
 > No Primary Account Number (PAN), CVV, track data, or cardholder name flows through or is stored by
 > the ERP API, database, or web application. All cardholder data functions are outsourced entirely to
 > PCI-DSS-certified payment service providers. This qualifies the system for SAQ-A — the lightest
@@ -26,7 +26,7 @@
 | PostgreSQL | Stores `payment_method` (PSP token string) in `orders` table | **No** — token is not cardholder data |
 | Railway (hosting) | Hosts API + DB containers | **No** — no CDE components |
 
-**PCI-DSS scope for Invisible ERP V2 = SAQ-A** (merchants who outsource all cardholder data functions to PCI-DSS-compliant third parties and whose e-commerce website does not directly receive cardholder data).
+**PCI-DSS scope for Invisible ERP = SAQ-A** (merchants who outsource all cardholder data functions to PCI-DSS-compliant third parties and whose e-commerce website does not directly receive cardholder data).
 
 ### What is OUT of PCI-DSS scope
 
@@ -83,7 +83,7 @@ PCI-DSS v4.0 SAQ-A applies when **all** of the following are true:
 | All elements of the payment page(s) delivered to the consumer's browser originate from the third party or the merchant | ✅ PSP-hosted elements only; no inline JS reading PAN |
 | The merchant does not electronically store, process, or transmit any cardholder data on merchant systems | ✅ Only `payment_method` token stored — confirmed by DB schema review |
 
-**Conclusion:** Invisible ERP V2 qualifies for SAQ-A. Completing SAQ-A produces a self-attestation (AoC) acceptable to most acquiring banks for merchant-level card acceptance.
+**Conclusion:** Invisible ERP qualifies for SAQ-A. Completing SAQ-A produces a self-attestation (AoC) acceptable to most acquiring banks for merchant-level card acceptance.
 
 ---
 

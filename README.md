@@ -1,4 +1,4 @@
-# Invisible ERP V2
+# Invisible ERP
 
 ยกเครื่อง Invisible Enterprise ERP จาก Python (Streamlit + FastAPI + SQLite) → **TypeScript end-to-end**:
 **NestJS · Drizzle · PostgreSQL · Next.js** บน Railway
