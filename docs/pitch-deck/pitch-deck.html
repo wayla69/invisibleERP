@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Invisible ERP — Investor Pitch Deck</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: 1280px 720px; margin: 0; }
+  html, body { background: #020617; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+  .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; background: #020617;
+           color: #e2e8f0; page-break-after: always; display: flex; flex-direction: column; }
+  .slide:last-child { page-break-after: auto; }
+  .grid-bg { position: absolute; inset: 0; opacity: 0.04; pointer-events: none;
+    background-image: linear-gradient(to right, #64748b 1px, transparent 1px),
+                      linear-gradient(to bottom, #64748b 1px, transparent 1px);
+    background-size: 48px 48px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid rgba(30,41,59,.8); padding: 16px 32px; position: relative; }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: #cbd5e1; }
+  .brand .ic { width: 20px; height: 20px; color: #34d399; }
+  .brand .dim { color: #475569; font-weight: 500; }
+  .pageno { font-size: 11px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: #64748b; }
+  .progress { height: 3px; background: #1e293b; position: relative; }
+  .progress > div { height: 100%; background: linear-gradient(to right, #3b82f6, #10b981); }
+  .body { flex: 1; position: relative; padding: 36px 72px; display: flex; flex-direction: column; justify-content: center; }
+  .ic { width: 20px; height: 20px; stroke-width: 2; flex-shrink: 0; }
+
+  /* tones */
+  .blue { color: #60a5fa; } .emerald { color: #34d399; } .slate { color: #cbd5e1; }
+  .amber { color: #fbbf24; } .rose { color: #fb7185; } .dim { color: #64748b; }
+
+  .chip { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 7px 16px;
+          font-size: 14px; font-weight: 500; }
+  .chip .ic { width: 16px; height: 16px; }
+  .chip.blue    { background: rgba(59,130,246,.10); box-shadow: inset 0 0 0 1px rgba(59,130,246,.30); }
+  .chip.emerald { background: rgba(16,185,129,.10); box-shadow: inset 0 0 0 1px rgba(16,185,129,.30); }
+  .chip.slate   { background: rgba(100,116,139,.10); box-shadow: inset 0 0 0 1px rgba(100,116,139,.30); }
+  .chip-row { display: flex; justify-content: center; gap: 12px; margin-top: 26px; flex-wrap: wrap; }
+
+  .badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 14px; }
+  .badge.md { width: 46px; height: 46px; } .badge.md .ic { width: 22px; height: 22px; }
+  .badge.lg { width: 60px; height: 60px; } .badge.lg .ic { width: 30px; height: 30px; }
+  .badge.blue    { background: rgba(59,130,246,.10); box-shadow: inset 0 0 0 1px rgba(59,130,246,.30); color: #60a5fa; }
+  .badge.emerald { background: rgba(16,185,129,.10); box-shadow: inset 0 0 0 1px rgba(16,185,129,.30); color: #34d399; }
+  .badge.slate   { background: rgba(100,116,139,.10); box-shadow: inset 0 0 0 1px rgba(100,116,139,.30); color: #cbd5e1; }
+  .badge.rose    { background: rgba(244,63,94,.10);  box-shadow: inset 0 0 0 1px rgba(244,63,94,.30);  color: #fb7185; }
+  .badge.amber   { background: rgba(245,158,11,.10); box-shadow: inset 0 0 0 1px rgba(245,158,11,.30); color: #fbbf24; }
+
+  .center-col { display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .hero { margin-top: 22px; font-size: 64px; font-weight: 800; line-height: 1.08; letter-spacing: -0.02em;
+          background: linear-gradient(to right, #60a5fa, #7dd3fc, #34d399);
+          -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { margin-top: 22px; max-width: 720px; font-size: 19px; line-height: 1.6; color: #94a3b8; }
+  .lede.narrow { max-width: 620px; }
+
+  .heading { margin-bottom: 26px; }
+  .kicker { font-size: 12px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; margin-bottom: 8px; }
+  .heading h2 { font-size: 34px; font-weight: 700; color: #f8fafc; letter-spacing: -0.01em; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid3.tight { margin-bottom: 20px; }
+  .card { display: flex; flex-direction: column; gap: 10px; border: 1px solid #1e293b; border-radius: 16px;
+          background: rgba(15,23,42,.6); padding: 20px; }
+  .card-t { font-size: 16px; font-weight: 600; color: #f1f5f9; }
+  .card-b { font-size: 13.5px; line-height: 1.55; color: #94a3b8; }
+
+  .stat { border: 1px solid #1e293b; border-radius: 16px; background: rgba(15,23,42,.6);
+          padding: 16px 20px; text-align: center; }
+  .stat-v { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat-l { margin-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #94a3b8; }
+
+  .punch { margin-top: 28px; text-align: center; font-size: 19px; color: #cbd5e1; }
+  .punch b { font-weight: 600; }
+
+  .panel { margin: 22px 0; border: 1px solid #1e293b; border-radius: 16px; background: rgba(2,6,23,.6); padding: 22px; }
+  .panel-t { font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: #64748b; margin-bottom: 16px; text-align: center; }
+  .flow { display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .flow-arrow .ic { width: 18px; height: 18px; color: #475569; }
+  .node { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 118px;
+          border: 1px solid #1e293b; border-radius: 14px; background: rgba(15,23,42,.8); padding: 12px 14px; text-align: center; }
+  .node .ic { width: 24px; height: 24px; }
+  .node-l { font-size: 13.5px; font-weight: 600; color: #f1f5f9; }
+  .node-s { font-size: 10.5px; line-height: 1.3; color: #64748b; }
+
+  .hero-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 22px; }
+  .hero-row-t { font-size: 18px; font-weight: 600; color: #f1f5f9; }
+  .hero-row-s { font-size: 14px; color: #94a3b8; margin-top: 2px; }
+
+  .zones { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch; }
+  .zone { border-radius: 16px; padding: 18px; }
+  .rose-zone    { border: 2px dashed rgba(244,63,94,.4);  background: rgba(244,63,94,.05); }
+  .emerald-zone { border: 2px solid rgba(16,185,129,.4);  background: rgba(16,185,129,.05); }
+  .zone-t { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700;
+            letter-spacing: .18em; margin-bottom: 14px; }
+  .zone-t .ic { width: 16px; height: 16px; }
+  .zone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .barrier { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  .barrier-line { width: 1px; flex: 1; background: linear-gradient(to bottom, transparent, rgba(16,185,129,.6), transparent); }
+  .barrier-box { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid rgba(16,185,129,.4);
+                 border-radius: 12px; background: rgba(16,185,129,.10); padding: 10px 12px;
+                 font-size: 10.5px; font-weight: 600; line-height: 1.3; color: #6ee7b7; text-align: center; }
+  .barrier-box .ic { width: 20px; height: 20px; color: #34d399; }
+  .footnote { margin-top: 22px; text-align: center; font-size: 14px; color: #94a3b8; }
+  .footnote b { font-weight: 600; }
+
+  .closing { margin-top: 24px; font-size: 56px; font-weight: 800; line-height: 1.15; color: #f8fafc; letter-spacing: -0.02em; }
+  .cta-row { display: flex; gap: 16px; margin-top: 34px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 12px; padding: 13px 26px;
+         font-size: 16px; font-weight: 600; }
+  .btn .ic { width: 17px; height: 17px; }
+  .btn.primary { background: #2563eb; color: #fff; }
+  .btn.ghost { box-shadow: inset 0 0 0 1px rgba(16,185,129,.5); color: #34d399; }
+  .chip-row.muted { margin-top: 40px; }
+  .chip-row.muted .chip { color: #94a3b8; }
+</style></head><body>
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Title — 1 / 7</div>
+  </header>
+  <div class="progress"><div style="width:14.285714285714285%"></div></div>
+  <main class="body">
+<div class="center-col">
+  <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg> NASDAQ IPO track · SOX-ICFR ready</span>
+  <h1 class="hero">Next-Gen Enterprise ERP</h1>
+  <p class="lede">A multi-tenant, Thai-localized ERP for food &amp; beverage enterprises — bridging
+  financial controls with supply-chain operations, from the diner's QR scan to the general ledger.</p>
+  <div class="chip-row">
+    <span class="chip blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" /> </svg> Lean &amp; fast — TypeScript end-to-end</span>
+    <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 12h4" /> <path d="M10 8h4" /> <path d="M14 21v-3a2 2 0 0 0-4 0v3" /> <path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2" /> <path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" /> </svg> True multi-tenancy — Postgres RLS</span>
+    <span class="chip slate"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" /> </svg> Omnichannel ready</span>
+  </div>
+</div></main>
+</section>
+
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Problem — 2 / 7</div>
+  </header>
+  <div class="progress"><div style="width:28.57142857142857%"></div></div>
+  <main class="body">
+<div class="heading"><div class="kicker rose">The Problem</div><h2>Legacy ERPs weren't built for this decade</h2></div>
+<div class="grid3">
+  <div class="card"><span class="badge rose md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" /> <path d="m7 16.5-4.74-2.85" /> <path d="m7 16.5 5-3" /> <path d="M7 16.5v5.17" /> <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" /> <path d="m17 16.5-5-3" /> <path d="m17 16.5 4.74-2.85" /> <path d="M17 16.5v5.17" /> <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" /> <path d="M12 8 7.26 5.15" /> <path d="m12 8 4.74-2.85" /> <path d="M12 13.5V8" /> </svg> </span><div class="card-t">Bulky and slow</div><div class="card-b">Monolithic suites with multi-million-line codebases, upgrade cycles measured in years, and consultants required for every change.</div></div>
+  <div class="card"><span class="badge amber md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m2 2 20 20" /> <path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71" /> <path d="M9.309 3.652A12.252 12.252 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.784 9.784 0 0 1-.08 1.264" /> </svg> </span><div class="card-t">Compliance as an afterthought</div><div class="card-b">Access controls and segregation-of-duty rules are bolted on after the fact — making SOX audits painful, manual, and expensive.</div></div>
+  <div class="card"><span class="badge rose md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m19 5 3-3" /> <path d="m2 22 3-3" /> <path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z" /> <path d="M7.5 13.5 10 11" /> <path d="M10.5 16.5 13 14" /> <path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z" /> </svg> </span><div class="card-t">Brittle integrations</div><div class="card-b">Modern delivery marketplaces, payment gateways, and POS terminals are wired in through fragile point-to-point connectors that break silently.</div></div>
+</div>
+<p class="punch">F&amp;B enterprises are forced to choose between <b class="blue">operational agility</b>
+and <b class="emerald">financial control</b>. <span class="dim">They shouldn't have to.</span></p></main>
+</section>
+
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Solution — 3 / 7</div>
+  </header>
+  <div class="progress"><div style="width:42.857142857142854%"></div></div>
+  <main class="body">
+<div class="heading"><div class="kicker blue">The Solution</div><h2>A lean, high-performance architecture</h2></div>
+<div class="grid3 tight">
+  <div class="stat"><div class="stat-v blue">~260k</div><div class="stat-l">Lines of code — total</div></div>
+  <div class="stat"><div class="stat-v emerald">100%</div><div class="stat-l">TypeScript end-to-end</div></div>
+  <div class="stat"><div class="stat-v slate">1</div><div class="stat-l">Source of truth — the ledger</div></div>
+</div>
+<div class="panel">
+  <div class="panel-t">One order, one flow — table-side scan to audited journal entry</div>
+  <div class="flow">
+    <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic blue" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="5" height="5" x="3" y="3" rx="1" /> <rect width="5" height="5" x="16" y="3" rx="1" /> <rect width="5" height="5" x="3" y="16" rx="1" /> <path d="M21 16h-3a2 2 0 0 0-2 2v3" /> <path d="M21 21v.01" /> <path d="M12 7v3a2 2 0 0 1-2 2H7" /> <path d="M3 12h.01" /> <path d="M12 3h.01" /> <path d="M12 16v.01" /> <path d="M16 12h1" /> <path d="M21 12v.01" /> <path d="M12 21v-1" /> </svg> <div class="node-l">Diner QR</div><div class="node-s">table-side ordering</div></div><span class="flow-arrow"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M5 12h14" /> <path d="m12 5 7 7-7 7" /> </svg> </span>
+    <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic blue" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8" /> <path d="M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c.7.7 2 .7 2.8 0L15 15Zm0 0 7 7" /> <path d="m2.1 21.8 6.4-6.3" /> <path d="m19 5-7 7" /> </svg> <div class="node-l">POS / KDS</div><div class="node-s">Next.js 15</div></div><span class="flow-arrow"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M5 12h14" /> <path d="m12 5 7 7-7 7" /> </svg> </span>
+    <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="8" x="2" y="2" rx="2" ry="2" /> <rect width="20" height="8" x="2" y="14" rx="2" ry="2" /> <line x1="6" x2="6.01" y1="6" y2="6" /> <line x1="6" x2="6.01" y1="18" y2="18" /> </svg> <div class="node-l">API tier</div><div class="node-s">NestJS · Fastify</div></div><span class="flow-arrow"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M5 12h14" /> <path d="m12 5 7 7-7 7" /> </svg> </span>
+    <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <ellipse cx="12" cy="5" rx="9" ry="3" /> <path d="M3 5V19A9 3 0 0 0 21 19V5" /> <path d="M3 12A9 3 0 0 0 21 12" /> </svg> <div class="node-l">PostgreSQL</div><div class="node-s">Drizzle ORM · RLS</div></div><span class="flow-arrow"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M5 12h14" /> <path d="m12 5 7 7-7 7" /> </svg> </span>
+    <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg> <div class="node-l">General Ledger</div><div class="node-s">auto-posted, balanced</div></div>
+  </div>
+</div>
+<div class="chip-row">
+  <span class="chip slate"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" /> <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" /> <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" /> </svg> Modular bounded contexts</span>
+  <span class="chip blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m12 14 4-4" /> <path d="M3.34 19a10 10 0 1 1 17.32 0" /> </svg> No batch lag — postings in the request</span>
+  <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect x="16" y="16" width="6" height="6" rx="1" /> <rect x="2" y="16" width="6" height="6" rx="1" /> <rect x="9" y="2" width="6" height="6" rx="1" /> <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" /> <path d="M12 12V8" /> </svg> Registry-driven extension seams</span>
+</div></main>
+</section>
+
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Security — 4 / 7</div>
+  </header>
+  <div class="progress"><div style="width:57.14285714285714%"></div></div>
+  <main class="body">
+<div class="heading"><div class="kicker emerald">Security &amp; Compliance</div><h2>Uncompromised financial integrity</h2></div>
+<div class="hero-row">
+  <span class="badge emerald lg"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /> </svg> </span>
+  <div>
+    <div class="hero-row-t">Fail-closed by design</div>
+    <div class="hero-row-s">If a control can't verify, the system refuses — it never silently allows.</div>
+  </div>
+</div>
+<div class="grid3 tight">
+  <div class="stat"><div class="stat-v blue">24</div><div class="stat-l">User roles</div></div>
+  <div class="stat"><div class="stat-v blue">82</div><div class="stat-l">Granular permissions</div></div>
+  <div class="stat"><div class="stat-v emerald">26</div><div class="stat-l">SoD rules on GL posting</div></div>
+</div>
+<div class="grid3">
+  <div class="card"><span class="badge emerald md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /> </svg> </span><div class="card-t">Row-Level Security multi-tenancy</div><div class="card-b">Every query is tenant-scoped at the database itself. The API even refuses to boot if its DB role could bypass RLS.</div></div>
+  <div class="card"><span class="badge blue md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 3v18" /> <path d="m19 8 3 8a5 5 0 0 1-6 0zV7" /> <path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1" /> <path d="m5 8 3 8a5 5 0 0 1-6 0zV7" /> <path d="M7 21h10" /> </svg> </span><div class="card-t">Maker-checker everywhere</div><div class="card-b">No journal entry reaches the balances until a different human approves it — enforced in code, not in policy documents.</div></div>
+  <div class="card"><span class="badge emerald md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10.5 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v6" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="m14 20 2 2 4-4" /> </svg> </span><div class="card-t">SOX-ICFR readiness</div><div class="card-b">A living Risk &amp; Control Matrix, process narratives, and automated control-test harnesses run on every change.</div></div>
+</div></main>
+</section>
+
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Integrations — 5 / 7</div>
+  </header>
+  <div class="progress"><div style="width:71.42857142857143%"></div></div>
+  <main class="body">
+<div class="heading"><div class="kicker blue">Omnichannel Supply Chain</div><h2>Every channel in — one trusted tier out</h2></div>
+<div class="zones">
+  <div class="zone rose-zone">
+    <div class="zone-t rose"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2" /> <path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06" /> <path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8" /> </svg>  UNTRUSTED BOUNDARY — INBOUND WEBHOOKS</div>
+    <div class="zone-grid">
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic rose" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="14" x="2" y="5" rx="2" /> <line x1="2" x2="22" y1="10" y2="10" /> </svg> <div class="node-l">Payments</div><div class="node-s">3 gateways</div></div>
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic rose" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" /> <path d="M15 18H9" /> <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" /> <circle cx="17" cy="18" r="2" /> <circle cx="7" cy="18" r="2" /> </svg><div class="node-l">Delivery</div><div class="node-s">3 marketplaces</div></div>
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic rose" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" /> </svg> <div class="node-l">Chat</div><div class="node-s">order capture</div></div>
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic rose" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="5" height="5" x="3" y="3" rx="1" /> <rect width="5" height="5" x="16" y="3" rx="1" /> <rect width="5" height="5" x="3" y="16" rx="1" /> <path d="M21 16h-3a2 2 0 0 0-2 2v3" /> <path d="M21 21v.01" /> <path d="M12 7v3a2 2 0 0 1-2 2H7" /> <path d="M3 12h.01" /> <path d="M12 3h.01" /> <path d="M12 16v.01" /> <path d="M16 12h1" /> <path d="M21 12v.01" /> <path d="M12 21v-1" /> </svg> <div class="node-l">Diner QR</div><div class="node-s">public ordering</div></div>
+    </div>
+  </div>
+  <div class="barrier">
+    <div class="barrier-line"></div>
+    <div class="barrier-box"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" /> <path d="M14 13.12c0 2.38 0 6.38-1 8.88" /> <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" /> <path d="M2 12a10 10 0 0 1 18-6" /> <path d="M2 16h.01" /> <path d="M21.8 16c.2-2 .131-5.354 0-6" /> <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" /> <path d="M8.65 22c.21-.66.45-1.32.57-2" /> <path d="M9 6.8a6 6 0 0 1 9 5.2v2" /> </svg> <span>HMAC-signed<br/>fail-closed</span></div>
+    <div class="barrier-line"></div>
+  </div>
+  <div class="zone emerald-zone">
+    <div class="zone-t emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /> </svg>  TRUSTED API TIER</div>
+    <div class="zone-grid">
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="8" x="2" y="2" rx="2" ry="2" /> <rect width="20" height="8" x="2" y="14" rx="2" ry="2" /> <line x1="6" x2="6.01" y1="6" y2="6" /> <line x1="6" x2="6.01" y1="18" y2="18" /> </svg> <div class="node-l">NestJS API</div><div class="node-s">authZ on every object</div></div>
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <ellipse cx="12" cy="5" rx="9" ry="3" /> <path d="M3 5V19A9 3 0 0 0 21 19V5" /> <path d="M3 12A9 3 0 0 0 21 12" /> </svg> <div class="node-l">PostgreSQL</div><div class="node-s">tenant RLS</div></div>
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10.5 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v6" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="m14 20 2 2 4-4" /> </svg> <div class="node-l">e-Tax</div><div class="node-s">Thai e-invoicing</div></div>
+      <div class="node"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic emerald" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" /> </svg> <div class="node-l">POS / KDS</div><div class="node-s">terminals</div></div>
+    </div>
+  </div>
+</div>
+<p class="footnote">Every external event is verified at the boundary before it can touch inventory or the ledger —
+<b class="emerald">integrations that fail loudly, never silently</b>.</p></main>
+</section>
+
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Traction — 6 / 7</div>
+  </header>
+  <div class="progress"><div style="width:85.71428571428571%"></div></div>
+  <main class="body">
+<div class="heading"><div class="kicker emerald">Traction &amp; Quality Assurance</div><h2>Enterprise-grade, provably</h2></div>
+<div class="grid3 tight">
+  <div class="stat"><div class="stat-v emerald">100%</div><div class="stat-l">Core-logic test coverage</div></div>
+  <div class="stat"><div class="stat-v blue">0</div><div class="stat-l">Diffs vs. golden master</div></div>
+  <div class="stat"><div class="stat-v slate">24/7</div><div class="stat-l">CI gates on every change</div></div>
+</div>
+<div class="grid3">
+  <div class="card"><span class="badge emerald md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" /> <path d="m9 12 2 2 4-4" /> </svg> </span><div class="card-t">Golden zero-diff parity</div><div class="card-b">Every financial output is deep-compared against a pinned golden master. A single unintended satang of drift fails the build.</div></div>
+  <div class="card"><span class="badge blue md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M15 6a9 9 0 0 0-9 9V3" /> <circle cx="18" cy="6" r="3" /> <circle cx="6" cy="18" r="3" /> </svg> </span><div class="card-t">CI/CD with down-only ratchets</div><div class="card-b">Control-test harnesses, migration gates, and code-quality ratchets that only ever tighten — technical debt can shrink, never grow.</div></div>
+  <div class="card"><span class="badge slate md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" /> <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" /> </svg> </span><div class="card-t">Enterprise SSO / SCIM</div><div class="card-b">Single sign-on and automated user provisioning out of the box — IT teams onboard and offboard staff from their existing identity provider.</div></div>
+</div>
+<div class="chip-row">
+  <span class="chip blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" /> </svg> Multi-company fleet operations</span>
+  <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 3h5v5" /> <path d="M8 3H3v5" /> <path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3" /> <path d="m15 9 6-6" /> </svg> SoD-tested on every pipeline run</span>
+</div></main>
+</section>
+
+<section class="slide">
+  <div class="grid-bg"></div>
+  <header class="topbar">
+    <div class="brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP <span class="dim">· Investor Deck</span></div>
+    <div class="pageno">Closing — 7 / 7</div>
+  </header>
+  <div class="progress"><div style="width:100%"></div></div>
+  <main class="body">
+<div class="center-col">
+  <span class="badge blue lg"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /> <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" /> <path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" /> <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" /> </svg> </span>
+  <h2 class="closing">Ready for <span class="blue">scale</span>.<br/>Ready for <span class="emerald">audit</span>.</h2>
+  <p class="lede narrow">IPO-grade controls with startup speed — one platform from the dining table to the audited financial statement.</p>
+  <div class="cta-row">
+    <span class="btn primary">Request a demo <!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M5 12h14" /> <path d="m12 5 7 7-7 7" /> </svg> </span>
+    <span class="btn ghost"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10.5 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v6" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="m14 20 2 2 4-4" /> </svg>  View the compliance pack</span>
+  </div>
+  <div class="chip-row muted">
+    <span class="chip slate"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /> </svg> SOX-ICFR</span>
+    <span class="chip slate"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /> </svg> RLS multi-tenant</span>
+    <span class="chip slate"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" /> </svg> Omnichannel</span>
+  </div>
+</div></main>
+</section></body></html>
