@@ -333,4 +333,22 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.sw_recent': { th: 'เพิ่งดู', en: 'Recent' },
   'plt.sw_search_results': { th: 'ผลค้นหา ({n})', en: 'Search results ({n})' },
   'plt.sw_no_company_found': { th: 'ไม่พบบริษัท', en: 'No company found' },
+
+  // ── Plans & modules review + per-tenant add-on management (0451) ──────────
+  'plt.tab_plans': { th: 'แพ็กเกจ & โมดูล', en: 'Plans & Modules' },
+  'plt.plans_sub': { th: 'โมดูลที่รวมในแต่ละแพ็กเกจ (อ่านจากตารางแพ็กเกจจริงที่ใช้ตอนเปิดบริษัท) — โมดูลเสริมแสดงเป็นสีเหลือง', en: 'Modules included in each sellable plan (read from the live plan rows provisioning assigns) — add-on modules render amber.' },
+  'plt.plans_modules_count': { th: 'โมดูลที่รวม ({n})', en: 'Included modules ({n})' },
+  'plt.plans_included_addons': { th: 'โมดูลเสริมที่รวมในแพ็กเกจ', en: 'Add-ons included in this plan' },
+  'plt.plans_addons_purchasable': { th: 'ไม่มีในแพ็กเกจ — ซื้อเพิ่มเป็นรายโมดูลได้', en: 'None included — purchasable à la carte.' },
+  'plt.plans_unlimited': { th: 'ไม่จำกัด', en: 'Unlimited' },
+  'plt.plans_custom_price': { th: 'ราคาตามตกลง', en: 'Custom pricing' },
+  'plt.plans_per_month': { th: '/เดือน', en: '/mo' },
+  'plt.plans_per_year': { th: '/ปี', en: '/yr' },
+  'plt.plans_seats_locations': { th: 'ผู้ใช้ {users} คน · {locations} สาขา', en: '{users} users · {locations} locations' },
+  'plt.col_addons_n': { th: '+ โมดูลเสริม {n} รายการ', en: '+ {n} add-on(s)' },
+  'plt.drawer_addons_title': { th: 'โมดูลเสริม (ซื้อเพิ่ม)', en: 'Purchased add-ons' },
+  'plt.drawer_addon_in_plan': { th: 'รวมในแพ็กเกจแล้ว', en: 'Included in plan' },
+  'plt.drawer_addons_save': { th: 'บันทึกโมดูลเสริม', en: 'Save add-ons' },
+  'plt.drawer_addons_saved': { th: 'บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: 'Add-ons saved — entitlements apply immediately' },
+  'plt.drawer_modules_title': { th: 'โมดูลที่เปิดใช้ทั้งหมด (แพ็กเกจ + โมดูลเสริม)', en: 'Effective modules (plan + add-ons)' },
 };
