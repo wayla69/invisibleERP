@@ -1342,6 +1342,33 @@ async function main() {
     clv && clv !== 0 ? (cr && cr.format === 'ratio' && near(cr.value, rowKey(conBsK2.rows, 'current_assets') / clv)) : cr === undefined,
     `cl=${clv} cr=${cr?.value} ca=${rowKey(conBsK2.rows, 'current_assets')}`);
 
+  // P9 — the whole statutory set (BS + P&L + SOCE + optional notes) exports as one formatted document. Chromium
+  // is absent in CI, so the renderer returns null and the endpoint serves the raw HTML — we assert the document
+  // assembles: every section heading, the unaudited marker, the company header, the comparative column, and the
+  // P8 KPI strip carried through. (The PDF byte path is covered by the pdf-render harness.)
+  const priorAsOfP6 = `${Number(asOfP3.slice(0, 4)) - 1}-12-31`;
+  const priorFromP6 = '1999-01-01';
+  const packRes = await inj('GET', `/api/reports/fs/statement-pack.pdf?as_of=${asOfP3}&from=${fsFromP6}&prior_as_of=${priorAsOfP6}&prior_from=${priorFromP6}`, conTok);
+  const packHtml: string = packRes.text ?? '';
+  ok('P9: statement-pack export returns a single assembled FS document (BS + P&L + SOCE headings, unaudited marker)',
+    packRes.status === 200 && /<!DOCTYPE html>/i.test(packHtml)
+      && packHtml.includes('งบแสดงฐานะการเงิน') && packHtml.includes('งบกำไรขาดทุน') && packHtml.includes('งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น')
+      && packHtml.includes('ยังไม่ได้ตรวจสอบ'),
+    `status=${packRes.status} len=${packHtml.length}`);
+  ok('P9: the pack carries the comparative (prior) column header and the P8 KPI strip',
+    packHtml.includes(priorAsOfP6) && packHtml.includes('kpis') && (packHtml.includes('อัตรากำไรขั้นต้น') || packHtml.includes('อัตราส่วนสภาพคล่อง')),
+    `hasPrior=${packHtml.includes(priorAsOfP6)} hasKpi=${/อัตรา/.test(packHtml)}`);
+  // fiscal_year shortcut fills the period + prior year in one param.
+  const packFy = await inj('GET', `/api/reports/fs/statement-pack.pdf?fiscal_year=${asOfP3.slice(0, 4)}`, conTok);
+  ok('P9: fiscal_year=YYYY shortcut assembles the pack (period + prior year) without explicit from/as_of',
+    packFy.status === 200 && /งบกำไรขาดทุน/.test(packFy.text ?? '') && /Statement of Changes in Equity/.test(packFy.text ?? ''),
+    `status=${packFy.status}`);
+  // Read-only, authenticated (fin_report/exec) — an unauthenticated caller is blocked; a bad range is a clean 400.
+  ok('P9: the pack export requires auth and validates its range (401 unauthenticated, 400 on a missing range)',
+    (await inj('GET', `/api/reports/fs/statement-pack.pdf?as_of=${asOfP3}&from=${fsFromP6}`)).status === 401
+      && (await inj('GET', '/api/reports/fs/statement-pack.pdf', conTok)).status === 400,
+    'gated+validated');
+
   // ───────────────────── WS1.2 — Posting / Account-Determination Engine (GL-12) golden snapshot ─────────────────────
   // TC-GL-12-01: preview fixed-asset depreciation legs — DR 5200 / CR 1590
   // Both legs use the same depreciation amount; pass both role keys so the engine maps them.

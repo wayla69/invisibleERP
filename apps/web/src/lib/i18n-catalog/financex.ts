@@ -718,6 +718,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'fnx.fs.tab_stat': { th: 'งบตามกฎหมาย & DBD', en: 'Statutory & DBD' },
   // ── Statutory FS pack (FIN-4) ──
   'fnx.fs.stat.run': { th: 'ดูรายงาน', en: 'Run' },
+  'fnx.fs.stat.pack_pdf': { th: 'ดาวน์โหลดชุดงบการเงิน (PDF)', en: 'Download FS pack (PDF)' },
   'fnx.fs.stat.col_current': { th: 'ปีปัจจุบัน', en: 'Current' },
   'fnx.fs.stat.col_prior': { th: 'ปีก่อน', en: 'Prior' },
   'fnx.fs.stat.col_total': { th: 'รวม', en: 'Total' },
