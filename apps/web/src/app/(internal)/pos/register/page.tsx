@@ -26,6 +26,10 @@ import { lineAmount, type CartLine, type MenuItem, type MenuResp } from '@/compo
 type Mode = 'quick' | 'dinein';
 type Method = 'Cash' | 'PromptPay' | 'Card' | 'Transfer';
 
+// docs/52 Phase 4b — any of these on a generic sale means the over-cap discount needs a (valid) supervisor
+// OVR- authorization; the checkout re-prompts the cashier for a code instead of aborting.
+const DISCOUNT_APPROVAL_CODES = new Set(['DISCOUNT_APPROVAL_REQUIRED', 'DISCOUNT_APPROVAL_INSUFFICIENT', 'DISCOUNT_APPROVAL_AMOUNT_EXCEEDED', 'DISCOUNT_APPROVAL_CONSUMED', 'DISCOUNT_APPROVAL_NOT_FOUND']);
+
 interface HeldCart { lines: CartLine[]; mode: Mode; tableId: number | null; tableNo: string | null; customerName: string }
 
 interface UserPrefs { favorites: string[]; navFold: Record<string, boolean>; pos_fav: number[]; saved: boolean }
@@ -169,13 +173,18 @@ export default function RegisterPage() {
       let gsale: { sale_no: string; total: number };
       try {
         let ageAck = false; let approvalNo: string | undefined; let attemptSale: { sale_no: string; total: number } | undefined;
-        for (let i = 0; i < 3 && !attemptSale; i++) {
+        for (let i = 0; i < 6 && !attemptSale; i++) {
           try { attemptSale = await postGeneric(ageAck, approvalNo); }
           catch (re) {
             const code = (re as Error & { code?: string }).code;
             if (code === 'AGE_VERIFICATION_REQUIRED' && !ageAck && typeof window !== 'undefined' && window.confirm(t('px.reg_age_confirm'))) { ageAck = true; continue; }
-            if (code === 'DISCOUNT_APPROVAL_REQUIRED' && !approvalNo && typeof window !== 'undefined') {
-              const entered = window.prompt(t('px.reg_discount_approval_prompt'));
+            // Over-cap discount: prompt for the supervisor's OVR- code. A code that's rejected (wrong/used, or
+            // below the authorized % / ฿) re-prompts WITH the reason so the cashier can key a valid one instead
+            // of the whole checkout aborting on a raw error.
+            if (DISCOUNT_APPROVAL_CODES.has(code ?? '') && typeof window !== 'undefined') {
+              const first = code === 'DISCOUNT_APPROVAL_REQUIRED' && !approvalNo;
+              const msg = first ? t('px.reg_discount_approval_prompt') : `${(re as Error).message}\n\n${t('px.reg_discount_approval_reprompt')}`;
+              const entered = window.prompt(msg, first ? '' : (approvalNo ?? ''));
               if (entered && entered.trim()) { approvalNo = entered.trim(); continue; }
             }
             throw re;

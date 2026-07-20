@@ -178,6 +178,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'px.disc_recent_empty': { th: 'ยังไม่มีรหัสอนุมัติ', en: 'No codes issued yet' },
   'px.disc_recent_empty_desc': { th: 'รหัสอนุมัติส่วนลดที่ออกจะแสดงที่นี่พร้อมสถานะการใช้งาน', en: 'Issued discount approval codes appear here with their usage status.' },
   'px.reg_discount_approval_prompt': { th: 'ส่วนลดนี้เกินเพดาน — กรอกรหัสอนุมัติจากหัวหน้า (OVR-…)', en: 'This discount exceeds the limit — enter the supervisor approval code (OVR-…)' },
+  'px.reg_discount_approval_reprompt': { th: 'กรอกรหัสอนุมัติใหม่ (OVR-…) หรือกดยกเลิกเพื่อหยุด', en: 'Enter another approval code (OVR-…), or cancel to stop.' },
   'px.ctrl_type': { th: 'ประเภท', en: 'Type' },
   'px.ctrl_unspecified': { th: '(ไม่ระบุ)', en: '(unspecified)' },
   'px.ctrl_void_confirm': { th: 'ยืนยันการยกเลิกบิล {no}? การกระทำนี้ย้อนกลับไม่ได้', en: 'Confirm voiding bill {no}? This action cannot be undone' },
