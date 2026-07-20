@@ -140,6 +140,23 @@ async function main() {
   const s12 = await sale({ line_pct: 50, approval: a12.json.override_no });
   ok("a SHOP2 authorization used on a SHOP sale → 400 DISCOUNT_APPROVAL_NOT_FOUND (tenant isolation)", s12.status === 400 && s12.json.error?.code === 'DISCOUNT_APPROVAL_NOT_FOUND', `${s12.status} ${s12.json.error?.code}`);
 
+  // ── 15. detective control (SoD R08): the over-cap discount-authorization exception report for review ──
+  // Review as the tenant-scoped supervisor (pos_refund) — an Admin would carry the single-company RLS bypass
+  // (AC-18) and see every tenant, which would defeat the isolation assertion below.
+  const rep = await inj('GET', '/api/pos/discount-exceptions', sup);
+  const auths = rep.json.authorizations ?? [];
+  ok('reviewer GET /discount-exceptions → 200 lists SHOP authorizations with consumed + unused',
+    rep.status === 200 && rep.json.count >= 4 && rep.json.consumed_count >= 1 && rep.json.unused_count >= 1 && auths.some((a: any) => a.consumed && a.sale_no) && auths.some((a: any) => !a.consumed),
+    JSON.stringify({ count: rep.json.count, consumed: rep.json.consumed_count, unused: rep.json.unused_count }));
+  ok('the report carries the ฿-capped authorization (max_amount 40, for_cashier + approver)',
+    auths.some((a: any) => near(a.max_amount, 40) && near(a.authorized_pct, 60) && a.approved_by === 'sup'),
+    JSON.stringify(auths.find((a: any) => a.max_amount != null) ?? null));
+  // tenant isolation: SHOP2's authorization (a12) is invisible to the SHOP reviewer
+  ok('the SHOP report excludes the SHOP2 authorization (tenant isolation)', !auths.some((a: any) => a.override_no === a12.json.override_no), a12.json.override_no);
+  // ── 16. SoD: the selling cashier cannot review the discount authorizations (segregated) ──
+  const c15 = await inj('GET', '/api/pos/discount-exceptions', cashier);
+  ok('cashier (pos_sell, no reviewer duty) GET /discount-exceptions → 403 (SoD R08 segregation)', c15.status === 403, `${c15.status}`);
+
   await app.close();
   await pg.close();
   console.log('\n── docs/52 Phase 4b — manual-discount approval routing (cutover) ──');

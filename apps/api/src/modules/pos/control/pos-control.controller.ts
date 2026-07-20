@@ -37,4 +37,7 @@ export class PosControlController {
   @Get('discount-settings') getDiscountSettings(@CurrentUser() u: JwtUser) { return this.svc.getDiscountSettings(u.tenantId ?? null); }
   @Put('discount-settings') @Permissions('pos_refund', 'exec') setDiscountSettings(@Body(new ZodValidationPipe(DiscountSettingsBody)) b: z.infer<typeof DiscountSettingsBody>, @CurrentUser() u: JwtUser) { return this.svc.setDiscountSettings(b, u); }
   @Post('discount-authorize') @Permissions('pos_refund', 'exec') authorizeDiscount(@Body(new ZodValidationPipe(AuthorizeDiscountBody)) b: z.infer<typeof AuthorizeDiscountBody>, @CurrentUser() u: JwtUser) { return this.svc.authorizeDiscount(b, u); }
+  // Detective control (SoD R08) — every over-cap discount authorization in the window, for independent review
+  // (reviewer duties, segregated from the selling cashier who can't reach it). Mirrors the G14 void/refund report.
+  @Get('discount-exceptions') @Permissions('exec', 'ar', 'fin_report', 'pos_refund') discountExceptions(@Query('from') from?: string, @Query('to') to?: string) { return this.svc.discountExceptions({ from, to }); }
 }

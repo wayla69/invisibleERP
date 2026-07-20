@@ -234,8 +234,40 @@ export default function ApprovalsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <VoidRefundReport />
         <VoidedTaxInvoiceReport />
+        <DiscountAuthorizationReport />
       </div>
     </ModulePage>
+  );
+}
+
+// Detective (SoD R08): every over-cap discount authorization a supervisor issued, for independent review —
+// who authorized how big a discount (% + optional ฿ cap), for which cashier, and whether it was consumed.
+function DiscountAuthorizationReport() {
+  const { t } = useLang();
+  const q = useQuery<{ authorizations: { override_no: string; authorized_pct: number | null; max_amount: number | null; approved_by: string | null; for_cashier: string | null; sale_no: string | null; consumed: boolean; created_at: string }[]; count: number; consumed_count: number; unused_count: number }>({
+    queryKey: ['exc-discount-auth'], queryFn: () => api('/api/pos/discount-exceptions'),
+  });
+  const d = q.data;
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-sm">{t('appr.exc_disc_title')}</CardTitle></CardHeader>
+      <CardContent>
+        <p className="mb-3 text-xs text-muted-foreground">{t('appr.exc_disc_desc')}{d ? ` · ${t('appr.exc_disc_summary', { n: d.count, unused: d.unused_count })}` : ''}</p>
+        <DataTable
+          rows={d?.authorizations ?? []}
+          rowKey={(r: any) => r.override_no}
+          columns={[
+            { key: 'override_no', label: t('appr.col_ref'), render: (r: any) => <span className="font-mono text-xs">{r.override_no}</span> },
+            { key: 'authorized_pct', label: t('appr.exc_disc_upto'), align: 'right', render: (r: any) => <span className="tabular">{r.authorized_pct}%{r.max_amount != null ? ` · ${baht(r.max_amount)}` : ''}</span> },
+            { key: 'approved_by', label: t('appr.exc_disc_by'), render: (r: any) => r.approved_by ?? '—' },
+            { key: 'consumed', label: t('appr.exc_disc_used'), render: (r: any) => r.consumed ? <span className="font-mono text-xs">{r.sale_no}</span> : <Badge variant="outline">{t('appr.exc_disc_unused')}</Badge> },
+            { key: 'created_at', label: t('appr.col_requested_at'), render: (r: any) => (r.created_at ? thaiDate(r.created_at) : '—') },
+          ]}
+          emptyState={{ title: t('appr.exc_none') }}
+          dense
+        />
+      </CardContent>
+    </Card>
   );
 }
 
