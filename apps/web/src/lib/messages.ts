@@ -883,6 +883,13 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'appr.exc_col_reason': { th: 'เหตุผล', en: 'Reason' },
   'appr.exc_col_issue_date': { th: 'วันที่ออก', en: 'Issue date' },
   'appr.exc_none': { th: 'ไม่มีรายการในช่วงนี้', en: 'No items in this period' },
+  'appr.exc_disc_title': { th: 'รายงานข้อยกเว้น: อนุมัติส่วนลดเกินเพดาน (ทบทวนอิสระ)', en: 'Exception report: over-cap discount authorizations (independent review)' },
+  'appr.exc_disc_desc': { th: 'ส่วนลดเกินเพดานที่หัวหน้าอนุมัติที่หน้าร้าน (SoD R08 — ผู้อนุมัติ ≠ แคชเชียร์) — ทบทวนเป็นรอบ', en: 'Over-cap discounts a supervisor authorized at the till (SoD R08 — approver ≠ cashier) — review periodically.' },
+  'appr.exc_disc_summary': { th: 'ออกรหัส {n} · ยังไม่ใช้ {unused}', en: '{n} issued · {unused} unused' },
+  'appr.exc_disc_upto': { th: 'อนุมัติสูงสุด', en: 'Authorized up to' },
+  'appr.exc_disc_by': { th: 'อนุมัติโดย', en: 'Approved by' },
+  'appr.exc_disc_used': { th: 'ใช้กับบิล', en: 'Used on sale' },
+  'appr.exc_disc_unused': { th: 'ยังไม่ใช้', en: 'Unused' },
   'appr.rejected_ok': { th: 'ปฏิเสธแล้ว', en: 'Rejected' },
   'appr.reject_reason_prompt': { th: 'เหตุผลที่ปฏิเสธ (ไม่บังคับ)', en: 'Reason for rejection (optional)' },
   // ── Batch approvals (multi-select — approve/reject many at once) ───────────

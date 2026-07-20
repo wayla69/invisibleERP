@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, isNotNull, gte, lte } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../../database/database.module';
 import { posHeldOrders, posOverrides, posDiscountSettings } from '../../../database/schema';
 import { DocNumberService } from '../../../common/doc-number.service';
@@ -72,6 +72,26 @@ export class PosControlService {
       overrides: rows.map((r: any) => ({ override_no: r.overrideNo, sale_no: r.saleNo, action: r.action, reason_code: r.reasonCode, reason: r.reason, amount: r.amount != null ? n(r.amount) : null, authorized_pct: r.authorizedPct != null ? n(r.authorizedPct) : null, requested_by: r.requestedBy, approved_by: r.approvedBy, created_at: r.createdAt })),
       count: rows.length,
     };
+  }
+
+  // Detective control (SoD R08, no new numbered control — mirrors the G14 void/refund report): every over-cap
+  // discount AUTHORIZATION a supervisor issued in the window, for independent periodic review. Surfaces who
+  // authorized how large a discount (% + optional ฿ cap), for which cashier, and whether it was consumed and
+  // on which sale — so a reviewer can spot a pattern of large or unused authorizations. Read-only, tenant-scoped
+  // by RLS. Window filters on the authorization's issue time (`created_at`); default = the trailing 30 days.
+  async discountExceptions(opts: { from?: string; to?: string }) {
+    const db = this.db;
+    const conds = [eq(posOverrides.action, 'discount'), isNotNull(posOverrides.authorizedPct)];
+    if (opts.from) conds.push(gte(posOverrides.createdAt, new Date(`${opts.from}T00:00:00`)));
+    if (opts.to) conds.push(lte(posOverrides.createdAt, new Date(`${opts.to}T23:59:59`)));
+    const rows = await db.select().from(posOverrides).where(and(...conds)).orderBy(desc(posOverrides.createdAt)).limit(500);
+    const authorizations = rows.map((r: any) => ({
+      override_no: r.overrideNo, authorized_pct: r.authorizedPct != null ? n(r.authorizedPct) : null,
+      max_amount: r.amount != null ? n(r.amount) : null, approved_by: r.approvedBy, for_cashier: r.requestedBy,
+      sale_no: r.saleNo, consumed: r.saleNo != null, reason: r.reason, created_at: r.createdAt,
+    }));
+    const consumed = authorizations.filter((a) => a.consumed).length;
+    return { authorizations, count: authorizations.length, consumed_count: consumed, unused_count: authorizations.length - consumed };
   }
 
   // ── docs/52 Phase 4b — discount-authority policy + supervisor authorization ────────────────────────────
