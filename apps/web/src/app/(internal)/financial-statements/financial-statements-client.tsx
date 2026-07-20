@@ -12,7 +12,8 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck, PlayCircle, Landmark, FileText, Scale } from 'lucide-react';
 
-import { api } from '@/lib/api';
+import { api, apiDownload } from '@/lib/api';
+import { notifyError } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -786,6 +787,18 @@ function CustomStatements({ lp }: { lp: string }) {
   const [priorAsOf, setPriorAsOf] = useState('');
   const [priorFrom, setPriorFrom] = useState('');
   const [run, setRun] = useState<{ code: string; type: string; industry: string } | null>(null);
+  const [packBusy, setPackBusy] = useState(false);
+  // P9: download the whole statutory set (BS + P&L + SOCE + notes) as one formatted PDF over the SAME period +
+  // comparative + industry the viewer has selected. Independent of which single statement is chosen above.
+  async function downloadPack() {
+    setPackBusy(true);
+    try {
+      const compQs = prior && priorAsOf ? `&prior_as_of=${priorAsOf}${priorFrom ? `&prior_from=${priorFrom}` : ''}` : '';
+      const indQs = industry ? `&industry=${encodeURIComponent(industry)}` : '';
+      await apiDownload(`/api/reports/fs/statement-pack.pdf?as_of=${asOf}&from=${from}${compQs}${indQs}${lp}`, `financial-statements-${asOf}.pdf`);
+    } catch (e: any) { notifyError(e?.message ?? 'download failed'); }
+    finally { setPackBusy(false); }
+  }
 
   const defs = defsQ.data?.definitions ?? [];
   const selected = defs.find((d) => d.code === code);
@@ -852,6 +865,7 @@ function CustomStatements({ lp }: { lp: string }) {
                 {prior && <div className="grid gap-2"><Label htmlFor="cs-pasof">{t('fnx.fs.stat.prior_as_of')}</Label><Input id="cs-pasof" type="date" className="max-w-[170px]" value={priorAsOf} onChange={(e) => setPriorAsOf(e.target.value)} /></div>}
                 {prior && isPl && <div className="grid gap-2"><Label htmlFor="cs-pfrom">{t('fnx.fs.stat.prior_from')}</Label><Input id="cs-pfrom" type="date" className="max-w-[170px]" value={priorFrom} onChange={(e) => setPriorFrom(e.target.value)} /></div>}
                 <Button disabled={!selected} onClick={() => selected && setRun({ code: selected.code, type: selected.statement_type, industry: showIndustry ? industry : '' })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
+                <Button variant="outline" disabled={!asOf || !from || packBusy} onClick={downloadPack}><Download className="size-4" /> {t('fnx.fs.stat.pack_pdf')}</Button>
               </div>
 
               {run != null && !isNotes && (

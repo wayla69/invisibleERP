@@ -160,6 +160,132 @@ export class ReportPdfService {
     );
   }
 
+  // ── Statutory financial-statement PACK (P9) ──────────────────────────
+  // Renders the assembled pack from StatutoryFsService.statementPack (BS + PL + SOCE + optional notes) as one
+  // formatted A4 document: Thai-forward bilingual captions, a current/prior comparative column, accounting-style
+  // negatives (parentheses), indentation + bold on subtotals, the P8 KPI strip per statement, and a page break
+  // before each primary statement. Pure presentation — the numbers come straight from the pack.
+  financialStatementPackHtml(pack: any): string {
+    const comp = !!pack.comparative;
+    const money = (x: number | null | undefined) => (x == null ? '' : fmtAmt(n(x)));
+    const curLbl = fmtDate(pack?.period?.as_of);
+    const priLbl = fmtDate(pack?.period?.prior_as_of);
+    const co = pack?.company;
+
+    // one statement table (BS/PL) from render rows
+    const stmtTable = (rows: any[]) => {
+      const body = (rows ?? []).map((r) => {
+        const name = esc(r.label_th ?? r.label ?? r.account_name ?? r.account_code ?? '');
+        const indent = 8 + (Number(r.level ?? 0)) * 16;
+        const cls = r.is_subtotal ? ' class="sub"' : (r.is_account ? ' class="acct"' : '');
+        const prior = comp ? `<td class="r">${money(r.prior)}</td>` : '';
+        return `<tr${cls}><td style="padding-left:${indent}px">${name}</td><td class="r">${money(r.current)}</td>${prior}</tr>`;
+      }).join('');
+      return `<table class="stmt"><thead><tr><th>รายการ / Item</th><th class="r">${esc(curLbl)}</th>${comp ? `<th class="r">${esc(priLbl)}</th>` : ''}</tr></thead><tbody>${body}</tbody></table>`;
+    };
+
+    // the P8 KPI strip for a statement
+    const kpiStrip = (kpis: any[]) => {
+      if (!kpis?.length) return '';
+      const chips = kpis.map((k) => {
+        const v = k.format === 'pct' ? `${(n(k.value) * 100).toFixed(1)}%` : `${n(k.value).toFixed(2)}×`;
+        return `<span class="kpi"><b>${esc(k.label_th ?? k.label)}</b> ${v}</span>`;
+      }).join('');
+      return `<div class="kpis">${chips}</div>`;
+    };
+
+    // SOCE matrix
+    const soce = pack?.changes_in_equity;
+    const soceTable = () => {
+      if (!soce?.components?.length) return '';
+      const rows = soce.components.map((c: any) => `<tr><td>${esc(c.account_name)} <span class="muted">${esc(c.account_code)}</span></td><td class="r">${money(c.opening)}</td><td class="r">${money(c.movements)}</td><td class="r">${money(c.profit)}</td><td class="r">${money(c.closing)}</td></tr>`).join('');
+      const t = soce.totals;
+      return `<table class="stmt"><thead><tr><th>องค์ประกอบ / Component</th><th class="r">ยอดต้นงวด</th><th class="r">การเปลี่ยนแปลง</th><th class="r">กำไรงวดนี้</th><th class="r">ยอดปลายงวด</th></tr></thead>`
+        + `<tbody>${rows}<tr class="sub"><td>รวม / Total</td><td class="r">${money(t.opening)}</td><td class="r">${money(t.movements)}</td><td class="r">${money(t.profit)}</td><td class="r">${money(t.closing)}</td></tr></tbody></table>`;
+    };
+
+    // Notes (best-effort)
+    const notesBlock = () => {
+      const notes = pack?.notes?.notes;
+      if (!notes?.length) return '';
+      const sections = notes.map((nt: any) => {
+        const lines = (nt.lines ?? []).map((l: any) => `<tr><td>${esc(l.account_name)} <span class="muted">${esc(l.account_code)}</span></td><td class="r">${money(l.current)}</td>${comp ? `<td class="r">${money(l.prior)}</td>` : ''}</tr>`).join('');
+        const policy = nt.policy_text_th || nt.policy_text ? `<p class="policy">${esc(nt.policy_text_th ?? nt.policy_text)}</p>` : '';
+        return `<div class="note"><div class="note-h">${esc(nt.number)}. ${esc(nt.title_th ?? nt.title)}</div>${policy}`
+          + `<table class="stmt"><tbody>${lines}<tr class="sub"><td>รวม / Total</td><td class="r">${money(nt.total)}</td>${comp ? `<td class="r">${money(nt.prior_total)}</td>` : ''}</tr></tbody></table></div>`;
+      }).join('');
+      return `<section class="break"><h2>หมายเหตุประกอบงบการเงิน / Notes to the Financial Statements</h2>${sections}</section>`;
+    };
+
+    const periodLine = `สำหรับปีสิ้นสุด / For the year ended ${esc(fmtDate(pack?.period?.as_of))}`
+      + (comp ? ` (เปรียบเทียบ / comparative ${esc(fmtDate(pack?.period?.prior_as_of))})` : '');
+
+    return `<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Sarabun', sans-serif; color: #1a1a1a; font-size: 12px; margin: 0; }
+  .cover { text-align: center; padding: 6px 0 14px; border-bottom: 3px solid #1E3C72; margin-bottom: 14px; }
+  .cover .co { font-size: 20px; font-weight: 700; color: #1E3C72; }
+  .cover .sub { color: #555; margin-top: 2px; }
+  .cover .fs { font-size: 15px; font-weight: 700; margin-top: 8px; }
+  .cover .unaudited { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid #b45309; color: #b45309; border-radius: 4px; font-size: 11px; }
+  h2 { font-size: 14px; color: #1E3C72; border-bottom: 1.5px solid #1E3C72; padding-bottom: 3px; margin: 0 0 8px; }
+  section { margin-bottom: 16px; }
+  section.break { page-break-before: always; }
+  table.stmt { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  table.stmt th { background: #1E3C72; color: #fff; font-weight: 600; padding: 5px 6px; text-align: left; }
+  table.stmt td { padding: 3px 6px; border-bottom: 1px solid #eee; }
+  table.stmt tr.sub td { font-weight: 700; border-top: 1px solid #1E3C72; background: #f2f6fc; }
+  table.stmt tr.acct td { color: #444; font-size: 11px; }
+  .r { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: #999; font-size: 10px; }
+  .kpis { margin: 2px 0 12px; }
+  .kpi { display: inline-block; margin: 0 8px 4px 0; padding: 2px 8px; background: #eef3fb; border: 1px solid #d6e2f5; border-radius: 4px; }
+  .note { margin-bottom: 10px; }
+  .note-h { font-weight: 700; color: #1E3C72; margin-bottom: 2px; }
+  .policy { color: #444; margin: 2px 0 4px; font-size: 11px; }
+  .foot { margin-top: 10px; color: #888; font-size: 10px; text-align: right; }
+</style>
+</head>
+<body>
+  <div class="cover">
+    <div class="co">${esc(co?.name ?? '—')}</div>
+    ${co?.taxId ? `<div class="sub">เลขประจำตัวผู้เสียภาษี / Tax ID: ${esc(co.taxId)}</div>` : ''}
+    <div class="fs">งบการเงิน / Financial Statements</div>
+    <div class="sub">${periodLine}</div>
+    <div class="unaudited">ยังไม่ได้ตรวจสอบ — งบเพื่อการบริหาร / Unaudited — management accounts</div>
+  </div>
+
+  <section>
+    <h2>งบแสดงฐานะการเงิน / Statement of Financial Position</h2>
+    ${stmtTable(pack?.balance_sheet?.rows)}
+    ${kpiStrip(pack?.balance_sheet?.kpis)}
+  </section>
+
+  <section class="break">
+    <h2>งบกำไรขาดทุน / Statement of Profit or Loss</h2>
+    ${stmtTable(pack?.profit_and_loss?.rows)}
+    ${kpiStrip(pack?.profit_and_loss?.kpis)}
+  </section>
+
+  <section class="break">
+    <h2>งบแสดงการเปลี่ยนแปลงส่วนของผู้ถือหุ้น / Statement of Changes in Equity</h2>
+    ${soceTable()}
+  </section>
+
+  ${notesBlock()}
+
+  <div class="foot">${esc(co?.name ?? '')} · ${esc(pack?.ledger ?? 'LEADING')} · หน่วย: บาท / Unit: THB</div>
+</body>
+</html>`;
+  }
+
   // ── shared layout ───────────────────────────────────────────────────
   private wrap(title: string, body: string): string {
     return `<!DOCTYPE html>
@@ -254,6 +380,16 @@ function fmtMoney(x: number): string {
 }
 function fmtQty(x: number): string {
   return x.toLocaleString('en-US', { maximumFractionDigits: 3 });
+}
+// Accounting presentation: negatives in parentheses, zero as a dash.
+function fmtAmt(x: number): string {
+  const v = Math.round(x * 100) / 100;
+  if (v === 0) return '-';
+  return v < 0 ? `(${fmtMoney(-v)})` : fmtMoney(v);
+}
+function fmtDate(ymd: unknown): string {
+  const s = String(ymd ?? '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : s;
 }
 function round2(x: number): number {
   return Math.round(x * 100) / 100;

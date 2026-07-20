@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Delete, Param, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Body, Res, BadRequestException } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { StatutoryFsService } from './statutory-fs.service';
+import { ReportPdfService } from './reports-pdf.service';
 
 const GroupSchema = z.object({
   key: z.string().min(1),
@@ -43,7 +45,10 @@ type UpsertBodyT = z.infer<typeof UpsertBody>;
 @Controller('api/reports/fs')
 @Permissions('fin_report', 'exec')
 export class StatutoryFsController {
-  constructor(private readonly svc: StatutoryFsService) {}
+  constructor(
+    private readonly svc: StatutoryFsService,
+    private readonly pdf: ReportPdfService,
+  ) {}
 
   // ── Report-definition CRUD (the buyer's own FS layouts) ──
   @Get('definitions')
@@ -82,6 +87,47 @@ export class StatutoryFsController {
     @Query('industry') industry?: string,
   ) {
     return this.svc.renderStatement(code, { asOf, from, priorAsOf, priorFrom, ledger: ledger || null, industry: industry || null });
+  }
+
+  // ── Formatted statutory FS pack (P9) — BS + PL + SOCE + optional notes as one A4 PDF ──
+  // Thai-forward bilingual captions, comparative column, per-statement KPIs. `fiscal_year=YYYY` is a shortcut
+  // that fills from/as_of + the prior year; otherwise pass from/as_of (+ prior_*) explicitly. Streams a PDF
+  // when Chromium/PDF service is available, else falls back to the raw HTML (same degrade as other PDF routes).
+  @Get('statement-pack.pdf')
+  async statementPackPdf(
+    @Res() reply: FastifyReply,
+    @Query('fiscal_year') fiscalYear?: string,
+    @Query('as_of') asOf?: string,
+    @Query('from') from?: string,
+    @Query('prior_as_of') priorAsOf?: string,
+    @Query('prior_from') priorFrom?: string,
+    @Query('ledger') ledger?: string,
+    @Query('industry') industry?: string,
+    @Query('notes_code') notesCode?: string,
+    @Query('comparative') comparative?: string,
+  ) {
+    let p = { from, asOf, priorFrom, priorAsOf };
+    const fy = fiscalYear ? parseInt(fiscalYear, 10) : NaN;
+    if (fy) {
+      const wantComp = comparative == null ? true : comparative === '1' || comparative === 'true';
+      p = {
+        from: `${fy}-01-01`, asOf: `${fy}-12-31`,
+        priorFrom: wantComp ? `${fy - 1}-01-01` : undefined,
+        priorAsOf: wantComp ? `${fy - 1}-12-31` : undefined,
+      };
+    }
+    if (!p.from || !p.asOf) {
+      throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'fiscal_year, or from + as_of, is required', messageTh: 'ต้องระบุปีบัญชี หรือ from และ as_of' });
+    }
+    const pack = await this.svc.statementPack({
+      asOf: p.asOf, from: p.from, priorAsOf: p.priorAsOf, priorFrom: p.priorFrom,
+      ledger: ledger || null, industry: industry || null, notesCode: notesCode || null,
+    });
+    const html = this.pdf.financialStatementPackHtml(pack);
+    const pdf = await this.pdf.renderHtmlToPdf(html);
+    const fname = `financial-statements-${p.asOf}.pdf`;
+    if (pdf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `attachment; filename="${fname}"`).header('Content-Length', pdf.length).send(pdf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
   }
 
   // ── Industry layouts a viewer can pick between for the built-in DBD-PL / DBD-BS ──
