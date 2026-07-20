@@ -50,11 +50,34 @@ async function bootAs(page: Page, me: Me) {
 }
 
 const domainHeader = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
-const navLink = (page: Page, href: string) => page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
+// The sidebar renders favourites + recents ABOVE the domain nav groups, and visiting a page auto-adds its
+// link to Recents (localStorage `ie-nav-recents`) — so the CURRENT page's link (e.g. /dashboard) appears
+// twice once recents populates, and whether it has by assert-time is a hydration-timing race (the original
+// strict-mode "2 elements" flake). Take the LAST match: the copy inside the domain nav groups, which is
+// stable regardless of what Recents has picked up. Non-current links match once, so .last() is a no-op there.
+const navLink = (page: Page, href: string) => page.locator(`a[data-sidebar="menu-button"][href="${href}"]`).last();
+
+// Gate the first interaction on a post-hydration signal. Next.js paints the sidebar before React
+// hydrates, so a click or visibility assertion at first paint races hydration: a pre-hydration event is
+// swallowed and hydration then resets the DOM (the sidebar can even double-render for a beat, hence the
+// occasional strict-mode "resolved to 2 elements" on a nav link). AppShell's mount unconditionally fetches
+// /api/auth/me (auth.ts); awaiting it proves React mounted + hydrated and the shell has its identity, so
+// the assertions below no longer race first paint (debug mantra #16). Method-agnostic predicate.
+async function gotoHydrated(page: Page, path: string) {
+  const hydrated = page.waitForResponse((r) => r.url().includes('/api/auth/me'));
+  await page.goto(path);
+  await hydrated;
+}
+
+// Expand a top-level domain idempotently (a no-op if already open), so a stray toggle can't collapse it.
+async function openDomain(page: Page, name: string) {
+  const header = domainHeader(page, name);
+  if ((await header.getAttribute('aria-expanded')) === 'false') await header.click();
+}
 
 test('SME restaurant: industry-hidden domain is gone; other domains fold; subgroups default folded', async ({ page }) => {
   await bootAs(page, SME_RESTO);
-  await page.goto('/dashboard');
+  await gotoHydrated(page, '/dashboard');
   await expect(navLink(page, '/dashboard')).toBeVisible(); // shell rendered (overview open — active + listed)
 
   // B1: the hidden domain (โครงการ / nav.group.projects) is absent from the sidebar entirely.
@@ -72,7 +95,7 @@ test('SME restaurant: industry-hidden domain is gone; other domains fold; subgro
 
 test('SME restaurant: POS workspace opens the industry groups with frontline items visible, rest folded', async ({ page }) => {
   await bootAs(page, SME_RESTO);
-  await page.goto('/dashboard');
+  await gotoHydrated(page, '/dashboard');
   // An Admin's default workspace is ERP — switch to POS via the workspace tab (like workspace-split.spec).
   await page.getByRole('tablist', { name: 'Workspace' }).getByRole('tab', { name: 'POS', exact: true }).click();
   await expect(page).toHaveURL(/\/pos-home$/);
@@ -90,7 +113,7 @@ test('SME restaurant: POS workspace opens the industry groups with frontline ite
 
 test('B2: the "show hidden menus" toggle reveals the industry-hidden domain and folds it back', async ({ page }) => {
   await bootAs(page, SME_RESTO);
-  await page.goto('/dashboard');
+  await gotoHydrated(page, '/dashboard');
   await expect(navLink(page, '/dashboard')).toBeVisible();
 
   const toggle = page.getByRole('button', { name: 'แสดงเมนูที่ซ่อนไว้', exact: true });
@@ -103,11 +126,11 @@ test('B2: the "show hidden menus" toggle reveals the industry-hidden domain and 
 
 test('enterprise regression: no SME toggle, subgroups still default open', async ({ page }) => {
   await bootAs(page, ENTERPRISE_ADMIN);
-  await page.goto('/dashboard');
+  await gotoHydrated(page, '/dashboard');
   await expect(navLink(page, '/dashboard')).toBeVisible();
 
   await expect(page.getByRole('button', { name: 'แสดงเมนูที่ซ่อนไว้', exact: true })).toHaveCount(0);
   await expect(domainHeader(page, 'โครงการ')).toBeVisible(); // nothing hidden
-  await domainHeader(page, 'ซัพพลายเชน').click();
+  await openDomain(page, 'ซัพพลายเชน');
   await expect(navLink(page, '/inventory')).toBeVisible(); // pre-B1 subgroup default (open) unchanged
 });
