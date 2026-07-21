@@ -163,9 +163,9 @@ function TitleSlide() {
         Next-Gen Enterprise ERP
       </h1>
       <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 md:text-xl">
-        A multi-tenant, Thai-localized ERP for food &amp; beverage enterprises — bridging
-        financial controls with supply-chain operations, from the diner&apos;s QR scan to the
-        general ledger.
+        A multi-tenant, Thai-localized ERP + POS platform for retail, food service, and every
+        branch-based business — bridging financial controls with operations, from the point of
+        sale to the general ledger.
       </p>
       <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
         <Chip icon={Zap} tone="blue">Lean &amp; fast — TypeScript end-to-end</Chip>
@@ -195,7 +195,7 @@ function ProblemSlide() {
         </Card>
       </div>
       <p className="mt-8 text-center text-lg text-slate-700">
-        F&amp;B enterprises are forced to choose between{" "}
+        Growing businesses are forced to choose between{" "}
         <span className="font-bold text-blue-700">operational agility</span> and{" "}
         <span className="font-bold text-emerald-700">financial control</span>.
         <span className="text-slate-400"> They shouldn&apos;t have to.</span>
@@ -275,8 +275,8 @@ function SecuritySlide() {
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat value="24" label="User roles" tone="blue" />
-        <Stat value="82" label="Granular permissions" tone="blue" />
-        <Stat value="26" label="SoD rules on GL posting" tone="emerald" />
+        <Stat value="80" label="Granular permissions" tone="blue" />
+        <Stat value="23" label="SoD rules on GL posting" tone="emerald" />
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card icon={Lock} tone="emerald" title="Row-Level Security multi-tenancy">
@@ -355,8 +355,8 @@ function MarketSlide() {
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card icon={Store} tone="amber" title="Underserved mid-market">
-          Chains of 5–100 branches are too big for spreadsheets, too small for SAP — exactly
-          where compliance pressure is now arriving.
+          Branch businesses of 5–100 locations — restaurants, cafés, retail, services — too
+          big for spreadsheets, too small for SAP; exactly where compliance pressure is arriving.
         </Card>
         <Card icon={TrendingUp} tone="emerald" title="Compliance tailwind">
           e-Tax mandates, PDPA, and listing ambitions push Thai operators toward audited,
@@ -374,9 +374,17 @@ function MarketSlide() {
   );
 }
 
+function PlanLineTag({ tone, children }) {
+  return (
+    <div className={`flex w-28 shrink-0 items-center justify-center rounded-xl border px-2 text-center text-[11px] font-extrabold leading-tight ${TONES[tone].bg} ${TONES[tone].border} ${TONES[tone].text}`}>
+      {children}
+    </div>
+  );
+}
+
 function PlanTier({ name, price, per, sub, tone }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center shadow-sm">
+    <div className="flex-1 rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center shadow-sm">
       <div className="text-sm font-extrabold text-slate-900">{name}</div>
       <div className={`mt-1 text-lg font-extrabold ${TONES[tone].text}`}>{price}</div>
       <div className="text-[10px] font-semibold text-slate-400">{per || " "}</div>
@@ -389,13 +397,26 @@ function BusinessModelSlide() {
   return (
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Business Model" title="SaaS economics on one multi-tenant core" tone="emerald" />
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-        <PlanTier name="Free" price="฿0" per="" sub="evaluation · 2 users, 1 location" tone="slate" />
-        <PlanTier name="SME" price="฿690" per="/mo" sub="single owner · full ops ERP + AI" tone="emerald" />
-        <PlanTier name="Standard" price="฿2,900" per="/mo" sub="finance core · 10 users, 2 locations" tone="blue" />
-        <PlanTier name="Business" price="฿4,900" per="/mo" sub="+ procurement · multi-branch" tone="violet" />
-        <PlanTier name="Professional" price="฿9,900" per="/mo" sub="+ planning · loyalty · AI" tone="amber" />
-        <PlanTier name="Enterprise" price="Custom" per="" sub="all verticals · unlimited scale" tone="rose" />
+      <div className="space-y-2.5">
+        <div className="flex items-stretch gap-2.5">
+          <PlanLineTag tone="blue">POS line · per branch</PlanLineTag>
+          <PlanTier name="POS Lite" price="฿590" per="/br/mo" sub="counter register · 3 seats" tone="blue" />
+          <PlanTier name="POS Pro" price="฿1,190" per="/br/mo" sub="full front of house · QR · channels" tone="blue" />
+        </div>
+        <div className="flex items-stretch gap-2.5">
+          <PlanLineTag tone="emerald">ERP line · per company</PlanLineTag>
+          <PlanTier name="ERP Essentials" price="฿1,900" per="/mo" sub="finance · orders · inventory" tone="emerald" />
+          <PlanTier name="ERP Growth" price="฿3,900" per="/mo" sub="+ procurement · planning" tone="emerald" />
+        </div>
+        <div className="flex items-stretch gap-2.5">
+          <PlanLineTag tone="violet">Complete bundles</PlanLineTag>
+          <PlanTier name="Solo" price="฿690" per="/mo" sub="1 seat" tone="slate" />
+          <PlanTier name="Standard" price="฿2,900" per="/mo" sub="+ procurement" tone="violet" />
+          <PlanTier name="Business" price="฿4,900" per="/mo" sub="multi-branch" tone="violet" />
+          <PlanTier name="Professional" price="฿9,900" per="/mo" sub="planning · AI" tone="amber" />
+          <PlanTier name="Franchise" price="฿14,900" per="/mo" sub="verticals" tone="rose" />
+          <PlanTier name="Enterprise" price="Custom" per="" sub="unlimited" tone="rose" />
+        </div>
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card icon={Wallet} tone="emerald" title="Per-company subscriptions">
@@ -406,9 +427,9 @@ function BusinessModelSlide() {
           AI tokens, e-Tax documents, and POS transactions carry plan quotas with automatic
           overage billing — expansion revenue grows with customer usage.
         </Card>
-        <Card icon={Rocket} tone="blue" title="Land and expand">
-          A 14-day self-service trial lands the account; every upgrade from SME to Enterprise
-          is a plan change on the same tenant — never a migration.
+        <Card icon={Rocket} tone="blue" title="Split-sell, land and expand">
+          Buy POS only, ERP only, or the Complete bundle — a 14-day trial lands the account,
+          and every upgrade between lines is a plan change on the same tenant, never a migration.
         </Card>
       </div>
     </div>

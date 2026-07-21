@@ -36,10 +36,14 @@ casual particles, no gimmicky metaphors, no machine-translation phrasing. This
 applies alongside the white/pastel visual rule in `docs/pitch-deck/README.md`.
 
 Pricing (§9) reflects the plan catalog seeded by the platform's billing
-service (`apps/api/src/modules/billing/billing.service.ts` `PLAN_SEED`, suites
-per plan in `packages/shared/src/entitlements.ts` `PLAN_SUITES`, 14-day trial)
-as of 2026-07 — re-check it if the seed changes. ROI math (§12) remains an
-illustrative model. To regenerate the PDF after
+service (`PLAN_SEED` + `PLAN_SUITES`, 14-day trial) **as of the docs/53
+product-line split (2026-07-21)**: the POS line (per branch) and ERP line
+(flat) beside the Complete bundles (Trial / Solo / Standard / Business /
+Professional / Franchise / Enterprise), with the à-la-carte add-on SKUs. All
+collateral is **industry-neutral** per the owner's positioning directive
+(multi-industry ERP + POS; F&B/retail/services as verticals) and states the
+verified control counts (24 roles / 80 permissions / 23 SoD rules). Re-check
+against the seed if it changes. ROI math (§12) remains an illustrative model. To regenerate the PDF after
 editing the HTML: print `sales-kit.html` to PDF with headless Chromium (A4).
 
 > Sales asset only — not imported by `apps/web` or `apps/api`; no effect on

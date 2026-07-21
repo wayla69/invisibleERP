@@ -141,8 +141,17 @@
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
   .grid2.tight { gap: 12px; }
 
+  .lines { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .line-row { display: flex; gap: 8px; align-items: stretch; }
+  .line-tag { display: flex; align-items: center; justify-content: center; width: 128px; flex-shrink: 0;
+              font-size: 10.5px; font-weight: 800; text-align: center; line-height: 1.3;
+              border-radius: 12px; padding: 6px; }
+  .line-tag.blue { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .line-tag.emerald { background: #ecfdf5; border: 1px solid #a7f3d0; }
+  .line-tag.violet { background: #f5f3ff; border: 1px solid #ddd6fe; }
+  .line-row .tier { flex: 1; }
   .tiers { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 20px; }
-  .tier { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; padding: 12px 8px; text-align: center;
+  .tier { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; padding: 8px 6px; text-align: center;
           box-shadow: 0 1px 2px rgba(15,23,42,.05); }
   .tier-n { font-size: 13px; font-weight: 800; color: #0f172a; }
   .tier-p { font-size: 17px; font-weight: 800; margin-top: 4px; }
@@ -214,8 +223,9 @@
 <div class="center-col">
   <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg> NASDAQ IPO track · SOX-ICFR ready</span>
   <h1 class="hero">Next-Gen Enterprise ERP</h1>
-  <p class="lede">A multi-tenant, Thai-localized ERP for food &amp; beverage enterprises — bridging
-  financial controls with supply-chain operations, from the diner's QR scan to the general ledger.</p>
+  <p class="lede">A multi-tenant, Thai-localized ERP + POS platform for retail, food service, and every
+  branch-based business — bridging financial controls with operations, from the point of sale to the
+  general ledger.</p>
   <div class="chip-row">
     <span class="chip blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" /> </svg> Lean &amp; fast — TypeScript end-to-end</span>
     <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 12h4" /> <path d="M10 8h4" /> <path d="M14 21v-3a2 2 0 0 0-4 0v3" /> <path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2" /> <path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" /> </svg> True multi-tenancy — Postgres RLS</span>
@@ -238,7 +248,7 @@
   <div class="card"><span class="badge amber md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m2 2 20 20" /> <path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71" /> <path d="M9.309 3.652A12.252 12.252 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.784 9.784 0 0 1-.08 1.264" /> </svg> </span><div class="card-t">Compliance as an afterthought</div><div class="card-b">Access controls and segregation-of-duty rules are bolted on after the fact — making SOX audits painful, manual, and expensive.</div></div>
   <div class="card"><span class="badge rose md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m19 5 3-3" /> <path d="m2 22 3-3" /> <path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z" /> <path d="M7.5 13.5 10 11" /> <path d="M10.5 16.5 13 14" /> <path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z" /> </svg> </span><div class="card-t">Brittle integrations</div><div class="card-b">Modern delivery marketplaces, payment gateways, and POS terminals are wired in through fragile point-to-point connectors that break silently.</div></div>
 </div>
-<p class="punch">F&amp;B enterprises are forced to choose between <b class="blue">operational agility</b>
+<p class="punch">Growing businesses are forced to choose between <b class="blue">operational agility</b>
 and <b class="emerald">financial control</b>. <span class="dim">They shouldn't have to.</span></p></main>
 </section>
 
@@ -314,8 +324,8 @@ no reconciliation projects, no batch ETL, no version drift between operations an
 </div>
 <div class="grid3 tight">
   <div class="stat blue"><div class="stat-v">24</div><div class="stat-l">User roles</div></div>
-  <div class="stat blue"><div class="stat-v">82</div><div class="stat-l">Granular permissions</div></div>
-  <div class="stat emerald"><div class="stat-v">26</div><div class="stat-l">SoD rules on GL posting</div></div>
+  <div class="stat blue"><div class="stat-v">80</div><div class="stat-l">Granular permissions</div></div>
+  <div class="stat emerald"><div class="stat-v">23</div><div class="stat-l">SoD rules on GL posting</div></div>
 </div>
 <div class="grid3">
   <div class="card"><span class="badge emerald md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /> </svg> </span><div class="card-t">Row-Level Security multi-tenancy</div><div class="card-b">Every query is tenant-scoped at the database itself. The API even refuses to boot if its DB role could bypass RLS.</div></div>
@@ -377,7 +387,7 @@ ledger — <b class="emerald">integrations that fail loudly, never silently</b>.
   <div class="stat rose"><div class="stat-v"><10%</div><div class="stat-l">Mid-market chains on a real ERP (est.)</div></div>
 </div>
 <div class="grid3">
-  <div class="card"><span class="badge amber md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M15 21v-5a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v5" /> <path d="M17.774 10.31a1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.451 0 1.12 1.12 0 0 0-1.548 0 2.5 2.5 0 0 1-3.452 0 1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.77-3.248l2.889-4.184A2 2 0 0 1 7 2h10a2 2 0 0 1 1.653.873l2.895 4.192a2.5 2.5 0 0 1-3.774 3.244" /> <path d="M4 10.95V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8.05" /> </svg> </span><div class="card-t">Underserved mid-market</div><div class="card-b">Chains of 5–100 branches are too big for spreadsheets, too small for SAP — exactly where compliance pressure is now arriving.</div></div>
+  <div class="card"><span class="badge amber md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M15 21v-5a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v5" /> <path d="M17.774 10.31a1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.451 0 1.12 1.12 0 0 0-1.548 0 2.5 2.5 0 0 1-3.452 0 1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.77-3.248l2.889-4.184A2 2 0 0 1 7 2h10a2 2 0 0 1 1.653.873l2.895 4.192a2.5 2.5 0 0 1-3.774 3.244" /> <path d="M4 10.95V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8.05" /> </svg> </span><div class="card-t">Underserved mid-market</div><div class="card-b">Branch businesses of 5–100 locations — restaurants, cafés, retail, services — too big for spreadsheets, too small for SAP; exactly where compliance pressure is arriving.</div></div>
   <div class="card"><span class="badge emerald md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 7h6v6" /> <path d="m22 7-8.5 8.5-5-5L2 17" /> </svg> </span><div class="card-t">Compliance tailwind</div><div class="card-b">e-Tax mandates, PDPA, and listing ambitions push Thai operators toward audited, controlled systems — our home turf.</div></div>
   <div class="card"><span class="badge sky md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /> <path d="M2 12h20" /> </svg> </span><div class="card-t">SEA expansion path</div><div class="card-b">The same multi-tenant, multi-language core localizes to neighboring markets without re-architecture.</div></div>
 </div>
@@ -393,18 +403,28 @@ ledger — <b class="emerald">integrations that fail loudly, never silently</b>.
   <div class="progress"><div style="width:50%"></div></div>
   <main class="body">
 <div class="heading"><div class="kicker emerald">Business Model</div><h2>SaaS economics on one multi-tenant core</h2></div>
-<div class="tiers">
-  <div class="tier"><div class="tier-n">Free</div><div class="tier-p slate">฿0</div><div class="tier-per">&nbsp;</div><div class="tier-s">evaluation · 2 users, 1 location</div></div>
-  <div class="tier"><div class="tier-n">SME</div><div class="tier-p emerald">฿690</div><div class="tier-per">/mo</div><div class="tier-s">single owner · full ops ERP + AI</div></div>
-  <div class="tier"><div class="tier-n">Standard</div><div class="tier-p blue">฿2,900</div><div class="tier-per">/mo</div><div class="tier-s">finance core · 10 users, 2 locations</div></div>
-  <div class="tier"><div class="tier-n">Business</div><div class="tier-p violet">฿4,900</div><div class="tier-per">/mo</div><div class="tier-s">+ procurement · multi-branch</div></div>
-  <div class="tier"><div class="tier-n">Professional</div><div class="tier-p amber">฿9,900</div><div class="tier-per">/mo</div><div class="tier-s">+ planning · loyalty · AI</div></div>
-  <div class="tier"><div class="tier-n">Enterprise</div><div class="tier-p rose">Custom</div><div class="tier-per">&nbsp;</div><div class="tier-s">all verticals · unlimited scale</div></div>
+<div class="lines">
+  <div class="line-row"><span class="line-tag blue">POS line · per branch</span>
+    <div class="tier"><div class="tier-n">POS Lite</div><div class="tier-p blue">฿590</div><div class="tier-per">/br/mo</div><div class="tier-s">counter register · 3 seats</div></div>
+    <div class="tier"><div class="tier-n">POS Pro</div><div class="tier-p blue">฿1,190</div><div class="tier-per">/br/mo</div><div class="tier-s">full front of house · QR · channels</div></div>
+  </div>
+  <div class="line-row"><span class="line-tag emerald">ERP line · per company</span>
+    <div class="tier"><div class="tier-n">ERP Essentials</div><div class="tier-p emerald">฿1,900</div><div class="tier-per">/mo</div><div class="tier-s">finance · orders · inventory</div></div>
+    <div class="tier"><div class="tier-n">ERP Growth</div><div class="tier-p emerald">฿3,900</div><div class="tier-per">/mo</div><div class="tier-s">+ procurement · planning · 3 branches</div></div>
+  </div>
+  <div class="line-row"><span class="line-tag violet">Complete bundles</span>
+    <div class="tier"><div class="tier-n">Solo</div><div class="tier-p slate">฿690</div><div class="tier-per">/mo</div><div class="tier-s">1 seat</div></div>
+    <div class="tier"><div class="tier-n">Standard</div><div class="tier-p violet">฿2,900</div><div class="tier-per">/mo</div><div class="tier-s">+ procurement</div></div>
+    <div class="tier"><div class="tier-n">Business</div><div class="tier-p violet">฿4,900</div><div class="tier-per">/mo</div><div class="tier-s">multi-branch</div></div>
+    <div class="tier"><div class="tier-n">Professional</div><div class="tier-p amber">฿9,900</div><div class="tier-per">/mo</div><div class="tier-s">planning · AI</div></div>
+    <div class="tier"><div class="tier-n">Franchise</div><div class="tier-p rose">฿14,900</div><div class="tier-per">/mo</div><div class="tier-s">verticals</div></div>
+    <div class="tier"><div class="tier-n">Enterprise</div><div class="tier-p rose">Custom</div><div class="tier-per">&nbsp;</div><div class="tier-s">unlimited</div></div>
+  </div>
 </div>
 <div class="grid3">
   <div class="card"><span class="badge emerald md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /> <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /> </svg> </span><div class="card-t">Per-company subscriptions</div><div class="card-b">Every company in a fleet subscribes to its own plan on one deployment — gross margin scales with tenants, not headcount. Yearly billing is priced at ten months.</div></div>
   <div class="card"><span class="badge violet md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /> <path d="M20 2v4" /> <path d="M22 4h-4" /> <circle cx="4" cy="20" r="2" /> </svg> </span><div class="card-t">Usage-metered expansion</div><div class="card-b">AI tokens, e-Tax documents, and POS transactions carry plan quotas with automatic overage billing — expansion revenue grows with customer usage.</div></div>
-  <div class="card"><span class="badge blue md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /> <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" /> <path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" /> <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" /> </svg> </span><div class="card-t">Land and expand</div><div class="card-b">A 14-day self-service trial lands the account; every upgrade from SME to Enterprise is a plan change on the same tenant — never a migration.</div></div>
+  <div class="card"><span class="badge blue md"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /> <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" /> <path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" /> <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" /> </svg> </span><div class="card-t">Split-sell, land and expand</div><div class="card-b">Buy POS only, ERP only, or the Complete bundle — a 14-day trial lands the account, and every upgrade between lines is a plan change on the same tenant, never a migration.</div></div>
 </div></main>
 </section>
 
