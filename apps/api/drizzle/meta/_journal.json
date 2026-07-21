@@ -2990,6 +2990,13 @@
       "when": 2023820000392,
       "tag": "0453_saas_lifecycle_events",
       "breakpoints": true
+    },
+    {
+      "idx": 428,
+      "version": "7",
+      "when": 2023820000393,
+      "tag": "0454_saas_receipts",
+      "breakpoints": true
     }
   ]
 }

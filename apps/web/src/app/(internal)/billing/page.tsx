@@ -30,6 +30,8 @@ export default function BillingPage() {
   // 1.4/1.5 — this month's metered usage (e-Tax docs / POS txns vs plan quota) + the overage charge history.
   const usage = useQuery<any>({ queryKey: ['billing-usage'], queryFn: () => api('/api/billing/usage') });
   const usageRuns = useQuery<any>({ queryKey: ['usage-overage-runs'], queryFn: () => api('/api/billing/usage-overage/runs') });
+  // A4 — the platform's receipts for this company's subscription payments.
+  const receipts = useQuery<{ receipts: any[] }>({ queryKey: ['saas-receipts'], queryFn: () => api('/api/billing/receipts') });
   const aiRuns = useQuery<any>({ queryKey: ['ai-overage-runs'], queryFn: () => api('/api/billing/ai-overage/runs') });
   const [msg, setMsg] = useState('');
   const [billInterval, setBillInterval] = useState<'monthly' | 'annual'>('monthly'); // 1.7 — annual billing toggle
@@ -210,6 +212,30 @@ export default function BillingPage() {
             <Button size="sm" variant="outline" className="w-fit" disabled={saveAddons.isPending} onClick={() => saveAddons.mutate()}>
               {t('st.bill.addons_save')}
             </Button>
+          </Card>
+        )}
+
+        {/* A4 — subscription receipts: list + printable document (PDF, HTML fallback). */}
+        {(receipts.data?.receipts ?? []).length > 0 && (
+          <Card className="gap-3 p-5">
+            <strong className="text-sm">{t('st.bill.receipts_title')}</strong>
+            <p className="text-xs text-muted-foreground">{t('st.bill.receipts_sub')}</p>
+            <DataTable
+              dense
+              rows={receipts.data!.receipts}
+              rowKey={(r: any) => r.receipt_no}
+              columns={[
+                { key: 'receipt_no', label: t('st.bill.col_receipt_no'), className: 'tabular-nums' },
+                { key: 'created_at', label: t('st.bill.col_date'), render: (r: any) => thaiDate(r.created_at) },
+                { key: 'period', label: t('st.bill.col_period'), render: (r: any) => r.period ?? '—' },
+                { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular-nums">{baht(r.amount)}</span> },
+                { key: 'open', label: '', align: 'right', render: (r: any) => (
+                  <a className="text-xs font-medium text-primary hover:underline" href={`/api/billing/receipts/${encodeURIComponent(r.receipt_no)}/pdf`} target="_blank" rel="noreferrer">
+                    {t('st.bill.receipt_open')}
+                  </a>
+                ) },
+              ]}
+            />
           </Card>
         )}
 
