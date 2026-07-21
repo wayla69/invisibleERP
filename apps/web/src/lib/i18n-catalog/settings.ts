@@ -921,4 +921,12 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.bill.addons_saved': { th: '✅ บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: '✅ Add-ons saved — entitlements apply immediately' },
   'st.bill.addons_saved_billed': { th: '✅ บันทึกแล้ว — ปรับรายการเรียกเก็บในรอบบิลให้อัตโนมัติ (+{added}/−{removed})', en: '✅ Saved — subscription line items reconciled (+{added}/−{removed})' },
   'st.bill.per_month_short': { th: '/เดือน', en: '/mo' },
+
+  // ── A4: own-SaaS receipts on /billing ─────────────────────────────────────
+  'st.bill.receipts_title': { th: 'ใบเสร็จค่าบริการ', en: 'Subscription receipts' },
+  'st.bill.receipts_sub': { th: 'ใบเสร็จทุกรายการที่ระบบบันทึกไว้ — เปิดดู/พิมพ์ได้ทันที', en: 'Every recorded payment — open or print any receipt.' },
+  'st.bill.receipt_open': { th: 'เปิดใบเสร็จ', en: 'Open receipt' },
+  'st.bill.col_receipt_no': { th: 'เลขที่', en: 'Receipt no.' },
+  'st.bill.col_period': { th: 'งวด', en: 'Period' },
+  'st.bill.col_date': { th: 'วันที่', en: 'Date' },
 };

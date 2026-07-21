@@ -29,14 +29,14 @@ export const subscriptions = pgTable('subscriptions', {
   // 0451 — purchased à-la-carte add-on suite keys (ADDON_KEYS in @ierp/shared); unioned into the
   // tenant's entitled suites by resolveEntitledSuites. NULL = none.
   addons: jsonb('addons'),
-  // 0454 — price grandfathering (docs/53 Q7): the plan price snapshotted at subscribe/plan-change time.
+  // 0455 — price grandfathering (docs/53 Q7): the plan price snapshotted at subscribe/plan-change time.
   // Charge paths read COALESCE(snapshot, plans.price_*), so a later PLAN_SEED repricing never re-prices
   // an existing subscription. grandfathered_until NULL = indefinite lock (cleared by plan change or an
   // explicit platform-admin re-price at contractual renewal).
   grandfatheredPrice: numeric('grandfathered_price'),
   grandfatheredAnnualPrice: numeric('grandfathered_annual_price'),
   grandfatheredUntil: timestamp('grandfathered_until'),
-  // 0455 — POS-line per-branch billing quantity (plans with features.per_branch). NULL = 1.
+  // 0456 — POS-line per-branch billing quantity (plans with features.per_branch). NULL = 1.
   branches: integer('branches'),
   trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),

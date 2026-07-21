@@ -3,8 +3,8 @@
 > **Status: SHIPPED v1.1 (2026-07-21).** Candidate **C1 approved (sign-off §10)** and implemented the
 > same day: suite split (`sales` → order-to-cash + `pos_frontoffice`), four line SKUs (`pos_lite`,
 > `pos_pro`, `erp_essentials`, `erp_growth`; POS line per-branch via `subscriptions.branches`,
-> migration 0455), procurement → Standard (Q1), Solo/Trial display renames (Q2/Q4), price
-> grandfathering (Q7, migration 0454), CI wiring for `plan-gating`/`proration`, and the `/plans`
+> migration 0456), procurement → Standard (Q1), Solo/Trial display renames (Q2/Q4), price
+> grandfathering (Q7, migration 0455), CI wiring for `plan-gating`/`proration`, and the `/plans`
 > product-line picker. Spec of record for the live packaging: docs/36 §3/§3b. Market evidence:
 > [`docs/ops/pricing-market-study-2026-07.md`](ops/pricing-market-study-2026-07.md).
 > Delta vs the proposal: quotas landed exactly as tabled; the per-branch mechanism shipped as
@@ -157,7 +157,7 @@ study §6 indicates those deals were predominantly not closing at ฿2,900 at al
 ## 9. Phase B implementation pointer (details in the approved plan)
 
 PR-2 hardening (CI wiring for `cutover:plan-gating` + `cutover:proration`; sync stale
-`docs/ops/pricing-and-ai-cogs.md`) → PR-3 grandfathering (migration **0454**, snapshot
+`docs/ops/pricing-and-ai-cogs.md`) → PR-3 grandfathering (migration **0455**, snapshot
 backfill, COALESCE charge path) → PR-4 packaging (entitlements split of `sales` →
 `pos_frontoffice` + remainder; four additive SKUs in PLAN_SEED; `included_branches`
 feature key + guard; provisioning defaults; /plans + configurator + Platform Console
@@ -182,4 +182,4 @@ services as proof points; fix stale "26 SoD rules" → 23 across collateral).
 | Ver | Date | Change |
 |---|---|---|
 | 1.0 | 2026-07-21 | Initial proposal (market study 2026-07; post-#885–#890 baseline). |
-| 1.1 | 2026-07-21 | C1 signed off and SHIPPED (Phase B: 0454 grandfathering, 0455 line SKUs, suite split, /plans picker, CI wiring). |
+| 1.1 | 2026-07-21 | C1 signed off and SHIPPED (Phase B: 0455 grandfathering, 0456 line SKUs, suite split, /plans picker, CI wiring). |

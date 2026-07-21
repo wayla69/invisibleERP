@@ -54,7 +54,7 @@ async function main() {
   const inj = async (m: string, url: string, token?: string, payload?: any) => {
     const res = await app.inject({ method: m as any, url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload });
     let json: any = {}; try { json = res.json(); } catch { /* */ }
-    return { status: res.statusCode, json };
+    return { status: res.statusCode, json, body: res.body }; // body: raw text for non-JSON responses (A4 printable docs)
   };
   const login = (u: string, p: string) => inj('POST', '/api/login', undefined, { username: u, password: p });
   const year = new Date().getFullYear();
@@ -569,6 +569,36 @@ async function main() {
   ok('A3: an add-on the target plan already includes is dropped from the charge (franchise ⊇ sandbox)',
     coIncluded.status < 300 && (coIncluded.json.addons ?? []).length === 0 && Number(coIncluded.json.total_amount) === 149000,
     JSON.stringify({ addons: coIncluded.json.addons, total: coIncluded.json.total_amount }));
+
+  // ── 3g-quater. A4 own-SaaS receipts: a Stripe invoice.paid webhook records the platform's receipt
+  //               (idempotent on the invoice id) + emails it; god records offline bank transfers; the
+  //               tenant lists/downloads ONLY its own receipts (foreign number = 404). MAIL/STRIPE
+  //               unset ⇒ mock providers, HTML fallback for the printable document. ──
+  await pg.query(`UPDATE subscriptions SET stripe_customer_id='cus_lifetest' WHERE tenant_id=${lcTid2}`);
+  const invEvent = { type: 'invoice.paid', data: { object: { id: 'in_test_1', customer: 'cus_lifetest', amount_paid: 490000, created: 1784600000 } } };
+  const wh1 = await inj('POST', '/api/billing/stripe/webhook', undefined, invEvent);
+  const rcpt1 = (await pg.query(`SELECT receipt_no, amount::numeric a, source, vat_amount FROM saas_receipts WHERE about_tenant_id=${lcTid2}`)).rows as any[];
+  ok('A4: invoice.paid webhook records ONE receipt (฿4,900, source stripe_invoice) + re-activates the subscription',
+    wh1.status < 300 && wh1.json.handled === true && rcpt1.length === 1 && Number(rcpt1[0].a) === 4900 && rcpt1[0].source === 'stripe_invoice' && /^RCPT-S-\d{6}$/.test(rcpt1[0].receipt_no),
+    JSON.stringify({ st: wh1.status, rows: rcpt1 }));
+  ok('A4: without RECEIPT_ISSUER_TAX_ID the receipt is plain (no VAT breakdown claimed)', rcpt1[0].vat_amount == null, `vat=${rcpt1[0].vat_amount}`);
+  await inj('POST', '/api/billing/stripe/webhook', undefined, invEvent);
+  const rcptAfterDup = (await pg.query(`SELECT count(*)::int n FROM saas_receipts WHERE about_tenant_id=${lcTid2}`)).rows[0] as any;
+  ok('A4: a re-delivered webhook converges to the SAME receipt (idempotent on the invoice id)', rcptAfterDup.n === 1, `n=${rcptAfterDup.n}`);
+  const rcptMail = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).find((m: any) => m.template === 'saas_receipt' && m.to_email === 'life@c.com');
+  ok('A4: the receipt was emailed to the company contact (saas_receipt queued)', !!rcptMail && String(rcptMail.subject).includes(rcpt1[0].receipt_no), `subj=${rcptMail?.subject}`);
+  const manual = await inj('POST', `/api/admin/tenants/${lcTid2}/receipts`, owner, { amount: 14900, period: '2026-07', note: 'โอนธนาคาร KTB' });
+  ok('A4: god records an offline bank-transfer receipt (201, RCPT-S numbering)', manual.status === 201 && manual.json.created === true && /^RCPT-S-\d{6}$/.test(manual.json.receipt_no), JSON.stringify(manual.json));
+  const myRcpts = await inj('GET', '/api/billing/receipts', lcLogin.json.token);
+  ok('A4: the tenant lists its own receipts (2 — webhook + manual, newest first)',
+    myRcpts.status === 200 && (myRcpts.json.receipts ?? []).length === 2 && myRcpts.json.receipts[0].receipt_no === manual.json.receipt_no,
+    JSON.stringify((myRcpts.json.receipts ?? []).map((r: any) => r.receipt_no)));
+  const pdfRes = await inj('GET', `/api/billing/receipts/${rcpt1[0].receipt_no}/pdf`, lcLogin.json.token);
+  ok('A4: the printable receipt renders (HTML fallback in CI) with the Thai title + amount',
+    pdfRes.status === 200 && String(pdfRes.body ?? '').includes('ใบเสร็จรับเงิน') && String(pdfRes.body ?? '').includes('4,900.00'),
+    `st=${pdfRes.status} len=${String(pdfRes.body ?? '').length}`);
+  const bolaRcpt = await inj('GET', `/api/billing/receipts/${rcpt1[0].receipt_no}/pdf`, qLogin.json.token);
+  ok('A4: another tenant cannot fetch this receipt (404 — BOLA-safe, not 403)', bolaRcpt.status === 404, `${bolaRcpt.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked

@@ -1,4 +1,4 @@
--- 0454: price grandfathering snapshot (docs/53 Q7 — makes the documented "existing subscriptions keep
+-- 0455: price grandfathering snapshot (docs/53 Q7 — makes the documented "existing subscriptions keep
 -- their price" promise code-enforced BEFORE any future repricing).
 -- Each subscription snapshots the plan's price at subscribe/plan-change time; charge paths read
 -- COALESCE(snapshot, plan price), so a later PLAN_SEED repricing (seedPlans upserts plan rows at every

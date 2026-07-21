@@ -7,7 +7,8 @@ export type MailTemplateKey =
   | 'signup_invite'
   | 'trial_reminder'
   | 'payment_failed'
-  | 'company_suspended';
+  | 'company_suspended'
+  | 'saas_receipt';
 
 export type MailLang = 'th' | 'en';
 export interface RenderedMail { subject: string; html: string; text: string }
@@ -110,6 +111,25 @@ export const MAIL_TEMPLATES: Record<MailTemplateKey, TemplateFn> = {
     const text = th
       ? `การชำระเงินของ ${vars.company} ไม่สำเร็จ — อัปเดตวิธีชำระเงินที่ ${vars.billing_url}`
       : `Payment failed for ${vars.company} — update your payment method at ${vars.billing_url}`;
+    return { subject, html: shell(subject, body), text };
+  },
+
+  // vars: company, receipt_no, amount (formatted), period?, billing_url
+  saas_receipt: (vars, lang) => {
+    const th = lang === 'th';
+    const subject = th
+      ? `ใบเสร็จรับเงิน ${String(vars.receipt_no ?? '')} — ${String(vars.company ?? '')}`
+      : `Receipt ${String(vars.receipt_no ?? '')} — ${String(vars.company ?? '')}`;
+    const body = th
+      ? `<p>ขอบคุณสำหรับการชำระค่าบริการของ <b>${v(vars, 'company')}</b>${vars.period ? ` (งวด ${v(vars, 'period')})` : ''}</p>` +
+        `<p>เลขที่ใบเสร็จ <b>${v(vars, 'receipt_no')}</b> · จำนวนเงิน <b>฿${v(vars, 'amount')}</b></p>` +
+        `<p>ดาวน์โหลดใบเสร็จได้ที่ <a href="${v(vars, 'billing_url')}">หน้าแพ็กเกจ & การชำระเงิน</a></p>`
+      : `<p>Thank you for your payment for <b>${v(vars, 'company')}</b>${vars.period ? ` (period ${v(vars, 'period')})` : ''}.</p>` +
+        `<p>Receipt <b>${v(vars, 'receipt_no')}</b> · amount <b>฿${v(vars, 'amount')}</b></p>` +
+        `<p>Download it any time from the <a href="${v(vars, 'billing_url')}">billing page</a>.</p>`;
+    const text = th
+      ? `ใบเสร็จ ${vars.receipt_no} · ฿${vars.amount} — ดาวน์โหลดที่ ${vars.billing_url}`
+      : `Receipt ${vars.receipt_no} · ฿${vars.amount} — download at ${vars.billing_url}`;
     return { subject, html: shell(subject, body), text };
   },
 

@@ -187,7 +187,7 @@ export class BillingMeteringService {
       .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
       .orderBy(desc(subscriptions.createdAt)).limit(1);
     const features: any = planRow?.features ?? {};
-    // 0455 — POS-line plans price and quota PER BRANCH: the included volume scales with the purchased
+    // 0456 — POS-line plans price and quota PER BRANCH: the included volume scales with the purchased
     // branch count (−1 = unlimited stays unlimited).
     const branchQty = features.per_branch === true ? Math.max(1, Number(planRow?.branches ?? 1)) : 1;
     const baseIncluded = Number(features[cfg.includedKey] ?? 0); // −1 = unlimited
