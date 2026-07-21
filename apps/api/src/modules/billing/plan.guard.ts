@@ -3,7 +3,8 @@ import { Reflector } from '@nestjs/core';
 import { eq, desc } from 'drizzle-orm';
 import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, type Permission, type SuiteKey } from '@ierp/shared';
 import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
-import { subscriptions, plans } from '../../database/schema';
+import { subscriptions, plans, entitlementObservations } from '../../database/schema';
+import { bizYmdDash } from '../../common/bizdate';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { PLAN_FEATURE_KEY } from './plan-feature.decorator';
 import { REQUIRES_SUITE_KEY } from './requires-suite.decorator';
@@ -20,6 +21,24 @@ export function entitlementsEnforced(env: NodeJS.ProcessEnv = process.env): bool
 }
 export function entitlementsShadow(env: NodeJS.ProcessEnv = process.env): boolean {
   return TRUTHY.has(String(env.ENTITLEMENTS_SHADOW ?? '').trim().toLowerCase());
+}
+
+// B3 — per-tenant enforcement cohort: ENTITLEMENTS_ENFORCE_TENANTS is a comma-separated list of tenant
+// IDs that get FULL enforcement while everyone else keeps the global mode (legacy or shadow). This is the
+// staged-rollout dial between "shadow for all" and "ENTITLEMENTS_ENFORCE=true for all": move tenants in
+// one at a time after the observation ledger (B1) shows them clean. Memoized on the raw env string so the
+// request hot path never re-parses.
+let cohortCache: { raw: string; ids: Set<number> } | null = null;
+export function entitlementEnforceTenantIds(env: NodeJS.ProcessEnv = process.env): Set<number> {
+  const raw = String(env.ENTITLEMENTS_ENFORCE_TENANTS ?? '').trim();
+  if (cohortCache?.raw === raw) return cohortCache.ids;
+  const ids = new Set<number>();
+  for (const part of raw.split(',')) {
+    const n = Number(part.trim());
+    if (Number.isInteger(n) && n > 0) ids.add(n);
+  }
+  cohortCache = { raw, ids };
+  return ids;
 }
 
 // 1.4 — PastDue grace window (days) before a lapsed subscription is hard-blocked. Within the window the
@@ -67,7 +86,10 @@ export class PlanGuard implements CanActivate {
     const required = this.reflector.getAllAndOverride<Permission[]>(PERMISSIONS_KEY, [ctx.getHandler(), ctx.getClass()]) ?? [];
     const reqSuite = this.reflector.getAllAndOverride<SuiteKey>(REQUIRES_SUITE_KEY, [ctx.getHandler(), ctx.getClass()]);
 
-    const enforce = entitlementsEnforced();
+    // B3 — a tenant in the enforcement cohort gets FULL enforcement regardless of the global flags; all
+    // other tenants keep the global mode (so the default legacy path stays zero-cost for them).
+    const cohortEnforce = user?.tenantId != null && entitlementEnforceTenantIds().has(user.tenantId);
+    const enforce = entitlementsEnforced() || cohortEnforce;
     const shadow = entitlementsShadow();
 
     // ── LEGACY path (default): identical behaviour to pre-1.2. Suite gating is not evaluated at all unless
@@ -219,14 +241,41 @@ export class PlanGuard implements CanActivate {
     }
   }
 
-  // In ENFORCE mode: throw the block. In SHADOW mode: log the would-block and allow. Always observable.
+  // In ENFORCE mode: throw the block. In SHADOW mode: log the would-block and allow. Always observable —
+  // both outcomes also land in the entitlement_observations ledger (B1) so gods can review who would
+  // break before widening the enforcement cohort.
   private decide(shadow: boolean, enforce: boolean, mkErr: () => ForbiddenException, tenantId: number, code: string, required: Permission[]): boolean {
     if (enforce) {
+      this.record('enforce', tenantId, code, required);
       this.logger.warn(`entitlement block ${code} tenant=${tenantId} route-perms=[${required.join(',')}]`);
       throw mkErr();
     }
     // shadow
+    this.record('shadow', tenantId, code, required);
     this.logger.log(`[shadow] WOULD block ${code} tenant=${tenantId} route-perms=[${required.join(',')}]`);
     return true;
+  }
+
+  // B1 — fire-and-forget observation. MUST never affect the request: fully wrapped (a stubbed db without
+  // .insert, or an insert failure, is swallowed to a debug log). The in-process first-seen Set keeps the
+  // hot path to at most one insert per unique (day × tenant × code × mode × perms) per process; the DB
+  // unique index dedups across processes/restarts (and after the size-cap clear below).
+  private readonly seenObservations = new Set<string>();
+  private record(mode: 'shadow' | 'enforce', tenantId: number, code: string, required: Permission[]): void {
+    try {
+      const day = bizYmdDash(new Date());
+      const routePerms = required.join(',');
+      const dedupKey = `${day}:${tenantId}:${code}:${mode}:${routePerms}`;
+      if (this.seenObservations.has(dedupKey)) return;
+      this.seenObservations.add(dedupKey);
+      if (this.seenObservations.size > 10_000) this.seenObservations.clear();
+      void runGlobalDb('plan-guard:observe', () => this.db
+        .insert(entitlementObservations)
+        .values({ day, aboutTenantId: tenantId, code, mode, routePerms, dedupKey })
+        .onConflictDoNothing(),
+      ).catch((e) => this.logger.debug(`observation insert failed (ignored): ${(e as Error)?.message ?? e}`));
+    } catch (e) {
+      this.logger.debug(`observation skipped: ${(e as Error)?.message ?? e}`);
+    }
   }
 }

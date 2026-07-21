@@ -8,6 +8,7 @@ import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
 import { SaasLifecycleService } from './saas-lifecycle.service';
 import { SaasReceiptsService } from './saas-receipts.service';
+import { EntitlementObservationsService } from './entitlement-observations.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -75,6 +76,7 @@ export class BillingController {
     private readonly lifecycle: TenantLifecycleService,
     private readonly saasLifecycle: SaasLifecycleService,
     private readonly saasReceipts: SaasReceiptsService,
+    private readonly entitlementObs: EntitlementObservationsService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -186,6 +188,13 @@ export class BillingController {
   @Get('admin/saas-lifecycle/events') @PlatformAdmin()
   saasLifecycleEvents(@Query('limit') limit?: string) {
     return this.saasLifecycle.listEvents(limit ? Number(limit) : undefined);
+  }
+
+  // B1 — entitlement-enforcement observations: who would break (shadow) / did break (enforce), on what,
+  // per tenant. The triage read before moving a tenant into the ENTITLEMENTS_ENFORCE_TENANTS cohort.
+  @Get('admin/entitlement-observations') @PlatformAdmin()
+  entitlementObservations(@Query('days') days?: string) {
+    return this.entitlementObs.list(days ? Number(days) : undefined);
   }
 
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.

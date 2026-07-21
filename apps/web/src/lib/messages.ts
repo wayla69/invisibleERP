@@ -50,6 +50,13 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'sme.reason_ph': { th: 'เหตุผลที่อนุมัติรายการของตนเอง เช่น เจ้าของกิจการเป็นผู้ปฏิบัติงานคนเดียว…', en: 'Why you are approving your own item…' },
   'sme.reason_cancel': { th: 'ยกเลิก', en: 'Cancel' },
   'sme.reason_confirm': { th: 'ยืนยันการอนุมัติ', en: 'Confirm approval' },
+  // Plan/entitlement upsell dialog (wave B2) — shown when the API denies a request with a plan-level code
+  // (SUITE_NOT_ENTITLED / PLAN_FEATURE_REQUIRED / TRIAL_EXPIRED / SUBSCRIPTION_*). The server's localized
+  // deny message is shown as the description; these keys are the dialog chrome.
+  'plan.upsell_title': { th: 'สิทธิ์การใช้งานตามแพ็กเกจ', en: 'Plan & subscription' },
+  'plan.upsell_hint': { th: 'อัปเกรดแพ็กเกจหรือซื้อโมดูลเสริมได้ที่หน้าแพ็กเกจ & การชำระเงิน', en: 'Upgrade your plan or purchase the add-on from the Billing page.' },
+  'plan.upsell_cta': { th: 'ดูแพ็กเกจ & ชำระเงิน', en: 'View plans & billing' },
+  'plan.upsell_dismiss': { th: 'ปิด', en: 'Dismiss' },
   // SME first-run setup wizard (docs/49 v1.3) — one-time guided setup for a solo-operator company.
   'sme.wizard_title': { th: 'ตั้งค่าธุรกิจของคุณ (โหมด SME)', en: 'Set up your business (SME mode)' },
   'sme.wizard_step_of': { th: 'ขั้นที่ {n} จาก {total}', en: 'Step {n} of {total}' },
