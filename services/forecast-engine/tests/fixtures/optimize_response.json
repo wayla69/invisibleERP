@@ -1,0 +1,40 @@
+{
+  "contract_version": "1",
+  "request_id": "fixture-optimize-1",
+  "plans": [
+    {
+      "item_code": "ING-CHICKEN",
+      "method": "milp",
+      "orders": [
+        { "order_ds": "2026-07-01", "arrival_ds": "2026-07-03", "qty": 55.0, "packs": 11.0 },
+        { "order_ds": "2026-07-03", "arrival_ds": "2026-07-05", "qty": 35.0, "packs": 7.0 }
+      ],
+      "order_up_to": [58.4, 61.2, 66.8, 71.5, 52.0, 34.6, 18.2],
+      "safety_stock": [9.7, 10.4, 11.9, 12.6, 8.3, 5.1, 2.4],
+      "expected": {
+        "fill_rate": 0.981,
+        "lost_sales_units": 2.85,
+        "waste_units": 3.4,
+        "waste_cost": 294.1,
+        "profit": 8420.55
+      },
+      "solver": { "status": "Optimal", "gap": null, "ms": 412 }
+    },
+    {
+      "item_code": "ING-RICE",
+      "method": "newsvendor",
+      "orders": [{ "order_ds": "2026-07-01", "arrival_ds": "2026-07-05", "qty": 178.0, "packs": 178.0 }],
+      "order_up_to": [321.5, 318.0, 305.4, 268.9, 212.3, 155.0, 118.6],
+      "safety_stock": [42.8, 41.1, 39.5, 34.2, 27.6, 19.4, 14.8],
+      "expected": {
+        "fill_rate": 1.0,
+        "lost_sales_units": 0.0,
+        "waste_units": 0.0,
+        "waste_cost": 0.0,
+        "profit": 3894.2
+      },
+      "solver": { "status": "optimal", "gap": null, "ms": 8 }
+    }
+  ],
+  "errors": []
+}

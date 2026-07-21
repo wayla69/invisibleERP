@@ -12,17 +12,22 @@
 // NB the detector is by-identifier, not by-import-path, so both `from '../../database/schema'` (the barrel)
 // and `from '../../database/schema/ledger'` count — a rename dodge would still fail human review.
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const BASELINE_PATH = 'tools/ci/ledger-boundary-baseline.json';
 const baseline = JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
 
+// Paths are normalised to POSIX separators: the prefix filter below and the committed baseline both
+// use forward slashes, but node:path join() emits '\' on Windows — without this the modules/ledger
+// exclusion silently never matches there and the gate reports every ledger file as a new offender.
 const files = [];
 const walk = (dir) => {
   for (const f of readdirSync(dir)) {
     const p = join(dir, f);
     if (statSync(p).isDirectory()) walk(p);
-    else if (f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.test.ts')) files.push(p);
+    else if (f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.test.ts')) {
+      files.push(p.split(sep).join('/'));
+    }
   }
 };
 walk('apps/api/src');
