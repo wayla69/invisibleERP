@@ -81,8 +81,10 @@ async function main() {
     (await run('legacy', { user: adminUser, feature: 'ai_chat', rows: [planRow('starter', 'Active', { ai_chat: false })] })).allowed === true);
 
   // ── ENFORCE: suite gating + god-only bypass ──
-  ok('enforce: starter (no procurement suite) blocks procurement route → SUITE_NOT_ENTITLED',
-    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: docs/53 Q1 — Standard (starter) now INCLUDES base procurement (PR→PO→GRN allowed)',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')] })).allowed === true);
+  ok('enforce: pos_lite (POS line) blocks procurement route → SUITE_NOT_ENTITLED',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pos_lite')] })).code === 'SUITE_NOT_ENTITLED');
   ok('enforce: pro (has procurement suite) allows procurement route',
     (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pro')] })).allowed === true);
   ok('enforce: core token (dashboard) always allowed even on starter',
@@ -90,11 +92,24 @@ async function main() {
   ok('enforce: sub-permission (gl_post) passes through (not suite-gated)',
     (await run('enforce', { user: tenantUser(), required: ['gl_post'], rows: [planRow('starter')] })).allowed === true);
   ok('enforce: FIX — per-tenant Admin no longer bypasses (blocked on unentitled module)',
-    (await run('enforce', { user: adminUser, required: ['procurement'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+    (await run('enforce', { user: adminUser, required: ['procurement'], rows: [planRow('pos_lite')] })).code === 'SUITE_NOT_ENTITLED');
   ok('enforce: platform god (username in PLATFORM_ADMIN_USERNAMES) bypasses',
-    (await run('enforce', { user: godUser, required: ['procurement'], rows: [planRow('starter')] })).allowed === true);
+    (await run('enforce', { user: godUser, required: ['procurement'], rows: [planRow('pos_lite')] })).allowed === true);
   ok('enforce: __platformBypass request flag bypasses',
-    (await run('enforce', { user: tenantUser(), required: ['procurement'], rows: [planRow('starter')], req: { __platformBypass: true } })).allowed === true);
+    (await run('enforce', { user: tenantUser(), required: ['procurement'], rows: [planRow('pos_lite')], req: { __platformBypass: true } })).allowed === true);
+
+  // ── ENFORCE: product-line SKUs (docs/53 C1) — POS-only and ERP-only entitlement boundaries ──
+  ok('enforce: pos_lite allows the register (pos token via pos_frontoffice)',
+    (await run('enforce', { user: tenantUser('pos'), required: ['pos'], rows: [planRow('pos_lite')] })).allowed === true);
+  ok('enforce: pos_lite blocks finance (exec) → SUITE_NOT_ENTITLED',
+    (await run('enforce', { user: tenantUser('Accounting'), required: ['exec'], rows: [planRow('pos_lite')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: erp_essentials allows order-to-cash (order_mgt via the split sales suite)',
+    (await run('enforce', { user: tenantUser('Sales'), required: ['order_mgt'], rows: [planRow('erp_essentials')] })).allowed === true);
+  ok('enforce: erp_essentials (register-less ERP line) blocks pos → SUITE_NOT_ENTITLED',
+    (await run('enforce', { user: tenantUser('pos'), required: ['pos'], rows: [planRow('erp_essentials')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('enforce: erp_growth includes base procurement + planning',
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('erp_growth')] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Planner'), required: ['planner'], rows: [planRow('erp_growth')] })).allowed === true);
 
   // ── ENFORCE: subscription status handling ──
   ok('enforce: Trialing (not expired) grants all suites',

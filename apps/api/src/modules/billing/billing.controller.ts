@@ -50,7 +50,7 @@ const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
 const DeleteTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
-const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
+const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional(), branches: z.number().int().min(1).max(500).optional() }); // 1.7 — annual billing + multi-currency; 0455 — POS-line per-branch quantity
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 // 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
 const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
@@ -320,9 +320,9 @@ export class BillingController {
   }
 
   @Post('billing/checkout') @Permissions('users')
-  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string }, @CurrentUser() u: JwtUser) {
+  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string; branches?: number }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
-    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB');
+    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB', b.branches);
   }
 
   @Post('billing/change-plan') @Permissions('users')

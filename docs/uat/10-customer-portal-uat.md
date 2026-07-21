@@ -1,6 +1,6 @@
 # UAT — Cycle 10: Customer Portal (Self-Serve)
 
-**Status: DRAFT v0.1 · 2026-06-22** · Cross-ref: process narrative `01-order-to-cash.md` (REV-03, REV-07), `08-itgc.md` (RLS); harness `tools/cutover/src/worldclass.ts`, `returns.ts`, `wms.ts`. Endpoints under `/api/portal`.
+**Status: DRAFT v0.2 · 2026-07-21** · *v0.2: + UAT-POR-013/014 — product-line SKUs (docs/53 C1): per-branch checkout math + ERP-line register block.* · Cross-ref: process narrative `01-order-to-cash.md` (REV-03, REV-07), `08-itgc.md` (RLS); harness `tools/cutover/src/worldclass.ts`, `returns.ts`, `wms.ts`. Endpoints under `/api/portal`.
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amounts are exact.
 
@@ -18,3 +18,5 @@ Result legend: Pass / Fail / Blocked / N/A / Not Run. VAT = 7%. Error codes/amou
 | UAT-POR-010 | Over-return guard on portal sale | ReturnsClerk | Portal sale qty 2 | 1. `POST /api/pos/returns` qty 3. | `{items:[{item_id:A, qty:3}]}` | 400 `OVER_RETURN`. | Med | Control | REV-09 | Not Run | returns.ts |
 | UAT-POR-011 | Billing plans listed (public) | (public) | Plans seeded | 1. `GET /api/billing/plans`. | — | 200; array of plans. | Low | Positive | RPT | Not Run | worldclass.ts |
 | UAT-POR-012 | Portal sale respects credit hold/limit | Customer | customer on hold or near limit | 1. Place sale exceeding limit / on hold. | `<<over-limit / held customer>>` | 409 `CREDIT_LIMIT` or `CREDIT_HOLD`. | High | Control | REV-08 | Not Run | compliance.ts |
+| UAT-POR-013 | POS-line per-branch checkout math (docs/53 C1) | Admin | tenant on any plan; pos_pro seeded | 1. `POST /api/billing/checkout` `{plan_code:'pos_pro', branches:3}`. 2. Repeat with `{plan_code:'starter', branches:3}`. | branches=3 | 1: 200, amount = 3 × ฿1,190 = ฿3,570, `subscriptions.branches`=3. 2: 400 `PLAN_NOT_PER_BRANCH`. | High | Positive+Negative | — (commercial gate, not ICFR) | Not Run | saas-metrics.ts |
+| UAT-POR-014 | ERP-line SKU blocks the register (docs/53 C1) | Sales user | tenant on `erp_essentials`, ENTITLEMENTS_ENFORCE on | 1. Call a `pos`-token route. 2. Call an `order_mgt` route. | — | 1: 403 `SUITE_NOT_ENTITLED`. 2: 200 (order-to-cash allowed). | High | Negative | — (commercial gate, not ICFR) | Not Run | plan-gating.ts |

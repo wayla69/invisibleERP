@@ -210,6 +210,18 @@ async function main() {
   ok('0454: a plan change RE-SNAPSHOTS at the new plan\'s current price (฿4,900) — old lock ends',
     gfCh.plan === 'business' && near(Number(gfRow.grandfathered_price), 4900), JSON.stringify(gfRow));
 
+  // ── PRODUCT-LINE SKUs (0455, docs/53 C1): POS line prices PER BRANCH — checkout multiplies by the
+  //    branch quantity, persists it, and a flat plan rejects an explicit quantity. ──
+  const pbCk = await g(() => billing.createCheckoutSession(t2, 'pos_pro', 'monthly', 'THB', 3));
+  const pbRow: any = (await pg.query(`SELECT branches FROM subscriptions WHERE tenant_id=${t2}`)).rows[0];
+  ok('0455: POS Pro × 3 branches checkout charges 3 × ฿1,190 = ฿3,570 and persists branches=3',
+    near(pbCk.amount, 3570) && pbCk.branches === 3 && Number(pbRow.branches) === 3, JSON.stringify({ a: pbCk.amount, b: pbRow.branches }));
+  const pbAnnual = await g(() => billing.createCheckoutSession(t2, 'pos_lite', 'annual', 'THB', 2));
+  ok('0455: POS Lite × 2 branches annual = 2 × ฿5,900 = ฿11,800 (per-branch × 10-month annual)',
+    near(pbAnnual.amount, 11800), `amount=${pbAnnual.amount}`);
+  ok('0455: a flat (per-company) plan rejects an explicit branch quantity → PLAN_NOT_PER_BRANCH',
+    (await errCode(() => g(() => billing.createCheckoutSession(t2, 'starter', 'monthly', 'THB', 3)))) === 'PLAN_NOT_PER_BRANCH', 'starter ×3');
+
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

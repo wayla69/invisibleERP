@@ -1,9 +1,17 @@
 # 53 — Pricing & Packaging Overhaul: Product-Line Split (POS / ERP / Complete)
 
-> **Status: PROPOSED v1.0 (2026-07-21) — NOT SHIPPED.** Nothing in this document changes
-> application behavior; docs/36 remains the spec of record for the shipped packaging until
-> the sign-off block (§10) is completed and Phase B lands. Market evidence:
+> **Status: SHIPPED v1.1 (2026-07-21).** Candidate **C1 approved (sign-off §10)** and implemented the
+> same day: suite split (`sales` → order-to-cash + `pos_frontoffice`), four line SKUs (`pos_lite`,
+> `pos_pro`, `erp_essentials`, `erp_growth`; POS line per-branch via `subscriptions.branches`,
+> migration 0455), procurement → Standard (Q1), Solo/Trial display renames (Q2/Q4), price
+> grandfathering (Q7, migration 0454), CI wiring for `plan-gating`/`proration`, and the `/plans`
+> product-line picker. Spec of record for the live packaging: docs/36 §3/§3b. Market evidence:
 > [`docs/ops/pricing-market-study-2026-07.md`](ops/pricing-market-study-2026-07.md).
+> Delta vs the proposal: quotas landed exactly as tabled; the per-branch mechanism shipped as
+> `features.per_branch` + `subscriptions.branches` (simpler than §4's sketched
+> `included_branches`/`branch_addon_thb` pair); locations caps remain advisory (as on all
+> pre-existing plans); the two new UAT cases are classified functional (plan gating is a commercial
+> gate, not an ICFR control — no RCM mapping).
 
 ## 1. Executive summary
 
@@ -174,3 +182,4 @@ services as proof points; fix stale "26 SoD rules" → 23 across collateral).
 | Ver | Date | Change |
 |---|---|---|
 | 1.0 | 2026-07-21 | Initial proposal (market study 2026-07; post-#885–#890 baseline). |
+| 1.1 | 2026-07-21 | C1 signed off and SHIPPED (Phase B: 0454 grandfathering, 0455 line SKUs, suite split, /plans picker, CI wiring). |

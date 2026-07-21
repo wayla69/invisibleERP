@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, jsonb, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, integer, text, numeric, timestamp, jsonb, pgEnum } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Self-serve tenant lifecycle + subscription billing (move #6)
@@ -36,6 +36,8 @@ export const subscriptions = pgTable('subscriptions', {
   grandfatheredPrice: numeric('grandfathered_price'),
   grandfatheredAnnualPrice: numeric('grandfathered_annual_price'),
   grandfatheredUntil: timestamp('grandfathered_until'),
+  // 0455 — POS-line per-branch billing quantity (plans with features.per_branch). NULL = 1.
+  branches: integer('branches'),
   trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
   stripeCustomerId: text('stripe_customer_id'),
