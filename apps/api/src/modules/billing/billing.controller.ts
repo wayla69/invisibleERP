@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService, type SignupDto } from './billing.service';
 import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
+import { SaasLifecycleService } from './saas-lifecycle.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -68,6 +69,7 @@ export class BillingController {
     private readonly svc: BillingService,
     private readonly metrics: SaasMetricsService,
     private readonly lifecycle: TenantLifecycleService,
+    private readonly saasLifecycle: SaasLifecycleService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -136,6 +138,18 @@ export class BillingController {
   @Get('admin/ai-usage') @PlatformAdmin()
   adminAiUsage() {
     return this.svc.aiUsageByTenant();
+  }
+
+  // A2 — run the SaaS lifecycle sweep on demand (the BI scheduler runs the same sweep daily; idempotent
+  // via saas_lifecycle_events dedup keys, so a manual run alongside the schedule is always safe).
+  @Post('admin/saas-lifecycle/run') @PlatformAdmin() @HttpCode(200)
+  runSaasLifecycle() {
+    return this.saasLifecycle.runDaily();
+  }
+
+  @Get('admin/saas-lifecycle/events') @PlatformAdmin()
+  saasLifecycleEvents(@Query('limit') limit?: string) {
+    return this.saasLifecycle.listEvents(limit ? Number(limit) : undefined);
   }
 
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.

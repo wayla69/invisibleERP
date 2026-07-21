@@ -479,6 +479,69 @@ async function main() {
   ok('A1: the three onboarding emails are Sent with provider=mock + a provider message id',
     sentSet.every((m) => m?.status === 'Sent' && m?.provider === 'mock' && !!m?.provider_msg_id && !!m?.sent_at),
     sentSet.map((m) => `${m?.template}=${m?.status}/${m?.provider}`).join(' '));
+
+  // ── 3g-bis. A2 SaaS lifecycle automation: the daily sweep (god POST /api/admin/saas-lifecycle/run —
+  //            the BI 'saas_lifecycle' job runs the same code) sends trial reminders, auto-suspends an
+  //            expired paid trial after grace, walks the PastDue dunning ladder, activates ฿0 plans, and
+  //            is idempotent via saas_lifecycle_events dedup keys. ──
+  const lcCreate = await inj('POST', '/api/admin/tenants', owner, {
+    company_name: 'LifecycleCo', tenant_code: 'lifecyc1', admin_username: 'lifecyc_admin', admin_password: 'lifecyc12345', email: 'life@c.com', plan_code: 'business',
+  });
+  ok('A2: fixture company provisioned on a paid plan (Trialing)', lcCreate.status === 201 && !!lcCreate.json.tenant_id, `${lcCreate.status}`);
+  const lcTid2 = Number(lcCreate.json.tenant_id);
+  // T-1 window (half-day offset — midnight-safe): first run fires BOTH reminders once; second run fires nothing.
+  await pg.query(`UPDATE subscriptions SET trial_ends_at = now() + interval '12 hours' WHERE tenant_id=${lcTid2}`);
+  const run1 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  ok('A2: T-1 sweep fires both trial reminders once (trial_reminder_7 + trial_reminder_1)',
+    run1.status === 200 && run1.json.actions?.trial_reminder_7 === 1 && run1.json.actions?.trial_reminder_1 === 1,
+    JSON.stringify(run1.json.actions));
+  const run2 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  ok('A2: an immediate re-run is a no-op for this tenant (dedup keys hold)',
+    run2.status === 200 && !run2.json.actions?.trial_reminder_7 && !run2.json.actions?.trial_reminder_1, JSON.stringify(run2.json.actions));
+  const remMail = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).filter((m: any) => m.template === 'trial_reminder' && m.to_email === 'life@c.com');
+  ok('A2: the trial reminders emailed the company contact (2 outbox rows)', remMail.length === 2, `rows=${remMail.length}`);
+  // Expired past grace → auto-suspend with attribution + email + still-idempotent.
+  await pg.query(`UPDATE subscriptions SET trial_ends_at = now() - interval '10 days' WHERE tenant_id=${lcTid2}`);
+  const run3 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  const lcTen = (await pg.query(`SELECT suspended_at, suspended_by, suspend_reason FROM tenants WHERE id=${lcTid2}`)).rows[0] as any;
+  ok('A2: an expired paid trial past grace is auto-suspended with attribution',
+    run3.json.actions?.trial_suspended === 1 && !!lcTen.suspended_at && lcTen.suspended_by === 'saas_lifecycle (auto)' && /trial expired/.test(lcTen.suspend_reason ?? ''),
+    `actions=${JSON.stringify(run3.json.actions)} by=${lcTen.suspended_by}`);
+  const suspMail = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).find((m: any) => m.template === 'company_suspended' && m.to_email === 'life@c.com');
+  ok('A2: the auto-suspension emailed the company (company_suspended queued)', !!suspMail, `found=${!!suspMail}`);
+  const run4 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  ok('A2: a suspended company is skipped by later sweeps', run4.json.actions?.trial_suspended == null, JSON.stringify(run4.json.actions));
+  // PastDue dunning ladder on a reactivated company: dunning_1 now; backdate the anchor → suspend at day 21+.
+  await inj('POST', `/api/admin/tenants/${lcTid2}/reactivate`, owner, {});
+  await pg.query(`UPDATE subscriptions SET status='PastDue', trial_ends_at=NULL WHERE tenant_id=${lcTid2}`);
+  const run5 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  ok('A2: PastDue starts the dunning ladder (dunning_1 + payment_failed email)',
+    run5.json.actions?.dunning_1 === 1
+    && ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).some((m: any) => m.template === 'payment_failed' && m.to_email === 'life@c.com'),
+    JSON.stringify(run5.json.actions));
+  await pg.query(`UPDATE saas_lifecycle_events SET created_at = now() - interval '22 days' WHERE event='dunning_1' AND about_tenant_id=${lcTid2}`);
+  const run6 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  const lcTen2 = (await pg.query(`SELECT suspended_at, suspend_reason FROM tenants WHERE id=${lcTid2}`)).rows[0] as any;
+  ok('A2: dunning exhausted (≥21d) auto-suspends with the past-due reason',
+    run6.json.actions?.pastdue_suspended === 1 && !!lcTen2.suspended_at && /past due/.test(lcTen2.suspend_reason ?? ''),
+    `actions=${JSON.stringify(run6.json.actions)} reason=${lcTen2.suspend_reason}`);
+  // Recovery: reactivate + Active → the ladder closes (dunning_cleared) so a later PastDue restarts fresh.
+  await inj('POST', `/api/admin/tenants/${lcTid2}/reactivate`, owner, {});
+  await pg.query(`UPDATE subscriptions SET status='Active' WHERE tenant_id=${lcTid2}`);
+  const run7 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  ok('A2: recovery to Active closes the dunning cycle (dunning_cleared)', run7.json.actions?.dunning_cleared === 1, JSON.stringify(run7.json.actions));
+  // ฿0 plan at expiry → activated, never suspended.
+  await pg.query(`UPDATE subscriptions SET status='Trialing', plan_code='free', trial_ends_at = now() - interval '2 days' WHERE tenant_id=${lcTid2}`);
+  const run8 = await inj('POST', '/api/admin/saas-lifecycle/run', owner, {});
+  const lcSub = (await pg.query(`SELECT status FROM subscriptions WHERE tenant_id=${lcTid2}`)).rows[0] as any;
+  ok('A2: an expired ฿0-plan trial activates (free tier continues; no suspension)',
+    run8.json.actions?.trial_free_activated === 1 && lcSub.status === 'Active', `actions=${JSON.stringify(run8.json.actions)} status=${lcSub.status}`);
+  const lcEvents = await inj('GET', '/api/admin/saas-lifecycle/events', owner);
+  ok('A2: the lifecycle event ledger records every action (god-only feed)',
+    lcEvents.status === 200 && (lcEvents.json.events ?? []).filter((e: any) => e.about_tenant_id === lcTid2).length >= 6,
+    `events=${(lcEvents.json.events ?? []).filter((e: any) => e.about_tenant_id === lcTid2).length}`);
+  const lcDenied = await inj('GET', '/api/admin/saas-lifecycle/events', qLogin.json.token);
+  ok('A2: the lifecycle feed + run are platform-admin only (403 for a company Admin)', lcDenied.status === 403, `${lcDenied.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked
