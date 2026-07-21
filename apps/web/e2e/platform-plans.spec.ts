@@ -42,7 +42,8 @@ const REQUEST = {
   requested_plan: 'business', requested_interval: 'annual', requested_addons: ['cdp'],
 };
 
-async function bootAsGod(page: Page, addonPosts: unknown[]) {
+async function bootAsGod(page: Page, addonPosts: unknown[], opts: { denyAiUsage?: boolean; skipPlansGate?: boolean } = {}) {
+  const denyAiUsage = opts.denyAiUsage ?? false;
   await page.addInitScript(() => {
     document.cookie = 'ierp_csrf=e2e; path=/';
   });
@@ -73,10 +74,24 @@ async function bootAsGod(page: Page, addonPosts: unknown[]) {
     if (url.includes('/api/admin/signup-requests')) return json({ requests: [REQUEST] });
     if (url.includes('/api/admin/signup-invites')) return json({ invites: [] });
     if (url.includes('/api/admin/sme-defaults')) return json({ hidden_nav_groups: [], accountant_email: null, updated_by: null });
-    if (url.includes('/api/admin/ai-usage')) return json([]);
+    if (url.includes('/api/admin/ai-usage')) {
+      // Wave B2: optionally deny with a plan-level code so api() raises the app-wide upsell event.
+      if (denyAiUsage) {
+        return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SUITE_NOT_ENTITLED', message: 'Your current plan does not include this module.', messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ' } }) });
+      }
+      return json([]);
+    }
+    // Wave B1: enforcement-impact rollup consumed by the plans tab's observations panel.
+    if (url.includes('/api/admin/entitlement-observations')) {
+      return json({
+        observations: [],
+        summary: [{ tenant_id: 3, tenant: 'Blocked Co', total: 4, codes: ['SUITE_NOT_ENTITLED', 'TRIAL_EXPIRED'], modes: ['shadow'], last_at: '2026-07-21T00:00:00Z' }],
+      });
+    }
     return json({});
   });
   await page.goto('/platform');
+  if (opts.skipPlansGate) return; // (B2 deny test: the upsell dialog overlays the tabs, so no gate click)
   // Hydration gate: retry the first tab click until its content mounts (no sleeps).
   await expect(async () => {
     await page.getByRole('tab', { name: 'แพ็กเกจ & โมดูล' }).click();
@@ -129,4 +144,25 @@ test('company drawer manages purchased add-ons and shows effective modules live'
   await drawer.getByRole('button', { name: 'บันทึกโมดูลเสริม' }).click();
   await expect.poll(() => posts.length).toBeGreaterThan(0);
   expect(posts[0].addons).toEqual(expect.arrayContaining(['cdp', 'sandbox']));
+});
+
+// Wave B1 — the plans tab's enforcement-impact panel (entitlement_observations rollup).
+test('plans tab shows the entitlement-observation triage panel', async ({ page }) => {
+  await bootAsGod(page, []);
+  const panel = page.getByTestId('entitlement-observations');
+  await expect(panel).toContainText('ผลกระทบการบังคับใช้แพ็กเกจ');
+  await expect(panel).toContainText('Blocked Co');
+  await expect(panel).toContainText('SUITE_NOT_ENTITLED');
+  await expect(panel).toContainText('TRIAL_EXPIRED');
+  await expect(panel).toContainText('shadow');
+});
+
+// Wave B2 — a plan-level 403 from any api() call raises the app-wide upsell dialog with the billing CTA.
+test('plan-denied 403 opens the upsell dialog and its CTA goes to /billing', async ({ page }) => {
+  await bootAsGod(page, [], { denyAiUsage: true, skipPlansGate: true }); // ai-usage (queried on the default overview tab) 403s SUITE_NOT_ENTITLED
+  const dialog = page.getByRole('dialog').filter({ hasText: 'สิทธิ์การใช้งานตามแพ็กเกจ' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้'); // server messageTh surfaced
+  await dialog.getByRole('button', { name: 'ดูแพ็กเกจ & ชำระเงิน' }).click();
+  await expect(page).toHaveURL(/\/billing/);
 });

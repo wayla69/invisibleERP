@@ -599,6 +599,21 @@ async function main() {
     `st=${pdfRes.status} len=${String(pdfRes.body ?? '').length}`);
   const bolaRcpt = await inj('GET', `/api/billing/receipts/${rcpt1[0].receipt_no}/pdf`, qLogin.json.token);
   ok('A4: another tenant cannot fetch this receipt (404 — BOLA-safe, not 403)', bolaRcpt.status === 404, `${bolaRcpt.status}`);
+
+  // ── 3g-quinquies. Wave B1: entitlement-observation ledger god read — the triage surface consulted
+  //                  BEFORE moving a tenant into the ENTITLEMENTS_ENFORCE_TENANTS cohort. The guard's
+  //                  write path is proven in the plan-gating harness; here we prove the endpoint + the
+  //                  per-tenant rollup + tenant-name join against the real migrated table (0455). ──
+  await pg.query(`INSERT INTO entitlement_observations (day, about_tenant_id, code, mode, route_perms, dedup_key) VALUES
+    ('2026-07-20', ${lcTid2}, 'SUITE_NOT_ENTITLED', 'shadow', 'procurement', 'obs-test-1'),
+    ('2026-07-21', ${lcTid2}, 'TRIAL_EXPIRED', 'shadow', '', 'obs-test-2')`);
+  const obsRes = await inj('GET', '/api/admin/entitlement-observations?days=30', owner);
+  const obsSum = (obsRes.json.summary ?? []).find((s: any) => s.tenant_id === lcTid2);
+  ok('B1: god reads the observation rollup (per-tenant deny codes + tenant-name join)',
+    obsRes.status === 200 && !!obsSum && obsSum.total === 2 && obsSum.codes.includes('SUITE_NOT_ENTITLED') && obsSum.codes.includes('TRIAL_EXPIRED') && typeof obsSum.tenant === 'string',
+    JSON.stringify(obsSum ?? obsRes.json).slice(0, 200));
+  const obsDenied = await inj('GET', '/api/admin/entitlement-observations', lcLogin.json.token);
+  ok('B1: a tenant admin cannot read the observation ledger (403 — god-only)', obsDenied.status === 403, `${obsDenied.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked

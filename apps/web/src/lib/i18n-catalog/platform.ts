@@ -351,4 +351,14 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.drawer_addons_save': { th: 'บันทึกโมดูลเสริม', en: 'Save add-ons' },
   'plt.drawer_addons_saved': { th: 'บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: 'Add-ons saved — entitlements apply immediately' },
   'plt.drawer_modules_title': { th: 'โมดูลที่เปิดใช้ทั้งหมด (แพ็กเกจ + โมดูลเสริม)', en: 'Effective modules (plan + add-ons)' },
+
+  // ── Entitlement enforcement rollout (wave B) — observation ledger triage ──
+  'plt.obs_title': { th: 'ผลกระทบการบังคับใช้แพ็กเกจ (ใครจะติดบล็อก)', en: 'Entitlement enforcement impact (who would break)' },
+  'plt.obs_sub': { th: 'บันทึกจาก PlanGuard: shadow = จะถูกบล็อกถ้าบังคับใช้ / enforce = ถูกบล็อกแล้วจริง — ตรวจรายบริษัทให้เคลียร์ก่อนย้ายเข้ากลุ่มบังคับใช้ (ENTITLEMENTS_ENFORCE_TENANTS)', en: 'Recorded by the PlanGuard: shadow = would be blocked if enforced / enforce = actually blocked — clear a company here before moving it into the enforcement cohort (ENTITLEMENTS_ENFORCE_TENANTS).' },
+  'plt.obs_col_company': { th: 'บริษัท', en: 'Company' },
+  'plt.obs_col_total': { th: 'จำนวนเหตุการณ์', en: 'Events' },
+  'plt.obs_col_codes': { th: 'รหัสที่ติด', en: 'Deny codes' },
+  'plt.obs_col_modes': { th: 'โหมด', en: 'Modes' },
+  'plt.obs_col_last': { th: 'ล่าสุด', en: 'Last seen' },
+  'plt.obs_empty': { th: 'ยังไม่มีเหตุการณ์ใน {days} วันที่ผ่านมา — ทุกบริษัทผ่านเงื่อนไขแพ็กเกจ', en: 'No observations in the last {days} days — every company is clean under its plan.' },
 };

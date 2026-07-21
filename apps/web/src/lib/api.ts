@@ -181,10 +181,19 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     err.code = body?.error?.code;
     err.status = res.status;
     err.details = body?.error?.details;
+    // Wave B2 — a plan-level denial also raises an app-wide event so the AppShell can show the upsell
+    // dialog (upgrade / add-on CTA) instead of each caller rendering a bare error toast. The error still
+    // throws unchanged, so existing per-caller handling keeps working.
+    if (typeof window !== 'undefined' && err.code && PLAN_DENY_CODES.has(err.code)) {
+      window.dispatchEvent(new CustomEvent('ierp:plan-denied', { detail: { code: err.code, message: msg } }));
+    }
     throw err;
   }
   return body as T;
 }
+
+// Deny codes the PlanGuard emits (apps/api modules/billing/plan.guard.ts) — keep the two lists in sync.
+const PLAN_DENY_CODES = new Set(['SUITE_NOT_ENTITLED', 'PLAN_FEATURE_REQUIRED', 'TRIAL_EXPIRED', 'SUBSCRIPTION_INACTIVE', 'SUBSCRIPTION_PASTDUE_READONLY']);
 
 
 // Download a file (xlsx/csv/pdf export, QR labels) with auth → save via a blob anchor.

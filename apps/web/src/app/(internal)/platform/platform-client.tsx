@@ -200,7 +200,59 @@ function PlansTab() {
           })}
         </div>
       </StateView>
+      <EntitlementObservationsPanel />
     </div>
+  );
+}
+
+// Wave B — enforcement-rollout triage: the per-tenant rollup of PlanGuard observations (shadow = would
+// block / enforce = did block). A company must read clean here before it goes into the
+// ENTITLEMENTS_ENFORCE_TENANTS cohort.
+const OBS_DAYS = 30;
+function EntitlementObservationsPanel() {
+  const { t } = useLang();
+  const obs = useQuery<{ observations: unknown[]; summary: { tenant_id: number; tenant: string | null; total: number; codes: string[]; modes: string[]; last_at: string | null }[] }>({
+    queryKey: ['entitlement-observations', OBS_DAYS],
+    queryFn: () => api(`/api/admin/entitlement-observations?days=${OBS_DAYS}`),
+  });
+  const summary = obs.data?.summary ?? [];
+  const cols: Column<(typeof summary)[number]>[] = [
+    { key: 'tenant', label: t('plt.obs_col_company'), render: (r) => <span className="font-medium">{r.tenant ?? `#${r.tenant_id}`}</span> },
+    { key: 'total', label: t('plt.obs_col_total'), render: (r) => num(r.total), align: 'right' },
+    {
+      key: 'codes', label: t('plt.obs_col_codes'),
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.codes.map((c) => <Badge key={c} variant="outline" className="px-1.5 py-0 text-[10px] font-normal">{c}</Badge>)}
+        </div>
+      ),
+    },
+    {
+      key: 'modes', label: t('plt.obs_col_modes'),
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.modes.map((m) => (
+            <Badge key={m} variant="outline" className={cn('px-1.5 py-0 text-[10px] font-normal', m === 'enforce' && 'border-red-400/60 bg-red-500/10 text-red-700 dark:text-red-300')}>{m}</Badge>
+          ))}
+        </div>
+      ),
+    },
+    { key: 'last_at', label: t('plt.obs_col_last'), render: (r) => (r.last_at ? thaiDate(r.last_at) : '—') },
+  ];
+  return (
+    <Card className="gap-3 p-4" data-testid="entitlement-observations">
+      <div className="grid gap-1 leading-tight">
+        <span className="flex items-center gap-1.5 font-semibold"><ShieldCheck className="size-4 text-muted-foreground" /> {t('plt.obs_title')}</span>
+        <span className="text-xs text-muted-foreground">{t('plt.obs_sub')}</span>
+      </div>
+      <StateView q={obs}>
+        {summary.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('plt.obs_empty', { days: OBS_DAYS })}</p>
+        ) : (
+          <DataTable columns={cols} rows={summary} rowKey={(r) => String(r.tenant_id)} />
+        )}
+      </StateView>
+    </Card>
   );
 }
 
