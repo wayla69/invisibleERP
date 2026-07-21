@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Query, Param, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, HttpCode, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Public, Permissions, PlatformAdmin, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -6,6 +7,7 @@ import { BillingService, type SignupDto } from './billing.service';
 import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
 import { SaasLifecycleService } from './saas-lifecycle.service';
+import { SaasReceiptsService } from './saas-receipts.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -54,6 +56,8 @@ const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum([
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 // 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
 const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
+// A4 — god-recorded offline payment (bank transfer): VAT-inclusive THB amount + optional period/note.
+const ManualReceiptBody = z.object({ amount: z.number().positive().max(10_000_000), period: z.string().regex(/^\d{4}-\d{2}$/).optional(), note: z.string().max(300).optional() });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 // docs/49 — control-profile transition is UPGRADE-ONLY, so the only accepted target is 'enterprise'.
@@ -70,6 +74,7 @@ export class BillingController {
     private readonly metrics: SaasMetricsService,
     private readonly lifecycle: TenantLifecycleService,
     private readonly saasLifecycle: SaasLifecycleService,
+    private readonly saasReceipts: SaasReceiptsService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -145,6 +150,37 @@ export class BillingController {
   @Post('admin/saas-lifecycle/run') @PlatformAdmin() @HttpCode(200)
   runSaasLifecycle() {
     return this.saasLifecycle.runDaily();
+  }
+
+  // A4 — own-SaaS receipts. Tenant side: list + printable receipt, hard-scoped to the caller's own
+  // tenant (an unknown/foreign receipt number is a 404, never a 403). God side: record an offline
+  // bank-transfer payment (creates the receipt + emails the customer) and print any receipt.
+  @Get('billing/receipts') @Permissions('users')
+  async myReceipts(@CurrentUser() u: JwtUser) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.saasReceipts.listForTenant(tenantId);
+  }
+
+  @Get('billing/receipts/:receiptNo/pdf') @Permissions('users')
+  async myReceiptPdf(@Param('receiptNo') receiptNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    const html = await this.saasReceipts.receiptHtml(receiptNo, tenantId);
+    const buf = await this.saasReceipts.renderPdf(html);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${receiptNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  @Post('admin/tenants/:id/receipts') @PlatformAdmin() @HttpCode(201)
+  recordManualReceipt(@Param('id') id: string, @Body(new ZodValidationPipe(ManualReceiptBody)) b: { amount: number; period?: string; note?: string }, @CurrentUser() u: JwtUser) {
+    return this.saasReceipts.record({ tenantId: Number(id), source: 'manual', amount: b.amount, period: b.period ?? null, note: b.note ?? null, createdBy: u.username });
+  }
+
+  @Get('admin/receipts/:receiptNo/pdf') @PlatformAdmin()
+  async adminReceiptPdf(@Param('receiptNo') receiptNo: string, @Res() reply: FastifyReply) {
+    const html = await this.saasReceipts.receiptHtml(receiptNo, null);
+    const buf = await this.saasReceipts.renderPdf(html);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${receiptNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
   }
 
   @Get('admin/saas-lifecycle/events') @PlatformAdmin()

@@ -13,6 +13,7 @@ import { StripeBilling } from './stripe-gateway';
 import { TenantProvisioningService, type SignupDto } from './tenant-provisioning.service';
 import { PlatformAdminService } from './platform-admin.service';
 import { BillingMeteringService } from './billing-metering.service';
+import { SaasReceiptsService } from './saas-receipts.service';
 // Re-exported so existing import sites (controllers, unit tests) keep working.
 export { isSignupAllowed, type SignupDto } from './tenant-provisioning.service';
 // Re-exported so existing import sites keep working (the adapter lives in stripe-gateway.ts now).
@@ -74,6 +75,7 @@ export class BillingService {
     @Optional() private readonly ledger?: LedgerService, // optional so hand-constructed test instances still work
     @Optional() private readonly platformNotifs?: PlatformNotificationsService, // god event feed; optional for partial harnesses
     @Optional() private readonly mailer?: MailerService, // A1 transactional email; optional for partial harnesses
+    @Optional() private readonly receipts?: SaasReceiptsService, // A4 own-SaaS receipts; optional for partial harnesses
   ) {
     this.provisioning = new TenantProvisioningService(db, password, ledger, platformNotifs, mailer);
     this.platformAdmin = new PlatformAdminService(db, platformNotifs);
@@ -430,6 +432,24 @@ export class BillingService {
         if (tenantId == null) return { handled: false };
         await setByTenant(tenantId, { status: 'Canceled' });
         return { handled: true, tenant_id: tenantId, status: 'Canceled' };
+      }
+      case 'invoice.paid':
+      case 'invoice.payment_succeeded': {
+        // A4 — a collected subscription invoice: record the platform's own receipt (idempotent on the
+        // Stripe invoice id) + confirm the subscription Active (also the dunning-recovery signal the A2
+        // lifecycle job closes its ladder on).
+        const tenantId = await tenantByCustomer(obj.customer);
+        if (tenantId == null || !obj.id) return { handled: false };
+        const amount = Number(obj.amount_paid ?? 0) / 100;
+        await setByTenant(tenantId, { status: 'Active' });
+        if (amount > 0) {
+          const created = obj.created ? new Date(Number(obj.created) * 1000) : new Date();
+          await this.receipts?.record({
+            tenantId, source: 'stripe_invoice', sourceRef: String(obj.id), amount,
+            period: created.toISOString().slice(0, 7), createdBy: 'stripe (auto)',
+          });
+        }
+        return { handled: true, tenant_id: tenantId, status: 'Active' };
       }
       case 'invoice.payment_failed': {
         const tenantId = await tenantByCustomer(obj.customer);
