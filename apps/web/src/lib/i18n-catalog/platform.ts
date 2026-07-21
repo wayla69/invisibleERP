@@ -361,4 +361,22 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.obs_col_modes': { th: 'โหมด', en: 'Modes' },
   'plt.obs_col_last': { th: 'ล่าสุด', en: 'Last seen' },
   'plt.obs_empty': { th: 'ยังไม่มีเหตุการณ์ใน {days} วันที่ผ่านมา — ทุกบริษัทผ่านเงื่อนไขแพ็กเกจ', en: 'No observations in the last {days} days — every company is clean under its plan.' },
+
+  // ── Payment-claim verify queue (wave C: bank-transfer/PromptPay slips) ────
+  'plt.tab_payments': { th: 'การชำระเงิน', en: 'Payments' },
+  'plt.pay_sub': { th: 'รายการแจ้งโอนค่าบริการจากลูกค้า — ตรวจกับยอดเงินเข้าบัญชีจริงก่อนอนุมัติ (อนุมัติ = ออกใบเสร็จ + เปิดใช้งานทันที)', en: 'Customer-filed transfer claims — verify against the real bank statement before approving (approve = issue the receipt + re-activate).' },
+  'plt.pay_col_amount': { th: 'จำนวนเงิน', en: 'Amount' },
+  'plt.pay_col_note': { th: 'หมายเหตุ', en: 'Note' },
+  'plt.pay_approve': { th: 'อนุมัติ', en: 'Approve' },
+  'plt.pay_reject': { th: 'ปฏิเสธ', en: 'Reject' },
+  'plt.pay_approved': { th: 'อนุมัติแล้ว — ออกใบเสร็จ {receipt}', en: 'Approved — receipt {receipt} issued' },
+  'plt.pay_rejected': { th: 'ปฏิเสธแล้ว — ส่งอีเมลแจ้งลูกค้าแล้ว', en: 'Rejected — the customer has been emailed' },
+  'plt.pay_reject_title': { th: 'ปฏิเสธรายการแจ้งโอน', en: 'Reject payment claim' },
+  'plt.pay_reject_ph': { th: 'เหตุผล เช่น ไม่พบยอดเงินเข้าตามอ้างอิงนี้…', en: 'Reason, e.g. no matching transfer found for this reference…' },
+  'plt.pay_filter_all': { th: 'ทั้งหมด', en: 'All' },
+  'plt.pay_empty': { th: 'ไม่มีรายการในสถานะนี้', en: 'No claims in this state.' },
+
+  // ── Console ops depth (wave D) ────────────────────────────────────────────
+  'plt.ov_health_alerts': { th: 'เกินเกณฑ์แจ้งเตือน — ต้องตรวจสอบ', en: 'Alert thresholds breached — action needed' },
+  'plt.drawer_export': { th: 'ส่งออกข้อมูลทั้งหมด (JSON)', en: 'Export all data (JSON)' },
 };

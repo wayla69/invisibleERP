@@ -8,7 +8,9 @@ export type MailTemplateKey =
   | 'trial_reminder'
   | 'payment_failed'
   | 'company_suspended'
-  | 'saas_receipt';
+  | 'saas_receipt'
+  | 'payment_claim_rejected'
+  | 'platform_alert';
 
 export type MailLang = 'th' | 'en';
 export interface RenderedMail { subject: string; html: string; text: string }
@@ -130,6 +132,41 @@ export const MAIL_TEMPLATES: Record<MailTemplateKey, TemplateFn> = {
     const text = th
       ? `ใบเสร็จ ${vars.receipt_no} · ฿${vars.amount} — ดาวน์โหลดที่ ${vars.billing_url}`
       : `Receipt ${vars.receipt_no} · ฿${vars.amount} — download at ${vars.billing_url}`;
+    return { subject, html: shell(subject, body), text };
+  },
+
+  // vars: title, body?, type, console_url — wave D1: a god-inbox event pushed to the platform owner's
+  // mailbox (PLATFORM_ALERT_EMAIL). The inbox entry is the durable record; this is the wake-up call.
+  platform_alert: (vars, lang) => {
+    const th = lang === 'th';
+    const subject = `[Invisible ERP] ${String(vars.title ?? '')}`;
+    const body =
+      `<p><b>${v(vars, 'title')}</b></p>` +
+      (vars.body ? `<p>${v(vars, 'body')}</p>` : '') +
+      `<p style="color:#64748b;font-size:12px">${v(vars, 'type')}</p>` +
+      (th
+        ? `<p><a href="${v(vars, 'console_url')}">เปิดศูนย์ควบคุมแพลตฟอร์ม</a></p>`
+        : `<p><a href="${v(vars, 'console_url')}">Open the Platform Console</a></p>`);
+    const text = `${vars.title}${vars.body ? ` — ${vars.body}` : ''} (${vars.type}) → ${vars.console_url}`;
+    return { subject, html: shell(subject, body), text };
+  },
+
+  // vars: company, slip_ref, reason?, billing_url — wave C: a bank-transfer slip claim the platform
+  // owner could not verify (the tenant should re-check the slip and file again, or contact support).
+  payment_claim_rejected: (vars, lang) => {
+    const th = lang === 'th';
+    const subject = th
+      ? `การแจ้งโอนของ ${String(vars.company ?? '')} ยังตรวจสอบไม่ผ่าน — กรุณาตรวจสลิปอีกครั้ง`
+      : `Payment claim for ${String(vars.company ?? '')} could not be verified`;
+    const reason = vars.reason ? (th ? `<p>เหตุผล: ${v(vars, 'reason')}</p>` : `<p>Reason: ${v(vars, 'reason')}</p>`) : '';
+    const body = th
+      ? `<p>รายการแจ้งโอนค่าบริการของ <b>${v(vars, 'company')}</b> (อ้างอิงสลิป <b>${v(vars, 'slip_ref')}</b>) ยังตรวจสอบไม่ผ่าน</p>${reason}` +
+        `<p>กรุณาตรวจสอบเลขอ้างอิง/จำนวนเงินบนสลิปแล้วแจ้งใหม่ได้ที่ <a href="${v(vars, 'billing_url')}">หน้าแพ็กเกจ & การชำระเงิน</a> หรือติดต่อผู้ดูแลแพลตฟอร์ม</p>`
+      : `<p>The payment claim for <b>${v(vars, 'company')}</b> (slip reference <b>${v(vars, 'slip_ref')}</b>) could not be verified.</p>${reason}` +
+        `<p>Please re-check the reference/amount on the slip and file it again from the <a href="${v(vars, 'billing_url')}">billing page</a>, or contact the platform team.</p>`;
+    const text = th
+      ? `การแจ้งโอนของ ${vars.company} (อ้างอิง ${vars.slip_ref}) ยังตรวจสอบไม่ผ่าน${vars.reason ? ` เหตุผล: ${vars.reason}` : ''} — แจ้งใหม่ที่ ${vars.billing_url}`
+      : `The payment claim for ${vars.company} (ref ${vars.slip_ref}) could not be verified.${vars.reason ? ` Reason: ${vars.reason}` : ''} File again at ${vars.billing_url}`;
     return { subject, html: shell(subject, body), text };
   },
 

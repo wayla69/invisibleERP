@@ -42,8 +42,9 @@ const REQUEST = {
   requested_plan: 'business', requested_interval: 'annual', requested_addons: ['cdp'],
 };
 
-async function bootAsGod(page: Page, addonPosts: unknown[], opts: { denyAiUsage?: boolean; skipPlansGate?: boolean } = {}) {
+async function bootAsGod(page: Page, addonPosts: unknown[], opts: { denyAiUsage?: boolean; skipPlansGate?: boolean; claimActions?: string[] } = {}) {
   const denyAiUsage = opts.denyAiUsage ?? false;
+  const claimActions = opts.claimActions ?? [];
   await page.addInitScript(() => {
     document.cookie = 'ierp_csrf=e2e; path=/';
   });
@@ -80,6 +81,16 @@ async function bootAsGod(page: Page, addonPosts: unknown[], opts: { denyAiUsage?
         return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SUITE_NOT_ENTITLED', message: 'Your current plan does not include this module.', messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ' } }) });
       }
       return json([]);
+    }
+    // Wave C: the bank-transfer slip verify queue (approve POSTs are captured into addonPosts's sibling).
+    if (url.includes('/api/admin/payment-claims')) {
+      if (route.request().method() === 'POST') {
+        claimActions.push(url.replace(/^.*\/api/, '/api'));
+        return json({ id: 5, status: 'Approved', receipt_no: 'RCPT-S-000042' });
+      }
+      return json({
+        claims: [{ id: 5, tenant_id: 3, tenant: 'Slow Payer Co', amount: 4900, period: '2026-08', slip_ref: 'TXN-778899', note: 'โอนจาก KBank', status: 'Pending', receipt_no: null, created_by: 'sp_admin', created_at: '2026-07-21T02:00:00Z' }],
+      });
     }
     // Wave B1: enforcement-impact rollup consumed by the plans tab's observations panel.
     if (url.includes('/api/admin/entitlement-observations')) {
@@ -155,6 +166,20 @@ test('plans tab shows the entitlement-observation triage panel', async ({ page }
   await expect(panel).toContainText('SUITE_NOT_ENTITLED');
   await expect(panel).toContainText('TRIAL_EXPIRED');
   await expect(panel).toContainText('shadow');
+});
+
+// Wave C — the payment-claim verify queue: pending slip renders with tenant/amount/ref; อนุมัติ posts approve.
+test('payments tab lists pending slip claims and approve hits the API', async ({ page }) => {
+  const claimActions: string[] = [];
+  await bootAsGod(page, [], { claimActions });
+  await page.getByRole('tab', { name: 'การชำระเงิน' }).click();
+  const panel = page.getByTestId('payment-claims');
+  await expect(panel).toContainText('Slow Payer Co');
+  await expect(panel).toContainText('TXN-778899');
+  await expect(panel).toContainText('฿4,900.00');
+  await panel.getByRole('button', { name: 'อนุมัติ' }).click();
+  await expect.poll(() => claimActions.length).toBeGreaterThan(0);
+  expect(claimActions[0]).toBe('/api/admin/payment-claims/5/approve');
 });
 
 // Wave B2 — a plan-level 403 from any api() call raises the app-wide upsell dialog with the billing CTA.

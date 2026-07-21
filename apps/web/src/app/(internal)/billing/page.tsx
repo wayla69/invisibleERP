@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CircleDollarSign, Package, Puzzle, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
+import { CalendarClock, CircleDollarSign, Landmark, Package, Puzzle, QrCode, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
 // A3 — the add-on vocabulary from the shared entitlement maps (same source the API prices/gates by).
 import { ADDON_GRANTS, ADDON_KEYS, ADDONS } from '@ierp/shared';
 import { api } from '@/lib/api';
@@ -215,6 +215,10 @@ export default function BillingPage() {
           </Card>
         )}
 
+        {/* Wave C — pay by bank transfer / PromptPay: WHERE to pay (platform PromptPay QR + bank account),
+            HOW MUCH (plan + purchased add-ons), then file the slip claim the platform owner verifies. */}
+        {sub.data && <PayByTransferCard />}
+
         {/* A4 — subscription receipts: list + printable document (PDF, HTML fallback). */}
         {(receipts.data?.receipts ?? []).length > 0 && (
           <Card className="gap-3 p-5">
@@ -285,5 +289,126 @@ export default function BillingPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Wave C — the Thai-payment-rails card: shows the platform's PromptPay QR (dynamic, amount due) and/or
+// bank account, takes the tenant's slip claim (transfer reference + amount), and lists the claims with
+// their verification status. A claim only becomes money after the platform owner verifies it — approve
+// issues the receipt (appears in the A4 list above) and re-activates the subscription.
+function PayByTransferCard() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const info = useQuery<any>({ queryKey: ['payment-info'], queryFn: () => api('/api/billing/payment-info') });
+  const claims = useQuery<{ claims: any[] }>({ queryKey: ['payment-claims'], queryFn: () => api('/api/billing/payment-claims') });
+  const [amount, setAmount] = useState('');
+  const [period, setPeriod] = useState('');
+  const [slipRef, setSlipRef] = useState('');
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    if (info.data) {
+      setAmount((prev) => prev || String(info.data.amount_due ?? ''));
+      setPeriod((prev) => prev || String(info.data.suggested_period ?? ''));
+    }
+  }, [info.data]);
+  const submit = useMutation({
+    mutationFn: () => api('/api/billing/payment-claims', {
+      method: 'POST',
+      body: JSON.stringify({ amount: Number(amount), period: period || undefined, slip_ref: slipRef.trim(), note: note.trim() || undefined }),
+    }),
+    onSuccess: () => {
+      setMsg(`✅ ${t('st.bill.pay_claim_filed')}`);
+      setSlipRef(''); setNote('');
+      qc.invalidateQueries({ queryKey: ['payment-claims'] });
+    },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+  const d = info.data;
+  const claimStatus = (s: string) => (
+    <Badge variant={s === 'Approved' ? 'success' : s === 'Rejected' ? 'destructive' : 'secondary'}>
+      {s === 'Approved' ? t('st.bill.pay_status_approved') : s === 'Rejected' ? t('st.bill.pay_status_rejected') : t('st.bill.pay_status_pending')}
+    </Badge>
+  );
+  return (
+    <Card className="gap-4 p-5">
+      <div className="flex items-center gap-2">
+        <Landmark className="size-4 text-primary" />
+        <strong className="text-sm">{t('st.bill.pay_title')}</strong>
+      </div>
+      <p className="text-xs text-muted-foreground">{t('st.bill.pay_sub')}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-3">
+          {d?.amount_due > 0 && (
+            <div className="rounded-lg border p-3 text-sm">
+              <span className="text-muted-foreground">{t('st.bill.pay_amount_due', { plan: String(d.plan_name ?? d.plan_code ?? ''), interval: d.interval === 'annual' ? t('st.bill.interval_annual') : t('st.bill.interval_monthly') })}</span>
+              <div className="text-2xl font-bold tabular-nums">{baht(d.amount_due)}</div>
+            </div>
+          )}
+          {d?.qr_image && (
+            <div className="flex items-center gap-3 rounded-lg border p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={d.qr_image} alt="PromptPay QR" className="size-36 rounded-lg border bg-white p-1" />
+              <div className="grid gap-1 text-sm">
+                <span className="flex items-center gap-1.5 font-medium"><QrCode className="size-4" /> PromptPay</span>
+                <span className="tabular-nums text-muted-foreground">{d.promptpay_id}</span>
+                <span className="text-xs text-muted-foreground">{t('st.bill.pay_qr_hint')}</span>
+              </div>
+            </div>
+          )}
+          {d?.bank_details && (
+            <div className="rounded-lg border p-3 text-sm">
+              <span className="font-medium">{t('st.bill.pay_bank_title')}</span>
+              <div className="whitespace-pre-line text-muted-foreground">{d.bank_details}</div>
+            </div>
+          )}
+        </div>
+        <div className="grid content-start gap-2">
+          <strong className="text-sm">{t('st.bill.pay_claim_title')}</strong>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('fin.col_amount')}
+            <input type="number" min="0" step="0.01" className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('st.bill.col_period')}
+            <input type="month" className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={period} onChange={(e) => setPeriod(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('st.bill.pay_slip_ref')}
+            <input className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" placeholder={t('st.bill.pay_slip_ref_ph')} value={slipRef} onChange={(e) => setSlipRef(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('st.bill.pay_note')}
+            <input className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+          <Button size="sm" className="w-fit" disabled={submit.isPending || !slipRef.trim() || !(Number(amount) > 0)} onClick={() => submit.mutate()}>
+            {t('st.bill.pay_claim_submit')}
+          </Button>
+          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+        </div>
+      </div>
+      {(claims.data?.claims ?? []).length > 0 && (
+        <DataTable
+          dense
+          rows={claims.data!.claims}
+          rowKey={(r: any) => String(r.id)}
+          columns={[
+            { key: 'created_at', label: t('st.bill.col_date'), render: (r: any) => thaiDate(r.created_at) },
+            { key: 'slip_ref', label: t('st.bill.pay_slip_ref'), className: 'tabular-nums' },
+            { key: 'period', label: t('st.bill.col_period'), render: (r: any) => r.period ?? '—' },
+            { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular-nums">{baht(r.amount)}</span> },
+            { key: 'status', label: t('fin.col_status'), render: (r: any) => (
+              <span className="inline-flex items-center gap-2">
+                {claimStatus(r.status)}
+                {r.status === 'Rejected' && r.reject_reason ? <span className="text-xs text-muted-foreground">{r.reject_reason}</span> : null}
+                {r.status === 'Approved' && r.receipt_no ? (
+                  <a className="text-xs font-medium text-primary hover:underline" href={`/api/billing/receipts/${encodeURIComponent(r.receipt_no)}/pdf`} target="_blank" rel="noreferrer">{r.receipt_no}</a>
+                ) : null}
+              </span>
+            ) },
+          ]}
+        />
+      )}
+    </Card>
   );
 }
