@@ -455,7 +455,7 @@ async function main() {
   //            (Queued), the god deliver-pending sweep delivers via the mock provider (MAIL_PROVIDER
   //            unset ⇒ no network), and the outbox is god-only. The background worker delivers the same
   //            rows in production; the sweep makes it deterministic here. ──
-  const outboxDenied = await inj('GET', '/api/admin/emails', qLogin);
+  const outboxDenied = await inj('GET', '/api/admin/emails', qLogin.json.token);
   ok('A1: the email outbox is platform-admin only (403 for a company Admin)', outboxDenied.status === 403, `${outboxDenied.status}`);
   const outbox1 = await inj('GET', '/api/admin/emails', owner);
   const mailRows = (outbox1.json.emails ?? []) as any[];
@@ -474,8 +474,8 @@ async function main() {
     sweep.status === 200 && sweep.json.attempted >= 3 && sweep.json.sent >= 3 && sweep.json.failed === 0,
     JSON.stringify(sweep.json));
   const outbox2 = await inj('GET', '/api/admin/emails', owner);
-  const after = (outbox2.json.emails ?? []) as any[];
-  const sentSet = [invMail, apprMail, rejMail].map((m) => after.find((x) => x.id === m?.id));
+  const outboxAfter = (outbox2.json.emails ?? []) as any[];
+  const sentSet = [invMail, apprMail, rejMail].map((m) => outboxAfter.find((x) => x.id === m?.id));
   ok('A1: the three onboarding emails are Sent with provider=mock + a provider message id',
     sentSet.every((m) => m?.status === 'Sent' && m?.provider === 'mock' && !!m?.provider_msg_id && !!m?.sent_at),
     sentSet.map((m) => `${m?.template}=${m?.status}/${m?.provider}`).join(' '));
