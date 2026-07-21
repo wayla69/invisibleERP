@@ -210,16 +210,16 @@ async function main() {
       JSON.stringify(ev ?? 'NO EVENT').slice(0, 160));
   }
 
-  // ── Wave B · B1 — observation ledger (entitlement_observations, migration 0455) ──
+
   const shObs: any[] = [];
   ok('B1: shadow would-block RECORDS an observation (mode=shadow, day + dedup key)',
-    (await run('shadow', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')], inserted: shObs })).allowed === true
+    (await run('shadow', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pos_lite')], inserted: shObs })).allowed === true
     && shObs.length === 1 && shObs[0].mode === 'shadow' && shObs[0].code === 'SUITE_NOT_ENTITLED'
     && shObs[0].aboutTenantId === 7 && /^\d{4}-\d{2}-\d{2}$/.test(shObs[0].day)
     && String(shObs[0].dedupKey).includes(':7:SUITE_NOT_ENTITLED:shadow'), JSON.stringify(shObs[0] ?? null));
   const enObs: any[] = [];
   ok('B1: enforce block RECORDS an observation (mode=enforce)',
-    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')], inserted: enObs })).code === 'SUITE_NOT_ENTITLED'
+    (await run('enforce', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pos_lite')], inserted: enObs })).code === 'SUITE_NOT_ENTITLED'
     && enObs.length === 1 && enObs[0].mode === 'enforce');
   const alObs: any[] = [];
   ok('B1: an ALLOWED request records nothing',
@@ -230,7 +230,7 @@ async function main() {
     process.env.ENTITLEMENTS_ENFORCE = 'false'; process.env.ENTITLEMENTS_SHADOW = 'true'; process.env.ENTITLEMENTS_ENFORCE_TENANTS = '';
     const meta: Record<string, unknown> = { [IS_PUBLIC_KEY]: false, [PERMISSIONS_KEY]: ['procurement'] };
     const dupObs: any[] = [];
-    const guard = new PlanGuard(stubReflector(meta), stubDb([planRow('starter')], false, dupObs));
+    const guard = new PlanGuard(stubReflector(meta), stubDb([planRow('pos_lite')], false, dupObs));
     await guard.canActivate(ctx(tenantUser('Procurement'), meta));
     await guard.canActivate(ctx(tenantUser('Procurement'), meta));
     ok('B1: identical denial twice on one guard instance → ONE insert (first-seen dedup)', dupObs.length === 1, `inserted=${dupObs.length}`);
@@ -238,17 +238,17 @@ async function main() {
 
   // ── Wave B · B3 — per-tenant enforcement cohort (ENTITLEMENTS_ENFORCE_TENANTS) ──
   ok('B3: cohort tenant is ENFORCED even in global legacy mode',
-    (await run('legacy', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')], cohort: '7' })).code === 'SUITE_NOT_ENTITLED');
+    (await run('legacy', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pos_lite')], cohort: '7' })).code === 'SUITE_NOT_ENTITLED');
   ok('B3: non-cohort tenant keeps legacy behaviour (no suite gating)',
-    (await run('legacy', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')], cohort: '99' })).allowed === true);
+    (await run('legacy', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pos_lite')], cohort: '99' })).allowed === true);
   ok('B3: cohort tenant is BLOCKED (not just logged) under global shadow',
-    (await run('shadow', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')], cohort: '7,99' })).code === 'SUITE_NOT_ENTITLED');
+    (await run('shadow', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pos_lite')], cohort: '7,99' })).code === 'SUITE_NOT_ENTITLED');
   ok('B3: cohort tenant with an entitled plan is still allowed',
     (await run('legacy', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('pro')], cohort: '7' })).allowed === true);
   ok('B3: per-tenant Admin does NOT bypass inside the cohort (enforce semantics)',
-    (await run('legacy', { user: adminUser, required: ['procurement'], rows: [planRow('starter')], cohort: '7' })).code === 'SUITE_NOT_ENTITLED');
+    (await run('legacy', { user: adminUser, required: ['procurement'], rows: [planRow('pos_lite')], cohort: '7' })).code === 'SUITE_NOT_ENTITLED');
   ok('B3: god bypasses even inside the cohort',
-    (await run('legacy', { user: godUser, required: ['procurement'], rows: [planRow('starter')], cohort: '7' })).allowed === true);
+    (await run('legacy', { user: godUser, required: ['procurement'], rows: [planRow('pos_lite')], cohort: '7' })).allowed === true);
   ok('B3: env parse — whitespace kept, bogus/zero dropped',
     [...entitlementEnforceTenantIds({ ENTITLEMENTS_ENFORCE_TENANTS: ' 1, 2,bogus,0,2 ' } as any)].sort().join(',') === '1,2');
 
