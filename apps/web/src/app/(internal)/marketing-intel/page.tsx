@@ -6,15 +6,17 @@
 // page reads the ERP's OWN store (GET /api/marketing-intel/summary) — no cross-database join, and it keeps
 // working when the platform is offline. Gated to the marketing/exec duty. Plain client page, matching its
 // marketing-analytics siblings (/mmm, /reputation, /marketing).
-import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Wallet, TrendingUp, Layers, Users, Sparkles } from 'lucide-react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { BarChart3, Wallet, TrendingUp, Layers, Users, Sparkles, Megaphone, History } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, baht } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { DataTable } from '@/components/data-table';
 import { StateView } from '@/components/state-view';
+import { Button } from '@/components/ui/button';
 
 interface Summary {
   mmm: { payload: any; model_run_ref: string | null; pushed_at: string | null } | null;
@@ -27,6 +29,13 @@ interface Summary {
 export default function MarketingIntelPage() {
   const { t } = useLang();
   const q = useQuery<Summary>({ queryKey: ['marketing-intel', 'summary'], queryFn: () => api('/api/marketing-intel/summary') });
+  const histQ = useQuery<{ runs: any[] }>({ queryKey: ['marketing-intel', 'mmm-history'], queryFn: () => api('/api/marketing-intel/mmm-history') });
+  const activate = useMutation({
+    mutationFn: (segment: string) => api('/api/marketing-intel/segments/activate', { method: 'POST', body: JSON.stringify({ segment }) }),
+    onSuccess: () => notifySuccess(t('mi.activate_done')),
+    onError: (e: any) => notifyError(e?.body?.error?.code === 'EMPTY_SEGMENT' ? t('mi.activate_empty') : (e?.message ?? 'error')),
+  });
+  const histRuns: any[] = Array.isArray(histQ.data?.runs) ? histQ.data!.runs : [];
 
   const mmm = q.data?.mmm?.payload ?? null;
   const rfm = q.data?.rfm?.payload ?? null;
@@ -73,10 +82,27 @@ export default function MarketingIntelPage() {
                     { key: 'roi', label: t('mi.col_roi'), render: (r: any) => r.roi != null ? num(r.roi) : '—' },
                   ]}
                 />
+                {histRuns.length > 1 && (
+                  <div className="space-y-2">
+                    <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><History className="size-4" /> {t('mi.history_heading')}</h3>
+                    <DataTable
+                      rows={histRuns}
+                      rowKey={(r) => String(r.pushed_at ?? r.model_run_ref)}
+                      emptyState={{ icon: History, title: t('mi.empty_title') }}
+                      columns={[
+                        { key: 'when', label: t('mi.col_when'), render: (r: any) => r.pushed_at ? new Date(r.pushed_at).toLocaleDateString() : '—' },
+                        { key: 'r2', label: t('mi.kpi_r2'), render: (r: any) => r.r2 != null ? Number(r.r2).toFixed(2) : '—' },
+                        { key: 'total_spend', label: t('mi.kpi_spend'), render: (r: any) => baht(r.total_spend ?? 0) },
+                        { key: 'top_channel', label: t('mi.kpi_top'), render: (r: any) => r.top_channel ?? '—' },
+                        { key: 'top_channel_roi', label: t('mi.col_top_roi'), render: (r: any) => r.top_channel_roi != null ? num(r.top_channel_roi) : '—' },
+                      ]}
+                    />
+                  </div>
+                )}
               </section>
             )}
 
-            {/* ── RFM ─────────────────────────────────────────────── */}
+            {/* ── RFM (with the activate → campaign action loop) ──── */}
             {rfm && (
               <section className="space-y-3">
                 <h2 className="text-lg font-semibold">{t('mi.rfm_heading')}</h2>
@@ -88,6 +114,11 @@ export default function MarketingIntelPage() {
                     { key: 'segment', label: t('mi.col_segment'), render: (r: any) => String(r.segment) },
                     { key: 'customers', label: t('mi.col_customers'), render: (r: any) => num(r.customers ?? 0) },
                     { key: 'monetary', label: t('mi.col_monetary'), render: (r: any) => baht(r.monetary ?? 0) },
+                    { key: 'activate', label: '', render: (r: any) => (
+                      <Button size="sm" variant="outline" disabled={activate.isPending} onClick={() => activate.mutate(String(r.segment))}>
+                        <Megaphone className="size-4" /> {t('mi.activate')}
+                      </Button>
+                    ) },
                   ]}
                 />
               </section>

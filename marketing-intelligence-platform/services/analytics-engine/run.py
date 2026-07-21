@@ -152,7 +152,13 @@ def _push_to_erp() -> None:
 
     rfm = fetch_df("SELECT segment, COUNT(*) AS customers, SUM(monetary) AS monetary FROM analytics.customer_rfm_segments GROUP BY segment ORDER BY customers DESC")
     if not rfm.empty:
-        snapshots.append({"kind": "rfm", "payload": {"segments": rfm.to_dict(orient="records")}})
+        # Per-customer assignments so the ERP can ACT on the segments (campaign targeting via mi_segment).
+        members = fetch_df("SELECT customer_no, segment FROM analytics.customer_rfm_segments WHERE customer_no IS NOT NULL")
+        snapshots.append({
+            "kind": "rfm",
+            "payload": {"segments": rfm.to_dict(orient="records")},
+            "members": members.to_dict(orient="records"),
+        })
 
     tows = fetch_df("SELECT quadrant, factor, recommendation, priority FROM analytics.tows_matrix ORDER BY priority ASC, quadrant ASC")
     if not tows.empty:

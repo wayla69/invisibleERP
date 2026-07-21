@@ -3,7 +3,10 @@
 -- Intelligence Platform computes advanced MMM / Sentiment-Weighted RFM / TOWS in its OWN data
 -- warehouse and PUSHES the results back into the ERP over the public API (scope analytics:write),
 -- so the ERP owns the data it displays at /marketing-intel and never joins across databases
--- (DB-isolation rule). One row per (tenant, kind); the writer upserts the LATEST snapshot per kind.
+-- (DB-isolation rule).
+--
+-- APPEND-ONLY history: every push inserts a new row (the read takes the latest per kind, the trend view
+-- compares recent runs) — nothing is overwritten, so period-over-period comparison is possible.
 --
 -- Tenancy: tenant-scoped — carries tenant_id and gets the CANONICAL 0232-form org-scoped
 -- tenant_isolation policy from the trailing DO block, plus a LEADING (tenant_id, …) index (the
@@ -20,10 +23,17 @@ CREATE TABLE IF NOT EXISTS mi_analytics_snapshots (
   pushed_at timestamptz DEFAULT now()
 );
 --> statement-breakpoint
--- Idempotent push: the latest snapshot per (tenant, kind) wins (writer does ON CONFLICT DO UPDATE).
-CREATE UNIQUE INDEX IF NOT EXISTS uq_mi_snapshot_kind ON mi_analytics_snapshots (tenant_id, kind);
+-- Latest-per-kind + history lookups: (tenant, kind, pushed_at DESC).
+CREATE INDEX IF NOT EXISTS idx_mi_snapshots_tenant ON mi_analytics_snapshots (tenant_id, kind, pushed_at DESC);
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS idx_mi_snapshots_tenant ON mi_analytics_snapshots (tenant_id, kind);
+
+-- Per-customer ADVANCED RFM segment pushed by the platform. Deliberately a SEPARATE column from the
+-- ERP's own customer_profiles.rfm_segment (which CrmService.refreshProfile owns) — two RFM engines must
+-- not clobber one field. Campaigns target it via the new `mi_segment` audience, so the platform's
+-- sentiment-weighted segmentation can drive the ERP's existing consent-gated campaign delivery.
+ALTER TABLE customer_profiles ADD COLUMN IF NOT EXISTS mi_rfm_segment text;
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_customer_profiles_mi_seg ON customer_profiles (tenant_id, mi_rfm_segment);
 --> statement-breakpoint
 
 -- app_user grants + re-apply the CANONICAL org-scoped tenant_isolation policy (0232 form). Idempotent.

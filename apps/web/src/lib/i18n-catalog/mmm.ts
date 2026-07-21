@@ -100,4 +100,10 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mi.col_monetary': { th: 'มูลค่ารวม', en: 'Monetary' },
   'mi.col_quadrant': { th: 'ควอดรันต์', en: 'Quadrant' },
   'mi.col_recommendation': { th: 'ข้อเสนอแนะ', en: 'Recommendation' },
+  'mi.history_heading': { th: 'ประวัติการรัน MMM (เทียบช่วง)', en: 'MMM run history (period comparison)' },
+  'mi.col_when': { th: 'เมื่อ', en: 'When' },
+  'mi.col_top_roi': { th: 'ROI ช่องทางเด่น', en: 'Top-channel ROI' },
+  'mi.activate': { th: 'สร้างแคมเปญกลุ่มนี้', en: 'Create campaign' },
+  'mi.activate_done': { th: 'สร้างแคมเปญร่างแล้ว — ไปแก้ข้อความแล้วส่งที่หน้าแคมเปญ', en: 'Draft campaign created — edit the message and send it from Campaigns' },
+  'mi.activate_empty': { th: 'ยังไม่มีสมาชิกในกลุ่มนี้ (platform ต้อง push RFM แบบมีรายชื่อลูกค้าก่อน)', en: 'No members in this segment yet (the platform must push RFM with the per-customer list first)' },
 };

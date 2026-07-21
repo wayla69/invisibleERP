@@ -37,7 +37,7 @@ export class CampaignsService {
 
   async upsertCampaign(user: JwtUser, dto: any) {
     const db = this.db; const tenantId = this.tid(user);
-    if (dto.audience === 'segment' && !dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required for a segment campaign', messageTh: 'ต้องระบุกลุ่ม RFM' });
+    if ((dto.audience === 'segment' || dto.audience === 'mi_segment') && !dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required for a segment campaign', messageTh: 'ต้องระบุกลุ่ม RFM' });
     if (dto.audience === 'tier' && !dto.tier) throw new BadRequestException({ code: 'NO_TIER', message: 'tier required for a tier campaign', messageTh: 'ต้องระบุระดับสมาชิก' });
     if (dto.audience === 'saved_segment') {
       if (!dto.saved_segment_id) throw new BadRequestException({ code: 'NO_SAVED_SEGMENT', message: 'saved_segment_id required for a saved-segment campaign', messageTh: 'ต้องระบุเซกเมนต์ที่บันทึกไว้' });
@@ -139,8 +139,11 @@ export class CampaignsService {
       if (!c.savedSegmentId) return [];
       try { return await this.savedSegments.membersForSend(tx, tenantId, Number(c.savedSegmentId)); } catch { return []; }
     }
-    if (c.audience === 'segment') {
-      const profs = await tx.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.rfmSegment, c.segment)));
+    if (c.audience === 'segment' || c.audience === 'mi_segment') {
+      // 'segment' → the ERP's own RFM (customer_profiles.rfm_segment); 'mi_segment' → the advanced RFM the
+      // external Marketing Intelligence platform pushed (customer_profiles.mi_rfm_segment). Same delivery.
+      const segCol = c.audience === 'mi_segment' ? customerProfiles.miRfmSegment : customerProfiles.rfmSegment;
+      const profs = await tx.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), eq(segCol, c.segment)));
       const ids = profs.map((p: any) => Number(p.memberId)).filter(Boolean);
       return ids.length ? await tx.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids), eq(posMembers.active, true))) : [];
     }
