@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ThreeWayMatchService } from './three-way-match.service';
 import { qint } from '../../common/query';
@@ -12,6 +13,8 @@ const MatchRunBody = z.object({
 const ToleranceBody = z.object({ qty_pct: z.number().min(0).optional(), price_pct: z.number().min(0).optional(), amount_pct: z.number().min(0).optional(), amount_abs: z.number().min(0).optional() });
 const OverrideBody = z.object({ reason: z.string().min(1), self_approval_reason: z.string().max(500).optional() });
 
+// 0451 — three-way match rides the 'scm_advanced' add-on suite (see RfqController for the grandfathering).
+@RequiresSuite('scm_advanced')
 @Controller('api/procurement/match')
 export class MatchController {
   constructor(private readonly svc: ThreeWayMatchService) {}

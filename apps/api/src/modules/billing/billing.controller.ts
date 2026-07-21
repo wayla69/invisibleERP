@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService, type SignupDto } from './billing.service';
 import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
+import { SaasLifecycleService } from './saas-lifecycle.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -27,6 +28,11 @@ const SignupBody = z.object({
   vat_registered: z.boolean().optional(),
   vat_rate: z.number().optional(),
   invite_token: z.string().optional(),
+  // Pack selection carried over from the public /plans configurator (0451). Advisory (shown to the
+  // approving platform owner + honoured at provisioning); unknown values are dropped server-side.
+  requested_plan: z.string().max(30).optional(),
+  requested_billing: z.enum(['monthly', 'annual']).optional(),
+  requested_addons: z.array(z.string().max(30)).max(10).optional(),
 });
 
 const InviteBody = z.object({
@@ -46,6 +52,8 @@ const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
 const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
+// 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
+const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 // docs/49 — control-profile transition is UPGRADE-ONLY, so the only accepted target is 'enterprise'.
@@ -61,6 +69,7 @@ export class BillingController {
     private readonly svc: BillingService,
     private readonly metrics: SaasMetricsService,
     private readonly lifecycle: TenantLifecycleService,
+    private readonly saasLifecycle: SaasLifecycleService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -131,6 +140,18 @@ export class BillingController {
     return this.svc.aiUsageByTenant();
   }
 
+  // A2 — run the SaaS lifecycle sweep on demand (the BI scheduler runs the same sweep daily; idempotent
+  // via saas_lifecycle_events dedup keys, so a manual run alongside the schedule is always safe).
+  @Post('admin/saas-lifecycle/run') @PlatformAdmin() @HttpCode(200)
+  runSaasLifecycle() {
+    return this.saasLifecycle.runDaily();
+  }
+
+  @Get('admin/saas-lifecycle/events') @PlatformAdmin()
+  saasLifecycleEvents(@Query('limit') limit?: string) {
+    return this.saasLifecycle.listEvents(limit ? Number(limit) : undefined);
+  }
+
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.
   @Get('admin/tenants/:id') @PlatformAdmin()
   tenantDetail(@Param('id') id: string) {
@@ -146,6 +167,13 @@ export class BillingController {
   @Post('admin/tenants/:id/extend-trial') @PlatformAdmin() @HttpCode(200)
   extendTrial(@Param('id') id: string, @Body(new ZodValidationPipe(ExtendTrialBody)) b: { days: number }) {
     return this.svc.extendTrial(Number(id), b.days);
+  }
+
+  // 0451 — set a company's à-la-carte add-ons (replaces the whole set). Add-on suite keys union into the
+  // tenant's entitled suites on top of its plan (resolveEntitledSuites); unknown keys are rejected.
+  @Post('admin/tenants/:id/addons') @PlatformAdmin() @HttpCode(200)
+  setTenantAddons(@Param('id') id: string, @Body(new ZodValidationPipe(AddonsBody)) b: { addons: string[] }) {
+    return this.svc.setTenantAddons(Number(id), b.addons);
   }
 
   @Post('admin/tenants/:id/tags') @PlatformAdmin() @HttpCode(200)

@@ -5,9 +5,10 @@ import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import type { JwtUser } from '../../common/decorators';
-import { PLAN_SUITES } from '@ierp/shared';
+import { PLAN_SUITES, isAddonKey } from '@ierp/shared';
 import { computeProration } from './proration';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
+import { MailerService } from '../mailer/mailer.service';
 import { StripeBilling } from './stripe-gateway';
 import { TenantProvisioningService, type SignupDto } from './tenant-provisioning.service';
 import { PlatformAdminService } from './platform-admin.service';
@@ -58,6 +59,9 @@ const PLAN_SEED: PlanSeed[] = [
   // with no rung). Standard + procurement + multi-branch; planning/loyalty/AI stay Professional-only.
   { code: 'business', name: 'Business', priceMonthly: '4900', priceYearly: '49000', currency: 'THB', prices: { USD: { monthly: 140, yearly: 1400 } }, features: { suites: PLAN_SUITES.business, users: 25, locations: 5, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 300, pos_txns_monthly: 10_000, etax_overage_rate_thb_per_doc: 2.5, pos_overage_rate_thb_per_txn: 0.4 } },
   { code: 'pro', name: 'Professional', priceMonthly: '9900', priceYearly: '99000', currency: 'THB', prices: { USD: { monthly: 285, yearly: 2850 } }, features: { suites: PLAN_SUITES.pro, users: 50, locations: 10, ai_chat: true, reports: 'advanced', ai_tokens_daily: 200_000, ai_tokens_daily_max: 500_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 1000, pos_txns_monthly: 30_000, etax_overage_rate_thb_per_doc: 2, pos_overage_rate_thb_per_txn: 0.3 } },
+  // 0451 — Franchise (multi-brand): the /plans configurator's 4th pack, between Professional and
+  // Enterprise. Professional + central-kitchen verticals (manufacturing, projects) + every add-on suite.
+  { code: 'franchise', name: 'Franchise', priceMonthly: '14900', priceYearly: '149000', currency: 'THB', prices: { USD: { monthly: 425, yearly: 4250 } }, features: { suites: PLAN_SUITES.franchise, users: 100, locations: 25, ai_chat: true, reports: 'advanced', ai_tokens_daily: 500_000, ai_tokens_daily_max: 1_000_000, ai_overage_rate_thb_per_1k: 10, etax_docs_monthly: 3000, pos_txns_monthly: 100_000, etax_overage_rate_thb_per_doc: 1.5, pos_overage_rate_thb_per_txn: 0.25 } },
   { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.enterprise, users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8, etax_docs_monthly: -1, pos_txns_monthly: -1, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
 ];
 
@@ -69,8 +73,9 @@ export class BillingService {
     private readonly password: PasswordService,
     @Optional() private readonly ledger?: LedgerService, // optional so hand-constructed test instances still work
     @Optional() private readonly platformNotifs?: PlatformNotificationsService, // god event feed; optional for partial harnesses
+    @Optional() private readonly mailer?: MailerService, // A1 transactional email; optional for partial harnesses
   ) {
-    this.provisioning = new TenantProvisioningService(db, password, ledger, platformNotifs);
+    this.provisioning = new TenantProvisioningService(db, password, ledger, platformNotifs, mailer);
     this.platformAdmin = new PlatformAdminService(db, platformNotifs);
     this.metering = new BillingMeteringService(db, this.stripe);
   }
@@ -157,6 +162,7 @@ export class BillingService {
         status: subscriptions.status,
         trial_ends_at: subscriptions.trialEndsAt,
         current_period_end: subscriptions.currentPeriodEnd,
+        addons: subscriptions.addons, // 0451 — purchased à-la-carte add-on suite keys
         plan_name: plans.name,
         price_monthly: plans.priceMonthly,
         currency: plans.currency,
@@ -215,6 +221,20 @@ export class BillingService {
 
     await db.update(subscriptions).set({ planCode: target, status: 'Active', billingInterval: targetInterval }).where(eq(subscriptions.id, sub.id));
     return { tenant_id: tenantId, plan: target, status: 'Active', billing_interval: targetInterval, proration, ...(prorationNote ? { proration_note: prorationNote } : {}) };
+  }
+
+  // 0451 — set a company's à-la-carte add-ons (the /plans configurator's advanced add-ons). Replaces the
+  // whole set; add-on suite keys union into the tenant's entitled suites on top of the plan at request
+  // time (resolveEntitledSuites), so this takes effect immediately without touching the plan row.
+  async setTenantAddons(tenantId: number, addons: string[]) {
+    const db = this.db;
+    const invalid = addons.filter((a) => !isAddonKey(a));
+    if (invalid.length) throw new BadRequestException({ code: 'UNKNOWN_ADDON', message: `Unknown add-on(s): ${invalid.join(', ')}`, messageTh: 'ไม่รู้จักโมดูลเสริมที่เลือก' });
+    const [sub] = await db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(sql`${subscriptions.createdAt} desc`).limit(1);
+    if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
+    const set = [...new Set(addons.filter(isAddonKey))];
+    await db.update(subscriptions).set({ addons: set.length ? set : null }).where(eq(subscriptions.id, sub.id));
+    return { tenant_id: tenantId, addons: set };
   }
 
   // ───────────────────── Plan limit enforcement ─────────────────────

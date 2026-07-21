@@ -1,0 +1,88 @@
+import type { Lang } from '../messages';
+
+// Public pricing & module configurator page (/pricing). Sits outside a session like the auth/public
+// surfaces, so the LanguageProvider resolves the device's cached locale (default Thai). Namespaced
+// `price.*`. Tier names (Essential/Growth/…) are brand names and stay English in every locale; prices
+// are indicative THB aligned with the seeded plans (see the page component for the mapping).
+export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
+  // ── Chrome ────────────────────────────────────────────────────────────────
+  'price.eyebrow': { th: 'Invisible ERP · แพลตฟอร์มร้านอาหารครบวงจร', en: 'Invisible ERP · F&B Platform' },
+  'price.title': { th: 'เลือกแพ็กเกจของคุณ', en: 'Build your plan' },
+  'price.subtitle': {
+    th: 'เริ่มจากแพ็กเกจที่พอดีกับธุรกิจวันนี้ แล้วค่อยเพิ่มโมดูลขั้นสูงเมื่อโตขึ้น — แพลตฟอร์มเดียวตั้งแต่ POS เครื่องเดียวจนถึงกลุ่มแฟรนไชส์หลายแบรนด์',
+    en: 'Start with a pack that fits your operation today, then bolt on advanced modules as you grow — one platform from a single POS to a multi-brand franchise group.',
+  },
+  'price.monthly': { th: 'รายเดือน', en: 'Monthly' },
+  'price.annual': { th: 'รายปี', en: 'Annual' },
+  'price.annual_badge': { th: 'ชำระรายปี: ฟรี 2 เดือน (ประหยัด ~17%)', en: 'Annual billing: 2 months free (save ~17%)' },
+  'price.packs': { th: 'แพ็กเกจเริ่มต้น', en: 'Starter packs' },
+  'price.legend_pos': { th: 'POS / หน้าร้าน', en: 'POS / front-of-house' },
+  'price.legend_erp': { th: 'ระบบหลังบ้าน (ERP)', en: 'Back-office ERP' },
+  'price.most_popular': { th: 'ยอดนิยม', en: 'Most popular' },
+  'price.per_month': { th: '/เดือน', en: '/mo' },
+  'price.billed_monthly': { th: 'ชำระรายเดือน', en: 'billed monthly' },
+  'price.billed_yearly': { th: 'ชำระ {amount}/ปี', en: 'billed {amount}/yr' },
+  'price.starting_at': { th: 'เริ่มต้นที่', en: 'starting at' },
+  'price.everything_in': { th: 'ทุกอย่างใน {tier} พร้อมทั้ง', en: 'Everything in {tier}, plus' },
+  'price.selected': { th: 'เลือกแล้ว', en: 'Selected' },
+  'price.choose': { th: 'เลือกแพ็กเกจนี้', en: 'Choose plan' },
+  'price.addons_title': { th: 'โมดูลเสริมขั้นสูง', en: 'Advanced add-ons' },
+  'price.addons_sub': { th: 'เลือกเพิ่มเป็นรายโมดูล — เปิด/ปิดแล้วดูยอดรวมเปลี่ยนทันที', en: 'À la carte modules — toggle them on and watch the total update.' },
+  'price.summary_title': { th: 'แพ็กเกจของคุณ', en: 'Your configuration' },
+  'price.summary_monthly': { th: 'ชำระรายเดือน', en: 'Monthly billing' },
+  'price.summary_annual': { th: 'ชำระรายปี · ฟรี 2 เดือน', en: 'Annual billing · 2 months free' },
+  'price.plan_line': { th: 'แพ็กเกจ {name}', en: '{name} plan' },
+  'price.starting_at_paren': { th: '(เริ่มต้น)', en: '(starting at)' },
+  'price.annual_savings': { th: 'ส่วนลดชำระรายปี', en: 'Annual savings' },
+  'price.total': { th: 'ค่าบริการโดยประมาณ', en: 'Total estimated cost' },
+  'price.billed_annually_as': { th: 'ชำระรายปี {amount}/ปี', en: 'billed annually as {amount}/yr' },
+  'price.start_trial': { th: 'สมัครใช้งาน', en: 'Start free trial' },
+  'price.contact_sales': { th: 'ติดต่อฝ่ายขายเพื่อขอใบเสนอราคา', en: 'Contact sales for a quote' },
+  'price.disclaimer': { th: 'ราคาโดยประมาณ (บาท) ยังไม่รวมภาษีมูลค่าเพิ่ม', en: 'Prices are indicative, in Thai Baht (฿), excluding VAT.' },
+  'price.enterprise_note': { th: 'แพ็กเกจ Enterprise กำหนดราคาตามขนาดองค์กร', en: 'Enterprise pricing is customized to your fleet size.' },
+  'price.details': { th: 'ดูรายละเอียด', en: 'Details' },
+  'price.hide': { th: 'ซ่อน', en: 'Hide' },
+  'price.addon_count': { th: '+ โมดูลเสริม {n} รายการ', en: '+ {n} add-on(s)' },
+  'price.annual_short': { th: 'รายปี', en: 'annual' },
+  'price.back_to_login': { th: '← กลับไปหน้าเข้าสู่ระบบ', en: '← Back to sign-in' },
+
+  // ── Tier audiences ────────────────────────────────────────────────────────
+  'price.aud_essential': { th: 'สาขาเดียว', en: 'Single branch' },
+  'price.aud_growth': { th: 'หลายสาขา', en: 'Multi-branch' },
+  'price.aud_scale': { th: 'ครัวกลาง & การผลิต', en: 'Central kitchen & ops' },
+  'price.aud_franchise': { th: 'หลายแบรนด์', en: 'Multi-brand' },
+  'price.aud_enterprise': { th: 'องค์กรขนาดใหญ่', en: 'Corporate' },
+
+  // ── Tier features ─────────────────────────────────────────────────────────
+  'price.f_pos': { th: 'POS พื้นฐาน', en: 'Basic POS' },
+  'price.f_gl': { th: 'บัญชีแยกประเภท (GL)', en: 'Standard Ledger (GL)' },
+  'price.f_inv': { th: 'สต๊อกพื้นฐาน', en: 'Basic Inventory' },
+  'price.f_cashier': { th: 'บทบาทแคชเชียร์', en: 'Cashier Role' },
+  'price.f_kds': { th: 'จอแสดงผลครัว (KDS)', en: 'Kitchen Display System (KDS)' },
+  'price.f_qr': { th: 'ลูกค้าสั่งอาหารผ่าน QR', en: 'Diner QR Ordering' },
+  'price.f_delivery': { th: 'เชื่อมต่อเดลิเวอรี่/มาร์เก็ตเพลส', en: 'Delivery & Marketplace Integrations' },
+  'price.f_loyalty': { th: 'พอร์ทัลสะสมแต้มลูกค้า', en: 'Customer Loyalty Portal' },
+  'price.f_mfg': { th: 'ครัวกลาง & การผลิต', en: 'Central Kitchen & Manufacturing' },
+  'price.f_proc': { th: 'จัดซื้อขั้นสูง & สกอร์การ์ดซัพพลายเออร์', en: 'Advanced Procurement & Supplier Scorecards' },
+  'price.f_mrp': { th: 'วางแผนผลิต MRP & พยากรณ์', en: 'Planning, MRP & Forecasting' },
+  'price.f_bi': { th: 'แดชบอร์ด BI & รายงานอัตโนมัติ', en: 'BI Dashboards & Scheduled Reports' },
+  'price.f_hr': { th: 'งานบุคคล & เงินเดือน', en: 'HR & Payroll' },
+  'price.f_brand': { th: 'บริหารหลายแบรนด์ & แฟรนไชส์', en: 'Multi-Brand & Franchise Management' },
+  'price.f_interco': { th: 'ธุรกรรมระหว่างบริษัทในเครือ', en: 'Intercompany Transactions' },
+  'price.f_royalty': { th: 'เรียกเก็บค่ารอยัลตี้ & ค่าธรรมเนียม', en: 'Royalty & Fee Billing' },
+  'price.f_fportal': { th: 'พอร์ทัลแฟรนไชซี & เปรียบเทียบสาขา', en: 'Franchisee Portal & Branch Benchmarking' },
+  'price.f_consol': { th: 'งบการเงินรวมหลายบริษัท', en: 'Multi-tenant Consolidation' },
+  'price.f_sso': { th: 'SSO องค์กร (SAML / OIDC)', en: 'Enterprise SSO (SAML / OIDC)' },
+  'price.f_sod': { th: 'กฎแบ่งแยกหน้าที่ (SoD) 23 ข้อ', en: '23 Segregation-of-Duty (SoD) Rules' },
+  'price.f_etax': { th: 'เชื่อมต่อ e-Tax กรมสรรพากร', en: 'National e-Tax Integration' },
+
+  // ── Add-ons ───────────────────────────────────────────────────────────────
+  'price.a_scm': { th: 'ซัพพลายเชน & เส้นทางอนุมัติจัดซื้อขั้นสูง', en: 'Advanced Supply Chain & Procurement Routing' },
+  'price.a_scm_d': { th: 'RFQ, การจับคู่สามทาง, คำแนะนำการจัดหา และเส้นทางอนุมัติ', en: 'RFQs, three-way match holds, sourcing suggestions and approval routing.' },
+  'price.a_webhook': { th: 'Webhook ขาเข้าสำหรับแชต / CRM', en: 'Inbound Webhook for Chat / CRM Integration' },
+  'price.a_webhook_d': { th: 'รับ webhook แบบลงลายเซ็น HMAC เพื่อเก็บลีดและออเดอร์จากแชตเข้า CRM', en: 'HMAC-signed inbound webhooks to capture leads and chat orders into CRM.' },
+  'price.a_cdp': { th: 'ส่งออกกลุ่มเป้าหมายโฆษณา (CDP Sync)', en: 'Ad-network Audience Export (CDP Sync)' },
+  'price.a_cdp_d': { th: 'ส่งเซกเมนต์ลูกค้า (ตาม PDPA) ไปยังแพลตฟอร์มโฆษณาและ CDP', en: 'PDPA-aware audience segments exported to ad networks and CDPs.' },
+  'price.a_sandbox': { th: 'สภาพแวดล้อมทดสอบ (Sandbox/Staging) เฉพาะราย', en: 'Dedicated Sandbox / Staging Environment' },
+  'price.a_sandbox_d': { th: 'สภาพแวดล้อมแยกพร้อม API key สำหรับทดสอบการเชื่อมต่อ', en: 'An isolated environment with API keys for integration testing.' },
+};

@@ -2969,6 +2969,27 @@
       "when": 2023820000389,
       "tag": "0450_pos_contract_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 425,
+      "version": "7",
+      "when": 2023820000390,
+      "tag": "0451_signup_pack_addons",
+      "breakpoints": true
+    },
+    {
+      "idx": 426,
+      "version": "7",
+      "when": 2023820000391,
+      "tag": "0452_platform_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 427,
+      "version": "7",
+      "when": 2023820000392,
+      "tag": "0453_saas_lifecycle_events",
+      "breakpoints": true
     }
   ]
 }

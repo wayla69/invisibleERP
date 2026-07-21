@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Loader2, Send } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -19,6 +19,23 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // Pack selection carried over from the public /plans configurator (?plan=&billing=&addons=), shown
+  // back to the prospect and forwarded on the request so the platform admin sees it at approval.
+  // Read via window.location.search in an effect (the useSearchParams hook would force a Suspense
+  // boundary at prerender — same pattern as the SSO callback); unknown values are dropped.
+  const [requested, setRequested] = useState<{ plan?: string; billing?: 'monthly' | 'annual'; addons: string[] }>({ addons: [] });
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const KNOWN_PLANS = ['essential', 'growth', 'scale', 'franchise', 'enterprise'];
+    const KNOWN_ADDONS = ['scm_advanced', 'integrations', 'cdp', 'sandbox'];
+    const plan = q.get('plan') ?? '';
+    const billing = q.get('billing');
+    setRequested({
+      plan: KNOWN_PLANS.includes(plan) ? plan : undefined,
+      billing: billing === 'annual' || billing === 'monthly' ? billing : undefined,
+      addons: (q.get('addons') ?? '').split(',').filter((a) => KNOWN_ADDONS.includes(a)),
+    });
+  }, []);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
 
   async function onSubmit(e: React.FormEvent) {
@@ -28,7 +45,15 @@ export default function SignupPage() {
     try {
       // Company creation is reserved to the platform owner (ITGC-AC-18). The public path submits a
       // request that the platform owner reviews and approves — no company is created here.
-      await api('/api/auth/signup-requests', { method: 'POST', body: JSON.stringify(f) });
+      await api('/api/auth/signup-requests', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...f,
+          ...(requested.plan
+            ? { requested_plan: requested.plan, requested_billing: requested.billing ?? 'monthly', requested_addons: requested.addons }
+            : {}),
+        }),
+      });
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.su_failed'));
@@ -71,6 +96,13 @@ export default function SignupPage() {
           </div>
           <h1 className="text-xl font-semibold tracking-tight">{t('auth.su_title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t('auth.su_subtitle')}</p>
+          {requested.plan && (
+            <p className="mt-3 inline-flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+              {t('auth.su_requested')}: <span className="font-semibold capitalize">{requested.plan}</span>
+              {' · '}{t(requested.billing === 'annual' ? 'price.annual' : 'price.monthly')}
+              {requested.addons.length > 0 && <> · {t('price.addon_count', { n: requested.addons.length })}</>}
+            </p>
+          )}
         </div>
 
         <form onSubmit={onSubmit} className="grid gap-4">
@@ -146,6 +178,10 @@ export default function SignupPage() {
           {t('auth.su_have_account')}{' '}
           <Link href="/login" className="font-medium text-primary hover:underline">
             {t('auth.sign_in')}
+          </Link>
+          {' · '}
+          <Link href="/plans" className="font-medium text-primary hover:underline">
+            {t('auth.pricing_link')}
           </Link>
         </p>
       </Card>

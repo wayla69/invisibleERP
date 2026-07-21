@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.9 · 2026-07-18** · *v0.9: Starter data — every one of the 17 business types now gets a sample starter kit + a matching one-click industry pack, and the chart of accounts ships six everyday expense accounts (ค่าเดินทาง, ค่าสาธารณูปโภค, ค่าเช่า, ค่าการตลาด, ค่าธรรมเนียมวิชาชีพ, ค่าวัสดุสำนักงาน) you can also hang sub-accounts under.* · *v0.8: Business type — the Sign-up business-type list expanded from 5 to 17 (added manufacturing, construction, e-commerce, hospitality, healthcare, professional services, agriculture, automotive, logistics, education, non-profit, real estate); each still tailors your chart of accounts and starting menu.* · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
+**Status: DRAFT v1.1 · 2026-07-20** · *v1.1: Plans & pricing — your pack selection (แพ็กเกจ · รอบชำระ · โมดูลเสริม) now travels with you to the sign-up form and is provisioned automatically when the platform administrator approves your request (§8 step 6).* · *v1.0: Plans & pricing — a public แพ็กเกจและราคา page at `/plans` (linked from the sign-in and sign-up screens) lets a prospect compare the five starter packs and add-on modules with a live cost calculator before signing up (§8).* · *v0.9: Starter data — every one of the 17 business types now gets a sample starter kit + a matching one-click industry pack, and the chart of accounts ships six everyday expense accounts (ค่าเดินทาง, ค่าสาธารณูปโภค, ค่าเช่า, ค่าการตลาด, ค่าธรรมเนียมวิชาชีพ, ค่าวัสดุสำนักงาน) you can also hang sub-accounts under.* · *v0.8: Business type — the Sign-up business-type list expanded from 5 to 17 (added manufacturing, construction, e-commerce, hospitality, healthcare, professional services, agriculture, automotive, logistics, education, non-profit, real estate); each still tailors your chart of accounts and starting menu.* · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -313,3 +313,34 @@ can also fine-tune your permissions individually.
 
 **Next:** Go to the chapter for your role — for example
 [Sales & POS](./01-sales-and-pos.md) or [Customer Portal](./02-customer-portal.md).
+---
+
+## 8. Viewing plans & pricing before you sign up (แพ็กเกจและราคา)
+
+**Screen:** `/plans` · **Required role:** none (public — no sign-in needed)
+
+If you do not have an account yet, you can compare packages and estimate your cost first:
+
+1. Open `/plans` directly, or click **ดูแพ็กเกจและราคา** (**View plans & pricing**) on the
+   **Sign in** or **Sign up** page. The page is in Thai by default; use the **ไทย / EN** toggle
+   at the top to switch language.
+2. Pick a billing interval with the **รายเดือน / รายปี** (**Monthly / Annual**) toggle. Annual
+   billing charges 10 of 12 months — **2 months free** — and the cards show the discounted
+   per-month price with the yearly amount.
+3. Choose one of the five **starter packs** (Essential · Growth · Scale · Franchise · Enterprise)
+   by clicking its card. Icons distinguish store-front POS modules from back-office ERP modules;
+   each pack includes everything in the pack before it.
+4. Toggle any **advanced add-on modules** (supply chain & procurement routing, inbound chat/CRM
+   webhook, ad-audience export, dedicated sandbox) on or off and watch the estimate update.
+5. Read your itemized **ค่าบริการโดยประมาณ** (**total estimated cost**) in the summary — the
+   panel on the right on a computer, or the expandable bar at the bottom of the screen on a
+   phone (tap **ดูรายละเอียด**).
+6. Click **สมัครใช้งาน** (**Start free trial**) — or **ติดต่อฝ่ายขาย** (**Contact sales**) on the
+   Enterprise pack — to continue to the sign-up request page. Your selection (pack, billing
+   interval, add-ons) travels with you: the sign-up form shows it back as **แพ็กเกจที่เลือกจากหน้าราคา**,
+   the platform administrator sees it on your request, and approval activates your company on that
+   pack automatically (company accounts are activated by the platform administrator).
+
+> **Note:** prices on this page are indicative, in Thai Baht, excluding VAT. Your actual
+> subscription is set when your company account is provisioned (see chapter 11 for billing
+> administration).

@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, ArrowUpCircle, BadgeCheck, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowUpCircle, BadgeCheck, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, Package, PauseCircle, Pause, Play, Plus, Puzzle, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
+// Entitlement vocabulary from the shared package — the SAME maps the API's plan guard and provisioning
+// use (single source of truth; the plan CATALOG itself renders from GET /api/billing/plans, the DB truth).
+// First real @ierp/shared import in web — the workspace dep + transpilePackages were already wired.
+import { ADDON_GRANTS, ADDON_KEYS, ADDONS, SUITE_LABELS, resolveEntitledSuites, type SuiteKey } from '@ierp/shared';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { INTERNAL_NAV } from '@/lib/nav';
@@ -54,6 +58,18 @@ interface Company {
   setup_complete?: boolean;
   tags?: string[];
   control_profile?: 'enterprise' | 'sme'; // docs/49 — SME single-user edition
+  addons?: string[] | null; // 0451 — purchased à-la-carte add-on suite keys
+}
+
+// One row of GET /api/billing/plans — the DB-authoritative plan catalogue (features.suites is the
+// boot-backfilled copy of PLAN_SUITES; a hand-edited plan row overrides the code map, so render THIS).
+interface PlanRow {
+  code: string;
+  name: string;
+  price_monthly: string | number | null;
+  price_yearly?: string | number | null;
+  currency?: string | null;
+  features?: { suites?: string[]; users?: number; locations?: number; custom?: boolean } & Record<string, unknown>;
 }
 
 interface SignupRequest {
@@ -64,6 +80,10 @@ interface SignupRequest {
   email: string | null;
   status: string;
   requested_at: string | null;
+  // Pack selection carried from the public /plans configurator (0451) — approve provisions this plan.
+  requested_plan?: string | null;
+  requested_interval?: string | null;
+  requested_addons?: string[];
 }
 
 // Mirrors INDUSTRY_KEYS in apps/api/src/modules/ledger/coa-templates.ts (the CoA-template packs the platform
@@ -95,16 +115,105 @@ function statusBadge(s: string | null, t: (key: string, vars?: Record<string, st
   return <Badge variant={variant as 'default' | 'secondary' | 'destructive' | 'outline'}>{label}</Badge>;
 }
 
+// ── Plans & modules review (god) ─────────────────────────────────────────────
+// Add-on suites render amber to stand apart from a plan's base modules at a glance.
+const ADDON_SUITE_SET = new Set<string>(ADDON_KEYS);
+const suiteLabel = (s: string, lang: string): string =>
+  (SUITE_LABELS as Record<string, { en: string; th: string }>)[s]?.[lang === 'th' ? 'th' : 'en'] ?? s;
+
+function SuiteChips({ suites, max }: { suites: readonly string[]; max?: number }) {
+  const { lang } = useLang();
+  const shown = max != null ? suites.slice(0, max) : suites;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {shown.map((s) => (
+        <Badge
+          key={s}
+          variant="outline"
+          className={cn(
+            'px-1.5 py-0 text-[10px] font-normal',
+            ADDON_SUITE_SET.has(s) && 'border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+          )}
+        >
+          {suiteLabel(s, lang)}
+        </Badge>
+      ))}
+      {max != null && suites.length > max && (
+        <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-muted-foreground">+{suites.length - max}</Badge>
+      )}
+    </div>
+  );
+}
+
+// The per-plan module matrix — what each sellable pack actually contains, straight from the plan rows the
+// provisioning/approve flow assigns (custom-priced plans sort last; the marketing page mirrors this data).
+function PlansTab() {
+  const { t } = useLang();
+  const plans = useQuery<{ plans: PlanRow[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
+  const rows = [...(plans.data?.plans ?? [])].sort((a, b) => {
+    const ca = a.features?.custom ? 1 : 0;
+    const cb = b.features?.custom ? 1 : 0;
+    return ca - cb || Number(a.price_monthly ?? 0) - Number(b.price_monthly ?? 0);
+  });
+  const cap = (n: number | undefined) => (n == null ? '—' : n === -1 ? t('plt.plans_unlimited') : num(n));
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">{t('plt.plans_sub')}</p>
+      <StateView q={plans}>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {rows.map((p) => {
+            const suites = p.features?.suites ?? [];
+            const includedAddons = ADDON_KEYS.filter((k) => ADDON_GRANTS[k].every((s) => suites.includes(s)));
+            return (
+              <Card key={p.code} className="gap-3 p-4" data-testid={`plan-card-${p.code}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="grid leading-tight">
+                    <span className="flex items-center gap-1.5 font-semibold"><Package className="size-4 text-muted-foreground" /> {p.name}</span>
+                    <span className="text-xs text-muted-foreground">{p.code}</span>
+                  </div>
+                  <div className="grid text-right leading-tight">
+                    <span className="font-semibold">
+                      {p.features?.custom ? t('plt.plans_custom_price') : `${baht(Number(p.price_monthly ?? 0))}${t('plt.plans_per_month')}`}
+                    </span>
+                    {!p.features?.custom && p.price_yearly != null && (
+                      <span className="text-xs text-muted-foreground">{baht(Number(p.price_yearly))}{t('plt.plans_per_year')}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t('plt.plans_seats_locations', { users: cap(p.features?.users), locations: cap(p.features?.locations) })}
+                </div>
+                <div className="grid gap-1">
+                  <div className="text-xs font-medium">{t('plt.plans_modules_count', { n: suites.length })}</div>
+                  <SuiteChips suites={suites} />
+                </div>
+                <div className="grid gap-1 border-t pt-2">
+                  <div className="flex items-center gap-1 text-xs font-medium"><Puzzle className="size-3.5 text-amber-600 dark:text-amber-400" /> {t('plt.plans_included_addons')}</div>
+                  {includedAddons.length > 0 ? (
+                    <SuiteChips suites={includedAddons} />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{t('plt.plans_addons_purchasable')}</span>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </StateView>
+    </div>
+  );
+}
+
 // Slide-over with the full picture of one company (drill-down without fully switching into it) + the
 // platform subscription controls (change plan / extend trial). Lives in this already-'use client' island.
 function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose: () => void; onChanged: () => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const detail = useQuery<any>({
     queryKey: ['tenant-detail', id],
     queryFn: () => api(`/api/admin/tenants/${id}`),
     enabled: id != null,
   });
-  const plans = useQuery<{ plans: { code: string; name: string }[] }>({
+  const plans = useQuery<{ plans: PlanRow[] }>({
     queryKey: ['plans'],
     queryFn: () => api('/api/billing/plans'),
     enabled: id != null,
@@ -124,6 +233,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
     setSmeHiddenGroups(detail.data?.sme_prefs?.hidden_nav_groups ?? []);
   }, [detail.data]);
   useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); setPurgeConfirm(''); }, [id]);
+  // 0451 — this company's purchased add-on SKUs (checkbox state seeded from the subscription row).
+  const [addonSel, setAddonSel] = useState<string[]>([]);
+  useEffect(() => { setAddonSel(detail.data?.subscription?.addons ?? []); }, [detail.data]);
 
   const saveTags = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
@@ -139,6 +251,13 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const extendTrial = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
     onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // 0451 — set the company's purchased add-ons; entitlement takes effect immediately (resolveEntitledSuites
+  // unions them on top of the plan at request time server-side, no plan-row change).
+  const saveAddons = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/addons`, { method: 'POST', body: JSON.stringify({ addons: addonSel }) }),
+    onSuccess: () => { notifySuccess(t('plt.drawer_addons_saved')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
   // docs/49 H1 — save this company's SME overrides (hidden nav groups + accountant email; the server
@@ -264,6 +383,47 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 </div>
               </div>
 
+              {/* 0451 — purchased add-on SKUs + the effective module set (plan ∪ add-ons) god is reviewing */}
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center gap-1.5 text-xs font-medium">
+                  <Puzzle className="size-3.5 text-amber-600 dark:text-amber-400" /> {t('plt.drawer_addons_title')}
+                </div>
+                <div className="grid gap-1.5">
+                  {ADDON_KEYS.map((k) => {
+                    const planSuites = (plans.data?.plans ?? []).find((p) => p.code === d.subscription?.plan_code)?.features?.suites ?? [];
+                    const inPlan = ADDON_GRANTS[k].every((s) => planSuites.includes(s));
+                    return (
+                      <label key={k} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={addonSel.includes(k)}
+                            onChange={(e) => setAddonSel(e.target.checked ? [...addonSel, k] : addonSel.filter((x) => x !== k))}
+                          />
+                          <span className="truncate">{suiteLabel(k, lang)}</span>
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {inPlan ? t('plt.drawer_addon_in_plan') : `${baht(ADDONS[k].priceMonthly)}${t('plt.plans_per_month')}`}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <Button size="sm" variant="outline" onClick={() => saveAddons.mutate()} disabled={saveAddons.isPending}>
+                  {t('plt.drawer_addons_save')}
+                </Button>
+                <div className="grid gap-1 border-t pt-2" data-testid="effective-modules">
+                  <div className="text-xs font-medium">{t('plt.drawer_modules_title')}</div>
+                  <SuiteChips
+                    suites={resolveEntitledSuites(
+                      d.subscription?.plan_code,
+                      (plans.data?.plans ?? []).find((p) => p.code === d.subscription?.plan_code)?.features?.suites,
+                      addonSel,
+                    ) as SuiteKey[]}
+                  />
+                </div>
+              </div>
+
               {/* docs/49 H1 — per-tenant SME settings (only for an 'sme' control profile). This company's
                   own copy of the SME prefs, editable after provisioning; the SME-01 review subscription
                   follows the accountant email automatically on the server. */}
@@ -382,8 +542,10 @@ export default function PlatformConsole({
   initialCompanies?: Company[];
   initialRequests?: SignupRequest[];
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const qc = useQueryClient();
+  // Plan catalogue (DB truth) — backs the onboarding module preview; shares the drawer/PlansTab cache key.
+  const planCatalog = useQuery<{ plans: PlanRow[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
   // Show-deleted toggle (migration 0386 soft-delete) — off by default so the fleet list matches the
   // pre-delete behaviour; flipping it refetches with deleted companies included, for restoreTenant.
   const [showDeleted, setShowDeleted] = useState(false);
@@ -632,7 +794,14 @@ export default function PlatformConsole({
         ? <Badge variant="secondary" className="bg-sky-500/15 text-sky-700 dark:text-sky-300">SME</Badge>
         : <Badge variant="outline">Enterprise</Badge>
     ) },
-    { key: 'plan_code', label: t('plt.col_plan'), render: (c) => c.plan_code ?? '—' },
+    { key: 'plan_code', label: t('plt.col_plan'), render: (c) => (
+      <div className="grid leading-tight">
+        <span>{c.plan_code ?? '—'}</span>
+        {(c.addons?.length ?? 0) > 0 && (
+          <span className="text-[10px] text-amber-700 dark:text-amber-300">{t('plt.col_addons_n', { n: c.addons!.length })}</span>
+        )}
+      </div>
+    ) },
     { key: 'users', label: t('plt.col_users'), align: 'right', sortable: true, render: (c) => c.users },
     { key: 'trial_ends_at', label: t('plt.col_trial_until'), render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },
     { key: 'created_at', label: t('plt.col_opened_at'), sortable: true, render: (c) => (c.created_at ? thaiDate(c.created_at) : '—') },
@@ -661,6 +830,19 @@ export default function PlatformConsole({
         <span className="text-xs text-muted-foreground">{r.tenant_code} · {r.admin_username}{r.email ? ` · ${r.email}` : ''}</span>
       </div>
     ) },
+    { key: 'requested_plan', label: t('plt.onb_requested_plan'), render: (r) => (r.requested_plan ? (
+      <div className="grid gap-0.5 leading-tight">
+        <span className="font-medium">{r.requested_plan}{r.requested_interval === 'annual' ? ` · ${t('plt.onb_annual')}` : ''}</span>
+        {(r.requested_addons?.length ?? 0) > 0 && <span className="text-xs text-muted-foreground">+ {r.requested_addons!.map((a) => suiteLabel(a, lang)).join(', ')}</span>}
+        {/* Module preview of the pack approve will provision — from the DB plan row (first 4 + count). */}
+        <SuiteChips
+          suites={[
+            ...((planCatalog.data?.plans ?? []).find((p) => p.code === r.requested_plan)?.features?.suites ?? []),
+          ]}
+          max={4}
+        />
+      </div>
+    ) : <span className="text-muted-foreground">—</span>) },
     { key: 'requested_at', label: t('plt.onb_requested_at'), render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
     { key: 'actions', label: '', align: 'right', render: (r) => (
       <div className="flex justify-end gap-1">
@@ -1180,6 +1362,7 @@ export default function PlatformConsole({
         tabs={[
           { key: 'overview', label: t('plt.tab_overview'), content: overviewTab },
           { key: 'companies', label: `${t('plt.tab_companies')} (${companies.data?.length ?? 0})`, content: companiesTab },
+          { key: 'plans', label: t('plt.tab_plans'), content: <PlansTab /> },
           { key: 'onboarding', label: pending ? `${t('plt.tab_onboarding')} (${pending})` : t('plt.tab_onboarding'), content: onboardingTab },
           { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `${t('plt.tab_notifications')} (${notifs.data?.unread_count})` : t('plt.tab_notifications'), content: notificationsTab },
           { key: 'activity', label: t('plt.tab_activity'), content: activityTab },

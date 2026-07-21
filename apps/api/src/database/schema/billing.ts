@@ -26,6 +26,9 @@ export const subscriptions = pgTable('subscriptions', {
   status: subStatusEnum('status').default('Trialing'),
   billingInterval: text('billing_interval').default('monthly'), // 1.7 — 'monthly' | 'annual' (default = legacy behaviour)
   currency: text('currency').default('THB'),                    // 1.7 — the currency this subscription is billed in
+  // 0451 — purchased à-la-carte add-on suite keys (ADDON_KEYS in @ierp/shared); unioned into the
+  // tenant's entitled suites by resolveEntitledSuites. NULL = none.
+  addons: jsonb('addons'),
   trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
   stripeCustomerId: text('stripe_customer_id'),
