@@ -256,6 +256,89 @@ function EntitlementObservationsPanel() {
   );
 }
 
+// Wave C — the bank-transfer/PromptPay slip verify queue: a tenant files a claim on /billing; the money
+// becomes real only here — อนุมัติ checks the transfer against the real bank statement, issues the A4
+// receipt, and re-activates the subscription; ปฏิเสธ emails the reason back to the company.
+function PaymentClaimsTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [status, setStatus] = useState('Pending');
+  const claims = useQuery<{ claims: any[] }>({
+    queryKey: ['payment-claims-admin', status],
+    queryFn: () => api(`/api/admin/payment-claims${status ? `?status=${status}` : ''}`),
+  });
+  const [rejecting, setRejecting] = useState<any | null>(null);
+  const [reason, setReason] = useState('');
+  const refresh = () => qc.invalidateQueries({ queryKey: ['payment-claims-admin'] });
+  const approve = useMutation({
+    mutationFn: (id: number) => api(`/api/admin/payment-claims/${id}/approve`, { method: 'POST' }),
+    onSuccess: (d: any) => { notifySuccess(t('plt.pay_approved', { receipt: d.receipt_no ?? '' })); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (args: { id: number; reason: string }) => api(`/api/admin/payment-claims/${args.id}/reject`, { method: 'POST', body: JSON.stringify({ reason: args.reason || undefined }) }),
+    onSuccess: () => { notifySuccess(t('plt.pay_rejected')); setRejecting(null); setReason(''); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const cols: Column<any>[] = [
+    { key: 'created_at', label: t('st.bill.col_date'), render: (r) => thaiDate(r.created_at) },
+    { key: 'tenant', label: t('plt.obs_col_company'), render: (r) => <span className="font-medium">{r.tenant ?? `#${r.tenant_id}`}</span> },
+    { key: 'amount', label: t('plt.pay_col_amount'), align: 'right', render: (r) => <span className="tabular-nums">{baht(r.amount)}</span> },
+    { key: 'period', label: t('st.bill.col_period'), render: (r) => r.period ?? '—' },
+    { key: 'slip_ref', label: t('st.bill.pay_slip_ref'), className: 'tabular-nums' },
+    { key: 'note', label: t('plt.pay_col_note'), render: (r) => r.note ?? '—' },
+    {
+      key: 'actions', label: '', align: 'right',
+      render: (r) => r.status === 'Pending' ? (
+        <span className="flex justify-end gap-1.5">
+          <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('plt.pay_approve')}</Button>
+          <Button size="sm" variant="outline" onClick={() => { setRejecting(r); setReason(''); }}>{t('plt.pay_reject')}</Button>
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          {r.status}{r.receipt_no ? ` · ${r.receipt_no}` : ''}{r.decided_by ? ` · ${r.decided_by}` : ''}
+        </span>
+      ),
+    },
+  ];
+  return (
+    <div className="space-y-3" data-testid="payment-claims">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm text-muted-foreground">{t('plt.pay_sub')}</p>
+        <div className="ml-auto inline-flex rounded-lg border p-0.5 text-xs">
+          {(['Pending', 'Approved', 'Rejected', ''] as const).map((s) => (
+            <button key={s || 'all'} type="button" className={cn('rounded-md px-3 py-1 font-medium', status === s && 'bg-primary text-primary-foreground')} onClick={() => setStatus(s)}>
+              {s === 'Pending' ? t('st.bill.pay_status_pending') : s === 'Approved' ? t('st.bill.pay_status_approved') : s === 'Rejected' ? t('st.bill.pay_status_rejected') : t('plt.pay_filter_all')}
+            </button>
+          ))}
+        </div>
+      </div>
+      <StateView q={claims}>
+        <DataTable columns={cols} rows={claims.data?.claims ?? []} rowKey={(r) => String(r.id)} emptyText={t('plt.pay_empty')} />
+      </StateView>
+      <Dialog open={rejecting != null} onOpenChange={(o) => { if (!o) setRejecting(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('plt.pay_reject_title')}</DialogTitle>
+            <DialogDescription>{rejecting ? `${rejecting.tenant ?? `#${rejecting.tenant_id}`} · ${baht(rejecting.amount)} · ${rejecting.slip_ref}` : ''}</DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="min-h-20 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+            maxLength={500}
+            placeholder={t('plt.pay_reject_ph')}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejecting(null)}>{t('common.cancel')}</Button>
+            <Button variant="destructive" disabled={reject.isPending} onClick={() => rejecting && reject.mutate({ id: rejecting.id, reason: reason.trim() })}>{t('plt.pay_reject')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // Slide-over with the full picture of one company (drill-down without fully switching into it) + the
 // platform subscription controls (change plan / extend trial). Lives in this already-'use client' island.
 function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose: () => void; onChanged: () => void }) {
@@ -1415,6 +1498,7 @@ export default function PlatformConsole({
           { key: 'overview', label: t('plt.tab_overview'), content: overviewTab },
           { key: 'companies', label: `${t('plt.tab_companies')} (${companies.data?.length ?? 0})`, content: companiesTab },
           { key: 'plans', label: t('plt.tab_plans'), content: <PlansTab /> },
+          { key: 'payments', label: t('plt.tab_payments'), content: <PaymentClaimsTab /> },
           { key: 'onboarding', label: pending ? `${t('plt.tab_onboarding')} (${pending})` : t('plt.tab_onboarding'), content: onboardingTab },
           { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `${t('plt.tab_notifications')} (${notifs.data?.unread_count})` : t('plt.tab_notifications'), content: notificationsTab },
           { key: 'activity', label: t('plt.tab_activity'), content: activityTab },

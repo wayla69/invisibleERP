@@ -9,6 +9,7 @@ import { SaasMetricsService } from './saas-metrics.service';
 import { SaasLifecycleService } from './saas-lifecycle.service';
 import { SaasReceiptsService } from './saas-receipts.service';
 import { EntitlementObservationsService } from './entitlement-observations.service';
+import { SaasPaymentClaimsService } from './saas-payment-claims.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -59,6 +60,9 @@ const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum
 const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
 // A4 — god-recorded offline payment (bank transfer): VAT-inclusive THB amount + optional period/note.
 const ManualReceiptBody = z.object({ amount: z.number().positive().max(10_000_000), period: z.string().regex(/^\d{4}-\d{2}$/).optional(), note: z.string().max(300).optional() });
+// Wave C — tenant-filed bank-transfer/PromptPay slip claim (god verifies before any receipt exists).
+const PaymentClaimBody = z.object({ amount: z.number().positive().max(10_000_000), period: z.string().regex(/^\d{4}-\d{2}$/).optional(), slip_ref: z.string().min(1).max(100), note: z.string().max(300).optional() });
+const ClaimRejectBody = z.object({ reason: z.string().max(500).optional() });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 // docs/49 — control-profile transition is UPGRADE-ONLY, so the only accepted target is 'enterprise'.
@@ -77,6 +81,7 @@ export class BillingController {
     private readonly saasLifecycle: SaasLifecycleService,
     private readonly saasReceipts: SaasReceiptsService,
     private readonly entitlementObs: EntitlementObservationsService,
+    private readonly paymentClaims: SaasPaymentClaimsService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -195,6 +200,39 @@ export class BillingController {
   @Get('admin/entitlement-observations') @PlatformAdmin()
   entitlementObservations(@Query('days') days?: string) {
     return this.entitlementObs.list(days ? Number(days) : undefined);
+  }
+
+  // Wave C — Thai payment rails. Tenant side: where/how much to pay (platform PromptPay QR + bank
+  // account) + file/list slip claims, hard-scoped to the caller's own tenant. God side: the verify
+  // queue — approve records the A4 receipt + re-activates; reject emails the reason.
+  @Get('billing/payment-info') @Permissions('users')
+  async paymentInfo(@CurrentUser() u: JwtUser) {
+    return this.paymentClaims.paymentInfo(await this.svc.resolveTenantId(u));
+  }
+
+  @Post('billing/payment-claims') @Permissions('users') @HttpCode(201)
+  async submitPaymentClaim(@Body(new ZodValidationPipe(PaymentClaimBody)) b: { amount: number; period?: string; slip_ref: string; note?: string }, @CurrentUser() u: JwtUser) {
+    return this.paymentClaims.submitClaim(await this.svc.resolveTenantId(u), b, u.username);
+  }
+
+  @Get('billing/payment-claims') @Permissions('users')
+  async myPaymentClaims(@CurrentUser() u: JwtUser) {
+    return this.paymentClaims.myClaims(await this.svc.resolveTenantId(u));
+  }
+
+  @Get('admin/payment-claims') @PlatformAdmin()
+  adminPaymentClaims(@Query('status') status?: string) {
+    return this.paymentClaims.listClaims(status || undefined);
+  }
+
+  @Post('admin/payment-claims/:id/approve') @PlatformAdmin() @HttpCode(200)
+  approvePaymentClaim(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.paymentClaims.approve(Number(id), u.username);
+  }
+
+  @Post('admin/payment-claims/:id/reject') @PlatformAdmin() @HttpCode(200)
+  rejectPaymentClaim(@Param('id') id: string, @Body(new ZodValidationPipe(ClaimRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.paymentClaims.reject(Number(id), b.reason, u.username);
   }
 
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.

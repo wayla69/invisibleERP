@@ -29,8 +29,8 @@ const vatRate = (): number => {
 
 export interface RecordReceiptOpts {
   tenantId: number;
-  source: 'stripe_invoice' | 'manual';
-  sourceRef?: string; // required for stripe_invoice; manual defaults to MANUAL-<uuid>
+  source: 'stripe_invoice' | 'manual' | 'bank_transfer'; // bank_transfer = wave-C verified slip claim
+  sourceRef?: string; // required for stripe_invoice; wave-C claims pass `claim:<id>`; manual defaults to MANUAL-<uuid>
   amount: number; // VAT-inclusive THB
   period?: string | null; // YYYY-MM
   note?: string | null;
