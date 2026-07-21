@@ -83,6 +83,12 @@ jobs:
               return 1
             fi
           }
+          # forecast-engine (docs/54) is a BEST-EFFORT sidecar: if it is not yet provisioned, or its
+          # build fails, the two API services still run their in-process fallback planner (they only call
+          # out when SCM_ENGINE_URL+SCM_ENGINE_SECRET are set). So its deploy must never abort the
+          # mandatory API rollout — swallow a non-zero and downgrade to a warning. Deployed FIRST so that,
+          # once the APIs are wired to it, they come up against a freshly-built engine.
+          deploy_service forecast-engine || echo "::warning::forecast-engine deploy failed or service not provisioned — APIs fall back to the in-process planner; investigate separately (ops-provision-forecast-engine.yml / ops-railway-diag.yml)"
           deploy_service invisibleERP
           deploy_service invisiblePOSERP
       - name: Smoke test (production)
