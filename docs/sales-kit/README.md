@@ -23,6 +23,18 @@ Contents:
 15. FAQ
 16. Back cover / CTA
 
+## Thai version (ฉบับภาษาไทย)
+
+`sales-kit-th.pdf` (23 pages, A4) is the full Thai translation, rendered from
+`sales-kit-th.html` with the Sarabun typeface embedded (self-contained file).
+
+## ✍️ Tone rule (standing instruction)
+
+Per the product owner: all customer- and internal-facing documents must read as
+**formal business writing** (ภาษาธุรกิจทางการ) — natural professional prose, no
+casual particles, no gimmicky metaphors, no machine-translation phrasing. This
+applies alongside the white/pastel visual rule in `docs/pitch-deck/README.md`.
+
 Pricing figures and ROI math are illustrative placeholders — replace with the
 current price list before customer-facing use. To regenerate the PDF after
 editing the HTML: print `sales-kit.html` to PDF with headless Chromium (A4).
