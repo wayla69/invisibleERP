@@ -19,6 +19,7 @@ const SCOPES = [
   { key: 'orders:read', desc: 'Read sales orders' },
   { key: 'invoices:read', desc: 'Read invoices' },
   { key: 'analytics:read', desc: 'Read analytics feeds (daily sales, customer purchase facts)' },
+  { key: 'analytics:write', desc: 'Push computed analytics results back into the ERP (MMM / RFM / TOWS snapshots)' },
 ];
 const ENDPOINTS = [
   { method: 'GET', path: '/api/v1/items', scope: 'catalog:read' },
@@ -27,6 +28,7 @@ const ENDPOINTS = [
   { method: 'GET', path: '/api/v1/invoices', scope: 'invoices:read' },
   { method: 'GET', path: '/api/v1/sales/daily', scope: 'analytics:read' },
   { method: 'GET', path: '/api/v1/customers/transactions', scope: 'analytics:read' },
+  { method: 'POST', path: '/api/v1/analytics/snapshots', scope: 'analytics:write' },
 ];
 
 @Injectable()

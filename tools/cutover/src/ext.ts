@@ -887,6 +887,56 @@ async function main() {
   const hqRows = hqTxn.json.data ?? [];
   ok('Public API: /customers/transactions — HQ key sees only its own member', hqRows.some((r: any) => r.customer_no === 'M-HQA') && !hqRows.some((r: any) => r.customer_no === 'M-CF2A'), `hq=${hqRows.map((r: any) => r.customer_no).join(',')}`);
 
+  // ── Analytics push-back (docs/48 phase 3, MKT-15) — the Marketing Intelligence platform PUSHES its
+  //    computed MMM / RFM / TOWS into the ERP (scope analytics:write); /marketing-intel renders the store. ──
+  const anWriteCf2 = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-anw-cf2', scopes: ['analytics:write'] })).json.key;
+  const mmmPayload = { r2: 0.49, total_spend: 50000, channels: [{ channel: 'tiktok', spend: 0, roi: null, contribution_pct: 10.3 }, { channel: 'facebook', spend: 30000, roi: 4.17, contribution_pct: 60.61 }] };
+  const snapBody = { snapshots: [
+    { kind: 'mmm', payload: mmmPayload, model_run_ref: 'MMM-CF2-001' },
+    { kind: 'rfm', payload: { segments: [{ segment: 'Loyal Promoters', customers: 12, monetary: 34000 }] } },
+    { kind: 'tows', payload: { items: [{ quadrant: 'SO', factor: 'tiktok momentum', recommendation: 'scale tiktok spend', priority: 1 }] } },
+  ] };
+
+  // Scope enforcement: neither a catalog-only key NOR an analytics:READ key may write (read ≠ write).
+  const catWrite = await inj('POST', '/api/v1/analytics/snapshots', catKey2, snapBody);
+  ok('Push-back: analytics write requires analytics:write (catalog key → 403 INSUFFICIENT_SCOPE)', catWrite.status === 403 && catWrite.json.error?.code === 'INSUFFICIENT_SCOPE', `${catWrite.status} ${catWrite.json.error?.code}`);
+  const readWrite = await inj('POST', '/api/v1/analytics/snapshots', anKeyCf2, snapBody);
+  ok('Push-back: an analytics:READ key cannot WRITE (read alias ⊄ :write → 403)', readWrite.status === 403 && readWrite.json.error?.code === 'INSUFFICIENT_SCOPE', `${readWrite.status} ${readWrite.json.error?.code}`);
+
+  // Happy path: the write key pushes all three snapshot kinds (idempotent upsert).
+  const pushed = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, snapBody);
+  ok('Push-back: analytics:write key pushes MMM/RFM/TOWS (200, pushed 3)', pushed.status === 200 && pushed.json.pushed === 3, `${pushed.status} ${JSON.stringify(pushed.json)}`);
+
+  // Storage is tenant-scoped: the rows carry cf2's tenant_id and none belong to HQ.
+  const snapRows = await db.select().from(s.miAnalyticsSnapshots);
+  const cf2Snaps = snapRows.filter((r: any) => Number(r.tenantId) === cf2.id);
+  ok('Push-back: snapshots stored tenant-scoped for the key tenant (3 kinds, none for HQ)', cf2Snaps.length === 3 && !snapRows.some((r: any) => Number(r.tenantId) === hq.id), `cf2=${cf2Snaps.map((r: any) => r.kind).join(',')} hq=${snapRows.filter((r: any) => Number(r.tenantId) === hq.id).length}`);
+
+  // APPEND-ONLY history: a second mmm push adds a row (does not overwrite); the summary shows the LATEST.
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'mmm', payload: { ...mmmPayload, r2: 0.55 }, model_run_ref: 'MMM-CF2-002' }] });
+  const afterRepush = (await db.select().from(s.miAnalyticsSnapshots)).filter((r: any) => Number(r.tenantId) === cf2.id && r.kind === 'mmm');
+  ok('Push-back: history is append-only (2 mmm rows after a re-push, not 1)', afterRepush.length === 2, `n=${afterRepush.length}`);
+  const miHist = await inj('GET', '/api/marketing-intel/mmm-history', cf2admin);
+  ok('Push-back: GET /mmm-history returns the run trend (2 runs, newest first r2=0.55)', miHist.status === 200 && (miHist.json.runs ?? []).length === 2 && Number(miHist.json.runs[0]?.r2) === 0.55, `${miHist.status} runs=${(miHist.json.runs ?? []).length} r2=${miHist.json.runs?.[0]?.r2}`);
+
+  // Internal read: the /marketing-intel page reads the ERP's OWN store (cf2 Admin holds marketing/exec).
+  const miSummary = await inj('GET', '/api/marketing-intel/summary', cf2admin);
+  ok('Push-back: GET /api/marketing-intel/summary returns the LATEST MMM/RFM/TOWS (has_data, r2=0.55)', miSummary.status === 200 && miSummary.json.has_data === true && Number(miSummary.json.mmm?.payload?.r2) === 0.55 && miSummary.json.tows?.payload != null, `${miSummary.status} has_data=${miSummary.json.has_data}`);
+
+  // ── RFM → campaign action loop: the pushed per-customer segment lands on customer_profiles.mi_rfm_segment
+  //    (a SEPARATE column from the ERP's own rfm_segment) and drives a campaign via the mi_segment audience.
+  //    cf2Mem ('M-CF2A') already has a customer_profiles row (seeded above), so the push updates it. ──
+  const rfmMembersPush = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs' }] }] });
+  ok('Push-back: an rfm push with per-customer members applies them (members_applied ≥ 1)', rfmMembersPush.status === 200 && rfmMembersPush.json.members_applied >= 1, `${rfmMembersPush.status} applied=${rfmMembersPush.json.members_applied}`);
+  const profAfter = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('Push-back: mi_rfm_segment set on the member WITHOUT clobbering the ERP rfm_segment column', profAfter?.miRfmSegment === 'At Risk VIPs', `mi=${profAfter?.miRfmSegment} own=${profAfter?.rfmSegment ?? null}`);
+  const miSegs = await inj('GET', '/api/marketing-intel/segments', cf2admin);
+  ok('Push-back: GET /segments counts members per pushed segment', miSegs.status === 200 && (miSegs.json.segments ?? []).some((x: any) => x.segment === 'At Risk VIPs' && x.members >= 1), `${miSegs.status} ${JSON.stringify(miSegs.json.segments ?? [])}`);
+  const activated = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'At Risk VIPs' });
+  ok('Push-back: activate a segment → a DRAFT campaign (audience=mi_segment) is created', (activated.status === 200 || activated.status === 201) && activated.json.audience === 'mi_segment' && activated.json.segment === 'At Risk VIPs' && activated.json.status === 'draft', `${activated.status} ${JSON.stringify({ a: activated.json.audience, s: activated.json.status })}`);
+  const emptyActivate = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'Nonexistent Segment' });
+  ok('Push-back: activating an empty segment → 400 EMPTY_SEGMENT (no members)', emptyActivate.status === 400 && emptyActivate.json.error?.code === 'EMPTY_SEGMENT', `${emptyActivate.status} ${emptyActivate.json.error?.code}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

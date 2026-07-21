@@ -26,6 +26,13 @@ from shared import fetch_df  # noqa: E402
 st.set_page_config(page_title="Marketing Intelligence", page_icon="📊", layout="wide")
 
 
+def _tables_not_created_yet(exc: Exception) -> bool:
+    """True when the failure is 'the analytics/core tables don't exist yet' (pipeline not run),
+    as opposed to a real connection/query error — so we can show a friendly empty state."""
+    msg = str(exc).lower()
+    return "does not exist" in msg or "undefinedtable" in msg or "no such table" in msg
+
+
 @st.cache_data(ttl=300)
 def load_latest_mmm() -> pd.DataFrame:
     return fetch_df(
@@ -63,7 +70,13 @@ try:
     rfm = load_rfm()
     sentiment = load_sentiment()
 except Exception as exc:  # surface DB/connection errors gracefully rather than a stack trace
-    st.error(f"Could not load analytics data: {exc}")
+    if _tables_not_created_yet(exc):
+        st.warning(
+            "The analytics tables haven't been created yet. Start the **ingestion worker** "
+            "(it builds the data warehouse on boot), then run the **analytics engine** — and refresh."
+        )
+    else:
+        st.error(f"Could not load analytics data: {exc}")
     st.stop()
 
 if run.empty or mmm.empty:
