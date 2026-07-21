@@ -5,7 +5,7 @@ import { plans, subscriptions, tenants, users } from '../../database/schema';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import type { JwtUser } from '../../common/decorators';
-import { PLAN_SUITES, isAddonKey } from '@ierp/shared';
+import { ADDONS, ADDON_GRANTS, PLAN_SUITES, isAddonKey, type AddonKey } from '@ierp/shared';
 import { computeProration } from './proration';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
 import { MailerService } from '../mailer/mailer.service';
@@ -327,7 +327,7 @@ export class BillingService {
   // BillingWebhookService) when Stripe confirms payment. 1.7 — interval ('monthly' default | 'annual') and
   // currency ('THB' default) select the price via resolvePlanPrice (fail-closed) and are stamped on the
   // subscription row as the billing intent.
-  async createCheckoutSession(tenantId: number, planCode: string, interval: 'monthly' | 'annual' = 'monthly', currency = 'THB', branches?: number) {
+  async createCheckoutSession(tenantId: number, planCode: string, interval: 'monthly' | 'annual' = 'monthly', currency = 'THB', branches?: number, addonKeys: string[] = []) {
     const db = this.db;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
@@ -355,9 +355,11 @@ export class BillingService {
     }
     const qty = perBranch ? Math.max(1, Math.floor(branches ?? sub?.branches ?? 1)) : 1;
     if (perBranch) price.amount = price.amount * qty;
+    const addonCharges = this.resolveAddonCharges(plan, price.interval, price.currency, addonKeys); // A3 (#891)
     const result = await this.stripe.createCheckoutSession(
       { code: plan.code, name: plan.name, amount: price.amount, currency: price.currency, interval: price.interval },
       { id: Number(tenant.id), code: tenant.code, existingCustomerId: sub?.cust ?? null },
+      addonCharges,
     );
     // Persist the billing intent (interval/currency) + a freshly-created Stripe customer id so subsequent
     // checkouts reuse it (best-effort; the webhook is the source of truth for subscription state).
@@ -367,7 +369,57 @@ export class BillingService {
       if (perBranch) patch.branches = qty; // 0455 — persist the purchased branch quantity
       await db.update(subscriptions).set(patch).where(eq(subscriptions.id, sub.id));
     }
-    return { url: result.url, mock: result.mock, interval: price.interval, currency: price.currency, amount: price.amount, ...(perBranch ? { branches: qty } : {}) };
+    return {
+      url: result.url, mock: result.mock, interval: price.interval, currency: price.currency, amount: price.amount,
+      ...(perBranch ? { branches: qty } : {}),
+      addons: addonCharges.map((c) => ({ key: c.key, amount: c.amount })),
+      total_amount: price.amount + addonCharges.reduce((t, c) => t + c.amount, 0),
+    };
+  }
+
+  // ── A3: à-la-carte add-on billing ──────────────────────────────────────────────────────────────────
+  // Price the REQUESTED add-ons for a plan/interval: unknown keys fail closed (UNKNOWN_ADDON), keys the
+  // plan already includes are dropped (they cost nothing extra), and amounts follow the platform pricing
+  // rule (annual = 10 × monthly, "2 months free"). Add-on prices are THB-denominated — a non-THB checkout
+  // that carries add-ons is refused rather than silently mispriced.
+  private resolveAddonCharges(
+    plan: { code: string; features: unknown },
+    interval: 'monthly' | 'annual',
+    currency: string,
+    addonKeys: string[],
+  ): { key: AddonKey; name: string; amount: number }[] {
+    const requested = [...new Set(addonKeys)];
+    if (!requested.length) return [];
+    const invalid = requested.filter((k) => !isAddonKey(k));
+    if (invalid.length) throw new BadRequestException({ code: 'UNKNOWN_ADDON', message: `Unknown add-on(s): ${invalid.join(', ')}`, messageTh: 'ไม่รู้จักโมดูลเสริมที่เลือก' });
+    if (currency.toUpperCase() !== 'THB') throw new BadRequestException({ code: 'ADDON_CURRENCY_UNSUPPORTED', message: 'Add-ons are priced in THB only', messageTh: 'โมดูลเสริมคิดราคาเป็นสกุลบาทเท่านั้น' });
+    const suites: string[] = Array.isArray((plan.features as { suites?: string[] } | null)?.suites)
+      ? ((plan.features as { suites: string[] }).suites)
+      : (PLAN_SUITES[plan.code] ?? []);
+    return (requested as AddonKey[])
+      .filter((k) => !ADDON_GRANTS[k].every((sv) => suites.includes(sv)))
+      .map((k) => ({ key: k, name: ADDONS[k].labels.en, amount: ADDONS[k].priceMonthly * (interval === 'annual' ? 10 : 1) }));
+  }
+
+  // Tenant self-serve add-on purchase/removal (perm `users`) — BOLA-safe by construction: the target is
+  // ALWAYS the caller's own tenant. Entitlement applies immediately (resolveEntitledSuites unions the set
+  // at request time); when a live Stripe subscription exists, its add-on line items are reconciled with
+  // mid-cycle proration, otherwise it is entitlement-only (mock/dev, or a Trialing tenant that has not
+  // checked out yet — checkout carries the add-ons as line items when they do).
+  async setOwnAddons(user: JwtUser, addons: string[]) {
+    const tenantId = Number(user.tenantId);
+    if (!Number.isFinite(tenantId) || tenantId <= 0) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'A tenant-scoped session is required', messageTh: 'ต้องเรียกจากบัญชีภายใต้บริษัท' });
+    const invalid = addons.filter((a) => !isAddonKey(a));
+    if (invalid.length) throw new BadRequestException({ code: 'UNKNOWN_ADDON', message: `Unknown add-on(s): ${invalid.join(', ')}`, messageTh: 'ไม่รู้จักโมดูลเสริมที่เลือก' });
+    const set = [...new Set(addons.filter(isAddonKey))];
+    const [sub] = await this.db.select().from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
+    if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for this tenant', messageTh: 'ไม่พบข้อมูลแพ็กเกจของบริษัท' });
+    await this.db.update(subscriptions).set({ addons: set.length ? set : null }).where(eq(subscriptions.id, sub.id));
+    const [plan] = await this.db.select().from(plans).where(eq(plans.code, sub.planCode)).limit(1);
+    const interval: 'monthly' | 'annual' = sub.billingInterval === 'annual' ? 'annual' : 'monthly';
+    const charges = plan ? this.resolveAddonCharges(plan, interval, 'THB', set) : [];
+    const billing = await this.stripe.syncAddonItems(sub.stripeSubscriptionId ?? null, charges, interval);
+    return { tenant_id: tenantId, addons: set, billing };
   }
 
   // ───────────────────── Stripe webhook → subscription state machine ─────────────────────
@@ -398,6 +450,11 @@ export class BillingService {
         if (!Number.isFinite(tenantId)) return { handled: false };
         const patch: Record<string, unknown> = { status: 'Active' };
         if (obj.metadata?.plan_code) patch.planCode = String(obj.metadata.plan_code);
+        if (typeof obj.metadata?.addons === 'string') {
+          // A3 — the paid checkout carried add-on line items; stamp the entitlement they bought.
+          const keys = String(obj.metadata.addons).split(',').filter(isAddonKey);
+          patch.addons = keys.length ? keys : null;
+        }
         if (obj.customer) patch.stripeCustomerId = String(obj.customer);
         if (obj.subscription) patch.stripeSubscriptionId = String(obj.subscription);
         await setByTenant(tenantId, patch);
