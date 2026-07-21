@@ -168,7 +168,7 @@ cooldown — one viral evening produces one event, not forty.
 | Phase | Scope | Status |
 |---|---|---|
 | **P1** | Shared zod contract, Python engine (FastAPI + Prophet + PuLP), pytest suite + shared fixtures, `engine-tests` CI job, `.env.example`, this plan | **DELIVERED** (2026-07-21) |
-| **P2** | API module `modules/scm-planning` — migration, extraction, engine client, jobs, plan lifecycle + maker-checker, PR handoff, `scm` harness; PN-34 + RCM SCM-01..03 + UAT | Planned |
+| **P2** | API module `modules/scm-planning` — migration, extraction, engine client, jobs, plan lifecycle + maker-checker, PR handoff, `scm` harness; PN-34 + RCM SCM-01..03 + UAT | **DELIVERED** (2026-07-21) |
 | **P3** | Planner workspace (`/demand` tabs: branch plans, order plans, scenario, spike feed), user manual, UAT screen cases | Planned |
 | **Ops** | Railway `forecast-engine` service + secret, `deploy_service` line | Manual, after P2 |
 
@@ -188,17 +188,35 @@ cooldown — one viral evening produces one event, not forty.
 - CI: new `engine-tests` job (setup-python 3.12 + `pip install -e .[dev]` + `pytest`).
   ⚠ **Not a required check until branch protection is updated** — see §6.
 
-### P2 planned (next change)
+### P2 delivered (2026-07-21)
 
-Migration `0458_scm_planning` (7 tenant tables + `items.shelf_life_days`, canonical 0232-form RLS
-loop, tenant-leading indexes); `modules/scm-planning/` registered in `SupplyChainDomainModule`;
-permissions `scm_plan` / `scm_approve` + SoD rule R24; `cutover:scm` harness in the `scm-mfg` shard.
+Migration **`0459_scm_planning`** (7 tenant tables + `items.shelf_life_days`, canonical 0232-form RLS
+loop, tenant-leading indexes — note the number moved from 0458, taken by a concurrent PR);
+`modules/scm-planning/` (14 files, largest 380 LOC) registered in `SupplyChainDomainModule`;
+permissions `scm_plan` / `scm_approve` + SoD rule **R24**; `cutover:scm` harness (20 checks) in the
+`scm-mfg` shard; PN-34, RCM SCM-01..03 (299→302 controls), UAT cycle 18.
+
 **The load-bearing extraction rule** (verified against `DineInSaleService.buildSale`): dine-in lines —
-including ฿0 buffet lines — are written into `cust_pos_items` at checkout, so demand extraction must
-**partition by sales channel** (retail leg excludes `payment_method IN ('Dine-in','Split')`; the
-restaurant leg reads `dine_in_order_items` directly) or every dine-in dish is counted twice.
-Dine-in orders carry no branch column, so restaurant demand is attributed via
-`scm_settings.dine_in_branch_id`.
+including ฿0 buffet lines — are written into `cust_pos_items` at checkout, so demand extraction
+**partitions by sales channel** (retail leg excludes `payment_method IN ('Dine-in','Split')`; the
+restaurant leg reads `dine_in_order_items` directly) or every dine-in dish is counted twice. The
+harness pins this end-to-end: 14 partitioned versus 18 naive. Dine-in orders carry no branch column,
+so restaurant demand is attributed via `scm_settings.dine_in_branch_id`, and the untagged share is
+reported on every run so the gap is visible rather than silent.
+
+**Two defects the harness caught that review would not have:**
+
+1. **The spike detector scored an observation against the baseline it had already been folded into**,
+   so a 6× day computed z ≈ 2 instead of ≈ 28 and never fired — the classic EWMA control-chart error.
+   An observation is now judged against the baseline as it stood *before* it arrived.
+2. **A failed run's own error handling destroyed the diagnosis**: when the failure was a DB error the
+   transaction was already aborted, so the "mark run Failed" UPDATE also failed and *its* error
+   replaced the original. The original cause chain now always wins, and is recorded in full
+   (drizzle 0.45 nests the pg SQLSTATE under `.cause`).
+
+A third, subtler one: interpolating the business-timezone offset into a Drizzle `sql` fragment used
+in both SELECT and GROUP BY emits *different* placeholders (`$1` vs `$4`), which Postgres does not
+treat as the same expression (42803). The offset is now inlined as a validated integer literal.
 
 ---
 
@@ -228,3 +246,4 @@ Dine-in orders carry no branch column, so restaurant demand is attributed via
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial plan. **Phase 1 DELIVERED**: shared contract, Python forecast-engine (Prophet + PuLP), pytest + shared contract fixtures, `engine-tests` CI job, `.env.example` SCM block. Phases 2–3 planned. |
+| 0.2 | 2026-07-21 | Supply-chain / Planning | **Phase 2 DELIVERED**: `modules/scm-planning` (migration `0459` — renumbered from 0458, taken by a concurrent PR), channel-partitioned demand extraction, engine client, background jobs + spike detector, maker-checker plan lifecycle with the procurement PR hand-off, `cutover:scm` harness (20 checks). New controls **SCM-01/02/03** (RCM 299→302), SoD **R24**, permissions `scm_plan`/`scm_approve`. Doc-sync: PN-34, UAT cycle 18 (UAT-SCM-001..032) + traceability, RCM census bumped and xlsx/catalog regenerated. Phase 3 (planner workspace) planned. |

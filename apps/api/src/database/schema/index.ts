@@ -183,3 +183,4 @@ export * from './channel-customer-refs';
 export * from './audience-exports';
 export * from './webhook-idempotency';
 export * from './qr-settings';
+export * from './scm-planning';

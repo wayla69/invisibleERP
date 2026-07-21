@@ -32,6 +32,7 @@ Each UAT case is traceable to:
 | 09 | Reports & Analytics | [`09-reports-analytics-uat.md`](./09-reports-analytics-uat.md) | UAT-RPT |
 | 10 | Customer Portal (self-serve POS, loyalty, inventory) | [`10-customer-portal-uat.md`](./10-customer-portal-uat.md) | UAT-POR |
 | 11 | Loyalty & CRM (member directory, 360, PDPA consent, points liability) | [`11-loyalty-crm-uat.md`](./11-loyalty-crm-uat.md) | UAT-LOY |
+| 18 | Supply Chain Planning (demand forecasting, order plans, spikes) | [`18-supply-chain-planning-uat.md`](./18-supply-chain-planning-uat.md) | UAT-SCM |
 
 ### Out of scope
 - Non-functional load/performance and penetration testing (covered by separate plans).
