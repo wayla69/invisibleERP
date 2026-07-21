@@ -158,7 +158,7 @@ export class SaasLifecycleService {
     }).from(subscriptions)
       .innerJoin(tenants, eq(tenants.id, subscriptions.tenantId))
       .innerJoin(plans, eq(plans.code, subscriptions.planCode));
-    return (raw as any[]).map((r) => ({
+    return raw.map((r) => ({
       tenantId: Number(r.tenantId), tenantName: r.tenantName, status: r.status, planCode: r.planCode,
       priceMonthly: Number(r.priceMonthly ?? 0), trialEndsAt: r.trialEndsAt ?? null,
       suspendedAt: r.suspendedAt ?? null, deleted: !!r.deletedAt, adminEmail: r.tenantEmail ?? null,
