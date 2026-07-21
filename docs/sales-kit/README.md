@@ -14,7 +14,7 @@ Contents:
 6. Value map — pain → capability → demo proof point
 7. Competitive battlecards (legacy ERP suites, POS point solutions, spreadsheets)
 8. Objection handling (8 objections with responses)
-9. Pricing & packaging guidance (illustrative — confirm with sales ops)
+9. Pricing & packaging — the platform's seeded plan catalog (Free / SME / Standard / Business / Professional / Enterprise)
 10. Discovery question bank + qualify-out criteria
 11. The 15-minute golden-path demo script
 12. ROI levers with example math (illustrative)
@@ -35,8 +35,11 @@ Per the product owner: all customer- and internal-facing documents must read as
 casual particles, no gimmicky metaphors, no machine-translation phrasing. This
 applies alongside the white/pastel visual rule in `docs/pitch-deck/README.md`.
 
-Pricing figures and ROI math are illustrative placeholders — replace with the
-current price list before customer-facing use. To regenerate the PDF after
+Pricing (§9) reflects the plan catalog seeded by the platform's billing
+service (`apps/api/src/modules/billing/billing.service.ts` `PLAN_SEED`, suites
+per plan in `packages/shared/src/entitlements.ts` `PLAN_SUITES`, 14-day trial)
+as of 2026-07 — re-check it if the seed changes. ROI math (§12) remains an
+illustrative model. To regenerate the PDF after
 editing the HTML: print `sales-kit.html` to PDF with headless Chromium (A4).
 
 > Sales asset only — not imported by `apps/web` or `apps/api`; no effect on
