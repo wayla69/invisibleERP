@@ -126,6 +126,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   project_governance_pack: { label: 'รายงานสถานะโครงการ (ธรรมาภิบาล)', labelEn: 'Project governance / status pack' },
   // Action job (monthly): each run bills every tenant's metered AI overage for the just-closed month as a
   // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
+  saas_lifecycle: { label: 'วงจรสถานะลูกค้า SaaS (เตือนทดลองใช้/ติดตามค้างชำระ/ระงับอัตโนมัติ)', labelEn: 'SaaS lifecycle sweep (trial reminders / dunning / auto-suspend)' },
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
   usage_overage_billing: { label: 'เรียกเก็บค่าใช้งานส่วนเกิน (e-Tax/POS รายเดือน)', labelEn: 'Bill usage overage (e-Tax/POS, monthly)' },
   pii_retention_sweep: { label: 'ลบล้างข้อมูลส่วนบุคคลที่พ้นระยะเก็บรักษา (PDPA)', labelEn: 'Anonymize PII past retention (PDPA)' },

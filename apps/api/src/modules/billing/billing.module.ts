@@ -12,6 +12,7 @@ import { PlanGuard } from './plan.guard';
 import { PlatformNotificationsModule } from '../platform-notifications/platform-notifications.module';
 import { MailerModule } from '../mailer/mailer.module';
 import { BillingBiReports } from './billing-bi-reports';
+import { SaasLifecycleService } from './saas-lifecycle.service';
 import { StarterPackService } from './starter-pack.service';
 
 // AuthModule exports PasswordService (signup hashes the admin password); LedgerModule exports
@@ -22,7 +23,7 @@ import { StarterPackService } from './starter-pack.service';
 @Module({
   imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule, MailerModule],
   controllers: [BillingController, TenantController, StripeWebhookController],
-  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasMetricsService, PlanGuard, StarterPackService],
+  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasLifecycleService, SaasMetricsService, PlanGuard, StarterPackService],
   exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}
