@@ -1,5 +1,11 @@
 # Invisible ERP forecast-engine (docs/54) — stateless SCM planning compute service.
 # Prophet >= 1.1.6 ships manylinux wheels with the compiled cmdstan model, so no toolchain build.
+#
+# BUILD CONTEXT = repo root. The Railway service uses Root Directory `/` (like invisibleERP), and
+# railway.json points dockerfilePath at `services/forecast-engine/Dockerfile` (repo-root-relative),
+# so `railway up` / the dashboard build both send the whole repo as the Docker context. The COPY
+# sources below are therefore repo-root-relative — NOT `pyproject.toml`/`app`, which would resolve to
+# the repo root and fail ("/pyproject.toml": not found).
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -8,8 +14,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
-COPY pyproject.toml ./
-COPY app ./app
+COPY services/forecast-engine/pyproject.toml ./
+COPY services/forecast-engine/app ./app
 RUN pip install --no-cache-dir .
 
 # Non-root: the engine never writes to disk (pure compute).
