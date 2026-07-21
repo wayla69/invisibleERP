@@ -10,7 +10,11 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    # The non-root `engine` user has no writable HOME, so matplotlib (pulled in transitively by
+    # prophet at forecast time) can't create its default ~/.config/matplotlib cache. Point it at a
+    # world-writable dir so the lazy `import prophet` never fails at runtime.
+    MPLCONFIGDIR=/tmp/matplotlib
 
 WORKDIR /srv
 
