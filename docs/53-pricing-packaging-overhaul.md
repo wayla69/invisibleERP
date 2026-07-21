@@ -161,13 +161,13 @@ services as proof points; fix stale "26 SoD rules" → 23 across collateral).
 
 | Decision | Choice | Notes |
 |---|---|---|
-| Candidate | ☐ C1 · ☐ C2 · ☐ C3 · ☐ modified (attach table) | |
-| Q1 procurement → Standard | ☐ approve · ☐ reject | |
-| Q2 SME as "Solo" display | ☐ approve · ☐ reject | |
-| POS line prices (฿590 / ฿1,190 per branch) | ☐ approve · ☐ revise: ______ | |
-| ERP line prices (฿1,900 / ฿3,900) | ☐ approve · ☐ revise: ______ | |
-| Q7 grandfathering snapshot | ☐ approve · ☐ reject | |
-| Signed | ____________  Date: ________ | |
+| Candidate | ☑ **C1** | approved as recommended |
+| Q1 procurement → Standard | ☑ approve | |
+| Q2 SME as "Solo" display | ☑ approve | |
+| POS line prices (฿590 / ฿1,190 per branch) | ☑ approve | |
+| ERP line prices (฿1,900 / ฿3,900) | ☑ approve | |
+| Q7 grandfathering snapshot | ☑ approve | |
+| Signed | Owner (via chat directive "next") · 2026-07-21 | recommended defaults accepted |
 
 ## Revision history
 
