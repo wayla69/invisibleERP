@@ -22,7 +22,11 @@
         "SENTRY_DSN",
         "TENANCY_MODE"
       ],
-      "transitional": ["AUTH_COOKIE_SAMESITE"]
+      "transitional": [
+        "AUTH_COOKIE_SAMESITE",
+        "ENTITLEMENTS_SHADOW",
+        "ENTITLEMENTS_ENFORCE"
+      ]
     },
     "invisiblePOSERP": {
       "expected": [

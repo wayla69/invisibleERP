@@ -190,6 +190,38 @@ async function main() {
   ok('1.7: interval switch (annual→monthly) → proration null + interval_change note, interval updated',
     chSwitch.billing_interval === 'monthly' && chSwitch.proration === null && (chSwitch as any).proration_note === 'interval_change', JSON.stringify({ i: chSwitch.billing_interval, n: (chSwitch as any).proration_note }));
 
+  // ── PRICE GRANDFATHERING (0456, docs/53 Q7): a subscription's snapshotted price survives a plan-row
+  //    repricing — charge paths and MRR read COALESCE(snapshot, list); a plan CHANGE re-snapshots. ──
+  // Simulate a legacy tenant: t3 subscribed to Standard back when it cost ฿1,900 (pre-1.9 list).
+  await pg.query(`UPDATE subscriptions SET grandfathered_price = 1900 WHERE tenant_id = ${t3}`);
+  const gfSub = await g(() => billing.getSubscription(t3));
+  ok('0456: getSubscription returns the EFFECTIVE price (snapshot 1,900), list price beside it, flagged',
+    near(gfSub.price_monthly, 1900) && near(gfSub.list_price_monthly, 2900) && gfSub.grandfathered === true, JSON.stringify({ p: gfSub.price_monthly, l: gfSub.list_price_monthly, g: gfSub.grandfathered }));
+  const gfCk = await g(() => billing.createCheckoutSession(t3, 'starter', 'monthly'));
+  ok('0456: checkout of the CURRENT plan charges the grandfathered ฿1,900, not list ฿2,900', near(gfCk.amount, 1900), `amount=${gfCk.amount}`);
+  const otherCk = await g(() => billing.createCheckoutSession(t3, 'business', 'monthly'));
+  ok('0456: checkout of a DIFFERENT plan prices at current list (฿4,900 — no snapshot carry-over)', near(otherCk.amount, 4900), `amount=${otherCk.amount}`);
+  // MRR sums effective prices: t1 pro 9,900 (re-snapshotted by the changePlan above) + t2 pro 9,900
+  // (NULL snapshot → list) + t3 starter 1,900 (grandfathered) = 21,700.
+  const m2 = (await inj('GET', '/api/billing/saas-metrics', token)).json;
+  ok('0456: MRR uses each sub\'s effective price (9,900 + 9,900 + 1,900 = 21,700)', near(m2.revenue?.mrr, 21700), `mrr=${m2.revenue?.mrr}`);
+  const gfCh = await g(() => billing.changePlan(t3, 'business'));
+  const gfRow: any = (await pg.query(`SELECT grandfathered_price FROM subscriptions WHERE tenant_id=${t3}`)).rows[0];
+  ok('0456: a plan change RE-SNAPSHOTS at the new plan\'s current price (฿4,900) — old lock ends',
+    gfCh.plan === 'business' && near(Number(gfRow.grandfathered_price), 4900), JSON.stringify(gfRow));
+
+  // ── PRODUCT-LINE SKUs (0457, docs/53 C1): POS line prices PER BRANCH — checkout multiplies by the
+  //    branch quantity, persists it, and a flat plan rejects an explicit quantity. ──
+  const pbCk = await g(() => billing.createCheckoutSession(t2, 'pos_pro', 'monthly', 'THB', 3));
+  const pbRow: any = (await pg.query(`SELECT branches FROM subscriptions WHERE tenant_id=${t2}`)).rows[0];
+  ok('0457: POS Pro × 3 branches checkout charges 3 × ฿1,190 = ฿3,570 and persists branches=3',
+    near(pbCk.amount, 3570) && pbCk.branches === 3 && Number(pbRow.branches) === 3, JSON.stringify({ a: pbCk.amount, b: pbRow.branches }));
+  const pbAnnual = await g(() => billing.createCheckoutSession(t2, 'pos_lite', 'annual', 'THB', 2));
+  ok('0457: POS Lite × 2 branches annual = 2 × ฿5,900 = ฿11,800 (per-branch × 10-month annual)',
+    near(pbAnnual.amount, 11800), `amount=${pbAnnual.amount}`);
+  ok('0457: a flat (per-company) plan rejects an explicit branch quantity → PLAN_NOT_PER_BRANCH',
+    (await errCode(() => g(() => billing.createCheckoutSession(t2, 'starter', 'monthly', 'THB', 3)))) === 'PLAN_NOT_PER_BRANCH', 'starter ×3');
+
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

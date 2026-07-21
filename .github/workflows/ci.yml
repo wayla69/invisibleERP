@@ -116,6 +116,7 @@ jobs:
             run: >-
               cutover:worldclass cutover:migration-parity cutover:ai-eval
               cutover:onboarding cutover:opening-balances cutover:sme
+              cutover:plan-gating cutover:proration
           # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
           - shard: controls
             run: >-

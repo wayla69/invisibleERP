@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Invisible ERP — Sales Kit</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4; margin: 13mm 12mm 15mm; }
+  body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #334155; font-size: 10.5pt; line-height: 1.55; background: #fff; }
+  .ic { width: 15px; height: 15px; stroke-width: 2; vertical-align: -2px; flex-shrink: 0; }
+  h1 { color: #0f172a; } h3 { font-size: 13pt; font-weight: 800; color: #0f172a; margin: 18px 0 8px; display: flex; align-items: center; gap: 8px; }
+  h3 .ic { width: 18px; height: 18px; color: #2563eb; }
+  h4 { font-size: 11.5pt; font-weight: 800; color: #0f172a; }
+  p { margin: 6px 0; } ul { margin: 4px 0 4px 18px; } li { margin: 3px 0; }
+  b { color: #0f172a; }
+  .blue { color: #2563eb; } .emerald { color: #059669; } .violet { color: #7c3aed; }
+  .amber { color: #d97706; } .rose { color: #e11d48; } .sky { color: #0284c7; }
+
+  .page-break { page-break-before: always; }
+  .sec-head { margin-bottom: 12px; border-bottom: 3px solid #f1f5f9; padding-bottom: 10px; }
+  .sec-kicker { display: flex; align-items: center; gap: 10px; font-size: 9pt; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; margin-bottom: 6px; }
+  .sec-head h2 { font-size: 20pt; font-weight: 800; color: #0f172a; letter-spacing: -0.01em; }
+
+  .badge { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; }
+  .badge .ic { width: 16px; height: 16px; }
+  .badge.blue { background: #dbeafe; color: #2563eb; } .badge.emerald { background: #d1fae5; color: #059669; }
+  .badge.violet { background: #ede9fe; color: #7c3aed; } .badge.amber { background: #fef3c7; color: #d97706; }
+  .badge.rose { background: #ffe4e6; color: #e11d48; } .badge.sky { background: #e0f2fe; color: #0284c7; }
+
+  .chip { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 14px; font-size: 9.5pt; font-weight: 700; }
+  .chip .ic { width: 13px; height: 13px; }
+  .chip.blue { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
+  .chip.emerald { background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; }
+  .chip.violet { background: #f5f3ff; border: 1px solid #ddd6fe; color: #6d28d9; }
+
+  .cover { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; height: 255mm; }
+  .cover-brand { display: flex; align-items: center; gap: 8px; font-size: 13pt; font-weight: 800; color: #0f172a; margin-bottom: 22px; }
+  .cover-brand .ic { width: 22px; height: 22px; color: #059669; }
+  .cover h1 { font-size: 44pt; font-weight: 800; letter-spacing: -0.02em;
+    background: linear-gradient(to right, #3b82f6, #0ea5e9, #10b981); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .back-h { font-size: 34pt !important; line-height: 1.2; color: #0f172a !important; -webkit-text-fill-color: #0f172a; background: none !important; }
+  .back-h .emerald { color: #059669; -webkit-text-fill-color: #059669; }
+  .cover-sub { max-width: 150mm; margin-top: 14px; font-size: 12pt; color: #475569; }
+  .cover-chips { display: flex; gap: 10px; margin-top: 26px; flex-wrap: wrap; justify-content: center; }
+  .cover-foot { margin-top: 40px; font-size: 8.5pt; color: #94a3b8; letter-spacing: .06em; text-transform: uppercase; line-height: 1.8; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 10px 0; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stats { margin-bottom: 12px; }
+  .stat { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; text-align: center; page-break-inside: avoid; }
+  .stat.blue { background: #eff6ff; border-color: #bfdbfe; } .stat.blue .stat-v { color: #1d4ed8; }
+  .stat.emerald { background: #ecfdf5; border-color: #a7f3d0; } .stat.emerald .stat-v { color: #047857; }
+  .stat.violet { background: #f5f3ff; border-color: #ddd6fe; } .stat.violet .stat-v { color: #6d28d9; }
+  .stat.amber { background: #fffbeb; border-color: #fde68a; } .stat.amber .stat-v { color: #b45309; }
+  .stat-v { font-size: 16pt; font-weight: 800; } .stat-l { font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #64748b; margin-top: 2px; }
+
+  .mini { border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; padding: 12px 14px; font-size: 9.5pt; page-break-inside: avoid; }
+  .mini-t { display: flex; align-items: center; gap: 7px; font-weight: 800; color: #0f172a; margin-bottom: 5px; font-size: 10pt; }
+  .mini-t .ic { color: #2563eb; }
+  ul.q { margin-left: 16px; } ul.q li { margin: 4px 0; }
+
+  .callout { border-radius: 12px; padding: 12px 16px; margin: 12px 0; font-size: 10pt; page-break-inside: avoid; }
+  .callout.blue { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .callout.emerald { background: #ecfdf5; border: 1px solid #a7f3d0; }
+  .callout.violet { background: #f5f3ff; border: 1px solid #ddd6fe; }
+  .callout.amber { background: #fffbeb; border: 1px solid #fde68a; }
+
+  .pitch { border-left: 4px solid #e2e8f0; padding: 6px 0 6px 16px; margin: 12px 0; page-break-inside: avoid; }
+  .pitch-label { font-size: 9pt; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 4px; }
+  .pitch p { font-size: 10.5pt; }
+
+  .tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.5pt; margin: 10px 0;
+         border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+  .tbl th, .tbl td { padding: 8px 11px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+  .tbl tbody tr:last-child td { border-bottom: none; }
+  .tbl thead th { background: #f8fafc; font-size: 8.5pt; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
+  .tbl td:first-child { font-weight: 600; color: #0f172a; }
+
+  .modcard { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; page-break-inside: avoid; background: #fff; }
+  .modcard-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .modcard ul { font-size: 9.5pt; margin-left: 16px; }
+  .modcard-value { margin-top: 7px; font-size: 9pt; background: #f8fafc; border-radius: 8px; padding: 7px 10px; color: #475569; }
+  .group-h { margin-top: 16px; }
+  .group-h.blue .ic { color: #2563eb; } .group-h.emerald .ic { color: #059669; }
+  .group-h.violet .ic { color: #7c3aed; } .group-h.amber .ic { color: #d97706; }
+
+  .persona { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .persona-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .persona-sub { font-size: 9pt; color: #64748b; }
+  .persona-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; font-size: 9.5pt; }
+  .p-label { font-size: 8pt; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 3px; }
+
+  .battle { border: 1px solid #e2e8f0; border-left-width: 4px; border-radius: 12px; padding: 12px 16px; margin: 10px 0; page-break-inside: avoid; }
+  .blue-edge { border-left-color: #93c5fd; } .amber-edge { border-left-color: #fcd34d; } .rose-edge { border-left-color: #fda4af; }
+  .battle-sub { font-size: 9pt; color: #64748b; margin-bottom: 8px; }
+  .battle-grid { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; font-size: 9.5pt; }
+  .battle-land { margin-top: 8px; font-size: 9.5pt; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 7px 10px; }
+
+  .obj { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; margin: 8px 0; page-break-inside: avoid; }
+  .obj-q { display: flex; align-items: center; gap: 8px; font-weight: 800; color: #0f172a; font-size: 10.5pt; }
+  .obj-q .ic { color: #e11d48; } .obj p { font-size: 9.8pt; margin-top: 5px; }
+
+  .step { display: flex; gap: 12px; margin: 10px 0; page-break-inside: avoid; }
+  .step-n { width: 28px; height: 28px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-weight: 800;
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11pt; }
+  .step-t { font-weight: 800; color: #0f172a; font-size: 11pt; margin-bottom: 3px; }
+  .step-row { display: flex; gap: 8px; align-items: baseline; } .step-row p { margin: 2px 0; font-size: 9.8pt; }
+  .step-row .p-label { flex-shrink: 0; width: 34px; }
+
+  .roi-total { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 12px 16px; font-size: 11pt; color: #065f46; }
+  .lead { font-size: 11pt; color: #475569; }
+</style></head><body>
+
+<div class="cover">
+  <div class="cover-brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP</div>
+  <h1>Sales Kit</h1>
+  <p class="cover-sub">The complete field guide for selling the audit-grade ERP + POS platform
+  for retail, food service, and every branch-based business — pitches, product detail, personas,
+  battlecards, objection handling, demo script, and ROI math.</p>
+  <div class="cover-chips">
+    <span class="chip blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" /> </svg>  Pitch-ready in 10 seconds</span>
+    <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /> </svg>  Compliance answers for procurement</span>
+    <span class="chip violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2 3h20" /> <path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3" /> <path d="m7 21 5-5 5 5" /> </svg>  15-minute demo script</span>
+  </div>
+  <div class="cover-foot">Internal sales enablement · v1.0 · Confidential — do not distribute</div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker blue"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 7v14" /> <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /> </svg> </span> <span>Section 1 · Orientation</span></div>
+    <h2>How to use this kit</h2>
+  </div>
+<div class="grid3">
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M12 6v6l4 2" /> </svg>  First call in 5 minutes?</div>
+    Read §2 (pitches) and §5 (personas). Open with the 30-second pitch matched to the persona in the room.</div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" /> <line x1="13" x2="19" y1="19" y2="13" /> <line x1="16" x2="20" y1="16" y2="20" /> <line x1="19" x2="21" y1="21" y2="19" /> <polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5" /> <line x1="5" x2="9" y1="14" y2="18" /> <line x1="7" x2="4" y1="17" y2="20" /> <line x1="3" x2="5" y1="19" y2="21" /> </svg>  Facing a competitor?</div>
+    Refer to §7 (battlecards) for the key winning arguments and §8 for the objections that typically follow.</div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2 3h20" /> <path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3" /> <path d="m7 21 5-5 5 5" /> </svg>  Demo booked?</div>
+    §10 (discovery) before the call, §11 (demo script) during, §12 (ROI levers) to close the follow-up.</div>
+</div>
+<div class="callout blue">
+  <b>The key point to remember:</b> every competitor makes the customer choose between running the
+  restaurant and controlling the money — <b>Invisible ERP is the only platform where the diner's QR scan and
+  the auditor's journal entry are the same record.</b>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker emerald"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" /> <path d="M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14" /> <path d="M8 6v8" /> </svg> </span> <span>Section 2 · Messaging</span></div>
+    <h2>Elevator pitches &amp; positioning</h2>
+  </div>
+<div class="pitch">
+  <div class="pitch-label emerald">10 seconds — the hook</div>
+  <p>"Invisible ERP runs your entire restaurant business — POS, kitchen, stock, purchasing, and accounting —
+  on one system, so every sale lands in an audit-ready ledger the moment it happens."</p>
+</div>
+<div class="pitch">
+  <div class="pitch-label blue">30 seconds — the elevator</div>
+  <p>"F&amp;B chains today run a POS from one vendor, delivery tablets from three more, spreadsheets for stock,
+  and an accounting package that sees everything a month late. Invisible ERP replaces that patchwork with one
+  Thai-localized, multi-tenant platform: diner QR ordering, POS and KDS, warehouse and purchasing,
+  manufacturing, HR, and a full general ledger with SOX-grade controls built in. Orders post to the ledger in
+  real time, delivery and payment channels are integrated natively, and month-end closes in days, not weeks —
+  with the evidence an auditor needs generated automatically."</p>
+</div>
+<div class="pitch">
+  <div class="pitch-label violet">2 minutes — the story</div>
+  <p>"Think about what happens when a diner scans the QR code on table 12. In most chains that order touches
+  five systems that don't talk: the ordering app, the POS, the kitchen printer, a stock spreadsheet someone
+  updates on Sunday, and an accounting system that gets a summary import next month. Every hand-off is a place
+  where money leaks — miscounted stock, unreconciled delivery fees, journal entries no one can explain.</p>
+  <p>Invisible ERP was built so that scan IS the system of record. The order hits the kitchen display, the sale
+  posts to the general ledger with the right VAT treatment, ingredients deplete from stock by recipe, and the
+  delivery-platform settlement reconciles against it automatically. Around that spine we built everything a
+  growing chain needs — purchasing with blind-count receiving, central-kitchen manufacturing, projects, HR and
+  payroll, CRM and loyalty — all sharing one permission model with 80 granular permissions and 23
+  segregation-of-duty rules, on true multi-tenant infrastructure isolated at the database row level.</p>
+  <p>That's why our customers can pass a SOX-style audit with evidence the platform produces itself — and why a
+  chain preparing for investment, franchise expansion, or a listing chooses us over a POS that can't do
+  accounting or an ERP that can't run a restaurant."</p>
+</div>
+<div class="callout emerald"><b>Positioning statement:</b> For mid-market branch businesses (5–100
+locations — restaurants, cafés, retail, services) that have outgrown POS-plus-spreadsheets, Invisible ERP
+is the split-sellable ERP + POS platform that delivers audit-grade financial control in real time — buy the
+POS line, the ERP line, or the Complete bundle, and upgrade without ever re-platforming.</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker violet"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" /> <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" /> <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" /> </svg> </span> <span>Section 3 · Product</span></div>
+    <h2>The platform at a glance</h2>
+  </div>
+<div class="grid4 stats">
+  <div class="stat blue"><div class="stat-v">1</div><div class="stat-l">Real-time audited ledger</div></div>
+  <div class="stat emerald"><div class="stat-v">24 / 80 / 23</div><div class="stat-l">Roles / permissions / SoD rules</div></div>
+  <div class="stat violet"><div class="stat-v">2</div><div class="stat-l">Languages — Thai &amp; English</div></div>
+  <div class="stat amber"><div class="stat-v">9+</div><div class="stat-l">Native channel &amp; service integrations</div></div>
+</div>
+<h3><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect x="16" y="16" width="6" height="6" rx="1" /> <rect x="2" y="16" width="6" height="6" rx="1" /> <rect x="9" y="2" width="6" height="6" rx="1" /> <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" /> <path d="M12 12V8" /> </svg>  Architecture in one paragraph</h3>
+<p>A modern TypeScript stack end-to-end: a <b>Next.js 15</b> web app (desktop, tablet, and phone layouts),
+a <b>NestJS/Fastify</b> API, and <b>PostgreSQL</b> with row-level security so every tenant's data is isolated
+by the database itself, not just by application code. Everything — POS sale, goods receipt, payroll run,
+lease schedule — posts through one ledger service with maker-checker approval, so operations and accounting
+can never drift apart. The platform is multi-company by design: a franchise group or holding company runs
+its whole fleet from one console, with per-company isolation and cross-company reporting.</p>
+<h3><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z" /> <path d="m2 22 3-3" /> <path d="M7.5 13.5 10 11" /> <path d="M10.5 16.5 13 14" /> <path d="m18 3-4 4h6l-4 4" /> </svg>  Integration surface</h3>
+<table class="tbl">
+  <thead><tr><th>Category</th><th>What's integrated</th><th>How it's secured</th></tr></thead>
+  <tbody>
+    <tr><td>Payments</td><td>3 payment gateways (cards, QR payment, e-wallets)</td><td>Signed webhooks, replay-window protection</td></tr>
+    <tr><td>Delivery &amp; marketplaces</td><td>3 delivery/marketplace channels — orders flow into POS/KDS</td><td>HMAC-verified inbound, per-channel secrets</td></tr>
+    <tr><td>Tax</td><td>Thai e-Tax invoicing, VAT &amp; withholding document flows</td><td>Numbered tax documents, immutable audit trail</td></tr>
+    <tr><td>Front of house</td><td>POS terminals, kitchen display (KDS), diner QR ordering, customer display</td><td>Session + device-level auth</td></tr>
+    <tr><td>Identity</td><td>Enterprise SSO and SCIM auto-provisioning</td><td>IdP-driven joiner/mover/leaver</td></tr>
+    <tr><td>Chat &amp; capture</td><td>Chat order capture, web-to-lead</td><td>HMAC-verified inbound webhooks</td></tr>
+    <tr><td>Open API</td><td>Scoped API keys for custom integrations</td><td>Keys bounded to the issuer's own permissions</td></tr>
+  </tbody>
+</table>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker blue"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" /> <path d="m7 16.5-4.74-2.85" /> <path d="m7 16.5 5-3" /> <path d="M7 16.5v5.17" /> <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" /> <path d="m17 16.5-5-3" /> <path d="m17 16.5 4.74-2.85" /> <path d="M17 16.5v5.17" /> <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" /> <path d="M12 8 7.26 5.15" /> <path d="m12 8 4.74-2.85" /> <path d="M12 13.5V8" /> </svg> </span> <span>Section 4 · Product detail</span></div>
+    <h2>Module catalog — what you're actually selling</h2>
+  </div>
+<h3 class="group-h blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8" /> <path d="M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c.7.7 2 .7 2.8 0L15 15Zm0 0 7 7" /> <path d="m2.1 21.8 6.4-6.3" /> <path d="m19 5-7 7" /> </svg>  Front of house &amp; revenue</h3>
+<div class="grid2">
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8" /> <path d="M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c.7.7 2 .7 2.8 0L15 15Zm0 0 7 7" /> <path d="m2.1 21.8 6.4-6.3" /> <path d="m19 5-7 7" /> </svg> </span><h4>POS, KDS & dine-in</h4></div>
+  <ul><li>Table service, takeaway, and counter sale on the same register; phone-optimized layouts for handhelds</li><li>Kitchen Display System with station routing, SLA timers, bump/recall, and expo view</li><li>Split bill, merged checks, tips distribution, shift and cash-drawer management</li><li>Returns, even/partial exchanges netted through store credit, and gift cards — all reason-coded and permission-gated</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> every front-of-house action posts correct GL entries automatically — no end-of-day summary imports, no leakage</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="5" height="5" x="3" y="3" rx="1" /> <rect width="5" height="5" x="16" y="3" rx="1" /> <rect width="5" height="5" x="3" y="16" rx="1" /> <path d="M21 16h-3a2 2 0 0 0-2 2v3" /> <path d="M21 21v.01" /> <path d="M12 7v3a2 2 0 0 1-2 2H7" /> <path d="M3 12h.01" /> <path d="M12 3h.01" /> <path d="M12 16v.01" /> <path d="M16 12h1" /> <path d="M21 12v.01" /> <path d="M12 21v-1" /> </svg> </span><h4>Diner QR ordering & customer portal</h4></div>
+  <ul><li>Scan-to-order at the table with a public menu — no app install</li><li>Customer portal for members: order history, points, e-receipts</li><li>Pole/customer display for order status in-store</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> adds capacity without headcount and captures every diner as a CRM member</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" /> <path d="M15 18H9" /> <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" /> <circle cx="17" cy="18" r="2" /> <circle cx="7" cy="18" r="2" /> </svg></span><h4>Omnichannel & delivery</h4></div>
+  <ul><li>Orders from 3 delivery/marketplace channels land directly in the KDS queue</li><li>Channel settlements reconcile against recorded orders — commissions and fees itemized</li><li>Chat-based order capture for social-commerce sales</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> eliminates the separate delivery-tablet setup and allows delivery revenue to reconcile automatically</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge rose"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M19.414 14.414C21 12.828 22 11.5 22 9.5a5.5 5.5 0 0 0-9.591-3.676.6.6 0 0 1-.818.001A5.5 5.5 0 0 0 2 9.5c0 2.3 1.5 4 3 5.5l5.535 5.362a2 2 0 0 0 2.879.052 2.12 2.12 0 0 0-.004-3 2.124 2.124 0 1 0 3-3 2.124 2.124 0 0 0 3.004 0 2 2 0 0 0 0-2.828l-1.881-1.882a2.41 2.41 0 0 0-3.409 0l-1.71 1.71a2 2 0 0 1-2.828 0 2 2 0 0 1 0-2.828l2.823-2.762" /> </svg> </span><h4>CRM, loyalty & growth</h4></div>
+  <ul><li>Member profiles, tiered points, campaigns, and audience segments</li><li>Sales pipeline with win/loss tracking; won deals convert into delivery projects</li><li>PDPA-compliant audience egress controls for ad platforms</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> turns transaction data into repeat visits while staying on the right side of PDPA</div>
+</div>
+</div>
+<h3 class="group-h emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" /> <path d="m7 16.5-4.74-2.85" /> <path d="m7 16.5 5-3" /> <path d="M7 16.5v5.17" /> <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" /> <path d="m17 16.5-5-3" /> <path d="m17 16.5 4.74-2.85" /> <path d="M17 16.5v5.17" /> <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" /> <path d="M12 8 7.26 5.15" /> <path d="m12 8 4.74-2.85" /> <path d="M12 13.5V8" /> </svg>  Supply chain &amp; production</h3>
+<div class="grid2">
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M18 21V10a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v11" /> <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 1.132-1.803l7.95-3.974a2 2 0 0 1 1.837 0l7.948 3.974A2 2 0 0 1 22 8z" /> <path d="M6 13h12" /> <path d="M6 17h12" /> </svg> </span><h4>Inventory & WMS</h4></div>
+  <ul><li>Real-time stock by branch and location; barcode scanning throughout</li><li>Putaway, picking, replenishment, stock reservations, and stocktakes</li><li>Recipe/BOM-driven depletion from POS sales — theoretical vs. actual variance</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> shrinkage becomes visible per branch, per day, rather than surfacing as a quarterly surprise</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="8" cy="21" r="1" /> <circle cx="19" cy="21" r="1" /> <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" /> </svg> </span><h4>Procurement</h4></div>
+  <ul><li>Requisition → approval → PO → receiving with budget checks along the way</li><li>Blind-count goods receiving: counters never see the ordered quantity; over-receipt tolerance only for weighed goods</li><li>Time-boxed claims with dock-photo evidence; three-way match places AP payment holds automatically</li><li>RFQs, supplier screening &amp; scorecards, price lists, and maker-checker on vendor bank-detail changes</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> closes the receiving and vendor-fraud control gaps that auditors and owners are most concerned about</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge rose"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 16h.01" /> <path d="M16 16h.01" /> <path d="M3 19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5a.5.5 0 0 0-.769-.422l-4.462 2.844A.5.5 0 0 1 15 10.5v-2a.5.5 0 0 0-.769-.422L9.77 10.922A.5.5 0 0 1 9 10.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z" /> <path d="M8 16h.01" /> </svg> </span><h4>Manufacturing & central kitchen</h4></div>
+  <ul><li>Multi-level BOMs, routings, work centers, and shop-floor operations</li><li>MRP and rough-cut capacity planning generate purchase suggestions</li><li>Finite-capacity scheduling (APS); QC disposition with controlled scrap write-offs</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> central-kitchen chains get factory-grade planning without a separate MES</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge sky"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="8" height="4" x="8" y="2" rx="1" ry="1" /> <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /> <path d="M12 11h4" /> <path d="M12 16h4" /> <path d="M8 11h.01" /> <path d="M8 16h.01" /> </svg> </span><h4>Projects, PPM & real estate</h4></div>
+  <ul><li>WBS, Gantt, milestones, EVM, baselines, RACI, risks and issues</li><li>Timesheets with maker-checker labor posting; rate cards; BoQ-driven material control</li><li>Subcontract valuations with free-issue material custody tracking; PMO action center</li><li>Real-estate module for property/space management</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> expansion projects (new branches, fit-outs) run on the same controlled ledger as operations</div>
+</div>
+</div>
+<h3 class="group-h violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Finance &amp; governance</h3>
+<div class="grid2">
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg> </span><h4>General ledger & close</h4></div>
+  <ul><li>Real-time posting from every module; manual JEs are draft-until-approved (maker-checker)</li><li>Recurring journals, prepaid amortization, multi-currency AR/AP statements</li><li>Close Manager: a period-close checklist that auto-completes only on system evidence (bank recs certified, depreciation posted, FX revalued)</li><li>Cash-flow statements (direct, indirect, forecast), budget vs. actual, year-end close</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> month-end drops from weeks to days because the evidence is produced, not hunted</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10.5 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v6" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="m14 20 2 2 4-4" /> </svg> </span><h4>Tax & e-Tax (Thai)</h4></div>
+  <ul><li>VAT documents, withholding certificates, numbered tax document series</li><li>e-Tax invoice generation and submission flows</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> Thai tax compliance is native, not a bolted-on localization pack</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m12 14 4-4" /> <path d="M3.34 19a10 10 0 1 1 17.32 0" /> </svg> </span><h4>Assets, leases & treasury</h4></div>
+  <ul><li>Fixed assets: depreciation, revaluation, impairment, disposal; EAM work orders and preventive maintenance</li><li>IFRS 16 leases: right-of-use assets, liability schedules, modifications</li><li>Collections and dunning workflows, credit holds, petty-cash advances</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> the balance-sheet items that break audits elsewhere are first-class modules here</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 7h6v6" /> <path d="m22 7-8.5 8.5-5-5L2 17" /> </svg> </span><h4>BI & analytics</h4></div>
+  <ul><li>Live KPI dashboards streamed in real time; exec scorecards</li><li>Scheduled report packs (governance, variance, supplier scorecards) delivered automatically</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> management sees the current day's figures the same day, and board reporting packs are assembled automatically</div>
+</div>
+</div>
+<h3 class="group-h amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" /> </svg>  People &amp; platform</h3>
+<div class="grid2">
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /> <path d="M16 3.128a4 4 0 0 1 0 7.744" /> <path d="M22 21v-2a4 4 0 0 0-3-3.87" /> <circle cx="9" cy="7" r="4" /> </svg> </span><h4>HR, payroll & ESS</h4></div>
+  <ul><li>Payroll with GL posting; compensation, performance, recruiting, onboarding, and training modules</li><li>Employee self-service: leave requests and balances, own-data access only</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> one staff record from hiring to payroll to the P&L</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /> </svg> </span><h4>Administration & controls</h4></div>
+  <ul><li>24 roles, 80 granular permissions, 23 segregation-of-duty rules enforced at grant time</li><li>Approval center aggregating every maker-checker queue in one inbox</li><li>Full audit trail; access recertification; quality/NCR management</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> the control environment IS the product — not a report written after the fact</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 12h4" /> <path d="M10 8h4" /> <path d="M14 21v-3a2 2 0 0 0-4 0v3" /> <path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2" /> <path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" /> </svg> </span><h4>Multi-company platform</h4></div>
+  <ul><li>Run an entire fleet of companies from one console: provisioning, plans, suspension, cross-company audit</li><li>Company-scoped admins; platform owner sees fleet health, AI spend, and onboarding pipeline</li><li>Per-company subscription billing with trials and AI usage metering built in</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> franchisors and holding groups get SaaS-style fleet operations out of the box</div>
+</div>
+
+<div class="modcard">
+  <div class="modcard-head"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /> <path d="M20 2v4" /> <path d="M22 4h-4" /> <circle cx="4" cy="20" r="2" /> </svg> </span><h4>AI & automation</h4></div>
+  <ul><li>AI-assisted features metered per company with transparent token usage and overage billing</li><li>Scheduled automations: dunning runs, PM work-order generation, recurring journals, lease runs — all idempotent</li></ul>
+  <div class="modcard-value"><b>Why buyers care:</b> automation that finance can trust: every run is idempotent and leaves an audit trail</div>
+</div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker rose"><span class="badge rose"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <circle cx="12" cy="12" r="6" /> <circle cx="12" cy="12" r="2" /> </svg> </span> <span>Section 5 · Targeting</span></div>
+    <h2>Ideal customer profile &amp; buyer personas</h2>
+  </div>
+<div class="callout violet"><b>ICP:</b> Thai (and expanding SEA) F&amp;B operators with <b>5–100 branches</b> —
+restaurant chains, cafés, cloud/central kitchens, franchise groups — with formalizing finance needs:
+outside investors, bank covenants, franchise reporting, or listing ambitions. The primary target is the chain that has just hired its first dedicated CFO. Secondary: multi-concept holding groups and franchisors who need fleet-level
+consolidation.</div>
+
+<div class="persona">
+  <div class="persona-head"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="16" height="20" x="4" y="2" rx="2" /> <line x1="8" x2="16" y1="6" y2="6" /> <line x1="16" x2="16" y1="14" y2="18" /> <path d="M16 10h.01" /> <path d="M12 10h.01" /> <path d="M8 10h.01" /> <path d="M12 14h.01" /> <path d="M8 14h.01" /> <path d="M12 18h.01" /> <path d="M8 18h.01" /> </svg> </span><div><h4>The CFO / Finance Director</h4><div class="persona-sub">Economic buyer — owns the budget</div></div></div>
+  <div class="persona-cols">
+    <div><div class="p-label rose">Their pains</div><ul><li>Month-end close takes two to three weeks of manual spreadsheet reconciliation</li><li>Can't produce audit evidence without a consulting project</li><li>Fears fraud in purchasing and cash handling at branches</li><li>Board/investors ask questions the systems can't answer</li></ul></div>
+    <div><div class="p-label emerald">Your talk track</div><p>Lead with the Close Manager and maker-checker controls. Show a journal entry born from a POS sale, then the close checklist auto-completing on real evidence. Close with: 'your next audit's evidence pack is a by-product of daily operations.'</p></div>
+  </div>
+</div>
+
+<div class="persona">
+  <div class="persona-head"><span class="badge amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z" /> <path d="M6 17h12" /> </svg> </span><div><h4>The COO / Operations Director</h4><div class="persona-sub">Champion — experiences the operational pain daily</div></div></div>
+  <div class="persona-cols">
+    <div><div class="p-label rose">Their pains</div><ul><li>Stock variance and shrinkage invisible until stocktake day</li><li>Delivery tablets and channel reconciliation eat manager hours</li><li>Every branch runs slightly different processes</li></ul></div>
+    <div><div class="p-label emerald">Your talk track</div><p>Lead with blind-count receiving and recipe-based depletion. Show the KDS absorbing a delivery-channel order next to a QR dine-in order. Close with: 'one process, every branch, and variance you can see tomorrow morning.'</p></div>
+  </div>
+</div>
+
+<div class="persona">
+  <div class="persona-head"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 17v4" /> <path d="m14.305 7.53.923-.382" /> <path d="m15.228 4.852-.923-.383" /> <path d="m16.852 3.228-.383-.924" /> <path d="m16.852 8.772-.383.923" /> <path d="m19.148 3.228.383-.924" /> <path d="m19.53 9.696-.382-.924" /> <path d="m20.772 4.852.924-.383" /> <path d="m20.772 7.148.924.383" /> <path d="M22 13v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /> <path d="M8 21h8" /> <circle cx="18" cy="6" r="3" /> </svg> </span><div><h4>The IT / Systems Manager</h4><div class="persona-sub">Technical evaluator — holds veto power</div></div></div>
+  <div class="persona-cols">
+    <div><div class="p-label rose">Their pains</div><ul><li>Maintains a large portfolio of brittle point-to-point integrations</li><li>User off-boarding is manual and risky</li><li>Security questionnaires from partners are burdensome</li></ul></div>
+    <div><div class="p-label emerald">Your talk track</div><p>Lead with the integration architecture (signed webhooks, one API surface), SSO/SCIM, and scoped API keys. Hand over §14 (security fact sheet) — it answers the questionnaire for them. Close with: 'you retire five integrations and one spreadsheet-import ritual.'</p></div>
+  </div>
+</div>
+
+<div class="persona">
+  <div class="persona-head"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z" /> <path d="M5 21h14" /> </svg> </span><div><h4>The Owner / CEO</h4><div class="persona-sub">Final approver — takes a long-term view</div></div></div>
+  <div class="persona-cols">
+    <div><div class="p-label rose">Their pains</div><ul><li>Wants to franchise, raise, or eventually list — and knows the books aren't ready</li><li>Is aware of margin leakage but cannot locate its source</li><li>Worried about betting on a vendor that's too small or too rigid</li></ul></div>
+    <div><div class="p-label emerald">Your talk track</div><p>Lead with the growth story: the same platform runs 1 branch and 100 companies. Show the fleet console and the investor-grade control set (SOX-style ICFR readiness). Close with: 'the system your future auditors would have told you to buy.'</p></div>
+  </div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker emerald"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" /> <path d="M15 5.764v15" /> <path d="M9 3.236v15" /> </svg> </span> <span>Section 6 · Value</span></div>
+    <h2>Pain → capability → proof</h2>
+  </div>
+<table class="tbl">
+  <thead><tr><th>Customer pain</th><th>Platform capability</th><th>Proof point in a demo</th></tr></thead>
+  <tbody>
+    <tr><td>"We don't trust our stock numbers"</td><td>Blind-count receiving, recipe depletion, per-branch variance</td><td>Receive a PO without seeing ordered qty; watch variance report update</td></tr>
+    <tr><td>"Month-end takes three weeks"</td><td>Real-time GL posting + Close Manager with evidence-gated checklist</td><td>Open the close checklist; show items ticking only when evidence exists</td></tr>
+    <tr><td>"Delivery channels are chaos"</td><td>Native channel integration into KDS + settlement reconciliation</td><td>A channel order appears on KDS beside dine-in orders, fees itemized</td></tr>
+    <tr><td>"Purchasing feels leaky"</td><td>Budget-checked PRs, 3-way match with auto payment holds, vendor-bank maker-checker</td><td>Show an invoice blocked by a quantity mismatch hold</td></tr>
+    <tr><td>"Audits are expensive projects"</td><td>23 SoD rules, maker-checker everywhere, immutable audit trail, access recertification</td><td>Try to approve your own journal entry — the system refuses</td></tr>
+    <tr><td>"Systems don't speak Thai / Thai tax"</td><td>Full Thai + English UI, e-Tax, VAT &amp; withholding flows</td><td>Switch language live; open a generated e-Tax document</td></tr>
+    <tr><td>"We're scaling and tools keep breaking"</td><td>Multi-company fleet console, SSO/SCIM, per-company billing</td><td>Provision a new company in minutes from the console</td></tr>
+  </tbody>
+</table>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker amber"><span class="badge amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" /> <line x1="13" x2="19" y1="19" y2="13" /> <line x1="16" x2="20" y1="16" y2="20" /> <line x1="19" x2="21" y1="21" y2="19" /> <polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5" /> <line x1="5" x2="9" y1="14" y2="18" /> <line x1="7" x2="4" y1="17" y2="20" /> <line x1="3" x2="5" y1="19" y2="21" /> </svg> </span> <span>Section 7 · Competition</span></div>
+    <h2>Battlecards</h2>
+  </div>
+
+<div class="battle blue-edge">
+  <h4>vs. Legacy mid-market ERP suites</h4><div class="battle-sub">(big-brand ERP with restaurant bolt-ons)</div>
+  <div class="battle-grid">
+    <div><div class="p-label blue">When you meet them</div><p>Enterprise-leaning prospects who equate brand size with safety; consultants are often part of the evaluation.</p></div>
+    <div><div class="p-label emerald">Why we win</div><p>Deployment in weeks vs. 12–24 months; F&amp;B operations (KDS, QR, recipes, delivery) are native, not a partner add-on; controls are built-in rather than a compliance consulting project; TCO has no per-module license maze or integrator dependency.</p></div>
+    <div><div class="p-label rose">Where they are strong — acknowledge honestly</div><p>Deep multi-country consolidation, treasury depth for conglomerates, and huge partner ecosystems. If the prospect is a 500-branch multinational, apply strict qualification.</p></div>
+  </div>
+  <div class="battle-land"><b>Strategic question to leave with the customer:</b> "Invite the customer to request a fixed-price quotation for posting a diner's QR order to the general ledger in real time — inclusive of the integrator's fees and delivery timeline."</div>
+</div>
+
+<div class="battle amber-edge">
+  <h4>vs. POS point solutions</h4><div class="battle-sub">(modern cloud POS with basic stock features)</div>
+  <div class="battle-grid">
+    <div><div class="p-label blue">When you meet them</div><p>Chains already running a popular POS that plan to add accounting capability at a later stage.</p></div>
+    <div><div class="p-label emerald">Why we win</div><p>A POS has no general ledger, no purchasing controls, no payroll, no close — in practice, 'later' means CSV exports into an accounting package supported by a manual re-keying team. We provide equivalent front-of-house speed together with the complete back office. Their stock module counts items; ours enforces blind counts, budget checks, and three-way match.</p></div>
+    <div><div class="p-label rose">Where they are strong — acknowledge honestly</div><p>Pure POS UX polish and hardware ecosystems; very small single-store operators are genuinely better served by them. Qualify out below roughly five branches unless growth is funded.</p></div>
+  </div>
+  <div class="battle-land"><b>Strategic question to leave with the customer:</b> "Invite the customer to ask how the system would prevent a branch manager from receiving 8 kg against a 10 kg purchase order and diverting the difference — and where that variance would appear in the P&amp;L."</div>
+</div>
+
+<div class="battle rose-edge">
+  <h4>vs. Spreadsheets + custom scripts + local accounting software</h4><div class="battle-sub">(the status quo)</div>
+  <div class="battle-grid">
+    <div><div class="p-label blue">When you meet them</div><p>Owner-operated chains where an operations manager has built an internal spreadsheet system; typically cost-sensitive.</p></div>
+    <div><div class="p-label emerald">Why we win</div><p>The internally built spreadsheet system depends on a single individual, has no permission model and no audit trail, and — once staff hours are counted — already costs more than the software. We import their master data via built-in Excel/CSV import-export, so migration is days, not a project. Trials and per-company pricing de-risk the start.</p></div>
+    <div><div class="p-label rose">Where they are strong — acknowledge honestly</div><p>Zero perceived cost and infinite perceived flexibility. Avoid criticizing the spreadsheet's author — enlist them as an ally; they typically become the strongest power user.</p></div>
+  </div>
+  <div class="battle-land"><b>Strategic question to leave with the customer:</b> "Invite the customer to consider how month-end close would proceed if the owner of the master spreadsheet resigned unexpectedly during a holiday period."</div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker rose"><span class="badge rose"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg> </span> <span>Section 8 · Objections</span></div>
+    <h2>Objection handling</h2>
+  </div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "It's too expensive compared to our POS subscription."</div><p>Compare it to the full stack it replaces: POS + inventory tool + accounting package + the payroll spreadsheet + the person re-keying between them. Then add one recovered point of shrinkage — on most chains' COGS that alone exceeds the subscription. We'll build that math together in the ROI worksheet (§12).</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "Migration sounds painful — we have years of data."</div><p>Master data (items, vendors, customers, chart of accounts) imports through built-in Excel/CSV templates with validation — typically days. Historical transactions stay in the old system for reference; you start the new ledger from an opening balance, which is exactly how auditors prefer a cutover. We run one parallel month-end before switching off the old close.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "Our staff aren't technical — they'll never learn a new system."</div><p>The register, KDS, and receiving screens are deliberately simpler than what they replace — phone-first layouts, big touch targets, Thai-first UI. Blind receiving is one number pad. The complexity lives in the back office where your accountants live, and they get a full Thai user manual and UAT scripts per module.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "We already customized our current setup — you won't fit our process."</div><p>Roles and permissions (82 of them), approval chains, posting rules, document numbering, and report packs are all configurable. What we deliberately do not permit is disabling financial controls — if a customization request amounts to allowing the same person to both order and approve, that is precisely the control gap the platform is designed to close. In practice, most customization requests prove to be workarounds for capabilities the platform already provides.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "What if you go out of business? You're smaller than the big ERP vendors."</div><p>A fair question, and one we are happy to address contractually: data export is a standard feature (full Excel/CSV export per entity), not a point of leverage. The customer owns their data at all times. It is also worth weighing the alternative risk: a large suite's implementation partner withdrawing mid-project is precisely the failure mode this platform replaces.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "Is our data safe on a multi-tenant cloud?"</div><p>Isolation is enforced by the database itself — row-level security — not just application code, and the API refuses to start if that isolation could be bypassed. Add SSO/SCIM, scoped API keys, signed webhooks, full audit trails, and PDPA-aware data handling. Hand them §14; it's written for their security reviewer.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "We only need POS right now."</div><p>Start there — POS + inventory is a valid landing package and it's priced that way. The difference from buying a point POS is that when you're ready for purchasing controls or a real close, it's a permission change, not a migration. You never re-platform.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  "Can it handle our franchise / multi-brand structure?"</div><p>That's the architecture, not an add-on: each company is an isolated tenant, the group runs a fleet console with cross-company reporting and per-company billing, and an org can share data across sister companies when — and only when — you configure it. Franchisors can provision a new franchisee company in minutes.</p></div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker violet"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /> <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /> </svg> </span> <span>Section 9 · Commercials</span></div>
+    <h2>Pricing &amp; packaging</h2>
+  </div>
+<div class="callout amber"><b>Source:</b> the plan catalog shipped with the platform's billing service
+(THB list prices; USD pricing is also published per plan). Confirm current promotions and Enterprise terms
+with sales operations before quoting.</div>
+<div style="font-weight:800;color:#0f172a;margin:6px 0 4px;font-size:10pt">Product lines (docs/53 — split-sell entry SKUs)</div>
+<table class="tbl">
+  <thead><tr><th>Line</th><th>Plan</th><th>Includes</th><th>List price (THB)</th></tr></thead>
+  <tbody>
+    <tr><td><b>POS</b> (per branch)</td><td><b>POS Lite</b></td><td>Counter register, receipts, shifts, item master · 3 seats/branch</td><td>฿590/branch/mo · ฿5,900/yr</td></tr>
+    <tr><td><b>POS</b> (per branch)</td><td><b>POS Pro</b></td><td>+ full inventory &amp; recipes, QR ordering, delivery channels, promotions · 10 seats/branch</td><td>฿1,190/branch/mo · ฿11,900/yr</td></tr>
+    <tr><td><b>ERP</b> (flat)</td><td><b>ERP Essentials</b></td><td>Finance &amp; GL, order management, inventory, e-Tax · 10 users, no register</td><td>฿1,900/mo · ฿19,000/yr</td></tr>
+    <tr><td><b>ERP</b> (flat)</td><td><b>ERP Growth</b></td><td>+ base procurement, planning, 3 branches · 25 users</td><td>฿3,900/mo · ฿39,000/yr</td></tr>
+  </tbody>
+</table>
+<div style="font-weight:800;color:#0f172a;margin:10px 0 4px;font-size:10pt">Complete bundles</div>
+<table class="tbl">
+  <thead><tr><th>Plan</th><th>For whom</th><th>Includes</th><th>List price (THB)</th></tr></thead>
+  <tbody>
+    <tr><td><b>Trial</b></td><td>Evaluation only</td><td>Core platform, customer portal, employee self-service · 2 users / 1 location</td><td>฿0</td></tr>
+    <tr><td><b>Solo</b> (single-owner)</td><td>Owner-operated single-location businesses</td><td>Full day-to-day operational ERP — finance, sales/POS, inventory, procurement, planning, CRM &amp; loyalty, AI assistant · 1 user / 1 location</td><td>฿690/mo · ฿6,900/yr</td></tr>
+    <tr><td><b>Standard</b></td><td>Small teams formalizing their finance</td><td>Finance &amp; GL, sales/POS, inventory, master data, customer portal, <b>base procurement</b> · 10 users / 2 locations</td><td>฿2,900/mo · ฿29,000/yr</td></tr>
+    <tr><td><b>Business</b></td><td>Chains adding branches and purchasing controls</td><td>Standard + procurement + multi-branch · 25 users / 5 locations</td><td>฿4,900/mo · ฿49,000/yr</td></tr>
+    <tr><td><b>Professional</b></td><td>Growing chains needing planning, loyalty, and AI</td><td>Business + planning (MRP/APS), CRM &amp; loyalty, AI assistant, advanced reports · 50 users / 10 locations</td><td>฿9,900/mo · ฿99,000/yr</td></tr>
+    <tr><td><b>Franchise</b></td><td>Multi-brand groups and franchisors</td><td>Professional + manufacturing, projects, every add-on suite · 100 users / 25 locations</td><td>฿14,900/mo · ฿149,000/yr</td></tr>
+    <tr><td><b>Enterprise</b></td><td>Groups, franchisors, pre-IPO organizations</td><td>Everything, plus manufacturing, projects, HR/HCM, and real estate · unlimited users and locations, custom controls</td><td>Custom (annual contract)</td></tr>
+  </tbody>
+</table>
+<div class="grid3">
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 7h6v6" /> <path d="m22 7-8.5 8.5-5-5L2 17" /> </svg>  Expansion path</div>Land with SME or Standard; move to Business as branches and purchasing controls arrive; Professional adds planning, loyalty, and AI; Enterprise unlocks the premium verticals and fleet consolidation. An upgrade is a plan change, not a migration.</div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /> <path d="M20 2v4" /> <path d="M22 4h-4" /> <circle cx="4" cy="20" r="2" /> </svg>  Usage-metered add-ons</div>AI assistant tokens carry a daily allowance per plan with per-1,000-token overage billing; e-Tax documents and POS transactions include monthly quotas with per-document and per-transaction overage — all metered per company, automatically.</div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m11 17 2 2a1 1 0 1 0 3-3" /> <path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4" /> <path d="m21 3 1 11h-2" /> <path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3" /> <path d="M3 4h8" /> </svg>  Trials</div>Every self-service signup begins as a 14-day trial on a real tenant — data created during the trial carries into the paid plan, and yearly billing is priced at ten months.</div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker blue"><span class="badge blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /> </svg> </span> <span>Section 10 · Discovery</span></div>
+    <h2>Question bank</h2>
+  </div>
+<div class="grid2">
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M15 21v-5a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v5" /> <path d="M17.774 10.31a1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.451 0 1.12 1.12 0 0 0-1.548 0 2.5 2.5 0 0 1-3.452 0 1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.77-3.248l2.889-4.184A2 2 0 0 1 7 2h10a2 2 0 0 1 1.653.873l2.895 4.192a2.5 2.5 0 0 1-3.774 3.244" /> <path d="M4 10.95V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8.05" /> </svg>  Operations</div><ul class="q">
+    <li>How many branches today — and in 24 months?</li>
+    <li>Walk me through an order from a delivery app: how many screens and re-keys before it's in your P&amp;L?</li>
+    <li>When did you last know your true stock variance per branch?</li>
+    <li>Who counts goods at receiving, and do they see what was ordered?</li>
+  </ul></div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="16" height="20" x="4" y="2" rx="2" /> <line x1="8" x2="16" y1="6" y2="6" /> <line x1="16" x2="16" y1="14" y2="18" /> <path d="M16 10h.01" /> <path d="M12 10h.01" /> <path d="M8 10h.01" /> <path d="M12 14h.01" /> <path d="M8 14h.01" /> <path d="M12 18h.01" /> <path d="M8 18h.01" /> </svg>  Finance</div><ul class="q">
+    <li>How many days is month-end close? Who touches which spreadsheets?</li>
+    <li>Could the same person raise and approve a PO or JE today? Would you know?</li>
+    <li>What did your last audit (or due-diligence) cost in fees and staff time?</li>
+    <li>How do you produce VAT and withholding documents today?</li>
+  </ul></div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 17v4" /> <path d="m14.305 7.53.923-.382" /> <path d="m15.228 4.852-.923-.383" /> <path d="m16.852 3.228-.383-.924" /> <path d="m16.852 8.772-.383.923" /> <path d="m19.148 3.228.383-.924" /> <path d="m19.53 9.696-.382-.924" /> <path d="m20.772 4.852.924-.383" /> <path d="m20.772 7.148.924.383" /> <path d="M22 13v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" /> <path d="M8 21h8" /> <circle cx="18" cy="6" r="3" /> </svg>  Systems</div><ul class="q">
+    <li>List every system a sale touches from order to ledger. Who maintains each hand-off?</li>
+    <li>What happens to system access when someone resigns?</li>
+    <li>Any security questionnaires from partners/banks you've struggled with?</li>
+  </ul></div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z" /> <path d="M5 21h14" /> </svg>  Strategy</div><ul class="q">
+    <li>Any plans for investment, franchising, or listing — on what horizon?</li>
+    <li>What would you do with branch-level P&amp;L by 9 a.m. daily?</li>
+    <li>Who else feels this pain — who signs, who vetoes?</li>
+  </ul></div>
+</div>
+<div class="callout blue"><b>Qualify out</b> when: single store with no funded growth; core need is multi-country
+consolidation for a conglomerate; or they want controls turned off "to keep things flexible".</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker emerald"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2 3h20" /> <path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3" /> <path d="m7 21 5-5 5 5" /> </svg> </span> <span>Section 11 · Demo</span></div>
+    <h2>The 15-minute golden-path demo</h2>
+  </div>
+<div class="callout emerald"><b>Setup:</b> demo company seeded with menu, recipes, stock, and one open PO.
+Two browser profiles logged in: a cashier and a finance manager — the permission difference IS the demo.</div>
+
+<div class="step"><div class="step-n">1</div>
+  <div><div class="step-t">The scan (2 min)</div>
+  <div class="step-row"><span class="p-label emerald">Show</span><p>Scan the table QR on your phone, order two items, watch them appear on the KDS by station.</p></div>
+  <div class="step-row"><span class="p-label blue">Say</span><p>"This QR code encapsulates the entire value proposition. Please note what a single scan sets in motion."</p></div></div>
+</div>
+
+<div class="step"><div class="step-n">2</div>
+  <div><div class="step-t">Front of house (3 min)</div>
+  <div class="step-row"><span class="p-label emerald">Show</span><p>Take a counter order on the register, split the bill, take one payment by QR payment. Bump the KDS tickets.</p></div>
+  <div class="step-row"><span class="p-label blue">Say</span><p>"Your cashiers get a faster register than the POS they know — split bills, tips, returns, all permission-gated."</p></div></div>
+</div>
+
+<div class="step"><div class="step-n">3</div>
+  <div><div class="step-t">The invisible accountant (3 min)</div>
+  <div class="step-row"><span class="p-label emerald">Show</span><p>Switch to the finance profile: open the GL entry created by the sale, then the stock movement it drove.</p></div>
+  <div class="step-row"><span class="p-label blue">Say</span><p>"Nobody did any accounting just now — and yet: here's the journal entry, VAT split out, and the ingredients depleted by recipe."</p></div></div>
+</div>
+
+<div class="step"><div class="step-n">4</div>
+  <div><div class="step-t">Controls enforced in practice (3 min)</div>
+  <div class="step-row"><span class="p-label emerald">Show</span><p>As the cashier, try to approve a journal entry / change a vendor bank account — show the refusals. As finance, receive the open PO blind and enter a short count; show the variance flag.</p></div>
+  <div class="step-row"><span class="p-label blue">Say</span><p>"This is what auditors mean by segregation of duties — the system enforces it, not a policy PDF."</p></div></div>
+</div>
+
+<div class="step"><div class="step-n">5</div>
+  <div><div class="step-t">The close & the fleet (3 min)</div>
+  <div class="step-row"><span class="p-label emerald">Show</span><p>Open Close Manager mid-period (some items green, some waiting). Then the multi-company console: branches, companies, live KPIs.</p></div>
+  <div class="step-row"><span class="p-label blue">Say</span><p>"Month-end is a checklist that completes itself when the evidence exists. And this is one company of your future fleet."</p></div></div>
+</div>
+
+<div class="step"><div class="step-n">6</div>
+  <div><div class="step-t">Close the meeting (1 min)</div>
+  <div class="step-row"><span class="p-label emerald">Show</span><p>Offer a trial company loaded with the customer's own master data via the import templates — and secure the working session before the meeting ends.</p></div>
+  <div class="step-row"><span class="p-label blue">Say</span><p>"You saw one scan become an audited ledger entry with stock, tax, and controls attached. That's the whole product. What would you want to see with your own menu in it?"</p></div></div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker amber"><span class="badge amber"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="16" height="20" x="4" y="2" rx="2" /> <line x1="8" x2="16" y1="6" y2="6" /> <line x1="16" x2="16" y1="14" y2="18" /> <path d="M16 10h.01" /> <path d="M12 10h.01" /> <path d="M8 10h.01" /> <path d="M12 14h.01" /> <path d="M8 14h.01" /> <path d="M12 18h.01" /> <path d="M8 18h.01" /> </svg> </span> <span>Section 12 · ROI</span></div>
+    <h2>Value levers &amp; example math</h2>
+  </div>
+<div class="callout amber"><b>Illustrative model</b> for a 20-branch chain, ฿2.5M revenue/branch/month,
+32% COGS. Replace with the customer's numbers in the discovery follow-up.</div>
+<table class="tbl">
+  <thead><tr><th>Lever</th><th>Mechanism</th><th>Conservative assumption</th><th>Annual value</th></tr></thead>
+  <tbody>
+    <tr><td>Shrinkage &amp; variance</td><td>Blind counts, recipe depletion, daily variance visibility</td><td>0.8% of COGS recovered</td><td><b>฿1.5M</b></td></tr>
+    <tr><td>Close &amp; audit effort</td><td>Real-time ledger, evidence-gated close</td><td>Finance saves 25 person-days/mo + ฿0.8M audit-prep fees</td><td><b>฿2.0M</b></td></tr>
+    <tr><td>Channel reconciliation</td><td>Native delivery settlement matching</td><td>1 manager-hour/branch/day recovered</td><td><b>฿1.8M</b></td></tr>
+    <tr><td>Procurement leakage</td><td>3-way match holds, vendor-bank maker-checker, budget-gated PRs</td><td>0.5% of purchase spend</td><td><b>฿1.0M</b></td></tr>
+    <tr><td>Retired software &amp; re-keying</td><td>One platform replaces 4–5 tools + manual imports</td><td>Current tools + 1 FTE</td><td><b>฿1.2M</b></td></tr>
+  </tbody>
+</table>
+<div class="roi-total">Total illustrative value: <b>~฿7.5M/year</b> — against a platform subscription typically
+a fraction of that. Lead with shrinkage and close effort; these are the two levers the CFO will have experienced directly.</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker sky"><span class="badge sky"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="6" cy="19" r="3" /> <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /> <circle cx="18" cy="5" r="3" /> </svg> </span> <span>Section 13 · Delivery</span></div>
+    <h2>Implementation journey</h2>
+  </div>
+<table class="tbl">
+  <thead><tr><th>Phase</th><th>Weeks</th><th>What happens</th><th>Customer effort</th></tr></thead>
+  <tbody>
+    <tr><td><b>1 · Foundation</b></td><td>1–2</td><td>Company provisioning, chart of accounts, roles &amp; permissions mapped to the org, master-data import (items, recipes, vendors, customers) via Excel/CSV templates</td><td>Data owners validate imports; 2 workshops</td></tr>
+    <tr><td><b>2 · Pilot branches</b></td><td>3–4</td><td>POS/KDS/QR live at 2–3 branches; receiving &amp; stock counts running; daily variance reviews</td><td>Branch managers + trainers on-site days</td></tr>
+    <tr><td><b>3 · Back office on</b></td><td>5–8</td><td>Procurement chains, AR/AP, payroll, opening balances posted; first in-system month-end run in parallel with the old close</td><td>Finance team runs parallel close</td></tr>
+    <tr><td><b>4 · Fleet rollout</b></td><td>8–12</td><td>Remaining branches in waves; delivery channels &amp; payment gateways switched over; old tools retired</td><td>Wave schedule owned jointly</td></tr>
+    <tr><td><b>5 · Controls hardening</b></td><td>12+</td><td>SoD review, access recertification cadence, close-checklist tuning, BI report packs, (Enterprise) SSO/SCIM</td><td>Quarterly control review, 2 hrs</td></tr>
+  </tbody>
+</table>
+<div class="grid3">
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 7v14" /> <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /> </svg>  Enablement included</div>Thai-language user manual per module, UAT scripts, and role-based training paths — the same artifacts our own QA runs.</div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="m4.93 4.93 4.24 4.24" /> <path d="m14.83 9.17 4.24-4.24" /> <path d="m14.83 14.83 4.24 4.24" /> <path d="m9.17 14.83-4.24 4.24" /> <circle cx="12" cy="12" r="4" /> </svg>  Support</div>In-app help, Thai/English support desk, and a named onboarding lead through phase 4.</div>
+  <div class="mini"><div class="mini-t"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528" /> </svg>  Success criteria</div>Agree them in the contract: first parallel close reconciled, variance reporting live, old POS retired by a named date.</div>
+</div>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker emerald"><span class="badge emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /> <path d="m9 12 2 2 4-4" /> </svg> </span> <span>Section 14 · Trust</span></div>
+    <h2>Security &amp; compliance fact sheet</h2>
+  </div>
+<p class="lead">Hand this section to the customer's security or audit reviewer as-is.</p>
+<table class="tbl">
+  <thead><tr><th>Domain</th><th>Control</th></tr></thead>
+  <tbody>
+    <tr><td>Tenant isolation</td><td>PostgreSQL row-level security on every tenant table; the API performs fail-closed boot checks and refuses to start if its database role could bypass isolation.</td></tr>
+    <tr><td>Access control</td><td>24 roles, 80 granular permissions, object-level authorization on every resource; 23 segregation-of-duty rules checked at grant time; periodic access recertification workflow.</td></tr>
+    <tr><td>Financial integrity</td><td>Maker-checker on journal entries, vendor bank-detail changes, tolerance changes, and privileged grants; idempotent posting (no duplicate ledger entries); immutable audit trail with actor, timestamp, and before/after values.</td></tr>
+    <tr><td>Identity</td><td>Enterprise SSO; SCIM provisioning for automated joiner/mover/leaver; MFA support; API keys are scoped and bounded to the issuing user's own permissions.</td></tr>
+    <tr><td>Integration security</td><td>Inbound webhooks HMAC-signed over the raw body with replay-window protection; outbound fetches pass an SSRF guard; per-request CSP nonce on the web app.</td></tr>
+    <tr><td>Data protection</td><td>PDPA-aware PII handling with redaction in logs; consent-aware audience egress controls; per-company data export available to the customer at any time.</td></tr>
+    <tr><td>Assurance process</td><td>Independent security reviews and penetration tests with tracked remediation; a documented Risk &amp; Control Matrix (187 controls) with automated control tests executed in CI on every change; golden-master regression on financial outputs.</td></tr>
+    <tr><td>Operations</td><td>Rate limiting at the edge and public API; environment-based secrets management; least-privilege database roles in production.</td></tr>
+  </tbody>
+</table>
+
+  <div class="sec-head page-break">
+    <div class="sec-kicker violet"><span class="badge violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg> </span> <span>Section 15 · Reference</span></div>
+    <h2>FAQ</h2>
+  </div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  Does it work offline?</div><p>Front-of-house screens tolerate brief connectivity drops; the system of record is cloud-based. For sites with unreliable links we recommend a backup LTE route — raise persistent-offline requirements to solutions engineering during scoping.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  Which languages are supported?</div><p>Thai and English, switchable per user, across the full product (~11,600 translated strings). The diner QR flow renders in both.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  Can we keep our receipt printers / POS hardware?</div><p>The register runs in a browser on standard hardware; validate specific printer and drawer models during the pilot phase — bring the model list to scoping.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  How are updates delivered?</div><p>Continuously, SaaS-style. Every change passes automated control tests, financial golden-master comparison, and migration gates before release — customers don't schedule upgrade projects.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  Can auditors get their own access?</div><p>Yes — read-only, permission-scoped roles are standard; the audit trail and control evidence are first-class screens, not database extracts.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  What's the data export story if we leave?</div><p>Full structured export (Excel/CSV) of master and transactional data per company, available to customer admins at any time. No exit fees for your own data.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  Is there an API for our own developers?</div><p>Yes — a scoped public API with per-key permissions. Keys can never exceed the permissions of the person who issued them.</p></div>
+<div class="obj"><div class="obj-q"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /> </svg>  Which organizations are not a good fit?</div><p>Single independent restaurants with no growth plans, and multinational groups requiring multi-GAAP statutory consolidation across many countries — we prefer to state this clearly at the outset rather than after a pilot.</p></div>
+<div class="cover back page-break">
+  <div class="cover-brand"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /> </svg>  Invisible ERP</div>
+  <h1 class="back-h">One scan.<br/>One ledger.<br/><span class="emerald">Zero leaks.</span></h1>
+  <div class="cover-chips">
+    <span class="chip blue"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M2 3h20" /> <path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3" /> <path d="m7 21 5-5 5 5" /> </svg>  Book the 15-minute demo</span>
+    <span class="chip emerald"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10.5 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v6" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="m14 20 2 2 4-4" /> </svg>  Request the compliance pack</span>
+    <span class="chip violet"><!-- @license lucide-static v1.25.0 - ISC --> <svg class="ic " xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" /> <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" /> <path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" /> <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" /> </svg>  Start a trial company</span>
+  </div>
+  <div class="cover-foot">Internal sales enablement · v1.0 · Confidential — do not distribute<br/>
+  Companion assets: investor pitch deck (16 pages) · security fact sheet (§14, standalone-ready) · user manual &amp; UAT scripts</div>
+</div>
+</body></html>

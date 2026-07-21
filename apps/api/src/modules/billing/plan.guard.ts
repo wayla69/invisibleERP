@@ -8,6 +8,7 @@ import { bizYmdDash } from '../../common/bizdate';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { PLAN_FEATURE_KEY } from './plan-feature.decorator';
 import { REQUIRES_SUITE_KEY } from './requires-suite.decorator';
+import { logger as pino } from '../../observability/logger';
 
 // ── Rollout modes (Wave 1 · 1.2) ────────────────────────────────────────────────────────────────
 // Suite-based plan gating is DEFAULT-OFF so it never breaks an existing tenant. Three states:
@@ -132,6 +133,16 @@ export class PlanGuard implements CanActivate {
       return true;
     }
 
+    // Structured telemetry context for decide() — makes a shadow/enforce log line self-contained for the
+    // rollout triage (docs/ops/entitlements-rollout-runbook.md): no manual tenant→plan join needed.
+    const meta = {
+      plan_code: row?.planCode ?? null,
+      sub_status: row?.status ?? null,
+      method: String(req.method ?? ''),
+      url: String(req.url ?? ''),
+      username: user.username ?? null,
+    };
+
     // Trialing within window → grant everything (all suites). Expired → block.
     if (row?.status === 'Trialing') {
       const expired = row.trialEndsAt && Date.now() > new Date(row.trialEndsAt).getTime();
@@ -140,14 +151,14 @@ export class PlanGuard implements CanActivate {
         code: 'TRIAL_EXPIRED',
         message: 'Your free trial has ended. Please upgrade your plan to continue.',
         messageTh: 'ช่วงทดลองใช้งานสิ้นสุดแล้ว กรุณาอัปเกรดแพ็กเกจเพื่อใช้งานต่อ',
-      }), user.tenantId, 'TRIAL_EXPIRED', required);
+      }), user.tenantId, 'TRIAL_EXPIRED', required, meta);
     }
     if (row?.status === 'Canceled') {
       return this.decide(shadow, enforce, () => new ForbiddenException({
         code: 'SUBSCRIPTION_INACTIVE',
         message: 'Subscription is canceled. Please update your billing to restore access.',
         messageTh: 'การสมัครสมาชิกถูกยกเลิก กรุณาตรวจสอบการชำระเงิน',
-      }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required);
+      }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required, meta);
     }
     if (row?.status === 'PastDue') {
       // 1.4 — grace window: within it, reads pass (fall through to suite gating); mutations are blocked;
@@ -158,14 +169,14 @@ export class PlanGuard implements CanActivate {
           code: 'SUBSCRIPTION_PASTDUE_READONLY',
           message: 'Payment is past due — your account is read-only during the grace period. Please update your billing.',
           messageTh: 'ค้างชำระเงิน — บัญชีอยู่ในโหมดอ่านอย่างเดียวช่วงผ่อนผัน กรุณาชำระเงิน',
-        }), user.tenantId, 'SUBSCRIPTION_PASTDUE_READONLY', required);
+        }), user.tenantId, 'SUBSCRIPTION_PASTDUE_READONLY', required, meta);
       }
       if (grace === 'block') {
         return this.decide(shadow, enforce, () => new ForbiddenException({
           code: 'SUBSCRIPTION_INACTIVE',
           message: 'Subscription is past due beyond the grace period. Please update your billing to restore access.',
           messageTh: 'การสมัครสมาชิกค้างชำระเกินระยะผ่อนผัน กรุณาชำระเงิน',
-        }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required);
+        }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required, meta);
       }
       // grace === 'allow' → within grace + read: fall through to normal suite gating.
     }
@@ -182,7 +193,7 @@ export class PlanGuard implements CanActivate {
         code: 'SUITE_NOT_ENTITLED',
         message: `Your current plan does not include this module (${reqSuite}). Please upgrade your plan.`,
         messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ',
-      }), user.tenantId, 'SUITE_NOT_ENTITLED', [reqSuite as unknown as Permission]);
+      }), user.tenantId, 'SUITE_NOT_ENTITLED', [reqSuite as unknown as Permission], meta);
     }
 
     // Suite gate: block only when NONE of the route's required tokens is entitled (mirrors ModuleEnabledGuard
@@ -194,7 +205,7 @@ export class PlanGuard implements CanActivate {
           code: 'SUITE_NOT_ENTITLED',
           message: `Your current plan does not include this module (${required.join(', ')}). Please upgrade your plan.`,
           messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ',
-        }), user.tenantId, 'SUITE_NOT_ENTITLED', required);
+        }), user.tenantId, 'SUITE_NOT_ENTITLED', required, meta);
       }
     }
 
@@ -204,7 +215,7 @@ export class PlanGuard implements CanActivate {
         code: 'PLAN_FEATURE_REQUIRED',
         message: `Your current plan does not include '${feature}'. Please upgrade to access this feature.`,
         messageTh: `แพ็กเกจปัจจุบันของคุณไม่รองรับฟีเจอร์ '${feature}' กรุณาอัปเกรดแพ็กเกจ`,
-      }), user.tenantId, 'PLAN_FEATURE_REQUIRED', required);
+      }), user.tenantId, 'PLAN_FEATURE_REQUIRED', required, meta);
     }
 
     return true;
@@ -241,18 +252,30 @@ export class PlanGuard implements CanActivate {
     }
   }
 
-  // In ENFORCE mode: throw the block. In SHADOW mode: log the would-block and allow. Always observable —
-  // both outcomes also land in the entitlement_observations ledger (B1) so gods can review who would
-  // break before widening the enforcement cohort.
-  private decide(shadow: boolean, enforce: boolean, mkErr: () => ForbiddenException, tenantId: number, code: string, required: Permission[]): boolean {
+  // In ENFORCE mode: throw the block. In SHADOW mode: log the would-block and allow. Always observable,
+  // three ways per decision: the legacy console line (docs/36 §5 references its literal text), a
+  // structured pino JSON line (event entitlement_shadow_block / entitlement_block) carrying plan_code,
+  // status, method, url, and username so the rollout triage (docs/ops/entitlements-rollout-runbook.md)
+  // can aggregate without joining tenant→plan by hand, and the entitlement_observations ledger (B1) so
+  // gods can review who would break before widening the enforcement cohort. Deliberately NOT alert:"ops" —
+  // a shadow denial is expected traffic during rollout and must never page; alert routing is a
+  // log-pipeline decision.
+  private decide(
+    shadow: boolean, enforce: boolean, mkErr: () => ForbiddenException, tenantId: number, code: string,
+    required: Permission[],
+    meta?: { plan_code: string | null; sub_status: string | null; method: string; url: string; username: string | null },
+  ): boolean {
+    const fields = { tenant_id: tenantId, code, tokens: required, ...(meta ?? {}) };
     if (enforce) {
       this.record('enforce', tenantId, code, required);
       this.logger.warn(`entitlement block ${code} tenant=${tenantId} route-perms=[${required.join(',')}]`);
+      pino.warn({ event: 'entitlement_block', ...fields }, `entitlement block ${code}`);
       throw mkErr();
     }
     // shadow
     this.record('shadow', tenantId, code, required);
     this.logger.log(`[shadow] WOULD block ${code} tenant=${tenantId} route-perms=[${required.join(',')}]`);
+    pino.info({ event: 'entitlement_shadow_block', ...fields }, `[shadow] would block ${code}`);
     return true;
   }
 

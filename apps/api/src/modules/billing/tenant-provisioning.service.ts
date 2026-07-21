@@ -381,6 +381,8 @@ export class TenantProvisioningService {
 
       await tx.insert(subscriptions).values({
         tenantId: Number(t.id), planCode, status: 'Trialing', trialEndsAt,
+        // 0456 — snapshot the plan's price at subscribe time; future PLAN_SEED repricings never touch it
+        grandfatheredPrice: plan.priceMonthly, grandfatheredAnnualPrice: plan.priceYearly,
         ...(opts?.interval ? { billingInterval: opts.interval } : {}),
         ...(opts?.addons?.length ? { addons: opts.addons.filter(isAddonKey) } : {}),
       });

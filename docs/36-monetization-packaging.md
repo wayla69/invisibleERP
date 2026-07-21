@@ -34,7 +34,8 @@ PLAN (free / starter / business / pro / enterprise)
 |-------|------------------|
 | **core** (always-on) | users, dashboard, approvals, mobile, images, track |
 | **finance** | ar, creditors, exec, treasury *(TRE-01..05 depth; `treasury_approve` is a sub-permission)* |
-| **sales** | pos, order_mgt, claim_mgt, crm, delivery, returns, pricelist, promos |
+| **sales** | order_mgt, claim_mgt, crm *(docs/53 C1 — order-to-cash remainder after the POS split)* |
+| **pos_frontoffice** | pos, delivery, returns, pricelist, promos *(docs/53 C1 — the register/till surface, sold per branch on the POS line; bundles list BOTH suites)* |
 | **inventory** | warehouse, lots, locations |
 | **procurement** | procurement, pr_raise |
 | **masterdata** | masterdata, bom_master |
@@ -53,12 +54,33 @@ PLAN (free / starter / business / pro / enterprise)
 
 | Plan (code) | Commercial name | THB/mo | THB/yr (2 mo free) | USD/mo · USD/yr | Seats | Suites |
 |-------------|-----------------|--------|--------------------|------------------|-------|--------|
-| `free` | Free / trial-limited | 0 | — | — | 2 | core, portal, selfservice |
-| `sme` | **SME (เจ้าของคนเดียว)** | 690 | 6,900 | $20 · $200 | 1 | core, finance, sales, inventory, masterdata, procurement, planning, crm_loyalty, ai, portal, selfservice |
-| `starter` | **Standard** | 2,900 | 29,000 | $85 · $850 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
+| `free` | Trial (evaluation only) | 0 | — | — | 2 | core, portal, selfservice |
+| `sme` | **Solo (เจ้าของคนเดียว)** | 690 | 6,900 | $20 · $200 | 1 | core, finance, sales, pos_frontoffice, inventory, masterdata, procurement, planning, crm_loyalty, ai, portal, selfservice |
+| `starter` | **Standard** | 2,900 | 29,000 | $85 · $850 | 10 | core, finance, sales, pos_frontoffice, inventory, masterdata, portal, selfservice, **procurement** *(docs/53 Q1 — base P2P from Standard up; RFQ/3-way stays scm_advanced)* |
 | `business` | **Business** | 4,900 | 49,000 | $140 · $1,400 | 25 | + procurement, multibranch |
 | `pro` | **Professional** | 9,900 | 99,000 | $285 · $2,850 | 50 | + planning, crm_loyalty, ai |
+| `franchise` | **Franchise** | 14,900 | 149,000 | $425 · $4,250 | 100 | + manufacturing, projects, all add-on suites (0451) |
 | `enterprise` | **Enterprise** | quote (custom) | quote | quote | ∞ | all suites (custom deals tune via `features.suites`) |
+
+### 3b. Product lines (docs/53 C1, SHIPPED 2026-07-21) — split-sell SKUs beside the Complete bundles
+
+| Line | Plan (code) | THB/mo | THB/yr | Seats | Suites |
+|---|---|---|---|---|---|
+| POS (per **branch**) | `pos_lite` **POS Lite** | 590/branch | 5,900/branch | 3/branch | core, pos_frontoffice, masterdata |
+| POS (per **branch**) | `pos_pro` **POS Pro** | 1,190/branch | 11,900/branch | 10/branch | + inventory, portal (QR ordering) |
+| ERP (flat) | `erp_essentials` **ERP Essentials** | 1,900 | 19,000 | 10 | core, finance, sales, inventory, masterdata, selfservice |
+| ERP (flat) | `erp_growth` **ERP Growth** | 3,900 | 39,000 | 25 | + procurement, planning, multibranch (3 locations) |
+
+POS-line plans carry `features.per_branch: true`: checkout multiplies the unit price by the purchased
+branch quantity (`subscriptions.branches`, migration 0457; `PLAN_NOT_PER_BRANCH` guards a quantity on a
+flat plan) and branch-scaled quotas (`pos_txns_monthly`) multiply the same way. The `/plans` configurator
+gained a product-line picker (Complete packs · POS only · ERP only) with a branch stepper. Upgrading a
+line SKU to a bundle is an ordinary plan change on the same tenant — an entitlement flip, never a
+migration. Positioning + market evidence: docs/53 + docs/ops/pricing-market-study-2026-07.md. ToE:
+`cutover:plan-gating` (line-SKU boundaries: pos_lite blocks exec/procurement, erp_essentials blocks pos)
++ `cutover:saas-metrics` (0457 per-branch checkout block). Locations caps remain advisory (display +
+billing quantity) exactly as on the pre-existing plans — a hard branch-creation check is a separate
+hardening item.
 
 **SME single-operator edition (docs/49):** the `sme` plan is the DEFAULT a `control_profile='sme'` company
 provisions onto (`provisionTenant` picks `sme` when the edition is SME and no explicit `plan_code` is passed;
@@ -91,6 +113,16 @@ Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserte
 `seedPlans()` at startup — which also **backfills `features.suites`** onto every plan row (the grandfather
 step). Codes are unchanged (`starter`/`pro`) so existing `subscriptions.plan_code` FKs stay valid; only the
 display names/prices changed. Prices are the recommended market-entry defaults — tune after market testing.
+
+**Price grandfathering (0456, docs/53 Q7 — code-enforced):** every subscription snapshots its plan's
+price at subscribe time (`subscriptions.grandfathered_price` / `grandfathered_annual_price`, backfilled
+for pre-0456 rows at migration time). Charge paths — same-plan checkout, `getSubscription`
+(`price_monthly` = effective, `list_price_monthly` beside it), the proration credit side, and SaaS-metrics
+MRR — read `COALESCE(snapshot, plans.price_*)`, so a later `PLAN_SEED` repricing **never re-prices an
+existing subscription**. The lock ends only on a **plan change** (which re-snapshots at the new plan's
+current price) or when a platform admin clears the snapshot at a contractual renewal
+(`grandfathered_until` reserved for future renewal automation; NULL = indefinite). ToE:
+`cutover:saas-metrics` (0456 block).
 
 ## 4. Premium/add-on suites — the `@RequiresSuite` mechanism (1.1b, RESOLVED)
 
@@ -150,7 +182,12 @@ insurance, not upsell garnish:
   bypasses; infra error fails **open**, successfully-read missing/unknown plan fails **closed** to `ALWAYS_ON`
   (via `resolveEntitledSuites`). Blocking mirrors `ModuleEnabledGuard` (block only when NONE of the route's
   tokens is entitled). Decision logic verified across 20 plan/route combos.
-- **1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
+- **Rollout procedure (ops):** [`ops/entitlements-rollout-runbook.md`](ops/entitlements-rollout-runbook.md)
+— shadow observation, triage of the structured telemetry (`entitlement_shadow_block` /
+`entitlement_block` pino events, added 2026-07-21 beside the legacy console lines), per-tenant
+remediation levers, flip, and rollback.
+
+**1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
   `features.suites`) → only then enable ENFORCE. Do NOT enable ENFORCE before the backfill.
 - **1.8 (pending):** cutover harness `tools/cutover/src/billing.ts` — plan→suite→403 matrix + god-bypass +
   kill-switch modes end-to-end (this is where the UAT negative case is codified).

@@ -75,6 +75,21 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'price.f_sso': { th: 'SSO องค์กร (SAML / OIDC)', en: 'Enterprise SSO (SAML / OIDC)' },
   'price.f_sod': { th: 'กฎแบ่งแยกหน้าที่ (SoD) 23 ข้อ', en: '23 Segregation-of-Duty (SoD) Rules' },
   'price.f_etax': { th: 'เชื่อมต่อ e-Tax กรมสรรพากร', en: 'National e-Tax Integration' },
+  // docs/53 C1 — product lines (POS only / ERP only) beside the Complete packs
+  'price.line_label': { th: 'เลือกรูปแบบผลิตภัณฑ์', en: 'Choose a product line' },
+  'price.line_packs': { th: 'แพ็กรวม', en: 'Complete packs' },
+  'price.line_pos': { th: 'POS อย่างเดียว', en: 'POS only' },
+  'price.line_erp': { th: 'ERP อย่างเดียว', en: 'ERP only' },
+  'price.line_pos_h': { th: 'ระบบขายหน้าร้าน (คิดราคาต่อสาขา)', en: 'Point of sale (priced per branch)' },
+  'price.line_erp_h': { th: 'ระบบหลังบ้าน ERP (ไม่มีหน้าร้าน)', en: 'Back-office ERP (no register)' },
+  'price.aud_pos_lite': { th: 'เคาน์เตอร์ & คีออสก์', en: 'Counter & kiosk' },
+  'price.aud_pos_pro': { th: 'ร้านบริการเต็มรูปแบบ', en: 'Full-service store' },
+  'price.aud_erp_essentials': { th: 'หลังบ้านครบ ไม่ใช้หน้าร้าน', en: 'Back office, no register' },
+  'price.aud_erp_growth': { th: 'หลายสาขา + จัดซื้อ + วางแผน', en: 'Multi-branch + procurement + planning' },
+  'price.f_orders': { th: 'จัดการออเดอร์ & ลูกหนี้', en: 'Order Management & AR' },
+  'price.f_proc_base': { th: 'จัดซื้อพื้นฐาน (PR→PO→รับของนับไม่เห็นยอด)', en: 'Base Procurement (PR→PO→blind-count GRN)' },
+  'price.per_branch_month': { th: '/สาขา/เดือน', en: '/branch/mo' },
+  'price.branches': { th: 'จำนวนสาขา', en: 'Branches' },
 
   // ── Add-ons ───────────────────────────────────────────────────────────────
   'price.a_scm': { th: 'ซัพพลายเชน & เส้นทางอนุมัติจัดซื้อขั้นสูง', en: 'Advanced Supply Chain & Procurement Routing' },
