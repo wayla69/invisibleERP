@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CircleDollarSign, Package, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
+import { CalendarClock, CircleDollarSign, Package, Puzzle, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
+// A3 — the add-on vocabulary from the shared entitlement maps (same source the API prices/gates by).
+import { ADDON_GRANTS, ADDON_KEYS, ADDONS } from '@ierp/shared';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, thaiDate, num } from '@/lib/format';
@@ -20,7 +22,7 @@ import { statusVariant } from '@/components/ui';
 type Plan = { code: string; name: string; price_monthly: number; price_yearly?: number | null; features?: any };
 
 export default function BillingPage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const qc = useQueryClient();
   const sub = useQuery<any>({ queryKey: ['subscription'], queryFn: () => api('/api/billing/subscription') });
   const plans = useQuery<{ plans: Plan[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
@@ -31,6 +33,17 @@ export default function BillingPage() {
   const aiRuns = useQuery<any>({ queryKey: ['ai-overage-runs'], queryFn: () => api('/api/billing/ai-overage/runs') });
   const [msg, setMsg] = useState('');
   const [billInterval, setBillInterval] = useState<'monthly' | 'annual'>('monthly'); // 1.7 — annual billing toggle
+  // A3 — self-serve add-on selection, seeded from the subscription row.
+  const [addonSel, setAddonSel] = useState<string[]>([]);
+  useEffect(() => { setAddonSel(Array.isArray(sub.data?.addons) ? sub.data.addons : []); }, [sub.data]);
+  const saveAddons = useMutation({
+    mutationFn: () => api<{ addons: string[]; billing: { added: number; removed: number; mock: boolean } }>('/api/billing/addons', { method: 'POST', body: JSON.stringify({ addons: addonSel }) }),
+    onSuccess: (d) => {
+      setMsg(d.billing?.mock ? t('st.bill.addons_saved') : t('st.bill.addons_saved_billed', { added: d.billing.added, removed: d.billing.removed }));
+      qc.invalidateQueries({ queryKey: ['subscription'] });
+    },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
 
   const change = useMutation({
     mutationFn: (args: { plan_code: string; interval: 'monthly' | 'annual' }) => api('/api/billing/change-plan', { method: 'POST', body: JSON.stringify(args) }),
@@ -159,6 +172,44 @@ export default function BillingPage() {
                 { key: 'status', label: t('fin.col_status'), render: (r) => <Badge variant={r.status === 'invoiced' ? 'success' : 'secondary'}>{r.status}</Badge> },
               ]}
             />
+          </Card>
+        )}
+
+        {/* A3 — à-la-carte add-ons: toggle + save; entitlement applies immediately, a live Stripe
+            subscription gets its line items reconciled (prorated) server-side. */}
+        {sub.data && (
+          <Card className="gap-3 p-5">
+            <div className="flex items-center gap-2">
+              <Puzzle className="size-4 text-primary" />
+              <strong className="text-sm">{t('st.bill.addons_title')}</strong>
+            </div>
+            <p className="text-xs text-muted-foreground">{t('st.bill.addons_sub')}</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ADDON_KEYS.map((k) => {
+                const planSuites: string[] = Array.isArray(sub.data?.features?.suites) ? sub.data.features.suites : [];
+                const inPlan = ADDON_GRANTS[k].every((sv) => planSuites.includes(sv));
+                const checked = addonSel.includes(k);
+                return (
+                  <label key={k} className={cn('flex items-center justify-between gap-2 rounded-lg border p-3 text-sm', checked && !inPlan && 'border-primary/50')}>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={inPlan || checked}
+                        disabled={inPlan}
+                        onChange={(e) => setAddonSel(e.target.checked ? [...addonSel, k] : addonSel.filter((x) => x !== k))}
+                      />
+                      <span className="truncate">{lang === 'en' ? ADDONS[k].labels.en : ADDONS[k].labels.th}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {inPlan ? t('st.bill.addon_in_plan') : `${baht(ADDONS[k].priceMonthly)}${t('st.bill.per_month_short')}`}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <Button size="sm" variant="outline" className="w-fit" disabled={saveAddons.isPending} onClick={() => saveAddons.mutate()}>
+              {t('st.bill.addons_save')}
+            </Button>
           </Card>
         )}
 

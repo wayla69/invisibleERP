@@ -912,4 +912,13 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // mdio.* — shared bulk import/export section heading embedded on list screens (assets, menu, suppliers)
   // that reuse the master-data registry engine via <MasterIo>.
   'mdio.section_title': { th: 'นำเข้า/ส่งออกแบบกลุ่ม (Excel/CSV)', en: 'Bulk import / export (Excel / CSV)' },
+
+  // ── A3: self-serve add-on purchase on /billing ────────────────────────────
+  'st.bill.addons_title': { th: 'โมดูลเสริม (ซื้อเพิ่มรายโมดูล)', en: 'Add-on modules (à la carte)' },
+  'st.bill.addons_sub': { th: 'เปิด/ปิดแล้วกดบันทึก — สิทธิ์มีผลทันที ค่าบริการคิดตามรอบบิลของแพ็กเกจ (คิดตามส่วนของรอบเมื่อเพิ่มกลางรอบ)', en: 'Toggle and save — entitlement applies immediately; billing follows your plan cycle (prorated mid-cycle).' },
+  'st.bill.addon_in_plan': { th: 'รวมในแพ็กเกจแล้ว', en: 'Included in your plan' },
+  'st.bill.addons_save': { th: 'บันทึกโมดูลเสริม', en: 'Save add-ons' },
+  'st.bill.addons_saved': { th: '✅ บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: '✅ Add-ons saved — entitlements apply immediately' },
+  'st.bill.addons_saved_billed': { th: '✅ บันทึกแล้ว — ปรับรายการเรียกเก็บในรอบบิลให้อัตโนมัติ (+{added}/−{removed})', en: '✅ Saved — subscription line items reconciled (+{added}/−{removed})' },
+  'st.bill.per_month_short': { th: '/เดือน', en: '/mo' },
 };
