@@ -7,7 +7,7 @@
 | Process ID | PN-29-ECO |
 | Process owner | `<<Platform Admin / Partnerships>>` |
 | Approver | `<<CFO / Head of IT>>` |
-| Version | **0.1 DRAFT · 2026-06-24** |
+| Version | **0.4 DRAFT · 2026-07-21** |
 | Review cadence | Annual + on significant change |
 | Related RCM controls | Reinforces ITGC-AC-07 (API-key issuance/auth). No new RCM control. |
 | Related narratives | `27-platform-customization.md` (public API #11, webhooks #8), roadmap `13-pillars-cde-architecture-spec.md` §4 |
@@ -57,8 +57,24 @@ Phase 24)**. **Planned (see roadmap `13` §4):** D3 marketplace **deferred** to 
    separate **Marketing Intelligence Platform** (a Python data-science app — advanced MMM / sentiment-weighted
    RFM / TOWS — that reads ERP data over this API into its own warehouse; ERP posts **nothing** and stores
    nothing new). *Verified by the `ext` harness (+8: scope-required `403 INSUFFICIENT_SCOPE`, per-day revenue
-   with Voided excluded, RFM base facts, and HQ↔cf2 tenant isolation on both feeds). Read-only this phase; a
-   future `analytics:write` push-back is a noted follow-up.*
+   with Voided excluded, RFM base facts, and HQ↔cf2 tenant isolation on both feeds). Read-only pull; the
+   result **push-back** is §4.4.*
+4. **Analytics push-back + `/marketing-intel` (Marketing Intelligence results in the ERP).** The reverse
+   direction of §4.3: the Marketing Intelligence Platform computes advanced MMM / sentiment-weighted RFM /
+   TOWS in its own warehouse and **pushes the results back into the ERP** so the ERP **owns** what it
+   displays (no cross-database join; the page works even when the external app is offline). New scope
+   **`analytics:write`** + one endpoint **`POST /api/v1/analytics/snapshots`** (`@Scopes('analytics:write')`,
+   body `{ snapshots: [{ kind: mmm\|rfm\|tows, payload, model_run_ref? }] }`) — an **idempotent upsert** of the
+   latest snapshot per `(tenant, kind)` into the tenant-scoped `mi_analytics_snapshots` (migration `0460`,
+   canonical org-RLS loop + leading `(tenant_id, kind)` index). A new bounded-context module
+   `modules/marketing-intel` owns the table (the public-API controller delegates the write; the internal
+   read `GET /api/marketing-intel/summary` is JWT + `marketing`/`exec`-gated). The **`/marketing-intel`** web
+   page (a marketing/exec nav entry) renders the stored MMM channel-ROI, RFM segments and TOWS from the
+   ERP's own store, with a "not yet pushed" empty state. Read model only — **no GL posting**. The
+   `analytics:write` scope is also selectable in the Settings → API-keys minting UI. *Verified by the `ext`
+   harness (+6: `analytics:write` required — a catalog **and** an `analytics:read` key are both `403`;
+   MMM/RFM/TOWS push `200`; tenant-scoped storage; idempotent re-push (one row per kind, latest wins); the
+   internal summary read).*
 
 ## 5. Control matrix
 
@@ -67,6 +83,7 @@ Phase 24)**. **Planned (see roadmap `13` §4):** D3 marketplace **deferred** to 
 | API maturity / portal | Over-broad or mis-tiered machine access | Keys + tiers RLS-scoped to the tenant; tier from an allowlist; reuses the v1 scope-gate + per-key rate limit | Preventive | ITGC-AC-07 | `ext` developer checks (portal, set-tier, bad-tier, RLS) |
 | Connector framework | Cross-tenant data bleed; duplicate imports; premature posting | Stub-default transport (CI-safe); idempotent dedupe via `external_id_map` (per-tenant RLS); imported records staged for review, never auto-posted; live creds would be encrypted at rest | Preventive | (operational) | `ext` connector checks (idempotent resync, per-tenant RLS) |
 | Analytics read feeds (`/api/v1/sales/daily`, `/customers/transactions`) | Over-broad machine access to sales/customer data; cross-tenant leak | Dedicated `analytics:read` scope (least privilege — not covered by catalog/orders/invoices scopes); RLS tenant-scoped to the calling key; per-key rate-limited; read-only (no write-back this phase); within-tenant egress only (a tenant's own key reads its own data) | Preventive | ITGC-AC-07 | `ext` analytics checks (scope-required 403, per-day revenue, RFM base facts, HQ↔cf2 isolation on both feeds) |
+| Analytics push-back (`POST /api/v1/analytics/snapshots`, `/marketing-intel`) | A machine key with only read access mutating ERP state; cross-tenant write/leak of pushed results; a runaway push ballooning a row | Dedicated `analytics:write` scope — the `read` alias does **not** satisfy `:write`, so a read key is `403`; the write carries the key's own `tenant_id` (RLS `WITH CHECK`); idempotent upsert (one row per `(tenant, kind)`) so a re-push cannot accumulate; body is a bounded snapshot set; a read model only (no GL) | Preventive | ITGC-AC-07 | `ext` push-back checks (write-scope-required 403 for catalog **and** read keys, 3-kind push, tenant-scoped storage, idempotent re-push, internal summary read) |
 
 ## 6. Exception & error handling
 
@@ -81,3 +98,4 @@ RLS-filtered.
 | 0.1 DRAFT | 2026-06-24 | Platform | Initial ecosystem narrative. Delivered **Platform Phase 23 — API maturity / developer portal (D1)**: a portal over the shipped public API v1 (keys + rate tiers, scopes, endpoints, OpenAPI); `api_keys.tier` (migration `0096`). RLS-scoped, no GL; `ext` +4 checks. D2 connector framework planned; D3 marketplace deferred — see roadmap `13` §4. |
 | 0.2 DRAFT | 2026-06-24 | Platform | Added **Platform Phase 24 — connector framework (D2)**: register + sync inbound connectors (LINE / Shopee / bank-CSV) over a canonical model with a stub-default transport, idempotent `external_id_map` dedupe (per-tenant), and a per-run log; imported records staged for review, never auto-posted. Tables `connectors`/`connector_syncs`/`external_id_map` (migration `0097`). RLS-scoped, no GL; new §4.2, control-matrix row, `BAD_CONNECTOR`/`CONNECTOR_NOT_FOUND`; `ext` +6 checks. D3 marketplace deferred. |
 | 0.3 DRAFT | 2026-07-14 | Platform | Added **analytics read feeds** to the public API v1 for the separate **Marketing Intelligence Platform** (a Python data-science app: advanced MMM / sentiment-weighted RFM / TOWS that reads ERP data by API into its own warehouse — no shared DB, ERP posts nothing). New scope **`analytics:read`** + two endpoints: `GET /api/v1/sales/daily` (per-day POS revenue, Voided excluded, `group_by=day\|product` — the MMM target) and `GET /api/v1/customers/transactions` (per-customer RFM base facts from `customer_profiles ⋈ pos_members`). Both RLS tenant-scoped + per-key rate-limited via the existing `PublicApiGuard`; wired into `developer.service.ts` scope/endpoint catalog + `openapi.ts` (HTML reference auto-derives). Read-only this phase (a future `analytics:write` push-back deferred). New §4.3, control-matrix row. `ext` +8 checks (scope-required 403, per-day revenue, RFM facts, HQ↔cf2 isolation). No new migration/RCM control (reuses ITGC-AC-07). |
+| 0.4 DRAFT | 2026-07-21 | Platform | Added the **analytics push-back** (the reverse of 0.3, docs/48 phase 3): the Marketing Intelligence Platform now **pushes its computed MMM / RFM / TOWS results back into the ERP** so the ERP owns what it renders. New scope **`analytics:write`** + endpoint **`POST /api/v1/analytics/snapshots`** (idempotent upsert per `(tenant, kind)` into `mi_analytics_snapshots`, migration **`0460`**, canonical org-RLS loop + leading index); new bounded-context module **`modules/marketing-intel`** (owns the table + the JWT `marketing`/`exec` internal read `GET /api/marketing-intel/summary`); the **`/marketing-intel`** web page (marketing/exec nav) renders it with a not-yet-pushed empty state; `analytics:write` added to the developer catalog + OpenAPI + the Settings API-key minting chips. Read model only, no GL. New §4.4, control-matrix row. `ext` +6 checks (write-scope required — read key `403`, 3-kind push, tenant-scoped storage, idempotent re-push, summary read). No new RCM control (reuses ITGC-AC-07). |

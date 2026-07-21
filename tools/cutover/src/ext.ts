@@ -887,6 +887,40 @@ async function main() {
   const hqRows = hqTxn.json.data ?? [];
   ok('Public API: /customers/transactions — HQ key sees only its own member', hqRows.some((r: any) => r.customer_no === 'M-HQA') && !hqRows.some((r: any) => r.customer_no === 'M-CF2A'), `hq=${hqRows.map((r: any) => r.customer_no).join(',')}`);
 
+  // ── Analytics push-back (docs/48 phase 3, MKT-15) — the Marketing Intelligence platform PUSHES its
+  //    computed MMM / RFM / TOWS into the ERP (scope analytics:write); /marketing-intel renders the store. ──
+  const anWriteCf2 = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-anw-cf2', scopes: ['analytics:write'] })).json.key;
+  const mmmPayload = { r2: 0.49, total_spend: 50000, channels: [{ channel: 'tiktok', spend: 0, roi: null, contribution_pct: 10.3 }, { channel: 'facebook', spend: 30000, roi: 4.17, contribution_pct: 60.61 }] };
+  const snapBody = { snapshots: [
+    { kind: 'mmm', payload: mmmPayload, model_run_ref: 'MMM-CF2-001' },
+    { kind: 'rfm', payload: { segments: [{ segment: 'Loyal Promoters', customers: 12, monetary: 34000 }] } },
+    { kind: 'tows', payload: { items: [{ quadrant: 'SO', factor: 'tiktok momentum', recommendation: 'scale tiktok spend', priority: 1 }] } },
+  ] };
+
+  // Scope enforcement: neither a catalog-only key NOR an analytics:READ key may write (read ≠ write).
+  const catWrite = await inj('POST', '/api/v1/analytics/snapshots', catKey2, snapBody);
+  ok('Push-back: analytics write requires analytics:write (catalog key → 403 INSUFFICIENT_SCOPE)', catWrite.status === 403 && catWrite.json.error?.code === 'INSUFFICIENT_SCOPE', `${catWrite.status} ${catWrite.json.error?.code}`);
+  const readWrite = await inj('POST', '/api/v1/analytics/snapshots', anKeyCf2, snapBody);
+  ok('Push-back: an analytics:READ key cannot WRITE (read alias ⊄ :write → 403)', readWrite.status === 403 && readWrite.json.error?.code === 'INSUFFICIENT_SCOPE', `${readWrite.status} ${readWrite.json.error?.code}`);
+
+  // Happy path: the write key pushes all three snapshot kinds (idempotent upsert).
+  const pushed = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, snapBody);
+  ok('Push-back: analytics:write key pushes MMM/RFM/TOWS (200, pushed 3)', pushed.status === 200 && pushed.json.pushed === 3, `${pushed.status} ${JSON.stringify(pushed.json)}`);
+
+  // Storage is tenant-scoped: the rows carry cf2's tenant_id and none belong to HQ.
+  const snapRows = await db.select().from(s.miAnalyticsSnapshots);
+  const cf2Snaps = snapRows.filter((r: any) => Number(r.tenantId) === cf2.id);
+  ok('Push-back: snapshots stored tenant-scoped for the key tenant (3 kinds, none for HQ)', cf2Snaps.length === 3 && !snapRows.some((r: any) => Number(r.tenantId) === hq.id), `cf2=${cf2Snaps.map((r: any) => r.kind).join(',')} hq=${snapRows.filter((r: any) => Number(r.tenantId) === hq.id).length}`);
+
+  // Idempotency: re-pushing mmm UPDATES the single (tenant,kind) row, never duplicates it.
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'mmm', payload: { ...mmmPayload, r2: 0.55 }, model_run_ref: 'MMM-CF2-002' }] });
+  const afterRepush = (await db.select().from(s.miAnalyticsSnapshots)).filter((r: any) => Number(r.tenantId) === cf2.id && r.kind === 'mmm');
+  ok('Push-back: re-push is idempotent (one mmm row per tenant, latest wins)', afterRepush.length === 1 && (afterRepush[0].payload as any)?.r2 === 0.55, `n=${afterRepush.length} r2=${(afterRepush[0]?.payload as any)?.r2}`);
+
+  // Internal read: the /marketing-intel page reads the ERP's OWN store (cf2 Admin holds marketing/exec).
+  const miSummary = await inj('GET', '/api/marketing-intel/summary', cf2admin);
+  ok('Push-back: GET /api/marketing-intel/summary returns the pushed MMM/RFM/TOWS (has_data)', miSummary.status === 200 && miSummary.json.has_data === true && Array.isArray(miSummary.json.mmm?.payload?.channels) && miSummary.json.tows?.payload != null, `${miSummary.status} has_data=${miSummary.json.has_data}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

@@ -192,6 +192,14 @@ export function buildOpenApi() {
           responses: listResponse({ $ref: '#/components/schemas/CustomerPurchaseFacts' }),
         },
       },
+      '/analytics/snapshots': {
+        post: {
+          summary: 'Push computed analytics results into the ERP (MMM / RFM / TOWS)',
+          description: 'Idempotent upsert of the latest analytics snapshot per kind for the caller\'s tenant. The Marketing Intelligence Platform posts its computed results here; the ERP stores them tenant-scoped and renders /marketing-intel. Body: `{ snapshots: [{ kind: "mmm"|"rfm"|"tows", payload: {…}, model_run_ref?: string }] }`.',
+          security: [{ apiKey: ['analytics:write'] }],
+          responses: { '200': { description: 'pushed count + kinds' }, '400': { description: 'INVALID_SNAPSHOT_KIND / TENANT_REQUIRED' }, '403': { description: 'INSUFFICIENT_SCOPE (needs analytics:write)' } },
+        },
+      },
       '/loyalty/member': {
         get: {
           summary: 'Read a loyalty member (by code / phone / card)', security: [{ apiKey: ['loyalty:read'] }],

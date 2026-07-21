@@ -3032,6 +3032,13 @@
       "when": 2023820000398,
       "tag": "0459_scm_planning",
       "breakpoints": true
+    },
+    {
+      "idx": 434,
+      "version": "7",
+      "when": 2023820000399,
+      "tag": "0460_marketing_intel_snapshots",
+      "breakpoints": true
     }
   ]
 }

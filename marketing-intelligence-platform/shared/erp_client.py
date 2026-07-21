@@ -111,6 +111,34 @@ class ErpClient:
         body = self._get("/api/v1/sales/daily", {"from": date_from, "to": date_to, "group_by": group_by})
         return body.get("data", [])
 
+    def push_analytics_snapshots(self, snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """POST /api/v1/analytics/snapshots — push computed MMM/RFM/TOWS back into the ERP.
+
+        The key must hold the `analytics:write` scope (distinct from the read scope). Each snapshot is
+        `{ "kind": "mmm"|"rfm"|"tows", "payload": {...}, "model_run_ref": "..."? }`. Idempotent server-side
+        (upsert per tenant+kind), so a re-push simply refreshes the latest.
+        """
+        return self._post("/api/v1/analytics/snapshots", {"snapshots": snapshots})
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.cfg.base_url}{path}"
+        for attempt in range(self.cfg.max_retries + 1):
+            resp = self._session.post(url, json=body, timeout=self.cfg.timeout)
+            if resp.status_code == 429:
+                wait = _retry_after_seconds(resp, default=2 ** attempt)
+                logger.warning("ERP rate-limited on %s (attempt %d) — sleeping %.1fs", path, attempt + 1, wait)
+                time.sleep(wait)
+                continue
+            if resp.status_code in (401, 403):
+                raise ErpApiError(
+                    f"ERP auth/scope error {resp.status_code} on {path}: {resp.text[:200]} "
+                    f"(the key needs the 'analytics:write' scope)"
+                )
+            if resp.status_code >= 400:
+                raise ErpApiError(f"ERP API {resp.status_code} on {path}: {resp.text[:200]}")
+            return resp.json()
+        raise ErpApiError(f"ERP API still rate-limited after {self.cfg.max_retries} retries on {path}")
+
     def fetch_customer_transactions(self, date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[Dict[str, Any]]:
         """GET /api/v1/customers/transactions — per-customer RFM base facts (auto-paginated)."""
         params: Dict[str, Any] = {}
