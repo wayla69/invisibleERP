@@ -112,7 +112,11 @@ export class StripeBilling {
     const label = `Invisible ERP add-on — ${name}`;
     const cached = this.addonProducts.get(label);
     if (cached) return cached;
-    const found = await stripe.products.search({ query: `name:'${label.replace(/'/g, "\\'")}' AND active:'true'`, limit: 1 });
+    // Stripe search-syntax escaping: backslashes FIRST, then quotes (CodeQL js/incomplete-sanitization —
+    // quote-only escaping lets a trailing backslash neutralize the added escape). The labels are static
+    // ADDONS constants today, but escape fully so a future dynamic name can't break the query.
+    const escaped = label.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const found = await stripe.products.search({ query: `name:'${escaped}' AND active:'true'`, limit: 1 });
     const product = found.data[0] ?? (await stripe.products.create({ name: label }));
     this.addonProducts.set(label, product.id);
     return product.id;
