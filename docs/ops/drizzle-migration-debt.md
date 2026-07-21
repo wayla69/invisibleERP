@@ -120,6 +120,14 @@ Verified: `new-migration.mjs` analyzer (journal consistent, next = 0419/idx 393)
   baseline alone for hand-written no-DDL-snapshot changes (it stays valid).
 - If the snapshot drifts again, repeat the §3 fix: `generate` → keep the new snapshot + journal entry →
   neutralise the catch-up `.sql` to a no-op → confirm a second `generate` is empty + harnesses green.
+- **Known benign staleness — `0284_annual_billing.sql` backfill (audited 2026-07-21):** the migration
+  backfills `plans.price_yearly`/`prices` with values that predate later `PLAN_SEED` repricing (starter
+  yr 19,000 / USD 55 vs the current 29,000 / USD 85). Harmless in every running deployment because
+  `seedPlans()` upserts **all** price columns (`priceMonthly`, `priceYearly`, `prices`, `features`) at
+  every API boot, overwriting the stale values before any request is served — but a fresh DB that runs
+  migrations *without* booting the API (e.g. an offline restore probe) will briefly show 0284's numbers.
+  Do not "fix" the historical migration (mantra: journaled history is immutable); the seed is the price
+  source of truth.
 
 ---
 

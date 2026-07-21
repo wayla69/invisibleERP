@@ -54,7 +54,7 @@ const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
 const DeleteTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
-const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional(), addons: z.array(z.string().max(30)).max(10).optional() }); // 1.7 — annual billing + multi-currency · A3 — add-on line items
+const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional(), branches: z.number().int().min(1).max(500).optional(), addons: z.array(z.string().max(30)).max(10).optional() }); // 1.7 — annual billing + multi-currency · 0457 — POS-line per-branch quantity · A3 — add-on line items
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 // 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
 const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
@@ -403,9 +403,9 @@ export class BillingController {
   }
 
   @Post('billing/checkout') @Permissions('users')
-  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string; addons?: string[] }, @CurrentUser() u: JwtUser) {
+  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string; branches?: number; addons?: string[] }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
-    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB', b.addons ?? []);
+    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB', b.branches, b.addons ?? []);
   }
 
   // A3 — tenant self-serve add-on purchase/removal (the god path is POST /api/admin/tenants/:id/addons).

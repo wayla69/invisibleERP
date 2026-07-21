@@ -1,4 +1,4 @@
--- 0456_saas_payment_claims — Thai payment rails for the platform's own subscription billing (wave C).
+-- 0458_saas_payment_claims — Thai payment rails for the platform's own subscription billing (wave C).
 -- One row per bank-transfer/PromptPay slip a tenant submits: Pending until a platform owner verifies the
 -- transfer actually arrived — approve records the A4 saas_receipt (idempotent on 'claim:<id>') and
 -- re-activates the subscription (the A2 dunning-recovery signal); reject emails the reason.

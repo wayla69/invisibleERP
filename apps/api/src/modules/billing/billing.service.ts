@@ -48,13 +48,13 @@ interface PlanSeed {
 // runs at startup) BACKFILLS every existing plan row — the grandfather step that must precede enabling
 // ENTITLEMENTS_ENFORCE. resolveEntitledSuites() still falls back to the code default if it is ever absent.
 const PLAN_SEED: PlanSeed[] = [
-  { code: 'free', name: 'Free', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
+  { code: 'free', name: 'Trial', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.free, users: 2, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
   // SME single-operator edition (docs/49 / docs/36 §SME): the default plan a control_profile='sme' company
   // provisions onto. Full day-to-day operational ERP (PLAN_SUITES.sme) at a solo price, capped to ONE seat +
   // ONE location — the seat cap is the commercial fence vs Enterprise (per-seat). Volume caps are generous
   // for a solo operator; AI is metered as overage. The self-approval relaxation is control_profile, not a
   // plan feature, so it stays orthogonal (a company could in principle run 'sme' profile on any plan).
-  { code: 'sme', name: 'SME (เจ้าของคนเดียว)', priceMonthly: '690', priceYearly: '6900', currency: 'THB', prices: { USD: { monthly: 20, yearly: 200 } }, features: { suites: PLAN_SUITES.sme, users: 1, locations: 1, ai_chat: true, reports: 'standard', ai_tokens_daily: 100_000, ai_tokens_daily_max: 200_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 200, pos_txns_monthly: 5000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
+  { code: 'sme', name: 'Solo (เจ้าของคนเดียว)', priceMonthly: '690', priceYearly: '6900', currency: 'THB', prices: { USD: { monthly: 20, yearly: 200 } }, features: { suites: PLAN_SUITES.sme, users: 1, locations: 1, ai_chat: true, reports: 'standard', ai_tokens_daily: 100_000, ai_tokens_daily_max: 200_000, ai_overage_rate_thb_per_1k: 12, etax_docs_monthly: 200, pos_txns_monthly: 5000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
   { code: 'starter', name: 'Standard', priceMonthly: '2900', priceYearly: '29000', currency: 'THB', prices: { USD: { monthly: 85, yearly: 850 } }, features: { suites: PLAN_SUITES.starter, users: 10, locations: 2, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 100, pos_txns_monthly: 3000, etax_overage_rate_thb_per_doc: 3, pos_overage_rate_thb_per_txn: 0.5 } },
   // 1.9 — Business mid-tier: closes the Standard→Professional price cliff (2,900 → 9,900 was a 3.4× jump
   // with no rung). Standard + procurement + multi-branch; planning/loyalty/AI stay Professional-only.
@@ -63,6 +63,13 @@ const PLAN_SEED: PlanSeed[] = [
   // 0451 — Franchise (multi-brand): the /plans configurator's 4th pack, between Professional and
   // Enterprise. Professional + central-kitchen verticals (manufacturing, projects) + every add-on suite.
   { code: 'franchise', name: 'Franchise', priceMonthly: '14900', priceYearly: '149000', currency: 'THB', prices: { USD: { monthly: 425, yearly: 4250 } }, features: { suites: PLAN_SUITES.franchise, users: 100, locations: 25, ai_chat: true, reports: 'advanced', ai_tokens_daily: 500_000, ai_tokens_daily_max: 1_000_000, ai_overage_rate_thb_per_1k: 10, etax_docs_monthly: 3000, pos_txns_monthly: 100_000, etax_overage_rate_thb_per_doc: 1.5, pos_overage_rate_thb_per_txn: 0.25 } },
+  // ── Product lines (docs/53 C1, additive) — split-sell SKUs beside the Complete bundles.
+  //    per_branch: true ⇒ priceMonthly is PER BRANCH; checkout multiplies by subscriptions.branches and
+  //    the branch-scaled quotas (pos_txns_monthly) multiply the same way. locations follows branches.
+  { code: 'pos_lite', name: 'POS Lite', priceMonthly: '590', priceYearly: '5900', currency: 'THB', prices: { USD: { monthly: 18, yearly: 180 } }, features: { suites: PLAN_SUITES.pos_lite, per_branch: true, users: 3, locations: 1, ai_chat: false, reports: 'basic', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 3000, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0.5 } },
+  { code: 'pos_pro', name: 'POS Pro', priceMonthly: '1190', priceYearly: '11900', currency: 'THB', prices: { USD: { monthly: 35, yearly: 350 } }, features: { suites: PLAN_SUITES.pos_pro, per_branch: true, users: 10, locations: 1, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 0, pos_txns_monthly: 8000, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0.4 } },
+  { code: 'erp_essentials', name: 'ERP Essentials', priceMonthly: '1900', priceYearly: '19000', currency: 'THB', prices: { USD: { monthly: 55, yearly: 550 } }, features: { suites: PLAN_SUITES.erp_essentials, users: 10, locations: 1, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 200, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 2.5, pos_overage_rate_thb_per_txn: 0 } },
+  { code: 'erp_growth', name: 'ERP Growth', priceMonthly: '3900', priceYearly: '39000', currency: 'THB', prices: { USD: { monthly: 110, yearly: 1100 } }, features: { suites: PLAN_SUITES.erp_growth, users: 25, locations: 3, ai_chat: false, reports: 'standard', ai_tokens_daily: 0, ai_tokens_daily_max: 0, ai_overage_rate_thb_per_1k: 0, etax_docs_monthly: 500, pos_txns_monthly: 0, etax_overage_rate_thb_per_doc: 2.5, pos_overage_rate_thb_per_txn: 0 } },
   { code: 'enterprise', name: 'Enterprise', priceMonthly: '0', currency: 'THB', features: { suites: PLAN_SUITES.enterprise, users: -1, locations: -1, ai_chat: true, reports: 'advanced', custom: true, ai_tokens_daily: 2_000_000, ai_tokens_daily_max: 5_000_000, ai_overage_rate_thb_per_1k: 8, etax_docs_monthly: -1, pos_txns_monthly: -1, etax_overage_rate_thb_per_doc: 0, pos_overage_rate_thb_per_txn: 0 } },
 ];
 
@@ -165,6 +172,8 @@ export class BillingService {
         trial_ends_at: subscriptions.trialEndsAt,
         current_period_end: subscriptions.currentPeriodEnd,
         addons: subscriptions.addons, // 0451 — purchased à-la-carte add-on suite keys
+        grandfathered_price: subscriptions.grandfatheredPrice, // 0456 — price snapshot
+        grandfathered_until: subscriptions.grandfatheredUntil,
         plan_name: plans.name,
         price_monthly: plans.priceMonthly,
         currency: plans.currency,
@@ -176,7 +185,14 @@ export class BillingService {
       .orderBy(sql`${subscriptions.createdAt} desc`)
       .limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
-    return { ...row, price_monthly: Number(row.price_monthly ?? 0) };
+    // 0456 — price_monthly is what the tenant actually pays: the grandfathered snapshot while active
+    // (until NULL = indefinite), else the plan's list price. list_price_monthly stays for transparency.
+    const gfActive = row.grandfathered_price != null
+      && (row.grandfathered_until == null || new Date(row.grandfathered_until).getTime() > Date.now());
+    const listPrice = Number(row.price_monthly ?? 0);
+    const effective = gfActive ? Number(row.grandfathered_price) : listPrice;
+    const { grandfathered_price: _gp, grandfathered_until: _gu, ...rest } = row;
+    return { ...rest, price_monthly: effective, list_price_monthly: listPrice, grandfathered: gfActive && effective !== listPrice };
   }
 
 
@@ -214,14 +230,23 @@ export class BillingService {
     let prorationNote: string | undefined;
     if (targetInterval === curInterval) {
       const periodDays = curInterval === 'annual' ? 365 : 30;
-      const oldAmount = curInterval === 'annual' ? Number(oldPlan?.priceYearly ?? 0) : Number(oldPlan?.price ?? 0);
+      // 0456 — the credit side of proration is what the tenant ACTUALLY pays (their grandfathered
+      // snapshot when present), not the plan's current list price.
+      const oldAmount = curInterval === 'annual'
+        ? Number(sub.grandfatheredAnnualPrice ?? oldPlan?.priceYearly ?? 0)
+        : Number(sub.grandfatheredPrice ?? oldPlan?.price ?? 0);
       const newAmount = curInterval === 'annual' ? Number(plan.priceYearly ?? 0) : Number(plan.priceMonthly ?? 0);
       proration = computeProration({ oldPriceMonthly: oldAmount, newPriceMonthly: newAmount, periodEnd: sub.currentPeriodEnd, now: Date.now(), periodDays });
     } else {
       prorationNote = 'interval_change'; // switching monthly↔annual — applied at the next renewal, no mid-cycle number
     }
 
-    await db.update(subscriptions).set({ planCode: target, status: 'Active', billingInterval: targetInterval }).where(eq(subscriptions.id, sub.id));
+    // 0456 — a plan change RE-SNAPSHOTS at the new plan's current price (choosing a new plan is the one
+    // event that ends the old price lock).
+    await db.update(subscriptions).set({
+      planCode: target, status: 'Active', billingInterval: targetInterval,
+      grandfatheredPrice: plan.priceMonthly, grandfatheredAnnualPrice: plan.priceYearly, grandfatheredUntil: null,
+    }).where(eq(subscriptions.id, sub.id));
     return { tenant_id: tenantId, plan: target, status: 'Active', billing_interval: targetInterval, proration, ...(prorationNote ? { proration_note: prorationNote } : {}) };
   }
 
@@ -304,7 +329,7 @@ export class BillingService {
   // BillingWebhookService) when Stripe confirms payment. 1.7 — interval ('monthly' default | 'annual') and
   // currency ('THB' default) select the price via resolvePlanPrice (fail-closed) and are stamped on the
   // subscription row as the billing intent.
-  async createCheckoutSession(tenantId: number, planCode: string, interval: 'monthly' | 'annual' = 'monthly', currency = 'THB', addonKeys: string[] = []) {
+  async createCheckoutSession(tenantId: number, planCode: string, interval: 'monthly' | 'annual' = 'monthly', currency = 'THB', branches?: number, addonKeys: string[] = []) {
     const db = this.db;
     const target = planCode.trim();
     const [plan] = await db.select().from(plans).where(eq(plans.code, target)).limit(1);
@@ -314,8 +339,25 @@ export class BillingService {
     const [tenant] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tenant not found', messageTh: 'ไม่พบร้าน' });
     // Reuse the tenant's existing Stripe customer (from a prior checkout) if we have one.
-    const [sub] = await db.select({ id: subscriptions.id, cust: subscriptions.stripeCustomerId }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
-    const addonCharges = this.resolveAddonCharges(plan, price.interval, price.currency, addonKeys);
+    const [sub] = await db.select({ id: subscriptions.id, cust: subscriptions.stripeCustomerId, planCode: subscriptions.planCode, gfPrice: subscriptions.grandfatheredPrice, gfAnnual: subscriptions.grandfatheredAnnualPrice, gfUntil: subscriptions.grandfatheredUntil, branches: subscriptions.branches }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
+    // 0456 — checking out the tenant's CURRENT plan (first payment / renewal) charges the grandfathered
+    // snapshot when one is active, THB only (snapshots are stored in the seed currency). A checkout for a
+    // DIFFERENT plan is a plan change and prices at current list (changePlan re-snapshots on completion).
+    if (sub && sub.planCode === target && currency === 'THB'
+      && (sub.gfUntil == null || new Date(sub.gfUntil).getTime() > Date.now())) {
+      const snap = interval === 'annual' ? sub.gfAnnual : sub.gfPrice;
+      if (snap != null && Number(snap) > 0) price.amount = Number(snap);
+    }
+    // 0457 — POS-line per-branch billing: the plan's price is PER BRANCH; multiply by the requested (or
+    // previously purchased) branch quantity. Non-per-branch plans reject an explicit branches argument
+    // rather than silently ignoring a quantity the buyer believed they bought.
+    const perBranch = (plan.features as Record<string, unknown> | null)?.per_branch === true;
+    if (!perBranch && branches != null && branches !== 1) {
+      throw new BadRequestException({ code: 'PLAN_NOT_PER_BRANCH', message: `Plan '${target}' is priced per company, not per branch`, messageTh: 'แพ็กเกจนี้คิดราคาต่อบริษัท ไม่ใช่ต่อสาขา' });
+    }
+    const qty = perBranch ? Math.max(1, Math.floor(branches ?? sub?.branches ?? 1)) : 1;
+    if (perBranch) price.amount = price.amount * qty;
+    const addonCharges = this.resolveAddonCharges(plan, price.interval, price.currency, addonKeys); // A3 (#891)
     const result = await this.stripe.createCheckoutSession(
       { code: plan.code, name: plan.name, amount: price.amount, currency: price.currency, interval: price.interval },
       { id: Number(tenant.id), code: tenant.code, existingCustomerId: sub?.cust ?? null },
@@ -326,10 +368,12 @@ export class BillingService {
     if (sub) {
       const patch: Record<string, unknown> = { billingInterval: price.interval, currency: price.currency };
       if (result.customerId && !sub.cust) patch.stripeCustomerId = result.customerId;
+      if (perBranch) patch.branches = qty; // 0457 — persist the purchased branch quantity
       await db.update(subscriptions).set(patch).where(eq(subscriptions.id, sub.id));
     }
     return {
       url: result.url, mock: result.mock, interval: price.interval, currency: price.currency, amount: price.amount,
+      ...(perBranch ? { branches: qty } : {}),
       addons: addonCharges.map((c) => ({ key: c.key, amount: c.amount })),
       total_amount: price.amount + addonCharges.reduce((t, c) => t + c.amount, 0),
     };

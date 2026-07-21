@@ -14,14 +14,17 @@ subscription, **one heavy tenant could burn more in API spend than their seat co
 that worsens as the best customers scale. This is now a **ceiling + metered-overage** model: every tier is
 finite, and usage above the included cap is **billed**, not given away.
 
-## Price list (illustrative)
+## Price list (synced to `PLAN_SEED`, 2026-07-21)
 
-| Plan | Price/mo (THB) | `ai_chat` | Included AI tokens/day | Hard ceiling/day | Overage rate |
+| Plan (code) | Price/mo (THB) | `ai_chat` | Included AI tokens/day | Hard ceiling/day | Overage rate |
 |------|----------------|-----------|------------------------|------------------|--------------|
-| Free | 0 | off | 0 | 0 | — |
-| Starter | 990 | off | 0 | 0 | — |
-| Pro | 2,900 | on | 200,000 | 500,000 | 12 THB / 1k overage tokens |
-| Enterprise | custom (contact sales) | on | 2,000,000 | 5,000,000 | 8 THB / 1k overage tokens |
+| Free (`free`) | 0 | off | 0 | 0 | — |
+| SME (`sme`) | 690 | on | 100,000 | 200,000 | 12 THB / 1k overage tokens |
+| Standard (`starter`) | 2,900 | off | 0 | 0 | — |
+| Business (`business`) | 4,900 | off | 0 | 0 | — |
+| Professional (`pro`) | 9,900 | on | 200,000 | 500,000 | 12 THB / 1k overage tokens |
+| Franchise (`franchise`) | 14,900 | on | 500,000 | 1,000,000 | 10 THB / 1k overage tokens |
+| Enterprise (`enterprise`) | custom (contact sales) | on | 2,000,000 | 5,000,000 | 8 THB / 1k overage tokens |
 
 Feature keys in `PLAN_SEED.features`: `ai_tokens_daily` (included, free band), `ai_tokens_daily_max` (hard
 ceiling), `ai_overage_rate_thb_per_1k` (price of the band between them).

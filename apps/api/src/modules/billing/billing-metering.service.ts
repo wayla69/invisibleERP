@@ -182,12 +182,16 @@ export class BillingMeteringService {
     if (!cfg) throw new BadRequestException({ code: 'UNKNOWN_METER', message: `Unknown meter ${meter}`, messageTh: `ไม่รู้จักมิเตอร์ ${meter}` });
     const db = this.db;
     const ym = (month && /^\d{4}-\d{2}$/.test(month)) ? month : new Date().toISOString().slice(0, 7);
-    const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode })
+    const [planRow] = await db.select({ features: plans.features, plan_code: subscriptions.planCode, branches: subscriptions.branches })
       .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
       .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
       .orderBy(desc(subscriptions.createdAt)).limit(1);
     const features: any = planRow?.features ?? {};
-    const included = Number(features[cfg.includedKey] ?? 0); // −1 = unlimited
+    // 0457 — POS-line plans price and quota PER BRANCH: the included volume scales with the purchased
+    // branch count (−1 = unlimited stays unlimited).
+    const branchQty = features.per_branch === true ? Math.max(1, Number(planRow?.branches ?? 1)) : 1;
+    const baseIncluded = Number(features[cfg.includedKey] ?? 0); // −1 = unlimited
+    const included = baseIncluded === -1 ? -1 : baseIncluded * branchQty;
     const rate = Number(features[cfg.rateKey] ?? 0); // THB per unit
     const [agg] = await db.select({ n: sql<number>`count(*)` }).from(usageEvents)
       .where(and(eq(usageEvents.tenantId, tenantId), eq(usageEvents.meter, meter), eq(usageEvents.period, ym)));

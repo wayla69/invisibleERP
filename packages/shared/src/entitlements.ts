@@ -20,6 +20,7 @@ export type SuiteKey =
   | 'core'
   | 'finance'
   | 'sales'
+  | 'pos_frontoffice' // docs/53 C1 — the register/till surface split out of `sales` for the POS line
   | 'inventory'
   | 'procurement'
   | 'masterdata'
@@ -56,8 +57,13 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   // hedge, investments, pooling — TRE-01..05) is finance depth; its checker duty (treasury_approve) is a
   // sub-permission, not suite-gated.
   finance: ['ar', 'creditors', 'exec', 'treasury'],
-  // Sales & order management / POS front office.
-  sales: ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
+  // Order-to-cash back office (docs/53 C1 split — the ERP line's sales surface, register-less).
+  // The POS front-of-house tokens moved to `pos_frontoffice` so a POS-only SKU can exist; every plan
+  // that carried the old combined `sales` suite lists BOTH suites (breadth unchanged for bundles).
+  sales: ['order_mgt', 'claim_mgt', 'crm'],
+  // POS front of house (docs/53 C1): the register + everything a till operator touches. Sold per branch
+  // on the POS line; bundled beside `sales` everywhere the old combined suite appeared.
+  pos_frontoffice: ['pos', 'delivery', 'returns', 'pricelist', 'promos'],
   // Warehouse / inventory.
   inventory: ['warehouse', 'lots', 'locations'],
   // Procurement (PR/PO). pr_raise is the low-risk company-wide requisition step.
@@ -107,7 +113,8 @@ export const ALWAYS_ON_SUITES: SuiteKey[] = ['core'];
 export const SUITE_LABELS: Record<SuiteKey, { en: string; th: string }> = {
   core: { en: 'Core', th: 'พื้นฐาน' },
   finance: { en: 'Finance & Accounting', th: 'บัญชีการเงิน' },
-  sales: { en: 'Sales & POS', th: 'ขาย & POS' },
+  sales: { en: 'Sales & Order Management', th: 'ขาย & จัดการออเดอร์' },
+  pos_frontoffice: { en: 'POS Front of House', th: 'POS หน้าร้าน' },
   inventory: { en: 'Inventory & Warehouse', th: 'คลังสินค้า' },
   procurement: { en: 'Procurement', th: 'จัดซื้อ' },
   masterdata: { en: 'Master Data', th: 'ข้อมูลหลัก' },
@@ -139,42 +146,56 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   // (features.users/locations cap the seats). The self-approval maker-checker relaxation is orthogonal
   // (control_profile='sme'), not a suite. Upgrading to Enterprise adds the verticals + multi-seat.
   sme: [
-    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai',
   ],
-  // Standard (current 'starter'): SME finance-first core.
-  starter: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice'],
+  // Standard (current 'starter'): finance-first core. docs/53 Q1 — BASE procurement (PR→PO→blind-count
+  // GRN, the F&B/retail receiving-controls story) is included from Standard up; the ADVANCED routing
+  // (RFQ / three-way match) stays behind the scm_advanced add-on / Business+.
+  starter: ['core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice', 'procurement'],
   // Business (mid-tier, 1.9): Standard + procurement + multi-branch. Closes the 5× price jump between
   // Standard and Professional; planning/loyalty/AI stay the Professional differentiators.
   // scm_advanced is GRANDFATHERED: RFQ/three-way match were reachable via the 'procurement' token
   // before the add-on suite existed, so plans that had procurement keep them.
   business: [
-    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'multibranch', 'scm_advanced',
   ],
   // Professional (current 'pro'): adds procurement, planning, loyalty, AI, multi-branch.
   // cdp/integrations GRANDFATHERED: audience export rode the 'marketing' token (planning suite) and
   // web-to-lead was un-gated, so the plan that had planning keeps both.
   pro: [
-    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
     'scm_advanced', 'integrations', 'cdp',
   ],
   // Franchise (multi-brand, between Professional and Enterprise — the /plans configurator's 4th pack):
   // Professional + the central-kitchen/ops verticals (manufacturing, projects) + every add-on suite.
   franchise: [
-    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
     'manufacturing', 'projects',
     'scm_advanced', 'integrations', 'cdp', 'sandbox',
   ],
   // Enterprise: everything, incl. the premium/add-on suites (custom deals tune via features.suites).
   enterprise: [
-    'core', 'finance', 'sales', 'inventory', 'masterdata', 'portal', 'selfservice',
+    'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
     'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
     'manufacturing', 'projects', 'hcm', 'realestate',
     'scm_advanced', 'integrations', 'cdp', 'sandbox',
   ],
+  // ── Product lines (docs/53 C1, ADDITIVE codes) — split-sell entry SKUs beside the Complete bundles.
+  //    POS line is priced PER BRANCH (features.per_branch); ERP line is flat per company. Upgrading any
+  //    line SKU to a bundle is a plan change (entitlement flip) on the same tenant — never a migration. ──
+  // POS Lite: counter/quick-service register only. Master data included (a register needs its items).
+  pos_lite: ['core', 'pos_frontoffice', 'masterdata'],
+  // POS Pro: full front of house — + inventory (recipes/stock depletion), customer-facing portal (QR
+  // ordering), delivery channels ride pos_frontoffice.
+  pos_pro: ['core', 'pos_frontoffice', 'masterdata', 'inventory', 'portal'],
+  // ERP Essentials: register-less back office — finance + order-to-cash + inventory.
+  erp_essentials: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'selfservice'],
+  // ERP Growth: + base procurement + planning + multi-branch consolidation (3 locations).
+  erp_growth: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'selfservice', 'procurement', 'planning', 'multibranch'],
 };
 
 // ── À-la-carte add-ons (the /plans configurator) ────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { bigint, bigserial, index, numeric, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
-// SaaS payment claims (wave C, migration 0456). Platform-level (about_tenant_id — NOT tenant_id, so the
+// SaaS payment claims (wave C, migration 0458). Platform-level (about_tenant_id — NOT tenant_id, so the
 // RLS loop + tenant-index guard skip it, mirroring saas_receipts). One row per bank-transfer/PromptPay
 // slip a tenant submits for its subscription: Pending until a platform owner verifies the money actually
 // arrived — approve records the A4 saas_receipt (idempotent on `claim:<id>`) + re-activates the

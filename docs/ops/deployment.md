@@ -144,6 +144,14 @@ webhook secret (`apps/api/src/common/env.validation.ts`, ITGC-AC-12). Full matri
 > **prod**. Rollback is clearing the var. Blast radius if enabled early: a user still on a pre-binding session
 > gets one `403` on a mutation (GETs unaffected) and **self-heals on re-login**.
 
+> **Plan-entitlement gating — `ENTITLEMENTS_SHADOW` → `ENTITLEMENTS_ENFORCE` (docs/36 §5; default OFF).**
+> Staged like the flags above but with a mandatory observation phase: SHADOW logs would-block decisions
+> (structured pino `entitlement_shadow_block` events) without blocking; triage + per-tenant remediation
+> (add-ons / plan change) precede the ENFORCE flip, which also activates trial-expiry and past-due
+> blocking (`BILLING_GRACE_DAYS`, default 7). Rollback is clearing the var. **Full procedure, checklists,
+> and comms templates: [`entitlements-rollout-runbook.md`](entitlements-rollout-runbook.md)** — do not
+> flip ENFORCE ad hoc.
+
 ## 5. CI/CD
 - `ci.yml` — build/typecheck/unit, integration harnesses, security (audit + gitleaks), CodeQL, web-e2e.
   Two queue-pressure guards against the ~20-concurrent-job account limit (both root-caused from the

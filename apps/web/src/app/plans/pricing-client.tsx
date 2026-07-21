@@ -31,11 +31,15 @@ interface Tier {
   icon: IconType;
   /** THB per month; annual billing charges 10 × monthly (2 months free). */
   priceMonthly: number;
+  /** docs/53 C1 — POS-line SKU: priceMonthly is PER BRANCH; the configurator adds a branch stepper. */
+  perBranch?: boolean;
   startingAt?: boolean;
   popular?: boolean;
   inherits?: string;
   features: TierFeature[];
 }
+/** Product line (docs/53 C1): Complete packs · POS only (per branch) · ERP only (flat). */
+type ProductLine = 'packs' | 'pos' | 'erp';
 interface Addon { id: string; nameKey: string; descKey: string; icon: IconType; kind: ModuleKind; priceMonthly: number }
 
 /** Annual billing = pay 10 of 12 months (matches the seeded plans' priceYearly). */
@@ -90,6 +94,46 @@ const TIERS: Tier[] = [
   },
 ];
 
+// ── Product lines (docs/53 C1) — split-sell SKUs beside the Complete packs. Codes match PLAN_SEED. ──
+const POS_TIERS: Tier[] = [
+  {
+    id: 'pos_lite', name: 'POS Lite', audKey: 'price.aud_pos_lite', icon: Store, priceMonthly: 590, perBranch: true,
+    features: [
+      { key: 'price.f_pos', icon: Store, kind: 'pos' },
+      { key: 'price.f_cashier', icon: UserCog, kind: 'pos' },
+    ],
+  },
+  {
+    id: 'pos_pro', name: 'POS Pro', audKey: 'price.aud_pos_pro', icon: ChefHat, priceMonthly: 1190, perBranch: true, popular: true, inherits: 'POS Lite',
+    features: [
+      { key: 'price.f_kds', icon: ChefHat, kind: 'pos' },
+      { key: 'price.f_qr', icon: QrCode, kind: 'pos' },
+      { key: 'price.f_delivery', icon: Bike, kind: 'pos' },
+      { key: 'price.f_inv', icon: Boxes, kind: 'pos' },
+    ],
+  },
+];
+const ERP_TIERS: Tier[] = [
+  {
+    id: 'erp_essentials', name: 'ERP Essentials', audKey: 'price.aud_erp_essentials', icon: BookOpenCheck, priceMonthly: 1900,
+    features: [
+      { key: 'price.f_gl', icon: BookOpenCheck, kind: 'erp' },
+      { key: 'price.f_orders', icon: ArrowLeftRight, kind: 'erp' },
+      { key: 'price.f_inv', icon: Boxes, kind: 'erp' },
+      { key: 'price.f_etax', icon: FileCheck2, kind: 'erp' },
+    ],
+  },
+  {
+    id: 'erp_growth', name: 'ERP Growth', audKey: 'price.aud_erp_growth', icon: TrendingUp, priceMonthly: 3900, popular: true, inherits: 'ERP Essentials',
+    features: [
+      { key: 'price.f_proc_base', icon: Handshake, kind: 'erp' },
+      { key: 'price.f_mrp', icon: CalendarRange, kind: 'erp' },
+      { key: 'price.f_interco', icon: Network, kind: 'erp' },
+    ],
+  },
+];
+const LINE_TIERS: Record<ProductLine, Tier[]> = { packs: TIERS, pos: POS_TIERS, erp: ERP_TIERS };
+
 const ADDONS: Addon[] = [
   { id: 'scm_advanced', nameKey: 'price.a_scm', descKey: 'price.a_scm_d', icon: Truck, kind: 'erp', priceMonthly: 1500 },
   { id: 'integrations', nameKey: 'price.a_webhook', descKey: 'price.a_webhook_d', icon: Webhook, kind: 'erp', priceMonthly: 990 },
@@ -113,9 +157,17 @@ function ModuleChip({ icon: Icon, kind }: { icon: IconType; kind: ModuleKind }) 
 export function PricingClient() {
   const { t, lang, setLang, fmtNumber } = useLang();
   const [billing, setBilling] = React.useState<Billing>('monthly');
+  const [line, setLine] = React.useState<ProductLine>('packs');
   const [tierId, setTierId] = React.useState<string>('growth');
+  const [branches, setBranches] = React.useState<number>(1); // docs/53 C1 — POS-line per-branch quantity
   const [addonIds, setAddonIds] = React.useState<Set<string>>(new Set());
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const activeTiers = LINE_TIERS[line];
+  const pickLine = (l: ProductLine) => {
+    setLine(l);
+    const first = LINE_TIERS[l].find((x) => x.popular) ?? LINE_TIERS[l][0];
+    if (first) setTierId(first.id);
+  };
 
   const baht = React.useCallback((n: number) => `฿${fmtNumber(Math.round(n), { maximumFractionDigits: 0 })}`, [fmtNumber]);
   const toggleAddon = (id: string) =>
@@ -126,9 +178,10 @@ export function PricingClient() {
     });
 
   const totals = React.useMemo(() => {
-    const tier = TIERS.find((x) => x.id === tierId) ?? (TIERS[0] as Tier);
+    const tier = activeTiers.find((x) => x.id === tierId) ?? (activeTiers[0] as Tier);
     const selectedAddons = ADDONS.filter((a) => addonIds.has(a.id));
-    const monthlySum = tier.priceMonthly + selectedAddons.reduce((s, a) => s + a.priceMonthly, 0);
+    const tierPrice = tier.perBranch ? tier.priceMonthly * branches : tier.priceMonthly;
+    const monthlySum = tierPrice + selectedAddons.reduce((s, a) => s + a.priceMonthly, 0);
     return {
       tier,
       selectedAddons,
@@ -136,7 +189,7 @@ export function PricingClient() {
       billedNow: billing === 'annual' ? monthlySum * ANNUAL_MONTHS : monthlySum,
       annualSavings: billing === 'annual' ? monthlySum * (12 - ANNUAL_MONTHS) : 0,
     };
-  }, [tierId, addonIds, billing]);
+  }, [activeTiers, tierId, addonIds, billing, branches]);
 
   // Carry the prospect's selection into the signup request (read there from window.location.search),
   // so the platform admin sees "requested: <pack> · <interval> · +add-ons" when approving (ITGC-AC-18).
@@ -144,8 +197,10 @@ export function PricingClient() {
     const q = new URLSearchParams({ plan: tierId, billing });
     const addons = ADDONS.filter((a) => addonIds.has(a.id)).map((a) => a.id);
     if (addons.length) q.set('addons', addons.join(','));
+    const tier = activeTiers.find((x) => x.id === tierId);
+    if (tier?.perBranch && branches > 1) q.set('branches', String(branches)); // per-branch quantity (0455)
     return `/signup?${q.toString()}`;
-  }, [tierId, billing, addonIds]);
+  }, [activeTiers, tierId, billing, addonIds, branches]);
 
   const summaryLines = (
     <>
@@ -153,10 +208,23 @@ export function PricingClient() {
         <li className="flex items-center justify-between gap-3">
           <span className="text-muted-foreground">
             {t('price.plan_line', { name: totals.tier.name })}
+            {totals.tier.perBranch && <span className="text-muted-foreground/70"> × {fmtNumber(branches)}</span>}
             {totals.tier.startingAt && <span className="text-muted-foreground/70"> {t('price.starting_at_paren')}</span>}
           </span>
-          <span className="font-medium">{baht(perMonth(totals.tier.priceMonthly, billing))}{t('price.per_month')}</span>
+          <span className="font-medium">{baht(perMonth(totals.tier.perBranch ? totals.tier.priceMonthly * branches : totals.tier.priceMonthly, billing))}{t('price.per_month')}</span>
         </li>
+        {totals.tier.perBranch && (
+          <li className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground">{t('price.branches')}</span>
+            <span className="inline-flex items-center gap-2">
+              <button type="button" aria-label="−" onClick={() => setBranches((b) => Math.max(1, b - 1))}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md border text-sm font-bold text-muted-foreground hover:text-foreground">−</button>
+              <span className="w-6 text-center font-semibold tabular-nums">{fmtNumber(branches)}</span>
+              <button type="button" aria-label="+" onClick={() => setBranches((b) => Math.min(500, b + 1))}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md border text-sm font-bold text-muted-foreground hover:text-foreground">+</button>
+            </span>
+          </li>
+        )}
         {totals.selectedAddons.map((a) => (
           <li key={a.id} className="flex items-center justify-between gap-3">
             <span className="truncate text-muted-foreground">{t(a.nameKey)}</span>
@@ -238,17 +306,35 @@ export function PricingClient() {
           </div>
         </header>
 
+        {/* ------- Product line picker (docs/53 C1: Complete packs · POS only · ERP only) ------- */}
+        <div className="mt-8 flex justify-center">
+          <div className="inline-flex items-center rounded-full border bg-card p-1 shadow-sm" role="tablist" aria-label={t('price.line_label')}>
+            {(['packs', 'pos', 'erp'] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                role="tab"
+                aria-selected={line === l}
+                onClick={() => pickLine(l)}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${line === l ? 'bg-primary text-primary-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {t(l === 'packs' ? 'price.line_packs' : l === 'pos' ? 'price.line_pos' : 'price.line_erp')}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* ------- Tier cards ------- */}
-        <section aria-label={t('price.packs')} className="mt-10">
+        <section aria-label={t('price.packs')} className="mt-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-lg font-bold">{t('price.packs')}</h2>
+            <h2 className="text-lg font-bold">{t(line === 'packs' ? 'price.packs' : line === 'pos' ? 'price.line_pos_h' : 'price.line_erp_h')}</h2>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-primary" /> {t('price.legend_pos')}</span>
               <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-muted-foreground/50" /> {t('price.legend_erp')}</span>
             </div>
           </div>
-          <div role="radiogroup" aria-label={t('price.packs')} className="grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {TIERS.map((tier) => {
+          <div role="radiogroup" aria-label={t('price.packs')} className={`grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2 ${line === 'packs' ? 'lg:grid-cols-3 xl:grid-cols-5' : 'mx-auto max-w-2xl'}`}>
+            {activeTiers.map((tier) => {
               const HeaderIcon = tier.icon;
               const selected = tierId === tier.id;
               const monthlyEq = perMonth(tier.priceMonthly, billing);
@@ -279,7 +365,7 @@ export function PricingClient() {
                     {tier.startingAt && <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">{t('price.starting_at')}</div>}
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-2xl font-extrabold tracking-tight">{baht(monthlyEq)}</span>
-                      <span className="text-xs text-muted-foreground">{t('price.per_month')}</span>
+                      <span className="text-xs text-muted-foreground">{tier.perBranch ? t('price.per_branch_month') : t('price.per_month')}</span>
                     </div>
                     {billing === 'annual' ? (
                       <div className="mt-0.5 text-xs text-muted-foreground">

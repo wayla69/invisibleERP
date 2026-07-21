@@ -55,6 +55,11 @@ found in the code (non-exhaustive — Phase S1 enumerates all):
 
 ---
 
+> **2026-07-21 (docs/53 Q2):** the `sme` plan's DISPLAY name changed to **"Solo (เจ้าของคนเดียว)"** —
+> re-presented as the solo edition of the Complete-bundle line on `/plans`. The plan CODE, suites,
+> price (฿690), and the 1-seat/1-location fence are unchanged; `control_profile='sme'` semantics
+> (docs/49 proper) are untouched.
+
 ## 1. The mechanism — `control_profile` per tenant
 
 A single per-tenant enum, resolved **live** (like role/orgId/tenantId in the guard), with an env-provided
