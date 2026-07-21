@@ -13,6 +13,7 @@ process.env.PLATFORM_ADMIN_USERNAMES = 'god';
 
 import { PlanGuard, evaluatePastDueGrace, billingGraceDays } from '../../../apps/api/dist/modules/billing/plan.guard';
 import { PLAN_SUITES } from '@ierp/shared';
+import { logger as apiPino } from '../../../apps/api/dist/observability/logger';
 
 const checks: { name: string; ok: boolean; detail?: string }[] = [];
 const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok: cond, detail });
@@ -185,8 +186,24 @@ async function main() {
     (await run('enforce', { user: tenantUser(), required: ['dashboard'], rows: [{ features: {}, status: 'Canceled', trialEndsAt: null, currentPeriodEnd: new Date(), planCode: 'pro' }] })).code === 'SUBSCRIPTION_INACTIVE');
 
   // ── SHADOW: evaluate but never block ──
-  ok('shadow: would-block scenario is ALLOWED (observe-not-block)',
-    (await run('shadow', { user: tenantUser('Procurement'), required: ['procurement'], rows: [planRow('starter')] })).allowed === true);
+  // NB the fixture must be a genuinely-blocked pair (docs/53 Q1 gave starter procurement, which made the
+  // old starter+procurement case vacuously allowed without ever reaching decide()): pos_lite lacks exec.
+  // Capture stdout around the call to prove BOTH observability lines fire: the legacy console line and
+  // the structured pino entitlement_shadow_block event (rollout triage, docs/ops runbook).
+  {
+    // Pino writes through its own sonic-boom fd stream (not process.stdout.write), so spy the SHARED
+    // logger instance the guard imports (same CJS module cache) rather than stdout.
+    const events: any[] = [];
+    const realInfo = apiPino.info.bind(apiPino);
+    (apiPino as any).info = (obj: any, msg?: string) => { events.push(obj); return realInfo(obj, msg); };
+    const shadowRes = await run('shadow', { user: tenantUser('Accounting'), required: ['exec'], rows: [planRow('pos_lite')] });
+    (apiPino as any).info = realInfo;
+    const ev = events.find((e) => e && e.event === 'entitlement_shadow_block');
+    ok('shadow: would-block scenario is ALLOWED (observe-not-block)', shadowRes.allowed === true);
+    ok('shadow: structured pino telemetry emitted (entitlement_shadow_block + plan_code/tokens)',
+      !!ev && ev.plan_code === 'pos_lite' && ev.code === 'SUITE_NOT_ENTITLED' && Array.isArray(ev.tokens) && ev.tokens.includes('exec'),
+      JSON.stringify(ev ?? 'NO EVENT').slice(0, 160));
+  }
 
   console.log('\n── Wave 1 · 1.8 — PlanGuard suite-gating (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

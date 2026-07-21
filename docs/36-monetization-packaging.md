@@ -182,7 +182,12 @@ insurance, not upsell garnish:
   bypasses; infra error fails **open**, successfully-read missing/unknown plan fails **closed** to `ALWAYS_ON`
   (via `resolveEntitledSuites`). Blocking mirrors `ModuleEnabledGuard` (block only when NONE of the route's
   tokens is entitled). Decision logic verified across 20 plan/route combos.
-- **1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
+- **Rollout procedure (ops):** [`ops/entitlements-rollout-runbook.md`](ops/entitlements-rollout-runbook.md)
+— shadow observation, triage of the structured telemetry (`entitlement_shadow_block` /
+`entitlement_block` pino events, added 2026-07-21 beside the legacy console lines), per-tenant
+remediation levers, flip, and rollback.
+
+**1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
   `features.suites`) → only then enable ENFORCE. Do NOT enable ENFORCE before the backfill.
 - **1.8 (pending):** cutover harness `tools/cutover/src/billing.ts` — plan→suite→403 matrix + god-bypass +
   kill-switch modes end-to-end (this is where the UAT negative case is codified).
