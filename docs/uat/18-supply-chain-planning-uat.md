@@ -1,6 +1,6 @@
 # UAT — Cycle 18: Supply Chain Planning — Demand Forecasting & Replenishment (SCM-01 / SCM-02 / SCM-03)
 
-**Status: DRAFT v0.1 · 2026-07-21** · *v0.1: docs/54 Phase 2 — per-(branch, item) probabilistic demand planning + perishable-aware order optimization. New controls **SCM-01** (order-plan maker-checker: submit → approve by a DIFFERENT user holding `scm_approve` → convert to a purchase requisition, idempotent by `pr_no`), **SCM-02** (planning-job monitoring + database-enforced idempotency: one nightly run per business day, watermarked spike scan, per-day spike dedupe + cooldown), **SCM-03** (auditable demand-driven order sizing: channel-partitioned demand so a dine-in dish is counted ONCE, closed/stockout-day exclusion, per-scenario BoM explosion, shelf-life cap that holds even with the external engine disabled). Migration `0459`; new duties `scm_plan` / `scm_approve` with SoD **R24**. Cases UAT-SCM-001..020; ToE `scm` (20 checks). Cross-ref: process narrative `34-supply-chain-planning.md`, plan `docs/54-dynamic-scm-forecasting-plan.md`, engine `services/forecast-engine`.*
+**Status: DRAFT v0.2 · 2026-07-21** · *v0.2: adds §7 planner-workspace screen cases (UAT-SCM-033..042) for the docs/54 Phase 3 tabs on `/demand` — branch plans with the uncertainty band and the untagged-demand warning, order-plan edit/submit/approve/convert, the approve controls hidden without `scm_approve`, the advisory scenario tool that persists nothing, the spike feed, and full th/en coverage from the `scm.*` catalog. Manual chapter 21; no control or endpoint change.* · *v0.1: docs/54 Phase 2 — per-(branch, item) probabilistic demand planning + perishable-aware order optimization. New controls **SCM-01** (order-plan maker-checker: submit → approve by a DIFFERENT user holding `scm_approve` → convert to a purchase requisition, idempotent by `pr_no`), **SCM-02** (planning-job monitoring + database-enforced idempotency: one nightly run per business day, watermarked spike scan, per-day spike dedupe + cooldown), **SCM-03** (auditable demand-driven order sizing: channel-partitioned demand so a dine-in dish is counted ONCE, closed/stockout-day exclusion, per-scenario BoM explosion, shelf-life cap that holds even with the external engine disabled). Migration `0459`; new duties `scm_plan` / `scm_approve` with SoD **R24**. Cases UAT-SCM-001..020; ToE `scm` (20 checks). Cross-ref: process narrative `34-supply-chain-planning.md`, plan `docs/54-dynamic-scm-forecasting-plan.md`, engine `services/forecast-engine`.*
 
 Result legend: Pass / Fail / Blocked / N/A / Not Run. All amounts THB. Error codes are exact and surface as `json.error.code`.
 
@@ -63,14 +63,29 @@ New duties: `scm_plan` (maker — maintain planning settings/policies, run plann
 | UAT-SCM-031 | A failed run records a diagnosable reason | IT Ops | Engine returns an invalid response | 1. Run a plan. 2. Inspect the run row and the ops alert. | — | The run is `Failed` with the **full underlying cause chain** recorded (the pg SQLSTATE is nested under `.cause`); the queue retries then dead-letters with `job_dead_letter` and an administrator notification (ITGC-OP-04). | High | Control | SCM-02, ITGC-OP-04 | Not Run | — |
 | UAT-SCM-032 | Misconfigured engine degrades rather than fails | IT Ops | Only ONE of `SCM_ENGINE_URL` / `SCM_ENGINE_SECRET` set | 1. Run a plan. | — | The run completes in fallback and a one-time `scm_engine_misconfigured` ops alert is raised — a half-configured integration must not silently look healthy. | Med | Control | SCM-02 | Not Run | — |
 
+## §7 — Planner workspace screens (docs/54 Phase 3)
+
+| Test ID | Scenario/Title | Role | Preconditions | Test steps | Test data | Expected result | Priority | Type | Traceability | Result | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| UAT-SCM-033 | Planning tabs are reachable from the demand workspace | Planner | — | 1. Open `/demand`. | — | The tabs **แผนสาขา**, **แผนสั่งซื้อ**, **จำลองสถานการณ์**, **ดีมานด์พุ่ง** appear alongside the existing forecast tabs. | Med | Positive | SCM-03 | Not Run | manual 21 |
+| UAT-SCM-034 | Run a plan from the screen | Planner | — | 1. **แผนสาขา** → **วางแผนตอนนี้**. | — | A run appears with status Completed, showing series/branch counts and which engine produced it (เครื่องพยากรณ์ vs คำนวณในระบบ). | Med | Positive | SCM-03 | Not Run | manual 21 §3 |
+| UAT-SCM-035 | Forecast chart shows the uncertainty band | Planner | An engine-backed run exists | 1. Click the run. | — | The per-day forecast chart renders; the caption reports the model, WAPE and that a p10–p90 band is available. | Med | Positive | SCM-03 | Not Run | manual 21 §3 |
+| UAT-SCM-036 | Untagged-demand warning is visible | Planner | `dine_in_branch_id` unset and dine-in demand present | 1. Open **แผนสาขา**. | — | A warning explains that dine-in orders carry no branch and per-branch ordering will under-plan until the setting is made. | Med | Detective | SCM-03 | Not Run | manual 21 §2 |
+| UAT-SCM-037 | Edit a draft line, then submit | Planner | A Draft plan exists | 1. **แผนสั่งซื้อ** → open a plan. 2. Change **สั่งจริง** on a line. 3. **ส่งอนุมัติ**. | — | The quantity and the plan total update; the plan moves to PendingApproval and the edit field becomes read-only. | High | Positive | SCM-01 | Not Run | manual 21 §4 |
+| UAT-SCM-038 | Approve controls are hidden without the checker duty | Planner (no `scm_approve`) | A PendingApproval plan | 1. Open the plan. | — | **อนุมัติ**/**ปฏิเสธ** are not rendered (the server refuses regardless — this only avoids a dead button). | Med | Control | SCM-01, R24 | Not Run | manual 21 §5 |
+| UAT-SCM-039 | Approve, then convert, from the screen | Approver / Planner | A PendingApproval plan submitted by someone else | 1. Approve. 2. **แปลงเป็นใบขอซื้อ**. | — | Status → Approved → Converted; the requisition number is shown on the plan. | High | Positive | SCM-01 | Not Run | manual 21 §5–6 |
+| UAT-SCM-040 | Scenario tab computes without saving | Planner | — | 1. **จำลองสถานการณ์** → enter 2 item codes, multiplier 2 → **คำนวณ**. 2. Re-open **แผนสาขา**. | — | Quantities and an estimated cost are returned with an advisory note; **no new run or plan appears**. | Med | Positive | SCM-03 | Not Run | manual 21 §7 |
+| UAT-SCM-041 | Spike feed lists and dismisses | Planner | An Open spike event | 1. **ดีมานด์พุ่ง**. 2. **ปิดเรื่อง** on a row. | — | Expected vs actual, the z-score and direction are shown; dismissing flips the row to Dismissed. | Med | Positive | SCM-02 | Not Run | manual 21 §8 |
+| UAT-SCM-042 | Screens are fully bilingual | Planner | — | 1. Switch language th ↔ en on every planning tab. | — | Every label, column, button and message switches; no hardcoded Thai or English remains. | Med | Positive | — | Not Run | catalog `scm.*` |
+
 ## §6 — Traceability summary
 
 | Control | Cases |
 |---|---|
-| **SCM-01** (order-plan maker-checker) | UAT-SCM-014, 017–024, 027 |
-| **SCM-02** (job monitoring + idempotency) | UAT-SCM-025–032 |
-| **SCM-03** (auditable demand-driven sizing) | UAT-SCM-001–016 |
-| SoD **R24** (`scm_plan` vs `scm_approve`) | UAT-SCM-018, 019 |
+| **SCM-01** (order-plan maker-checker) | UAT-SCM-014, 017–024, 027, 037–039 |
+| **SCM-02** (job monitoring + idempotency) | UAT-SCM-025–032, 041 |
+| **SCM-03** (auditable demand-driven sizing) | UAT-SCM-001–016, 033–036, 040 |
+| SoD **R24** (`scm_plan` vs `scm_approve`) | UAT-SCM-018, 019, 038 |
 | GOV-01 (pending approvals) | UAT-SCM-017 |
 | EXP-01 (requisition hand-off) | UAT-SCM-020 |
 | ITGC-OP-04 (job failure alerting) | UAT-SCM-031 |
