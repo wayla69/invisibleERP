@@ -10,6 +10,7 @@ import { SaasLifecycleService } from './saas-lifecycle.service';
 import { SaasReceiptsService } from './saas-receipts.service';
 import { EntitlementObservationsService } from './entitlement-observations.service';
 import { SaasPaymentClaimsService } from './saas-payment-claims.service';
+import { TenantExportService } from './tenant-export.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -82,6 +83,7 @@ export class BillingController {
     private readonly saasReceipts: SaasReceiptsService,
     private readonly entitlementObs: EntitlementObservationsService,
     private readonly paymentClaims: SaasPaymentClaimsService,
+    private readonly tenantExport: TenantExportService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -233,6 +235,17 @@ export class BillingController {
   @Post('admin/payment-claims/:id/reject') @PlatformAdmin() @HttpCode(200)
   rejectPaymentClaim(@Param('id') id: string, @Body(new ZodValidationPipe(ClaimRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
     return this.paymentClaims.reject(Number(id), b.reason, u.username);
+  }
+
+  // D2 — full tenant data export (offboarding / PDPA portability): the tenant row + every row in every
+  // tenant-scoped table, as one downloadable JSON document. God-only; the download is the audit-logged act.
+  @Get('admin/tenants/:id/export') @PlatformAdmin()
+  async exportTenant(@Param('id') id: string, @Res() reply: FastifyReply) {
+    const doc = await this.tenantExport.exportTenant(Number(id));
+    reply
+      .header('Content-Type', 'application/json; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="tenant-${id}-export.json"`)
+      .send(JSON.stringify(doc, null, 1));
   }
 
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.

@@ -611,6 +611,11 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 <Button size="sm" variant="ghost" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/admin/users'); }}>
                   <Users className="size-3.5" /> {t('plt.drawer_manage_users')}
                 </Button>
+                {/* D2 — full tenant data export (offboarding / PDPA portability): one JSON of every
+                    tenant-scoped row, straight from the schema (auto-discovered tables). */}
+                <Button size="sm" variant="ghost" onClick={() => apiDownload(`/api/admin/tenants/${d.id}/export`, `tenant-${d.id}-export.json`).catch((e) => notifyError((e as Error).message))}>
+                  <Download className="size-3.5" /> {t('plt.drawer_export')}
+                </Button>
               </div>
 
               {/* Danger zone — factory reset + delete. Only offered on a suspended, non-deleted company
@@ -1275,6 +1280,15 @@ export default function PlatformConsole({
           {/* Platform health (item 10) — DB pool, cache, queue backlog + dead-letters. */}
           <div>
             <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Server className="size-4 text-primary" /> {t('plt.ov_system_health')}</h3>
+            {/* D4 — server-evaluated alert thresholds (PLATFORM_ALERT_* envs): red banner when breached. */}
+            {(jobs.data?.alerts ?? []).length > 0 && (
+              <div className="mb-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm" data-testid="health-alerts">
+                <div className="flex items-center gap-1.5 font-medium text-destructive"><AlertTriangle className="size-4" /> {t('plt.ov_health_alerts')}</div>
+                <ul className="mt-1 list-disc pl-5 text-destructive">
+                  {jobs.data.alerts.map((a: any) => <li key={a.key}>{a.message}</li>)}
+                </ul>
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard label={t('plt.ov_db_pool')} value={`${ops.data ? '' : '—'}${jobs.data?.pool?.saturation_pct ?? 0}%`} icon={Database} tone={(jobs.data?.pool?.saturation_pct ?? 0) > 80 ? 'danger' : 'default'} hint={t('plt.ov_db_pool_hint', { inflight: num(jobs.data?.pool?.in_flight_tx ?? 0), max: num(jobs.data?.pool?.max ?? 0) })} />
               <StatCard label={t('plt.ov_jobs_queued')} value={num(jobs.data?.jobs?.queued ?? 0)} icon={Activity} hint={t('plt.ov_jobs_queued_hint', { running: num(jobs.data?.jobs?.running ?? 0) })} />

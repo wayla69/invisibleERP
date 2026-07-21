@@ -668,6 +668,43 @@ async function main() {
     JSON.stringify({ st: payRej.status, mail: !!payRejMail, myRej: myRej?.status }));
   delete process.env.PLATFORM_PROMPTPAY_ID;
   delete process.env.PLATFORM_BANK_ACCOUNT;
+
+  // ── 3g-septies. Wave D — console ops depth: (D1) god-inbox events pushed to PLATFORM_ALERT_EMAIL via
+  //                the A1 outbox; (D2) full tenant data export (auto-discovered tenant-scoped tables);
+  //                (D3) optional god hardening — IP allowlist + mandatory MFA (fail-closed 403s). ──
+  process.env.PLATFORM_ALERT_EMAIL = 'god@platform.co';
+  const alertClaim = await inj('POST', '/api/billing/payment-claims', lcLogin.json.token, { amount: 900, slip_ref: 'TXN-ALERT-1' });
+  const alertMail = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).find((m: any) => m.template === 'platform_alert' && m.to_email === 'god@platform.co');
+  ok('D1: a god-inbox event (payment claim) is ALSO pushed to PLATFORM_ALERT_EMAIL (platform_alert queued)',
+    alertClaim.status === 201 && !!alertMail && String(alertMail.subject).includes('แจ้งโอนค่าบริการ'),
+    JSON.stringify({ st: alertClaim.status, subj: alertMail?.subject }));
+  delete process.env.PLATFORM_ALERT_EMAIL;
+
+  const exportRes = await inj('GET', `/api/admin/tenants/${lcTid2}/export`, owner);
+  const exportDoc = (() => { try { return JSON.parse(String(exportRes.body ?? '')); } catch { return exportRes.json; } })();
+  ok('D2: full tenant export returns the tenant row + auto-discovered tenant-scoped tables (subscriptions + receipts present)',
+    exportRes.status === 200 && exportDoc?.tenant?.id === lcTid2 && !!exportDoc.tables?.subscriptions && !!exportDoc.tables?.saas_receipts
+    && exportDoc.table_count > 2 && exportDoc.row_total > 0,
+    JSON.stringify({ st: exportRes.status, tables: exportDoc?.table_count, rows: exportDoc?.row_total }));
+  const exportDenied = await inj('GET', `/api/admin/tenants/${lcTid2}/export`, lcLogin.json.token);
+  ok('D2: a tenant admin cannot export (403 — god-only)', exportDenied.status === 403, `${exportDenied.status}`);
+
+  process.env.PLATFORM_IP_ALLOWLIST = '203.0.113.0/24';
+  const ipBlocked = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: PLATFORM_IP_ALLOWLIST — a god from outside the allowlist is refused (403 PLATFORM_IP_BLOCKED)',
+    ipBlocked.status === 403 && ipBlocked.json.error?.code === 'PLATFORM_IP_BLOCKED', `${ipBlocked.status} ${ipBlocked.json.error?.code}`);
+  process.env.PLATFORM_IP_ALLOWLIST = '127.0.0.1, 203.0.113.0/24';
+  const ipAllowed = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: the loopback entry admits the harness god again (200)', ipAllowed.status === 200, `${ipAllowed.status}`);
+  delete process.env.PLATFORM_IP_ALLOWLIST;
+
+  process.env.PLATFORM_REQUIRE_MFA = 'true';
+  const mfaBlocked = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: PLATFORM_REQUIRE_MFA — a god WITHOUT TOTP enrolled is refused (403 PLATFORM_MFA_REQUIRED)',
+    mfaBlocked.status === 403 && mfaBlocked.json.error?.code === 'PLATFORM_MFA_REQUIRED', `${mfaBlocked.status} ${mfaBlocked.json.error?.code}`);
+  delete process.env.PLATFORM_REQUIRE_MFA;
+  const mfaOffAgain = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: with the knob off the god passes again (default behaviour unchanged)', mfaOffAgain.status === 200, `${mfaOffAgain.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked

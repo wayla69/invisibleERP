@@ -375,4 +375,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.pay_reject_ph': { th: 'เหตุผล เช่น ไม่พบยอดเงินเข้าตามอ้างอิงนี้…', en: 'Reason, e.g. no matching transfer found for this reference…' },
   'plt.pay_filter_all': { th: 'ทั้งหมด', en: 'All' },
   'plt.pay_empty': { th: 'ไม่มีรายการในสถานะนี้', en: 'No claims in this state.' },
+
+  // ── Console ops depth (wave D) ────────────────────────────────────────────
+  'plt.ov_health_alerts': { th: 'เกินเกณฑ์แจ้งเตือน — ต้องตรวจสอบ', en: 'Alert thresholds breached — action needed' },
+  'plt.drawer_export': { th: 'ส่งออกข้อมูลทั้งหมด (JSON)', en: 'Export all data (JSON)' },
 };

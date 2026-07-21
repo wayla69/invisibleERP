@@ -238,11 +238,51 @@ export class PermissionsGuard implements CanActivate {
 // and BEFORE the TenantTxInterceptor, so on success it sets the server-only req.__platformBypass flag the
 // interceptor honours to grant an RLS bypass (needed to provision a brand-new tenant). Empty config ⇒ every
 // such route 403s (secure by default). The flag is set server-side here, never read from client input.
+// D3 hardening knobs (both default OFF = behaviour unchanged):
+//  • PLATFORM_REQUIRE_MFA — a god without TOTP enrolled is refused on every @PlatformAdmin route
+//    (403 PLATFORM_MFA_REQUIRED) until they enrol; the strongest credential gets the strongest factor.
+//  • PLATFORM_IP_ALLOWLIST — comma-separated IPv4 addresses / CIDR prefixes; a platform-admin request
+//    from outside the list is refused (403 PLATFORM_IP_BLOCKED). Pair with TRUSTED_PROXY_HOPS behind a
+//    proxy so req.ip is the real client. IPv6 or unparsable peers fail CLOSED when a list is set.
+const PLATFORM_TRUTHY = new Set(['1', 'true', 'on', 'yes']);
+export function platformRequireMfa(env: NodeJS.ProcessEnv = process.env): boolean {
+  return PLATFORM_TRUTHY.has(String(env.PLATFORM_REQUIRE_MFA ?? '').trim().toLowerCase());
+}
+export function ipv4InAllowlist(ip: string, rawList: string): boolean {
+  const entries = rawList.split(',').map((s) => s.trim()).filter(Boolean);
+  const toInt = (addr: string): number | null => {
+    const parts = addr.split('.');
+    if (parts.length !== 4) return null;
+    let n = 0;
+    for (const p of parts) {
+      const b = Number(p);
+      if (!Number.isInteger(b) || b < 0 || b > 255 || p !== String(b)) return null;
+      n = (n * 256) + b;
+    }
+    return n;
+  };
+  const ipInt = toInt(ip.replace(/^::ffff:/, '')); // Fastify may present IPv4-mapped IPv6
+  if (ipInt == null) return false; // fail closed on anything unparsable/IPv6
+  for (const entry of entries) {
+    const [addr, bitsRaw] = entry.split('/');
+    const base = toInt(addr ?? '');
+    if (base == null) continue;
+    const bits = bitsRaw == null ? 32 : Number(bitsRaw);
+    if (!Number.isInteger(bits) || bits < 0 || bits > 32) continue;
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    if (((ipInt & mask) >>> 0) === ((base & mask) >>> 0)) return true;
+  }
+  return false;
+}
+
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+  ) {}
 
-  canActivate(ctx: ExecutionContext): boolean {
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const needs = this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (!needs) return true;
     const req = ctx.switchToHttp().getRequest();
@@ -253,6 +293,30 @@ export class PlatformAdminGuard implements CanActivate {
     // god session (no apiKeyPrefix) may pass; the key's machine identity is carried on `apiKeyPrefix`.
     if (user?.apiKeyPrefix || !isPlatformAdmin(user?.username)) {
       throw new ForbiddenException({ code: 'PLATFORM_ADMIN_REQUIRED', message: 'Platform-admin access required', messageTh: 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น' });
+    }
+    // D3 — optional IP allowlist on the platform surface (403 from outside; unset = unrestricted).
+    const allowlist = (process.env.PLATFORM_IP_ALLOWLIST ?? '').trim();
+    if (allowlist && !ipv4InAllowlist(String(req.ip ?? ''), allowlist)) {
+      throw new ForbiddenException({ code: 'PLATFORM_IP_BLOCKED', message: 'Platform-admin access is not allowed from this network', messageTh: 'ไม่อนุญาตให้เข้าถึงส่วนผู้ดูแลแพลตฟอร์มจากเครือข่ายนี้' });
+    }
+    // D3 — optional mandatory MFA for gods: read the live enrolment flag (never trust a stale token claim).
+    // `users` is under FORCE RLS, so this pre-tenant identity read uses the same bypass-tx pattern as
+    // JwtAuthGuard.authRead. Fail CLOSED on a missing row; an infra error also refuses (the platform
+    // surface prefers a rare 403 over an unverified god session).
+    if (platformRequireMfa()) {
+      let enrolled = false;
+      try {
+        const [row] = await this.db.transaction(async (tx: any) => {
+          await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
+          return tx.select({ mfa: users.mfaEnabled }).from(users).where(eq(users.username, user!.username)).limit(1);
+        });
+        enrolled = row?.mfa === true;
+      } catch {
+        enrolled = false;
+      }
+      if (!enrolled) {
+        throw new ForbiddenException({ code: 'PLATFORM_MFA_REQUIRED', message: 'Platform admins must enrol MFA before using the platform console', messageTh: 'ผู้ดูแลแพลตฟอร์มต้องเปิดใช้ MFA ก่อนใช้งานศูนย์ควบคุม' });
+      }
     }
     req.__platformBypass = true; // honoured by TenantTxInterceptor to bypass RLS for tenant provisioning
     return true;

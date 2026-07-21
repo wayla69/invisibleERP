@@ -9,7 +9,8 @@ export type MailTemplateKey =
   | 'payment_failed'
   | 'company_suspended'
   | 'saas_receipt'
-  | 'payment_claim_rejected';
+  | 'payment_claim_rejected'
+  | 'platform_alert';
 
 export type MailLang = 'th' | 'en';
 export interface RenderedMail { subject: string; html: string; text: string }
@@ -131,6 +132,22 @@ export const MAIL_TEMPLATES: Record<MailTemplateKey, TemplateFn> = {
     const text = th
       ? `ใบเสร็จ ${vars.receipt_no} · ฿${vars.amount} — ดาวน์โหลดที่ ${vars.billing_url}`
       : `Receipt ${vars.receipt_no} · ฿${vars.amount} — download at ${vars.billing_url}`;
+    return { subject, html: shell(subject, body), text };
+  },
+
+  // vars: title, body?, type, console_url — wave D1: a god-inbox event pushed to the platform owner's
+  // mailbox (PLATFORM_ALERT_EMAIL). The inbox entry is the durable record; this is the wake-up call.
+  platform_alert: (vars, lang) => {
+    const th = lang === 'th';
+    const subject = `[Invisible ERP] ${String(vars.title ?? '')}`;
+    const body =
+      `<p><b>${v(vars, 'title')}</b></p>` +
+      (vars.body ? `<p>${v(vars, 'body')}</p>` : '') +
+      `<p style="color:#64748b;font-size:12px">${v(vars, 'type')}</p>` +
+      (th
+        ? `<p><a href="${v(vars, 'console_url')}">เปิดศูนย์ควบคุมแพลตฟอร์ม</a></p>`
+        : `<p><a href="${v(vars, 'console_url')}">Open the Platform Console</a></p>`);
+    const text = `${vars.title}${vars.body ? ` — ${vars.body}` : ''} (${vars.type}) → ${vars.console_url}`;
     return { subject, html: shell(subject, body), text };
   },
 
