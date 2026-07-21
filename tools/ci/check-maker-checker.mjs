@@ -22,7 +22,7 @@
 //
 // Regenerate the discovered inventory after a conscious change: node tools/ci/check-maker-checker.mjs --update
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const BASELINE_PATH = 'tools/ci/maker-checker-baseline.json';
 const baseline = JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
@@ -34,12 +34,15 @@ const SENSITIVE = /(approve|override|authoriz|certif|reverse|release|dispose|wri
 // Only state-mutating verbs carry the risk; a GET can't self-approve.
 const MUTATING = new Set(['Post', 'Put', 'Patch', 'Delete']);
 
+// Normalised to POSIX separators — moduleOf() below matches on 'apps/api/src/modules/<name>', but
+// node:path join() emits '\' on Windows, which would resolve EVERY controller to the 'src' bucket
+// and report all 94 sensitive routes as unenforced.
 const files = [];
 const walk = (dir) => {
   for (const f of readdirSync(dir)) {
     const p = join(dir, f);
     if (statSync(p).isDirectory()) walk(p);
-    else if (f.endsWith('.controller.ts')) files.push(p);
+    else if (f.endsWith('.controller.ts')) files.push(p.split(sep).join('/'));
   }
 };
 walk('apps/api/src');

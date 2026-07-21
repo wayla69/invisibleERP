@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLang } from '@/lib/i18n';
 import { Select } from '@/components/form-controls';
+import { BranchPlansTab, OrderPlansTab, ScenarioTab, SpikesTab } from '@/components/scm/plan-tabs';
 
 // ── API contract (apps/api/src/modules/demand-ml) ─────────────────────────────
 interface Metrics { algorithm: string; wape: number; mase: number; rmse: number; bias: number; n_test: number }
@@ -39,6 +40,15 @@ const ALGOS = ['', 'sma', 'ses', 'holt', 'seasonal_naive', 'croston', 'croston_s
 
 export default function DemandPage() {
   const { t } = useLang();
+  const me = useQuery<{ permissions?: string[]; role?: string }>({
+    queryKey: ['me'],
+    queryFn: () => api('/api/auth/me'),
+    staleTime: 60_000,
+  });
+  // Only render the approve/reject pair for a holder of the checker duty. The server enforces it
+  // regardless (permission guard + maker ≠ checker), so this only avoids showing a dead button.
+  const canApprove = me.data?.role === 'Admin' || !!me.data?.permissions?.includes('scm_approve');
+
   return (
     <div>
       <PageHeader
@@ -47,6 +57,12 @@ export default function DemandPage() {
       />
       <Tabs
         tabs={[
+          // docs/54 — supply-chain planning rides the existing demand workspace rather than a new
+          // route: same audience, same data lineage, and it keeps the nav from growing another entry.
+          { key: 'branch-plans', label: t('scm.tab_branch_plans'), content: <BranchPlansTab /> },
+          { key: 'order-plans', label: t('scm.tab_order_plans'), content: <OrderPlansTab canApprove={canApprove} /> },
+          { key: 'scenario', label: t('scm.tab_scenario'), content: <ScenarioTab /> },
+          { key: 'spikes', label: t('scm.tab_spikes'), content: <SpikesTab /> },
           { key: 'forecast', label: t('mf.dem_tab_forecast'), content: <ForecastTab /> },
           { key: 'backtest', label: t('mf.dem_tab_backtest'), content: <BacktestTab /> },
           { key: 'history', label: t('mf.dem_tab_history'), content: <HistoryTab /> },

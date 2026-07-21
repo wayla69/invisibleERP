@@ -44,6 +44,11 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
   // Likewise: each run raises preventive-maintenance work orders for every due PM schedule (idempotent).
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
+  // docs/54 — supply-chain planning. The nightly plan is ENQUEUED (a 33-branch run is minutes of
+  // solver time); the spike scan runs inline and is watermarked, so any cadence is idempotent.
+  scm_nightly_plan: { label: 'วางแผนซัพพลายเชนประจำคืน', labelEn: 'Nightly supply-chain plan' },
+  scm_spike_scan: { label: 'ตรวจจับดีมานด์พุ่ง', labelEn: 'Demand-spike scan' },
+  scm_plan_summary: { label: 'สรุปแผนสั่งซื้อรออนุมัติ', labelEn: 'Supply-chain plan summary' },
   // docs/50 Wave 1 A2 — release stock reservations held past their TTL (filters: { max_age_days }, default 30).
   reservation_stale_release: { label: 'ปล่อยการจองสต๊อกที่ค้างเกินกำหนด', labelEn: 'Release stale stock reservations' },
   // docs/50 Wave 2 B3 — period-end STAGING jobs (auto-Draft; posting stays maker-checker).

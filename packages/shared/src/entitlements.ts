@@ -70,8 +70,9 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   procurement: ['procurement', 'pr_raise'],
   // Master data & BoM master.
   masterdata: ['masterdata', 'bom_master'],
-  // Supply-chain planning & marketing analytics.
-  planning: ['planner', 'marketing'],
+  // Supply-chain planning & marketing analytics. docs/54 demand planning (`scm_plan`) belongs here —
+  // it is the same buyer as `planner`; its checker duty (scm_approve) is a sub-permission, not gated.
+  planning: ['planner', 'marketing', 'scm_plan'],
   // CRM loyalty / surveys (loyalty back-office single-duties are granted directly, not suite-gated).
   crm_loyalty: ['loyalty', 'survey'],
   // AI copilot / chat (also token-metered separately).

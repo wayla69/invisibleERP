@@ -71,6 +71,31 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # docs/54 — the SCM forecast/optimization engine is a Python microservice (services/forecast-engine),
+  # deliberately OUTSIDE the pnpm workspace, so `pnpm -r` never sees it and the build job can't gate it.
+  # This job is its gate: unit tests for the maths (newsvendor critical-ratio quantile, MILP⇄newsvendor
+  # equivalence in the single-period limit, FEFO consumption property, Croston-SBA intermittency) plus
+  # the HMAC auth boundary. It also parses the SHARED contract fixtures with the pydantic mirror — the
+  # TS half of that parity check runs in `build` (apps/api/test/scm-contract.test.ts), so a one-sided
+  # contract change fails whichever side went stale.
+  engine-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/forecast-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # matches the Dockerfile base image
+          cache: pip
+          cache-dependency-path: services/forecast-engine/pyproject.toml
+      - name: Install engine + dev deps
+        # prophet ships manylinux wheels with the compiled cmdstan model — no toolchain build here.
+        run: pip install -e ".[dev]"
+      - name: Unit + contract tests
+        run: pytest -q
+
   # The integration harnesses boot the real Nest app over PGlite (a real Postgres),
   # run the Drizzle migrations and assert behaviour — green means "it works", not
   # "it compiles". Previously only a handful ran inline; the rest existed but were
@@ -145,7 +170,7 @@ jobs:
           - shard: scm-mfg
             run: >-
               cutover:stock-ops cutover:match cutover:costing cutover:landed-cost cutover:wms cutover:scm17c cutover:cycle-counts cutover:transfer-orders cutover:std-cost-roll cutover:lot-trace
-              cutover:manufacturing cutover:mfg-depth cutover:mrp
+              cutover:manufacturing cutover:mfg-depth cutover:mrp cutover:scm
           # ── CRM / billing / projects / loyalty ──
           - shard: crm
             run: >-
