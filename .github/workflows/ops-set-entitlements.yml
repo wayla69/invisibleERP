@@ -1,0 +1,59 @@
+# Ops utility (manual dispatch): the entitlements-rollout "button" (docs/ops/entitlements-rollout-runbook.md)
+# — set ENTITLEMENTS_SHADOW / ENTITLEMENTS_ENFORCE on the invisibleERP API service and redeploy so the
+# PlanGuard picks the flags up at boot. The platform runs ONE Railway environment; per the runbook,
+# SHADOW on production IS the safe soak (log-only, never blocks). Turning ENFORCE on is gated behind an
+# explicit typed confirmation because the runbook's §3 preconditions and §5 triage must be completed
+# first — do not flip it ad hoc. Idempotent — safe to re-run. Lives in CI because dev sandboxes cannot
+# reach Railway's API; uses the same RAILWAY_TOKEN binding as deploy.yml / ops-set-observability.yml.
+name: Ops — set entitlements gating (SHADOW/ENFORCE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shadow:
+        description: "ENTITLEMENTS_SHADOW (observe-only; logs entitlement_shadow_block, never blocks)"
+        type: choice
+        options: [leave, "on", "off"]
+        default: "on"
+      enforce:
+        description: "ENTITLEMENTS_ENFORCE (BLOCKS requests — runbook §3+§5 must be complete first)"
+        type: choice
+        options: [leave, "on", "off"]
+        default: leave
+      confirm_enforce:
+        description: "Type ENFORCE to confirm turning enforcement on (ignored otherwise)"
+        type: string
+        default: ""
+
+jobs:
+  set-entitlements:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN is an environment secret here
+    steps:
+      - name: Set entitlement flags on the API service and redeploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SHADOW: ${{ inputs.shadow }}
+          ENFORCE: ${{ inputs.enforce }}
+          CONFIRM: ${{ inputs.confirm_enforce }}
+        run: |
+          set -e
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then echo "::error::RAILWAY_TOKEN not configured on the production environment"; exit 1; fi
+          if [ "${SHADOW}" = "leave" ] && [ "${ENFORCE}" = "leave" ]; then
+            echo "::error::Nothing to do — both inputs are 'leave'."; exit 1
+          fi
+          if [ "${ENFORCE}" = "on" ] && [ "${CONFIRM}" != "ENFORCE" ]; then
+            echo "::error::Turning ENFORCE on requires typing ENFORCE in confirm_enforce. Complete docs/ops/entitlements-rollout-runbook.md §3 (preconditions) and §5 (triage) first."
+            exit 1
+          fi
+          args=""
+          [ "${SHADOW}" = "on" ]   && args="$args --set ENTITLEMENTS_SHADOW=true"
+          [ "${SHADOW}" = "off" ]  && args="$args --set ENTITLEMENTS_SHADOW=false"
+          [ "${ENFORCE}" = "on" ]  && args="$args --set ENTITLEMENTS_ENFORCE=true"
+          [ "${ENFORCE}" = "off" ] && args="$args --set ENTITLEMENTS_ENFORCE=false"
+          # shellcheck disable=SC2086 — word-splitting of the --set pairs is intended
+          npx -y @railway/cli variables $args --service invisibleERP --skip-deploys
+          npx -y @railway/cli redeploy --service invisibleERP -y
+          echo "Now set on invisibleERP:"
+          npx -y @railway/cli variables --service invisibleERP --kv | grep -E '^ENTITLEMENTS_(SHADOW|ENFORCE)=' || echo "(neither flag present)"
+          echo "Entitlement flags applied and API redeploy triggered ✅ — next steps per docs/ops/entitlements-rollout-runbook.md (§4 probe after SHADOW; §6 verification after ENFORCE)."

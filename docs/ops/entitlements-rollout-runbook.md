@@ -1,6 +1,6 @@
 # Entitlements Enforcement Rollout — ENTITLEMENTS_SHADOW → ENTITLEMENTS_ENFORCE
 
-> **Status:** v1.0 · **Date:** 2026-07-21 · **Owner:** Platform / Ops (commercial decisions: CEO/CFO)
+> **Status:** v1.1 · **Date:** 2026-07-21 · **Owner:** Platform / Ops (commercial decisions: CEO/CFO)
 > Procedure for taking production plan-entitlement gating (docs/36 §5, docs/53 packaging) from
 > default-off → shadow observation → enforced, with per-tenant remediation and instant rollback.
 > Cross-refs: [`../36-monetization-packaging.md`](../36-monetization-packaging.md) §5,
@@ -75,8 +75,23 @@ Run against production (god session / Railway psql). Tick each:
 
 ## 4. Stage 1 — enable SHADOW
 
-1. Railway → **api** service → Variables: set `ENTITLEMENTS_SHADOW=true` (leave
-   `ENTITLEMENTS_ENFORCE` unset/false). Redeploy/restart the api service.
+> **Single-environment note (v1.1):** the platform runs ONE Railway environment — there is no separate
+> staging. The staged-rollout wording elsewhere ("staging → prod") maps here to: **SHADOW on production
+> IS the staging soak** (log-only, blocks nobody), then ENFORCE on the same environment. The live api
+> service is named **`invisibleERP`** (web: `invisiblePOSERP`) — use that in every CLI command; "api"
+> below refers to it.
+
+1. Set the flag — either path:
+   - **Push-button (preferred):** GitHub → Actions → **"Ops — set entitlements gating (SHADOW/ENFORCE)"**
+     (`.github/workflows/ops-set-entitlements.yml`, manual dispatch on the `production` environment) →
+     `shadow: on`, `enforce: leave` → Run. It sets the variable via the CI `RAILWAY_TOKEN` and triggers
+     the api redeploy. (Turning ENFORCE on through the same workflow requires typing `ENFORCE` in the
+     confirmation input — §3/§5 must be complete first.)
+   - **Dashboard:** Railway → **invisibleERP** service → Variables: set `ENTITLEMENTS_SHADOW=true`
+     (leave `ENTITLEMENTS_ENFORCE` unset/false) → redeploy the service.
+   Both flags are listed in `railway-env-manifest.json` under `transitional` during the rollout (the
+   30-min env probe warns instead of hard-failing while they come and go); move them to `expected`
+   in the change that makes ENFORCE permanent.
 2. **Probe** (proves the wiring, same day): using any *expired-trial* tenant account (or a
    throwaway Trial company created then date-shifted), call a non-portal route; confirm the request
    still succeeds AND both §2 log lines appear in the Railway stream.
@@ -85,8 +100,8 @@ Run against production (god session / Railway psql). Tick each:
 
 ## 5. Triage — turning shadow logs into a remediation list
 
-Export the window's api logs (Railway CLI: `railway logs -s api > shadow.log`, or the dashboard
-export) and aggregate:
+Export the window's api logs (Railway CLI: `railway logs --service invisibleERP > shadow.log`, or
+the dashboard export) and aggregate:
 
 ```bash
 grep '"event":"entitlement_shadow_block"' shadow.log \
@@ -110,8 +125,9 @@ this table is empty, or every remaining row has a named owner decision ("let it 
 ## 6. Stage 2 — enable ENFORCE
 
 1. Send the §8 notice to every tenant on the remediation list at least 3 business days ahead.
-2. Railway → api service: set `ENTITLEMENTS_ENFORCE=true`, set `ENTITLEMENTS_SHADOW=false`.
-   Redeploy during low traffic (recommended: 05:00–06:00 Asia/Bangkok; avoid 25th–5th close window).
+2. Flip via the dispatch workflow (`enforce: on` + typed `ENFORCE` confirmation, `shadow: off`) or
+   Railway → **invisibleERP** service variables directly. Redeploy during low traffic (recommended:
+   05:00–06:00 Asia/Bangkok; avoid the 25th–5th close window).
 3. **Post-flip verification (within 30 min):**
    - [ ] god account operates normally across companies (bypass intact);
    - [ ] a healthy paid tenant's normal flows green (login, POS sale or order, billing page);
@@ -126,7 +142,7 @@ this table is empty, or every remaining row has a named owner decision ("let it 
 ## 7. Rollback
 
 Set `ENTITLEMENTS_ENFORCE=false` (optionally `ENTITLEMENTS_SHADOW=true` to keep observing) on the
-api service and redeploy — config-only, takes effect at boot, no data to unwind (denials are
+**invisibleERP** service — via the dispatch workflow or the dashboard — and redeploy — config-only, takes effect at boot, no data to unwind (denials are
 stateless 403s; nothing was written). Legacy behaviour returns byte-for-byte.
 
 ## 8. Tenant notice template (send before the flip)
@@ -147,4 +163,5 @@ stateless 403s; nothing was written). Legacy behaviour returns byte-for-byte.
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.1 | 2026-07-21 | Platform / Ops | Single-environment clarification (SHADOW-on-production IS the staging soak); live service names (`invisibleERP`/`invisiblePOSERP`); push-button dispatch workflow `ops-set-entitlements.yml` (typed confirmation gates ENFORCE); flags registered as `transitional` in `railway-env-manifest.json`. |
 | 1.0 | 2026-07-21 | Platform / Ops | Initial runbook (post-docs/53 packaging; structured `entitlement_shadow_block`/`entitlement_block` telemetry added to `plan.guard.ts` with ToE in `cutover:plan-gating`). |
