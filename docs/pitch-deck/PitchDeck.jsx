@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
-  Coins,
   CreditCard,
   Database,
   Factory,
@@ -27,7 +26,6 @@ import {
   Monitor,
   Network,
   QrCode,
-  Repeat,
   Rocket,
   Scale,
   Server,
@@ -376,28 +374,42 @@ function MarketSlide() {
   );
 }
 
+function PlanTier({ name, price, per, sub, tone }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center shadow-sm">
+      <div className="text-sm font-extrabold text-slate-900">{name}</div>
+      <div className={`mt-1 text-lg font-extrabold ${TONES[tone].text}`}>{price}</div>
+      <div className="text-[10px] font-semibold text-slate-400">{per || " "}</div>
+      <div className="mt-1 text-[10px] leading-snug text-slate-500">{sub}</div>
+    </div>
+  );
+}
+
 function BusinessModelSlide() {
   return (
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Business Model" title="SaaS economics on one multi-tenant core" tone="emerald" />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+        <PlanTier name="Free" price="฿0" per="" sub="evaluation · 2 users, 1 location" tone="slate" />
+        <PlanTier name="SME" price="฿690" per="/mo" sub="single owner · full ops ERP + AI" tone="emerald" />
+        <PlanTier name="Standard" price="฿2,900" per="/mo" sub="finance core · 10 users, 2 locations" tone="blue" />
+        <PlanTier name="Business" price="฿4,900" per="/mo" sub="+ procurement · multi-branch" tone="violet" />
+        <PlanTier name="Professional" price="฿9,900" per="/mo" sub="+ planning · loyalty · AI" tone="amber" />
+        <PlanTier name="Enterprise" price="Custom" per="" sub="all verticals · unlimited scale" tone="rose" />
+      </div>
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card icon={Wallet} tone="emerald" title="Per-company subscriptions">
-          Tiered plans with self-service signup and trials. One deployment serves the whole
-          fleet — gross margin scales with tenants, not headcount.
+          Every company in a fleet subscribes to its own plan on one deployment — gross margin
+          scales with tenants, not headcount. Yearly billing is priced at ten months.
         </Card>
-        <Card icon={Sparkles} tone="violet" title="Usage-metered AI add-ons">
-          AI features are token-metered per tenant with automated overage billing — expansion
-          revenue that grows with customer usage.
+        <Card icon={Sparkles} tone="violet" title="Usage-metered expansion">
+          AI tokens, e-Tax documents, and POS transactions carry plan quotas with automatic
+          overage billing — expansion revenue grows with customer usage.
         </Card>
         <Card icon={Rocket} tone="blue" title="Land and expand">
-          Land with POS + inventory at a few branches; expand into procurement, finance, and
-          full ICFR as the chain grows and formalizes.
+          A 14-day self-service trial lands the account; every upgrade from SME to Enterprise
+          is a plan change on the same tenant — never a migration.
         </Card>
-      </div>
-      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <Chip icon={Repeat} tone="emerald">Recurring revenue</Chip>
-        <Chip icon={Users} tone="blue">Fleet-level ops = low cost to serve</Chip>
-        <Chip icon={Coins} tone="amber">Billing &amp; metering built into the platform</Chip>
       </div>
     </div>
   );
