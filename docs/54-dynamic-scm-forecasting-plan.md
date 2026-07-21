@@ -170,7 +170,7 @@ cooldown — one viral evening produces one event, not forty.
 | **P1** | Shared zod contract, Python engine (FastAPI + Prophet + PuLP), pytest suite + shared fixtures, `engine-tests` CI job, `.env.example`, this plan | **DELIVERED** (2026-07-21) |
 | **P2** | API module `modules/scm-planning` — migration, extraction, engine client, jobs, plan lifecycle + maker-checker, PR handoff, `scm` harness; PN-34 + RCM SCM-01..03 + UAT | **DELIVERED** (2026-07-21) |
 | **P3** | Planner workspace (`/demand` tabs: branch plans, order plans, scenario, spike feed), user manual, UAT screen cases | **DELIVERED** (2026-07-21) |
-| **Ops** | Railway `forecast-engine` service + secret, `deploy_service` line | Manual, after P2 |
+| **Ops** | Railway `forecast-engine` service + secret, `deploy_service` line | **DELIVERED (plumbing, 2026-07-21)** — `deploy_service forecast-engine` added to `deploy.yml` (best-effort) + `ops-provision-forecast-engine.yml` wires secret/URL in the right order. **One manual dashboard step remains**: create+configure the Railway service (see §6). |
 
 ### P1 delivered (this change)
 
@@ -233,10 +233,24 @@ treat as the same expression (42803). The offset is now inlined as a validated i
 - **Branch protection:** `engine-tests` is a NEW top-level job, i.e. a new check name. It is not in
   the required set until the repo owner adds it — flag this at merge (adding a `cutover:` script
   inside an existing shard would not have needed it; a new job does).
-- **Going live:** create the Railway service (root `services/forecast-engine`, Dockerfile builder),
-  generate `SCM_ENGINE_SECRET`, set it plus `SCM_ENGINE_URL=http://<service>.railway.internal:8000`
-  on both API services, then add a `deploy_service forecast-engine` line to `deploy.yml`. Until then
-  the API runs the in-process fallback and never calls out.
+- **Going live:** the `deploy_service forecast-engine` line is now in `deploy.yml` (best-effort — its
+  failure never blocks the mandatory API rollout, since the APIs only call the engine once
+  `SCM_ENGINE_URL`+`SCM_ENGINE_SECRET` are set), and `ops-provision-forecast-engine.yml` automates the
+  secret + env-var wiring. The one remaining **manual** step is creating the Railway service, because a
+  service's config-as-code path is a per-service setting the CLI cannot set (the two API services set
+  theirs — `apps/api/railway.json` / `apps/web/railway.json` — the same way):
+  1. **Railway dashboard →** New Service → from the GitHub repo → name it **exactly** `forecast-engine`
+     (the internal host `forecast-engine.railway.internal` derives from the service name) → Settings →
+     Root Directory `/` (repo root, same as invisibleERP) → Config-as-code path
+     `services/forecast-engine/railway.json` (which selects the Dockerfile builder).
+  2. **Run `ops-provision-forecast-engine.yml`** (Actions → manual dispatch). It generates
+     `SCM_ENGINE_SECRET`, sets it on the engine, builds+deploys it and waits for `/healthz`, then wires
+     `SCM_ENGINE_URL`+`SCM_ENGINE_SECRET` onto **both** API services and redeploys — in that order,
+     because scm-run has no *runtime* fallback (a call to a down engine marks the run Failed), so the
+     engine must be healthy before the APIs point at it.
+
+  Until both steps are done the API runs the in-process fallback planner and never calls out — safe, but
+  without full Prophet/MILP.
 - **Engine trust boundary:** the API zod-validates and **clamps** engine output before persisting
   (qty ≥ 0, ≤ 2× max stock, flagged in `detail.clamped`) — a buggy or compromised engine must not be
   able to plant absurd quantities into a Draft plan that a hurried approver rubber-stamps.
@@ -247,4 +261,6 @@ treat as the same expression (42803). The offset is now inlined as a validated i
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial plan. **Phase 1 DELIVERED**: shared contract, Python forecast-engine (Prophet + PuLP), pytest + shared contract fixtures, `engine-tests` CI job, `.env.example` SCM block. Phases 2–3 planned. |
 | 0.3 | 2026-07-21 | Supply-chain / Planning | **Phase 3 DELIVERED**: planner workspace as four new tabs on the existing `/demand` page (branch plans with the p10–p90 band and the untagged-demand warning, order plans with line edit → submit → approve → convert, the advisory scenario tool, the spike feed), `scm.*` th/en catalog, nav perms extended. The components live under `components/scm/` **without** their own `'use client'` directive — they inherit the page's boundary, so the use-client ratchet stayed flat at 288. Doc-sync: user-manual chapter 21 with body walkthroughs per flow, FAQ error codes, UAT §7 screen cases (UAT-SCM-033..042). |
+| 0.5 | 2026-07-21 | Supply-chain / Planning | **Dockerfile build-context fix**: the Railway service uses Root Directory `/` (repo root, like invisibleERP) and railway.json's repo-root-relative `dockerfilePath`, so the Docker build context is the whole repo. The `COPY pyproject.toml`/`COPY app` lines were repo-root-relative-wrong (`"/pyproject.toml": not found` at build) and are now `COPY services/forecast-engine/pyproject.toml`/`… /app`. No behaviour change. |
+| 0.4 | 2026-07-21 | Supply-chain / Planning | **Ops plumbing DELIVERED**: `deploy_service forecast-engine` added to `deploy.yml` (best-effort — deployed first, its failure downgraded to a warning so it can never block the API rollout); new `ops-provision-forecast-engine.yml` (manual dispatch, `production` env) generates `SCM_ENGINE_SECRET`, deploys the engine and waits for `/healthz`, then wires `SCM_ENGINE_URL`+`SCM_ENGINE_SECRET` onto both API services and redeploys — engine-first, because scm-run has no runtime fallback. §4 Ops row + §6 "Going live" rewritten with the one remaining manual dashboard step (create+configure the service). No app/API/control/behaviour change — narratives (PN-34), user manual, UAT, and RCM (SCM-01..03) are unaffected. |
 | 0.2 | 2026-07-21 | Supply-chain / Planning | **Phase 2 DELIVERED**: `modules/scm-planning` (migration `0459` — renumbered from 0458, taken by a concurrent PR), channel-partitioned demand extraction, engine client, background jobs + spike detector, maker-checker plan lifecycle with the procurement PR hand-off, `cutover:scm` harness (20 checks). New controls **SCM-01/02/03** (RCM 299→302), SoD **R24**, permissions `scm_plan`/`scm_approve`. Doc-sync: PN-34, UAT cycle 18 (UAT-SCM-001..032) + traceability, RCM census bumped and xlsx/catalog regenerated. Phase 3 (planner workspace) planned. |

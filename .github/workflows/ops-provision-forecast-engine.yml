@@ -1,0 +1,85 @@
+# Ops utility (manual dispatch): wire the docs/54 SCM forecast engine to production.
+#
+# Sets the shared HMAC secret on the `forecast-engine` service, builds+deploys it, waits for it to
+# pass /healthz, and only THEN points both API services at it (SCM_ENGINE_URL + SCM_ENGINE_SECRET)
+# and redeploys them. That ordering is load-bearing: scm-run marks a plan run Failed (there is NO
+# runtime fallback once the engine is configured) if it calls an engine that isn't up, so the engine
+# must be healthy BEFORE the APIs are wired to it.
+#
+# PREREQUISITE (one-time, Railway dashboard — the CLI cannot set a service's config-as-code path):
+#   Create a service named exactly `forecast-engine` from the GitHub repo, Root Directory `/`
+#   (repo root, same as invisibleERP), Config-as-code path `services/forecast-engine/railway.json`
+#   (which selects the Dockerfile builder). This mirrors how invisibleERP points at apps/api/railway.json.
+#
+# Lives in CI because dev sandboxes cannot reach Railway's API. Uses the same RAILWAY_TOKEN binding as
+# deploy.yml / ops-set-cors.yml. Idempotent — safe to re-run (reuses the existing secret unless you
+# ask to rotate). The secret is generated/read in-job and NEVER printed.
+name: Ops — provision forecast-engine (docs/54)
+
+on:
+  workflow_dispatch:
+    inputs:
+      rotate_secret:
+        description: "Regenerate SCM_ENGINE_SECRET even if one already exists on forecast-engine"
+        type: boolean
+        default: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN is an environment secret here (same binding as deploy.yml)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4   # `railway up` uploads this checkout as the engine's build context
+      - name: Provision forecast-engine and wire the API services
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ROTATE: ${{ inputs.rotate_secret }}
+        run: |
+          set -e
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then echo "::error::RAILWAY_TOKEN not configured on the production environment"; exit 1; fi
+          rw() { npx -y @railway/cli "$@"; }
+
+          # 1) The service must already exist + be configured (see the PREREQUISITE header). Verify
+          #    before mutating anything — a clear error beats a half-applied wiring.
+          if ! rw variables --service forecast-engine --kv >/tmp/fe.kv 2>/tmp/fe.err; then
+            echo "::error::'forecast-engine' service not found or unreachable. Create+configure it in the Railway dashboard first (see this workflow's PREREQUISITE header), then re-run."
+            sed 's/^/  /' /tmp/fe.err || true
+            exit 1
+          fi
+
+          # 2) Shared HMAC secret. Reuse the value already on the engine (idempotent — keeps HMAC stable
+          #    across re-runs) unless it is unset or rotate_secret=true. Never printed.
+          SECRET="$(grep '^SCM_ENGINE_SECRET=' /tmp/fe.kv | cut -d= -f2- | tr -d '\r' || true)"
+          rm -f /tmp/fe.kv
+          if [ -z "$SECRET" ] || [ "$ROTATE" = "true" ]; then
+            SECRET="$(openssl rand -hex 32)"
+            echo "Generated a fresh SCM_ENGINE_SECRET (32 bytes)."
+          else
+            echo "Reusing the SCM_ENGINE_SECRET already present on forecast-engine."
+          fi
+
+          # 3) Set the secret on the engine, then build+deploy it and WAIT for the /healthz healthcheck
+          #    (railway.json healthcheckPath). --ci blocks until the deployment is healthy or fails.
+          rw variables --set "SCM_ENGINE_SECRET=$SECRET" --service forecast-engine --skip-deploys
+          echo "Building + deploying forecast-engine (blocks on the /healthz healthcheck)…"
+          rw up --service forecast-engine --ci
+
+          # 4) Only now wire both API services to the healthy engine (same secret + the internal URL)
+          #    and redeploy so the process picks the vars up (read at request time via process.env).
+          for svc in invisibleERP invisiblePOSERP; do
+            rw variables \
+              --set "SCM_ENGINE_URL=http://forecast-engine.railway.internal:8000" \
+              --set "SCM_ENGINE_SECRET=$SECRET" \
+              --service "$svc" --skip-deploys
+            rw redeploy --service "$svc" -y
+            echo "Wired $svc → forecast-engine and triggered a redeploy."
+          done
+
+          # 5) Confirm the keys are present on every service (values masked — this log is public).
+          for svc in forecast-engine invisibleERP invisiblePOSERP; do
+            echo "Keys now on $svc:"
+            rw variables --service "$svc" --kv | grep -E '^(SCM_ENGINE_URL|SCM_ENGINE_SECRET)=' | sed 's/=.*/=<set>/' || echo "  (none)"
+          done
+          echo "✅ forecast-engine provisioned; both API services wired. The engine now serves Prophet/MILP forecasts; the in-process planner stays as the degrade path if the engine is ever unreachable."
