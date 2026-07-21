@@ -115,4 +115,73 @@ export class DocAiService {
     const r = await this.extractInvoiceDocument({ media_type: doc.mime, data: doc.base64 }, user);
     return { fields: r.fields, source: r.source };
   }
+
+  // ── Bank-transfer SLIP extraction (wave-C claim pre-fill) ─────────────────────────────────────────
+  // Same honesty contract as the invoice extractors: Claude vision when keyed (and the tenant hasn't
+  // opted out), deterministic regex for pasted text, EMPTY fields otherwise — the result only PRE-FILLS
+  // the /billing claim form; the human confirms and the platform owner still verifies against the real
+  // bank statement, so a misread can never move money. (The slip QR's exact transfer ref is decoded
+  // CLIENT-side — @ierp/shared slipTransferRef — before this is even called.)
+  private slipRuleExtract(text: string): SlipFields {
+    const amtM = text.match(/(?:จำนวนเงิน|จำนวน|amount)[^\d]{0,12}([\d,]+(?:\.\d{2})?)/i)
+      ?? text.match(/([\d,]+\.\d{2})\s*(?:บาท|THB|฿)/i)
+      ?? text.match(/(?:บาท|THB|฿)\s*([\d,]+(?:\.\d{2})?)/i);
+    const amount = amtM ? Number(amtM[1]!.replace(/,/g, '')) : null;
+    const ref = text.match(/(?:เลขที่รายการ|รหัสอ้างอิง|หมายเลขอ้างอิง|อ้างอิง|reference(?:\s*no\.?)?|ref(?:erence)?)[\s#:.\-]*([A-Za-z0-9]{8,40})/i)?.[1] ?? null;
+    const dateM = text.match(/(\d{4}-\d{2}-\d{2})/)?.[1]
+      ?? text.match(/(\d{1,2}\s*(?:ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*\d{2,4})/)?.[1]
+      ?? text.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/)?.[1] ?? null;
+    return { amount: Number.isFinite(amount as number) && (amount as number) > 0 ? amount : null, transfer_ref: ref, date: dateM };
+  }
+
+  private emptySlip(): SlipFields { return { amount: null, transfer_ref: null, date: null }; }
+
+  async extractSlip(input: { data_url?: string; text?: string }, user: JwtUser): Promise<{ fields: SlipFields; source: string }> {
+    const text = (input.text ?? '').trim();
+    if (text) {
+      if (!this.apiKey || (await aiTenantOptedOut(this.db, user?.tenantId))) return { fields: this.slipRuleExtract(text), source: 'rules' };
+      try {
+        const client = llmClient(this.apiKey);
+        const res: any = await client.create({
+          model: this.model, max_tokens: 512, system: SLIP_SYSTEM,
+          messages: [{ role: 'user', content: `Extract from this transfer slip:\n${text}` }],
+        });
+        const out = (res.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+        try { return { fields: normalizeSlipFields(parseModelJson(out)), source: 'ai' }; } catch { return { fields: this.slipRuleExtract(text), source: 'rules-fallback' }; }
+      } catch { return { fields: this.slipRuleExtract(text), source: 'rules-fallback' }; }
+    }
+    if (!input.data_url) return { fields: this.emptySlip(), source: 'none' };
+    const doc = parseInvoiceDataUrl(input.data_url); // shared mime allow-list + size caps
+    if (!this.apiKey || (await aiTenantOptedOut(this.db, user?.tenantId))) return { fields: this.emptySlip(), source: 'none' };
+    try {
+      const client = llmClient(this.apiKey);
+      const block = doc.mime === 'application/pdf'
+        ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: doc.base64 } }
+        : { type: 'image', source: { type: 'base64', media_type: doc.mime, data: doc.base64 } };
+      const res: any = await client.create({
+        model: this.model, max_tokens: 512, system: SLIP_SYSTEM,
+        messages: [{ role: 'user', content: [block, { type: 'text', text: 'Extract the transfer-slip fields from this image.' }] }],
+      });
+      const out = (res.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+      try { return { fields: normalizeSlipFields(parseModelJson(out)), source: 'ai' }; } catch { return { fields: this.emptySlip(), source: 'none' }; }
+    } catch { return { fields: this.emptySlip(), source: 'none' }; }
+  }
+}
+
+export interface SlipFields { amount: number | null; transfer_ref: string | null; date: string | null }
+
+const SLIP_SYSTEM =
+  'You extract fields from a Thai bank money-transfer slip (สลิปโอนเงิน). Return ONLY JSON: ' +
+  '{amount (number — THB transferred), transfer_ref (the transaction/reference code, e.g. เลขที่รายการ/รหัสอ้างอิง), ' +
+  'date (YYYY-MM-DD in the Common Era — Thai slips print Buddhist-era พ.ศ. years, subtract 543)}. ' +
+  'Use null for anything not legible. No prose.';
+
+// Normalize a model slip response defensively (finite positive amount, bounded ref, BE→CE date passthrough
+// left to the model per the system prompt — an unparseable value degrades to null, never garbage).
+export function normalizeSlipFields(raw: unknown): SlipFields {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const amt = Number(o.amount);
+  const ref = typeof o.transfer_ref === 'string' && /^[A-Za-z0-9\-]{4,60}$/.test(o.transfer_ref.trim()) ? o.transfer_ref.trim() : null;
+  const date = typeof o.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? o.date : null;
+  return { amount: Number.isFinite(amt) && amt > 0 ? Math.round(amt * 100) / 100 : null, transfer_ref: ref, date };
 }

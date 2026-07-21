@@ -705,6 +705,21 @@ async function main() {
   delete process.env.PLATFORM_REQUIRE_MFA;
   const mfaOffAgain = await inj('GET', '/api/admin/payment-claims', owner);
   ok('D3: with the knob off the god passes again (default behaviour unchanged)', mfaOffAgain.status === 200, `${mfaOffAgain.status}`);
+
+  // ── 3g-octies. Slip pre-fill: the doc-ai slip extractor behind the /billing claim form — deterministic
+  //               rules without an AI key (CI honesty ladder), perm `users` (same duty that files claims). ──
+  const slipX = await inj('POST', '/api/doc-ai/slip-extract', lcLogin.json.token,
+    { text: 'โอนเงินสำเร็จ\nจำนวนเงิน 4,900.00 บาท\nเลขที่รายการ: 014000601034578\n2026-07-21 14:02' });
+  ok('Slip pre-fill: deterministic text extraction (amount + transfer ref + date, source rules)',
+    slipX.status === 201 || slipX.status === 200
+      ? slipX.json.source === 'rules' && slipX.json.fields?.amount === 4900 && slipX.json.fields?.transfer_ref === '014000601034578' && slipX.json.fields?.date === '2026-07-21'
+      : false,
+    JSON.stringify(slipX.json));
+  const slipEmpty = await inj('POST', '/api/doc-ai/slip-extract', lcLogin.json.token,
+    { data_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' });
+  ok('Slip pre-fill: an image without an AI key is honestly EMPTY (source none — never a guess)',
+    (slipEmpty.status === 201 || slipEmpty.status === 200) && slipEmpty.json.source === 'none' && slipEmpty.json.fields?.amount === null,
+    JSON.stringify(slipEmpty.json));
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked

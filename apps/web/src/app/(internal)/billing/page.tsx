@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CircleDollarSign, Landmark, Package, Puzzle, QrCode, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
 // A3 — the add-on vocabulary from the shared entitlement maps (same source the API prices/gates by).
-import { ADDON_GRANTS, ADDON_KEYS, ADDONS } from '@ierp/shared';
+// slipTransferRef — the Slip-Verify mini-QR TLV parser (slip pre-fill; same code path API tests cover).
+import { ADDON_GRANTS, ADDON_KEYS, ADDONS, slipTransferRef } from '@ierp/shared';
+import { createFrameDecoder } from '@/lib/qr-decode';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, thaiDate, num } from '@/lib/format';
@@ -312,6 +314,51 @@ function PayByTransferCard() {
       setPeriod((prev) => prev || String(info.data.suggested_period ?? ''));
     }
   }, [info.data]);
+  const [slipBusy, setSlipBusy] = useState(false);
+  // Read an uploaded slip image: (1) draw to canvas → decode the mini-QR → exact transfer ref;
+  // (2) send a bounded JPEG to doc-ai for amount/date (+ref fallback when no QR decoded).
+  const readSlip = async (file: File) => {
+    setSlipBusy(true);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('bad image'));
+        el.src = URL.createObjectURL(file);
+      });
+      const draw = (scale: number) => {
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+        return c;
+      };
+      let ref: string | null = null;
+      try {
+        const decoder = await createFrameDecoder();
+        for (const scale of [1, 2]) {
+          const decoded = await decoder.decode(draw(scale));
+          if (decoded) { ref = slipTransferRef(decoded); if (ref) break; }
+        }
+      } catch { /* no decoder / no QR — the AI fallback below still runs */ }
+      if (ref) setSlipRef(ref);
+      // Bound the upload the same way parseInvoiceDataUrl expects (phone photos can be huge).
+      const maxSide = 1600;
+      const scaleDown = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const dataUrl = draw(scaleDown).toDataURL('image/jpeg', 0.85);
+      let aiAmount = false;
+      try {
+        const r = await api<{ fields: { amount: number | null; transfer_ref: string | null; date: string | null } }>('/api/doc-ai/slip-extract', { method: 'POST', body: JSON.stringify({ data_url: dataUrl }) });
+        if (r.fields.amount) { setAmount(String(r.fields.amount)); aiAmount = true; }
+        if (!ref && r.fields.transfer_ref) { ref = r.fields.transfer_ref; setSlipRef(ref); }
+        if (r.fields.date) setPeriod(r.fields.date.slice(0, 7));
+      } catch { /* extraction is best-effort — the form stays manual */ }
+      URL.revokeObjectURL(img.src);
+      setMsg(ref || aiAmount ? `✅ ${t('st.bill.pay_slip_read_done')}` : t('st.bill.pay_slip_read_none'));
+    } finally {
+      setSlipBusy(false);
+    }
+  };
   const submit = useMutation({
     mutationFn: () => api('/api/billing/payment-claims', {
       method: 'POST',
@@ -365,6 +412,13 @@ function PayByTransferCard() {
         </div>
         <div className="grid content-start gap-2">
           <strong className="text-sm">{t('st.bill.pay_claim_title')}</strong>
+          {/* Slip pre-fill: decode the slip's Slip-Verify mini-QR client-side (exact transfer ref, free),
+              then ask doc-ai for amount/date (+ref fallback). Pre-fill ONLY — the user confirms the form
+              and the platform owner still verifies against the real bank statement. */}
+          <label className={cn('flex w-fit cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium', slipBusy && 'opacity-60')}>
+            {slipBusy ? t('st.bill.pay_slip_reading') : t('st.bill.pay_slip_read')}
+            <input type="file" accept="image/*" className="hidden" disabled={slipBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void readSlip(f); e.target.value = ''; }} />
+          </label>
           <label className="grid gap-1 text-xs text-muted-foreground">
             {t('fin.col_amount')}
             <input type="number" min="0" step="0.01" className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={amount} onChange={(e) => setAmount(e.target.value)} />
