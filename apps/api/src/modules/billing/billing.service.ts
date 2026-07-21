@@ -163,6 +163,8 @@ export class BillingService {
         trial_ends_at: subscriptions.trialEndsAt,
         current_period_end: subscriptions.currentPeriodEnd,
         addons: subscriptions.addons, // 0451 — purchased à-la-carte add-on suite keys
+        grandfathered_price: subscriptions.grandfatheredPrice, // 0454 — price snapshot
+        grandfathered_until: subscriptions.grandfatheredUntil,
         plan_name: plans.name,
         price_monthly: plans.priceMonthly,
         currency: plans.currency,
@@ -174,7 +176,14 @@ export class BillingService {
       .orderBy(sql`${subscriptions.createdAt} desc`)
       .limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
-    return { ...row, price_monthly: Number(row.price_monthly ?? 0) };
+    // 0454 — price_monthly is what the tenant actually pays: the grandfathered snapshot while active
+    // (until NULL = indefinite), else the plan's list price. list_price_monthly stays for transparency.
+    const gfActive = row.grandfathered_price != null
+      && (row.grandfathered_until == null || new Date(row.grandfathered_until).getTime() > Date.now());
+    const listPrice = Number(row.price_monthly ?? 0);
+    const effective = gfActive ? Number(row.grandfathered_price) : listPrice;
+    const { grandfathered_price: _gp, grandfathered_until: _gu, ...rest } = row;
+    return { ...rest, price_monthly: effective, list_price_monthly: listPrice, grandfathered: gfActive && effective !== listPrice };
   }
 
 
@@ -212,14 +221,23 @@ export class BillingService {
     let prorationNote: string | undefined;
     if (targetInterval === curInterval) {
       const periodDays = curInterval === 'annual' ? 365 : 30;
-      const oldAmount = curInterval === 'annual' ? Number(oldPlan?.priceYearly ?? 0) : Number(oldPlan?.price ?? 0);
+      // 0454 — the credit side of proration is what the tenant ACTUALLY pays (their grandfathered
+      // snapshot when present), not the plan's current list price.
+      const oldAmount = curInterval === 'annual'
+        ? Number(sub.grandfatheredAnnualPrice ?? oldPlan?.priceYearly ?? 0)
+        : Number(sub.grandfatheredPrice ?? oldPlan?.price ?? 0);
       const newAmount = curInterval === 'annual' ? Number(plan.priceYearly ?? 0) : Number(plan.priceMonthly ?? 0);
       proration = computeProration({ oldPriceMonthly: oldAmount, newPriceMonthly: newAmount, periodEnd: sub.currentPeriodEnd, now: Date.now(), periodDays });
     } else {
       prorationNote = 'interval_change'; // switching monthly↔annual — applied at the next renewal, no mid-cycle number
     }
 
-    await db.update(subscriptions).set({ planCode: target, status: 'Active', billingInterval: targetInterval }).where(eq(subscriptions.id, sub.id));
+    // 0454 — a plan change RE-SNAPSHOTS at the new plan's current price (choosing a new plan is the one
+    // event that ends the old price lock).
+    await db.update(subscriptions).set({
+      planCode: target, status: 'Active', billingInterval: targetInterval,
+      grandfatheredPrice: plan.priceMonthly, grandfatheredAnnualPrice: plan.priceYearly, grandfatheredUntil: null,
+    }).where(eq(subscriptions.id, sub.id));
     return { tenant_id: tenantId, plan: target, status: 'Active', billing_interval: targetInterval, proration, ...(prorationNote ? { proration_note: prorationNote } : {}) };
   }
 
@@ -312,7 +330,15 @@ export class BillingService {
     const [tenant] = await db.select({ id: tenants.id, code: tenants.code }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
     if (!tenant) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tenant not found', messageTh: 'ไม่พบร้าน' });
     // Reuse the tenant's existing Stripe customer (from a prior checkout) if we have one.
-    const [sub] = await db.select({ id: subscriptions.id, cust: subscriptions.stripeCustomerId }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
+    const [sub] = await db.select({ id: subscriptions.id, cust: subscriptions.stripeCustomerId, planCode: subscriptions.planCode, gfPrice: subscriptions.grandfatheredPrice, gfAnnual: subscriptions.grandfatheredAnnualPrice, gfUntil: subscriptions.grandfatheredUntil }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
+    // 0454 — checking out the tenant's CURRENT plan (first payment / renewal) charges the grandfathered
+    // snapshot when one is active, THB only (snapshots are stored in the seed currency). A checkout for a
+    // DIFFERENT plan is a plan change and prices at current list (changePlan re-snapshots on completion).
+    if (sub && sub.planCode === target && currency === 'THB'
+      && (sub.gfUntil == null || new Date(sub.gfUntil).getTime() > Date.now())) {
+      const snap = interval === 'annual' ? sub.gfAnnual : sub.gfPrice;
+      if (snap != null && Number(snap) > 0) price.amount = Number(snap);
+    }
     const result = await this.stripe.createCheckoutSession(
       { code: plan.code, name: plan.name, amount: price.amount, currency: price.currency, interval: price.interval },
       { id: Number(tenant.id), code: tenant.code, existingCustomerId: sub?.cust ?? null },

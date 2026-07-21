@@ -92,6 +92,16 @@ Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserte
 step). Codes are unchanged (`starter`/`pro`) so existing `subscriptions.plan_code` FKs stay valid; only the
 display names/prices changed. Prices are the recommended market-entry defaults — tune after market testing.
 
+**Price grandfathering (0454, docs/53 Q7 — code-enforced):** every subscription snapshots its plan's
+price at subscribe time (`subscriptions.grandfathered_price` / `grandfathered_annual_price`, backfilled
+for pre-0454 rows at migration time). Charge paths — same-plan checkout, `getSubscription`
+(`price_monthly` = effective, `list_price_monthly` beside it), the proration credit side, and SaaS-metrics
+MRR — read `COALESCE(snapshot, plans.price_*)`, so a later `PLAN_SEED` repricing **never re-prices an
+existing subscription**. The lock ends only on a **plan change** (which re-snapshots at the new plan's
+current price) or when a platform admin clears the snapshot at a contractual renewal
+(`grandfathered_until` reserved for future renewal automation; NULL = indefinite). ToE:
+`cutover:saas-metrics` (0454 block).
+
 ## 4. Premium/add-on suites — the `@RequiresSuite` mechanism (1.1b, RESOLVED)
 
 Manufacturing / PPM / HCM / Real-estate originally had **no distinct coarse token** (their controllers ride

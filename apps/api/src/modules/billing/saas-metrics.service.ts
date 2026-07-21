@@ -20,13 +20,21 @@ export class SaasMetricsService {
     const db = this.db;
 
     // Recurring revenue + status counts + per-plan mix (active subscriptions drive MRR).
+    // 0454 — MRR sums each subscription's EFFECTIVE monthly price: the grandfathered snapshot while its
+    // lock is active (grandfathered_until NULL = indefinite), else the plan's current list price.
     const planRows = await db.execute(sql`
       SELECT p.code, p.name,
              coalesce(p.price_monthly, 0)::float8 AS price,
              count(*) FILTER (WHERE s.status = 'Active')     AS active,
              count(*) FILTER (WHERE s.status = 'Trialing')   AS trialing,
              count(*) FILTER (WHERE s.status = 'PastDue')    AS past_due,
-             count(*) FILTER (WHERE s.status = 'Canceled')   AS canceled
+             count(*) FILTER (WHERE s.status = 'Canceled')   AS canceled,
+             coalesce(sum(
+               CASE WHEN s.status = 'Active' THEN
+                 CASE WHEN s.grandfathered_price IS NOT NULL
+                           AND (s.grandfathered_until IS NULL OR s.grandfathered_until > now())
+                      THEN s.grandfathered_price ELSE coalesce(p.price_monthly, 0) END
+               ELSE 0 END), 0)::float8 AS mrr_active
       FROM plans p LEFT JOIN subscriptions s ON s.plan_code = p.code
       GROUP BY p.code, p.name, p.price_monthly
       ORDER BY p.price_monthly`);
@@ -34,9 +42,9 @@ export class SaasMetricsService {
 
     let mrr = 0, active = 0, trialing = 0, pastDue = 0, canceled = 0;
     const byPlan = plans.map((r) => {
-      const a = n(r.active), price = n(r.price);
-      mrr += a * price; active += a; trialing += n(r.trialing); pastDue += n(r.past_due); canceled += n(r.canceled);
-      return { plan: r.code, name: r.name, price_monthly: round2(price), active_subscriptions: a, mrr: round2(a * price), trialing: n(r.trialing) };
+      const a = n(r.active), price = n(r.price), planMrr = n(r.mrr_active);
+      mrr += planMrr; active += a; trialing += n(r.trialing); pastDue += n(r.past_due); canceled += n(r.canceled);
+      return { plan: r.code, name: r.name, price_monthly: round2(price), active_subscriptions: a, mrr: round2(planMrr), trialing: n(r.trialing) };
     });
 
     // Churn (last 30 days): subscriptions canceled in the window vs the active base at the window start

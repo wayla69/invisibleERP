@@ -190,6 +190,26 @@ async function main() {
   ok('1.7: interval switch (annual→monthly) → proration null + interval_change note, interval updated',
     chSwitch.billing_interval === 'monthly' && chSwitch.proration === null && (chSwitch as any).proration_note === 'interval_change', JSON.stringify({ i: chSwitch.billing_interval, n: (chSwitch as any).proration_note }));
 
+  // ── PRICE GRANDFATHERING (0454, docs/53 Q7): a subscription's snapshotted price survives a plan-row
+  //    repricing — charge paths and MRR read COALESCE(snapshot, list); a plan CHANGE re-snapshots. ──
+  // Simulate a legacy tenant: t3 subscribed to Standard back when it cost ฿1,900 (pre-1.9 list).
+  await pg.query(`UPDATE subscriptions SET grandfathered_price = 1900 WHERE tenant_id = ${t3}`);
+  const gfSub = await g(() => billing.getSubscription(t3));
+  ok('0454: getSubscription returns the EFFECTIVE price (snapshot 1,900), list price beside it, flagged',
+    near(gfSub.price_monthly, 1900) && near(gfSub.list_price_monthly, 2900) && gfSub.grandfathered === true, JSON.stringify({ p: gfSub.price_monthly, l: gfSub.list_price_monthly, g: gfSub.grandfathered }));
+  const gfCk = await g(() => billing.createCheckoutSession(t3, 'starter', 'monthly'));
+  ok('0454: checkout of the CURRENT plan charges the grandfathered ฿1,900, not list ฿2,900', near(gfCk.amount, 1900), `amount=${gfCk.amount}`);
+  const otherCk = await g(() => billing.createCheckoutSession(t3, 'business', 'monthly'));
+  ok('0454: checkout of a DIFFERENT plan prices at current list (฿4,900 — no snapshot carry-over)', near(otherCk.amount, 4900), `amount=${otherCk.amount}`);
+  // MRR sums effective prices: t1 pro 9,900 (re-snapshotted by the changePlan above) + t2 pro 9,900
+  // (NULL snapshot → list) + t3 starter 1,900 (grandfathered) = 21,700.
+  const m2 = (await inj('GET', '/api/billing/saas-metrics', token)).json;
+  ok('0454: MRR uses each sub\'s effective price (9,900 + 9,900 + 1,900 = 21,700)', near(m2.revenue?.mrr, 21700), `mrr=${m2.revenue?.mrr}`);
+  const gfCh = await g(() => billing.changePlan(t3, 'business'));
+  const gfRow: any = (await pg.query(`SELECT grandfathered_price FROM subscriptions WHERE tenant_id=${t3}`)).rows[0];
+  ok('0454: a plan change RE-SNAPSHOTS at the new plan\'s current price (฿4,900) — old lock ends',
+    gfCh.plan === 'business' && near(Number(gfRow.grandfathered_price), 4900), JSON.stringify(gfRow));
+
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
