@@ -45,7 +45,14 @@ def load_latest() -> tuple[pd.DataFrame, pd.DataFrame]:
     return run, results
 
 
-run, results = load_latest()
+try:
+    run, results = load_latest()
+except Exception as exc:  # tables not created yet vs a real error
+    if "does not exist" in str(exc).lower() or "undefinedtable" in str(exc).lower():
+        st.warning("No model run yet — start the ingestion worker, then run the analytics engine, and refresh.")
+    else:
+        st.error(f"Could not load model data: {exc}")
+    st.stop()
 if run.empty or results.empty:
     st.warning("No model run yet — run the analytics engine first.")
     st.stop()
