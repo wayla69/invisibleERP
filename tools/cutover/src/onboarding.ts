@@ -542,6 +542,33 @@ async function main() {
     `events=${(lcEvents.json.events ?? []).filter((e: any) => e.about_tenant_id === lcTid2).length}`);
   const lcDenied = await inj('GET', '/api/admin/saas-lifecycle/events', qLogin.json.token);
   ok('A2: the lifecycle feed + run are platform-admin only (403 for a company Admin)', lcDenied.status === 403, `${lcDenied.status}`);
+
+  // ── 3g-ter. A3 add-on billing: tenant self-serve purchase (POST /api/billing/addons — always the
+  //            CALLER'S OWN tenant) + checkout carrying add-ons as priced line items (annual = 10×
+  //            monthly; plan-included add-ons cost nothing; THB-only; unknown keys fail closed). ──
+  const lcLogin = await login('lifecyc_admin', 'lifecyc12345');
+  const addonBad = await inj('POST', '/api/billing/addons', lcLogin.json.token, { addons: ['cdp', 'bogus_addon'] });
+  ok('A3: self-serve add-ons refuse unknown keys (400 UNKNOWN_ADDON)', addonBad.status === 400 && addonBad.json.error?.code === 'UNKNOWN_ADDON', `${addonBad.status} ${addonBad.json.error?.code}`);
+  const addonSet = await inj('POST', '/api/billing/addons', lcLogin.json.token, { addons: ['cdp', 'sandbox'] });
+  ok('A3: self-serve add-on purchase applies to the caller\'s own tenant (entitlement-only in mock mode)',
+    addonSet.status === 200 && Array.isArray(addonSet.json.addons) && addonSet.json.addons.length === 2 && addonSet.json.billing?.mock === true,
+    JSON.stringify(addonSet.json));
+  const ownSub = await inj('GET', '/api/billing/subscription', lcLogin.json.token);
+  ok('A3: GET /api/billing/subscription reflects the purchased add-ons', JSON.stringify((ownSub.json.addons ?? []).slice().sort()) === JSON.stringify(['cdp', 'sandbox']), JSON.stringify(ownSub.json.addons));
+  const queueAddons = (await pg.query(`SELECT s.addons FROM subscriptions s JOIN tenants t ON t.id=s.tenant_id WHERE t.code='queueco1'`)).rows[0] as any;
+  ok('A3: another tenant\'s add-ons are untouched (BOLA-safe: own tenant only)', JSON.stringify(queueAddons.addons) === JSON.stringify(['cdp']), JSON.stringify(queueAddons.addons));
+  const coBad = await inj('POST', '/api/billing/checkout', lcLogin.json.token, { plan_code: 'business', interval: 'annual', addons: ['cdp', 'bogus_addon'] });
+  ok('A3: checkout refuses unknown add-on keys (400 UNKNOWN_ADDON)', coBad.status === 400 && coBad.json.error?.code === 'UNKNOWN_ADDON', `${coBad.status} ${coBad.json.error?.code}`);
+  const coUsd = await inj('POST', '/api/billing/checkout', lcLogin.json.token, { plan_code: 'pro', currency: 'USD', addons: ['cdp'] });
+  ok('A3: a non-THB checkout carrying add-ons fails closed (400 ADDON_CURRENCY_UNSUPPORTED)', coUsd.status === 400 && coUsd.json.error?.code === 'ADDON_CURRENCY_UNSUPPORTED', `${coUsd.status} ${coUsd.json.error?.code}`);
+  const coAnnual = await inj('POST', '/api/billing/checkout', lcLogin.json.token, { plan_code: 'business', interval: 'annual', addons: ['cdp'] });
+  ok('A3: annual checkout prices the add-on at 10× monthly and totals plan + add-ons (49,000 + 12,900)',
+    coAnnual.status < 300 && coAnnual.json.mock === true && coAnnual.json.addons?.[0]?.key === 'cdp' && Number(coAnnual.json.addons?.[0]?.amount) === 12900 && Number(coAnnual.json.total_amount) === 61900,
+    JSON.stringify({ addons: coAnnual.json.addons, total: coAnnual.json.total_amount }));
+  const coIncluded = await inj('POST', '/api/billing/checkout', lcLogin.json.token, { plan_code: 'franchise', interval: 'annual', addons: ['sandbox'] });
+  ok('A3: an add-on the target plan already includes is dropped from the charge (franchise ⊇ sandbox)',
+    coIncluded.status < 300 && (coIncluded.json.addons ?? []).length === 0 && Number(coIncluded.json.total_amount) === 149000,
+    JSON.stringify({ addons: coIncluded.json.addons, total: coIncluded.json.total_amount }));
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked
