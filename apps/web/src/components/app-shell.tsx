@@ -57,6 +57,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageToggle } from '@/components/language-toggle';
 import { CommandPalette } from '@/components/command-palette';
 import { SmeReasonDialog } from '@/components/sme-reason-dialog';
+import { PlanUpsellDialog } from '@/components/plan-upsell-dialog';
 import { SmeSetupWizard } from '@/components/sme-setup-wizard';
 import { AssistantWidget } from '@/components/assistant-widget';
 import { NotificationBell } from '@/components/notification-bell';
@@ -1006,6 +1007,10 @@ export function AppShell({
       {/* SME self-approval reason dialog (docs/49 H2) — invisible until api() dispatches a
           SELF_APPROVAL_REASON_REQUIRED request to it via lib/sme-reason.ts. Mounted unconditionally. */}
       <SmeReasonDialog />
+
+      {/* Plan/entitlement upsell dialog (wave B2) — invisible until api() dispatches an
+          `ierp:plan-denied` event on a plan-level 403. The billing CTA is internal-only. */}
+      <PlanUpsellDialog showBillingCta={variant === 'internal'} />
 
       {/* SME first-run setup wizard (docs/49 v1.3) — self-hides unless the tenant is 'sme', setup is
           incomplete, and the wizard hasn't been completed/dismissed (sme_wizard_done user-pref). */}

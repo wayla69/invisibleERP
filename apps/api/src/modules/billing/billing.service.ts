@@ -172,7 +172,7 @@ export class BillingService {
         trial_ends_at: subscriptions.trialEndsAt,
         current_period_end: subscriptions.currentPeriodEnd,
         addons: subscriptions.addons, // 0451 — purchased à-la-carte add-on suite keys
-        grandfathered_price: subscriptions.grandfatheredPrice, // 0455 — price snapshot
+        grandfathered_price: subscriptions.grandfatheredPrice, // 0456 — price snapshot
         grandfathered_until: subscriptions.grandfatheredUntil,
         plan_name: plans.name,
         price_monthly: plans.priceMonthly,
@@ -185,7 +185,7 @@ export class BillingService {
       .orderBy(sql`${subscriptions.createdAt} desc`)
       .limit(1);
     if (!row) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription for tenant', messageTh: 'ไม่พบการสมัครสมาชิกของร้าน' });
-    // 0455 — price_monthly is what the tenant actually pays: the grandfathered snapshot while active
+    // 0456 — price_monthly is what the tenant actually pays: the grandfathered snapshot while active
     // (until NULL = indefinite), else the plan's list price. list_price_monthly stays for transparency.
     const gfActive = row.grandfathered_price != null
       && (row.grandfathered_until == null || new Date(row.grandfathered_until).getTime() > Date.now());
@@ -230,7 +230,7 @@ export class BillingService {
     let prorationNote: string | undefined;
     if (targetInterval === curInterval) {
       const periodDays = curInterval === 'annual' ? 365 : 30;
-      // 0455 — the credit side of proration is what the tenant ACTUALLY pays (their grandfathered
+      // 0456 — the credit side of proration is what the tenant ACTUALLY pays (their grandfathered
       // snapshot when present), not the plan's current list price.
       const oldAmount = curInterval === 'annual'
         ? Number(sub.grandfatheredAnnualPrice ?? oldPlan?.priceYearly ?? 0)
@@ -241,7 +241,7 @@ export class BillingService {
       prorationNote = 'interval_change'; // switching monthly↔annual — applied at the next renewal, no mid-cycle number
     }
 
-    // 0455 — a plan change RE-SNAPSHOTS at the new plan's current price (choosing a new plan is the one
+    // 0456 — a plan change RE-SNAPSHOTS at the new plan's current price (choosing a new plan is the one
     // event that ends the old price lock).
     await db.update(subscriptions).set({
       planCode: target, status: 'Active', billingInterval: targetInterval,
@@ -340,7 +340,7 @@ export class BillingService {
     if (!tenant) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tenant not found', messageTh: 'ไม่พบร้าน' });
     // Reuse the tenant's existing Stripe customer (from a prior checkout) if we have one.
     const [sub] = await db.select({ id: subscriptions.id, cust: subscriptions.stripeCustomerId, planCode: subscriptions.planCode, gfPrice: subscriptions.grandfatheredPrice, gfAnnual: subscriptions.grandfatheredAnnualPrice, gfUntil: subscriptions.grandfatheredUntil, branches: subscriptions.branches }).from(subscriptions).where(eq(subscriptions.tenantId, tenantId)).orderBy(desc(subscriptions.createdAt)).limit(1);
-    // 0455 — checking out the tenant's CURRENT plan (first payment / renewal) charges the grandfathered
+    // 0456 — checking out the tenant's CURRENT plan (first payment / renewal) charges the grandfathered
     // snapshot when one is active, THB only (snapshots are stored in the seed currency). A checkout for a
     // DIFFERENT plan is a plan change and prices at current list (changePlan re-snapshots on completion).
     if (sub && sub.planCode === target && currency === 'THB'
@@ -348,7 +348,7 @@ export class BillingService {
       const snap = interval === 'annual' ? sub.gfAnnual : sub.gfPrice;
       if (snap != null && Number(snap) > 0) price.amount = Number(snap);
     }
-    // 0456 — POS-line per-branch billing: the plan's price is PER BRANCH; multiply by the requested (or
+    // 0457 — POS-line per-branch billing: the plan's price is PER BRANCH; multiply by the requested (or
     // previously purchased) branch quantity. Non-per-branch plans reject an explicit branches argument
     // rather than silently ignoring a quantity the buyer believed they bought.
     const perBranch = (plan.features as Record<string, unknown> | null)?.per_branch === true;
@@ -368,7 +368,7 @@ export class BillingService {
     if (sub) {
       const patch: Record<string, unknown> = { billingInterval: price.interval, currency: price.currency };
       if (result.customerId && !sub.cust) patch.stripeCustomerId = result.customerId;
-      if (perBranch) patch.branches = qty; // 0456 — persist the purchased branch quantity
+      if (perBranch) patch.branches = qty; // 0457 — persist the purchased branch quantity
       await db.update(subscriptions).set(patch).where(eq(subscriptions.id, sub.id));
     }
     return {

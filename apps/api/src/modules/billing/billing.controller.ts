@@ -8,6 +8,7 @@ import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
 import { SaasLifecycleService } from './saas-lifecycle.service';
 import { SaasReceiptsService } from './saas-receipts.service';
+import { EntitlementObservationsService } from './entitlement-observations.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -52,7 +53,7 @@ const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
 const DeleteTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
-const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional(), branches: z.number().int().min(1).max(500).optional(), addons: z.array(z.string().max(30)).max(10).optional() }); // 1.7 — annual billing + multi-currency · 0456 — POS-line per-branch quantity · A3 — add-on line items
+const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional(), branches: z.number().int().min(1).max(500).optional(), addons: z.array(z.string().max(30)).max(10).optional() }); // 1.7 — annual billing + multi-currency · 0457 — POS-line per-branch quantity · A3 — add-on line items
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
 // 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
 const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
@@ -75,6 +76,7 @@ export class BillingController {
     private readonly lifecycle: TenantLifecycleService,
     private readonly saasLifecycle: SaasLifecycleService,
     private readonly saasReceipts: SaasReceiptsService,
+    private readonly entitlementObs: EntitlementObservationsService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -186,6 +188,13 @@ export class BillingController {
   @Get('admin/saas-lifecycle/events') @PlatformAdmin()
   saasLifecycleEvents(@Query('limit') limit?: string) {
     return this.saasLifecycle.listEvents(limit ? Number(limit) : undefined);
+  }
+
+  // B1 — entitlement-enforcement observations: who would break (shadow) / did break (enforce), on what,
+  // per tenant. The triage read before moving a tenant into the ENTITLEMENTS_ENFORCE_TENANTS cohort.
+  @Get('admin/entitlement-observations') @PlatformAdmin()
+  entitlementObservations(@Query('days') days?: string) {
+    return this.entitlementObs.list(days ? Number(days) : undefined);
   }
 
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.

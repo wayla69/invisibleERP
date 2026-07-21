@@ -51,7 +51,7 @@ Only would-block requests log — volume ≈ the number of requests enforcement 
 Run against production (god session / Railway psql). Tick each:
 
 - [ ] **Deploy level:** api image includes the docs/53 packaging + the structured telemetry
-      (`plan.guard.ts` emits `entitlement_shadow_block`) + 0455/0456 migrations applied
+      (`plan.guard.ts` emits `entitlement_shadow_block`) + 0456/0457 migrations applied
       (`SELECT tag FROM drizzle.__drizzle_migrations ORDER BY id DESC LIMIT 3` or check the boot log).
 - [ ] **Plan rows carry suites (the 1.3 backfill):** boot `seedPlans()` does this automatically —
       verify: `curl -s $API/api/billing/plans | jq '.plans[] | {code, suites: .features.suites|length}'`
@@ -116,7 +116,7 @@ Classify every distinct (tenant, code, tokens) row:
 | `TRIAL_EXPIRED` | trial backlog | commercial exception? extend trial; else let A2 suspend | `POST /api/admin/tenants/:id/extend-trial` |
 | `SUBSCRIPTION_INACTIVE` / `_PASTDUE_READONLY` | dunning backlog | verify A2 already emailed; collections decision | A2 lifecycle / Stripe |
 | `SUITE_NOT_ENTITLED`, tokens map to `scm_advanced`/`integrations`/`cdp`/`sandbox` | tenant uses an add-on surface | sell/comp the add-on | `POST /api/admin/tenants/:id/addons` — **replaces the whole set; read current `addons` first** |
-| `SUITE_NOT_ENTITLED`, any base suite (finance/pos_frontoffice/planning/…) | tenant genuinely uses a suite outside its plan | plan change (customer conversation) — **warn: `changePlan` re-snapshots the 0455 grandfathered price at the NEW plan's current list** | `POST /api/admin/tenants/:id/plan` |
+| `SUITE_NOT_ENTITLED`, any base suite (finance/pos_frontoffice/planning/…) | tenant genuinely uses a suite outside its plan | plan change (customer conversation) — **warn: `changePlan` re-snapshots the 0456 grandfathered price at the NEW plan's current list** | `POST /api/admin/tenants/:id/plan` |
 | bespoke enterprise deal that fits no plan | last resort | **new custom `plans` row** (SQL insert with tailored `features.suites` + price) then `changePlan` to it — change-management sign-off required (`change-management.md`); **never edit a shared plan row** (`features.suites` on a plan re-gates every tenant on that plan) | SQL + changePlan |
 
 There is **no per-tenant suite override** — the levers above are the complete set. The flip gate:

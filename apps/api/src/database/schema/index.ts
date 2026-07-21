@@ -51,6 +51,7 @@ export * from './platform-notifications';
 export * from './platform-emails';
 export * from './saas-lifecycle';
 export * from './saas-receipts';
+export * from './entitlement-observations';
 export * from './self-approvals';
 export * from './sme-review-signoffs';
 export * from './platform-sme-defaults';

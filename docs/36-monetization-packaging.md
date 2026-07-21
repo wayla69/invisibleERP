@@ -72,13 +72,13 @@ PLAN (free / starter / business / pro / enterprise)
 | ERP (flat) | `erp_growth` **ERP Growth** | 3,900 | 39,000 | 25 | + procurement, planning, multibranch (3 locations) |
 
 POS-line plans carry `features.per_branch: true`: checkout multiplies the unit price by the purchased
-branch quantity (`subscriptions.branches`, migration 0456; `PLAN_NOT_PER_BRANCH` guards a quantity on a
+branch quantity (`subscriptions.branches`, migration 0457; `PLAN_NOT_PER_BRANCH` guards a quantity on a
 flat plan) and branch-scaled quotas (`pos_txns_monthly`) multiply the same way. The `/plans` configurator
 gained a product-line picker (Complete packs · POS only · ERP only) with a branch stepper. Upgrading a
 line SKU to a bundle is an ordinary plan change on the same tenant — an entitlement flip, never a
 migration. Positioning + market evidence: docs/53 + docs/ops/pricing-market-study-2026-07.md. ToE:
 `cutover:plan-gating` (line-SKU boundaries: pos_lite blocks exec/procurement, erp_essentials blocks pos)
-+ `cutover:saas-metrics` (0456 per-branch checkout block). Locations caps remain advisory (display +
++ `cutover:saas-metrics` (0457 per-branch checkout block). Locations caps remain advisory (display +
 billing quantity) exactly as on the pre-existing plans — a hard branch-creation check is a separate
 hardening item.
 
@@ -114,15 +114,15 @@ Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserte
 step). Codes are unchanged (`starter`/`pro`) so existing `subscriptions.plan_code` FKs stay valid; only the
 display names/prices changed. Prices are the recommended market-entry defaults — tune after market testing.
 
-**Price grandfathering (0455, docs/53 Q7 — code-enforced):** every subscription snapshots its plan's
+**Price grandfathering (0456, docs/53 Q7 — code-enforced):** every subscription snapshots its plan's
 price at subscribe time (`subscriptions.grandfathered_price` / `grandfathered_annual_price`, backfilled
-for pre-0455 rows at migration time). Charge paths — same-plan checkout, `getSubscription`
+for pre-0456 rows at migration time). Charge paths — same-plan checkout, `getSubscription`
 (`price_monthly` = effective, `list_price_monthly` beside it), the proration credit side, and SaaS-metrics
 MRR — read `COALESCE(snapshot, plans.price_*)`, so a later `PLAN_SEED` repricing **never re-prices an
 existing subscription**. The lock ends only on a **plan change** (which re-snapshots at the new plan's
 current price) or when a platform admin clears the snapshot at a contractual renewal
 (`grandfathered_until` reserved for future renewal automation; NULL = indefinite). ToE:
-`cutover:saas-metrics` (0455 block).
+`cutover:saas-metrics` (0456 block).
 
 ## 4. Premium/add-on suites — the `@RequiresSuite` mechanism (1.1b, RESOLVED)
 
@@ -191,6 +191,24 @@ remediation levers, flip, and rollback.
   `features.suites`) → only then enable ENFORCE. Do NOT enable ENFORCE before the backfill.
 - **1.8 (pending):** cutover harness `tools/cutover/src/billing.ts` — plan→suite→403 matrix + god-bypass +
   kill-switch modes end-to-end (this is where the UAT negative case is codified).
+- **Wave B (done) — staged enforcement rollout tooling** (the operating loop between "shadow for all" and
+  "enforce for all"):
+  - **B1 — observation ledger** (`entitlement_observations`, migration `0455`, platform-level
+    `about_tenant_id`): every would-block (shadow) and did-block (enforce) decision lands one row per
+    (business day × tenant × deny code × mode × route-perm set) — fire-and-forget from `PlanGuard.decide()`
+    behind an in-process first-seen gate + a DB `dedup_key` UNIQUE, so the request hot path pays at most one
+    insert per unique denial per day per process and can NEVER fail a request. God read:
+    `GET /api/admin/entitlement-observations?days=N` (rollup + raw rows); Platform Console → **แพ็กเกจ &
+    โมดูล** shows the "who would break" triage panel.
+  - **B2 — upsell UX:** a plan-level deny code (`SUITE_NOT_ENTITLED` / `PLAN_FEATURE_REQUIRED` /
+    `TRIAL_EXPIRED` / `SUBSCRIPTION_INACTIVE` / `SUBSCRIPTION_PASTDUE_READONLY`) reaching `lib/api.ts` raises
+    an app-wide `ierp:plan-denied` event; the AppShell-mounted `PlanUpsellDialog` turns the bare 403 into the
+    server's localized message + a **ดูแพ็กเกจ & ชำระเงิน** CTA → `/billing` (internal variant only; open
+    dialog + per-code cooldown absorb parallel-query 403 bursts). Errors still throw unchanged.
+  - **B3 — per-tenant cohort:** `ENTITLEMENTS_ENFORCE_TENANTS` (comma-separated tenant IDs) gives listed
+    tenants FULL enforcement (Admin no-bypass semantics included) while everyone else keeps the global mode —
+    the legacy path stays zero-cost for non-cohort tenants. Rollout: shadow for all → clear a tenant in the
+    B1 panel → add it to the cohort → repeat → finally `ENTITLEMENTS_ENFORCE=true` global.
 
 ## 5b. Usage metering → overage billing (1.5, DONE)
 
@@ -238,6 +256,7 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.7 | 2026-07-21 | Platform | **Wave B — staged enforcement rollout (migration `0455`).** B1 observation ledger `entitlement_observations` (would-block/did-block per business day × tenant × code × mode, written fire-and-forget from `PlanGuard.decide()` with in-process + DB dedup; god read `GET /api/admin/entitlement-observations` + Platform Console triage panel on the แพ็กเกจ & โมดูล tab). B2 upsell UX: plan-level deny codes raise `ierp:plan-denied` from `lib/api.ts` → AppShell `PlanUpsellDialog` (localized server message + ดูแพ็กเกจ & ชำระเงิน CTA → `/billing`, internal only; cooldown against parallel-403 bursts). B3 per-tenant cohort `ENTITLEMENTS_ENFORCE_TENANTS` — listed tenants get full enforcement while everyone else keeps the global mode (legacy path stays zero-cost). ToE: `plan-gating` 41→52, `onboarding` 194→196, platform-plans e2e 3→5. No ICFR control change (commercial gating; tenant GL untouched). |
 | 1.6 | 2026-07-21 | Platform | **A4 — own-SaaS receipts (migration `0454`).** One `saas_receipts` row per subscription payment the platform collects: Stripe `invoice.paid`/`invoice.payment_succeeded` webhooks (which now also confirm the subscription Active — the A2 dunning-recovery signal) and god-recorded bank transfers (`POST /api/admin/tenants/:id/receipts`). RCPT-S numbering, idempotent on the invoice id (`source_ref` UNIQUE), 7% VAT breakdown ONLY when `RECEIPT_ISSUER_TAX_ID` is configured (else a plain ใบเสร็จรับเงิน — never a false tax-invoice claim), `saas_receipt` email via the A1 outbox, bilingual A4 document via the shared PdfRenderer (HTML fallback). Tenant self-serve: `GET /api/billing/receipts` + printable `/:no/pdf`, hard-scoped to the caller's own tenant (foreign number = 404); `/billing` gains a receipts card. ToE: `onboarding` 186→194. No ICFR control change (platform revenue paper trail; tenant GL untouched). |
 | 1.5 | 2026-07-21 | Platform | **A3 — add-on BILLING + tenant self-serve purchase.** Checkout now carries purchased add-ons as extra **recurring Stripe line items** on the same subscription (amount interval-scaled: annual = 10× monthly; keys in session metadata → the webhook stamps `subscriptions.addons` on completion). New tenant self-serve `POST /api/billing/addons` (perm `users`, ALWAYS the caller's own tenant): entitlement applies immediately; a live Stripe subscription gets its add-on line items **reconciled** (`syncAddonItems` — items identified by `metadata.addon_key`, default proration both directions), else entitlement-only (mock/dev/Trialing). Pricing fail-closed: unknown key → 400 `UNKNOWN_ADDON`, non-THB checkout with add-ons → 400 `ADDON_CURRENCY_UNSUPPORTED`, plan-included add-ons dropped from the charge. `/billing` gains an add-on card (toggle + save, "รวมในแพ็กเกจแล้ว" for included ones). ToE: `onboarding` 178→186. No ICFR control change. |
 | 1.4 | 2026-07-20 | Platform | **Franchise tier + à-la-carte ADD-ON suites + /plans pack carry-through (migration `0451`).** New seeded plan **`franchise`** (฿14,900/mo · ฿149,000/yr · USD 425; Professional + manufacturing + projects + every add-on suite; 100 seats / 25 locations). Four token-less **add-on suites** `scm_advanced`/`integrations`/`cdp`/`sandbox` (the /plans configurator's "Advanced add-ons"): grandfathered into the plans whose tokens already reached those surfaces (scm_advanced→business+, cdp/integrations→pro+, sandbox→franchise+), purchasable per tenant via **`subscriptions.addons`** (`POST /api/admin/tenants/:id/addons`, god-only; unknown key → 400 `UNKNOWN_ADDON`); `resolveEntitledSuites(plan, features, addons)` unions each purchased add-on's **`ADDON_GRANTS`** set (scm_advanced also carries the base `procurement` suite — its RFQ/match endpoints ride that token). `@RequiresSuite` gates added: `scm_advanced` on RFQ + three-way-match controllers, `sandbox` on the developer portal, `cdp` per-handler on the CRM audience-export/register/rules/CDP-export endpoints; the @Public web-to-lead webhook checks `integrations` IN-SERVICE (mirrors guard semantics; enforce-mode only, trial allows, fail-open on infra error). All gates INERT under the default legacy mode. **Pack carry-through:** the public /plans configurator's CTA carries `?plan=&billing=&addons=` → the signup request stores the PACK_TO_PLAN-mapped REAL plan code + interval + add-ons (`signup_requests.requested_*`), the Platform Console onboarding queue shows them, and **approve provisions the requested pack** (plan + `billing_interval` + `addons` stamped on the trialing subscription; absent ⇒ legacy `free`). ToE: `plan-gating` 34→41 (add-on grants, grandfathering, franchise suites, junk-key ignored, legacy inert) + `onboarding` 157→160 (queue row carries the mapped pack; approve honours it; franchise seeded). No ICFR control change. |

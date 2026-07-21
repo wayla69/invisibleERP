@@ -16,6 +16,7 @@ import { SaasLifecycleService } from './saas-lifecycle.service';
 import { SaasReceiptsService } from './saas-receipts.service';
 import { PdfModule } from '../pdf/pdf.module';
 import { StarterPackService } from './starter-pack.service';
+import { EntitlementObservationsService } from './entitlement-observations.service';
 
 // AuthModule exports PasswordService (signup hashes the admin password); LedgerModule exports
 // LedgerService (signup provisions the new tenant's fiscal periods); TaxModule for cache invalidation.
@@ -25,7 +26,7 @@ import { StarterPackService } from './starter-pack.service';
 @Module({
   imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule, MailerModule, PdfModule],
   controllers: [BillingController, TenantController, StripeWebhookController],
-  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasLifecycleService, SaasReceiptsService, SaasMetricsService, PlanGuard, StarterPackService],
+  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasLifecycleService, SaasReceiptsService, SaasMetricsService, PlanGuard, StarterPackService, EntitlementObservationsService],
   exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}

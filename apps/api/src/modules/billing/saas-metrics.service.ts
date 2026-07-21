@@ -20,7 +20,7 @@ export class SaasMetricsService {
     const db = this.db;
 
     // Recurring revenue + status counts + per-plan mix (active subscriptions drive MRR).
-    // 0455 — MRR sums each subscription's EFFECTIVE monthly price: the grandfathered snapshot while its
+    // 0456 — MRR sums each subscription's EFFECTIVE monthly price: the grandfathered snapshot while its
     // lock is active (grandfathered_until NULL = indefinite), else the plan's current list price.
     const planRows = await db.execute(sql`
       SELECT p.code, p.name,
