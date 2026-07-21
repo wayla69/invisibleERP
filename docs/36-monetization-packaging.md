@@ -209,6 +209,37 @@ remediation levers, flip, and rollback.
     tenants FULL enforcement (Admin no-bypass semantics included) while everyone else keeps the global mode —
     the legacy path stays zero-cost for non-cohort tenants. Rollout: shadow for all → clear a tenant in the
     B1 panel → add it to the cohort → repeat → finally `ENTITLEMENTS_ENFORCE=true` global.
+- **Wave C (done) — Thai payment rails** (`saas_payment_claims`, migration `0458`): a tenant that pays by
+  bank transfer / PromptPay (no card) gets a real self-serve loop:
+  - **Where + how much:** `GET /api/billing/payment-info` — the platform's dynamic EMVCo PromptPay QR for
+    the amount due (`PLATFORM_PROMPTPAY_ID`; reuses the POS `buildPromptPayPayload`, raw payload — never a
+    deep link) and/or free-text bank details (`PLATFORM_BANK_ACCOUNT`); amount due = plan price for the
+    subscription's interval + purchased add-ons via the ONE A3 pricing rule (`resolveAddonCharges`).
+  - **Slip claim:** `POST /api/billing/payment-claims` (perm `users`, always the caller's own tenant) files
+    the transfer reference + amount as a **Pending claim** — `(tenant, slip_ref)` UNIQUE refuses a re-filed
+    slip (`DUPLICATE_SLIP`); a god-inbox notification fires. A claim is NEVER money by itself.
+  - **God verify queue:** `GET /api/admin/payment-claims` + Platform Console **การชำระเงิน** tab — approve
+    (after checking the real bank statement) records the A4 `saas_receipt` (source `bank_transfer`,
+    idempotent on `claim:<id>` — a double-click approves once), **re-activates the subscription** (the A2
+    dunning-recovery signal) and emails the receipt; reject emails the reason (`payment_claim_rejected`
+    template). Decided claims are immutable (`CLAIM_NOT_PENDING`).
+- **Wave D (done) — Platform Console ops depth** (no migration; all knobs default off = unchanged):
+  - **D1 — god-inbox email push:** every `platform_notifications` emit (signup requests, suspend/
+    reactivate, payment claims …) is ALSO sent to **`PLATFORM_ALERT_EMAIL`** via the A1 outbox
+    (`platform_alert` template) — the wake-up call; the inbox stays the durable log.
+  - **D2 — full tenant data export** (offboarding / PDPA portability): god-only
+    `GET /api/admin/tenants/:id/export` dumps the tenant row + every row of every tenant-scoped table as
+    one JSON document — tables **auto-discovered from the drizzle schema** (`tenant_id` +
+    `about_tenant_id` columns), so a future table can never be silently omitted; per-table rows capped at
+    50k with a `truncated` flag. Download button in the console company drawer.
+  - **D3 — platform-owner hardening:** `PLATFORM_REQUIRE_MFA` — a god without TOTP enrolled is refused on
+    every `@PlatformAdmin` route (403 `PLATFORM_MFA_REQUIRED`; live DB check, fail-closed);
+    `PLATFORM_IP_ALLOWLIST` — comma-separated IPv4/CIDR entries; requests from outside are 403
+    `PLATFORM_IP_BLOCKED` (fail-closed on unparsable/IPv6 peers; pair with `TRUSTED_PROXY_HOPS`).
+  - **D4 — health alert thresholds:** `/api/jobs/ops-metrics` now returns server-evaluated `alerts[]`
+    (`PLATFORM_ALERT_POOL_PCT`/`_JOBS_FAILED`/`_JOBS_STUCK`/`_JOBS_QUEUED` + stale-scheduler; pure
+    `evaluateHealthAlerts`, unit-tested) — the console overview shows a red breach banner and external
+    pollers read the same field.
 
 ## 5b. Usage metering → overage billing (1.5, DONE)
 
@@ -256,6 +287,8 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.9 | 2026-07-21 | Platform | **Wave D — Platform Console ops depth (no migration; knobs default off).** D1 god-inbox → email push (`PLATFORM_ALERT_EMAIL`, `platform_alert` template over the A1 outbox, wired inside `PlatformNotificationsService.emit` — best-effort, never breaks the emitting action). D2 full tenant export `GET /api/admin/tenants/:id/export` (tenant row + every tenant-scoped table auto-discovered from the drizzle schema via `getTableConfig` — `tenant_id`/`about_tenant_id`; 50k/table cap with `truncated` flag; drawer download button). D3 god hardening in `PlatformAdminGuard`: `PLATFORM_REQUIRE_MFA` (live `users.mfa_enabled` check, fail-closed 403 `PLATFORM_MFA_REQUIRED`) + `PLATFORM_IP_ALLOWLIST` (IPv4/CIDR, fail-closed 403 `PLATFORM_IP_BLOCKED`). D4 `evaluateHealthAlerts` on `/api/jobs/ops-metrics` (`PLATFORM_ALERT_*` thresholds + stale scheduler) + console breach banner. ToE: `onboarding` 207→214, vitest `health-alerts.test.ts` (14 incl. guard helpers), template suite auto-covers `platform_alert`. No ICFR control change (optional hardening strengthens ITGC-AC-18 operationally). |
+| 1.8 | 2026-07-21 | Platform | **Wave C — Thai payment rails (migration `0458`).** `saas_payment_claims` slip-claim ledger: `GET /api/billing/payment-info` (platform PromptPay dynamic EMVCo QR via the POS `buildPromptPayPayload` + `PLATFORM_PROMPTPAY_ID`/`PLATFORM_BANK_ACCOUNT`; amount due = plan + add-ons via the shared `resolveAddonCharges`, now public), tenant slip claims (`POST/GET /api/billing/payment-claims`, own-tenant only, `(tenant, slip_ref)` UNIQUE → `DUPLICATE_SLIP`, god-inbox notify), god verify queue (`/api/admin/payment-claims` + Platform Console การชำระเงิน tab: approve → A4 receipt source `bank_transfer` idempotent on `claim:<id>` + subscription Active + receipt email; reject → `payment_claim_rejected` email; decided = immutable `CLAIM_NOT_PENDING`). `/billing` gains the ชำระด้วยการโอน card (QR + bank + claim form + status list). ToE: `onboarding` 196→207, platform e2e 5→6. No ICFR control change (platform revenue collection; tenant GL untouched). |
 | 1.7 | 2026-07-21 | Platform | **Wave B — staged enforcement rollout (migration `0455`).** B1 observation ledger `entitlement_observations` (would-block/did-block per business day × tenant × code × mode, written fire-and-forget from `PlanGuard.decide()` with in-process + DB dedup; god read `GET /api/admin/entitlement-observations` + Platform Console triage panel on the แพ็กเกจ & โมดูล tab). B2 upsell UX: plan-level deny codes raise `ierp:plan-denied` from `lib/api.ts` → AppShell `PlanUpsellDialog` (localized server message + ดูแพ็กเกจ & ชำระเงิน CTA → `/billing`, internal only; cooldown against parallel-403 bursts). B3 per-tenant cohort `ENTITLEMENTS_ENFORCE_TENANTS` — listed tenants get full enforcement while everyone else keeps the global mode (legacy path stays zero-cost). ToE: `plan-gating` 41→52, `onboarding` 194→196, platform-plans e2e 3→5. No ICFR control change (commercial gating; tenant GL untouched). |
 | 1.6 | 2026-07-21 | Platform | **A4 — own-SaaS receipts (migration `0454`).** One `saas_receipts` row per subscription payment the platform collects: Stripe `invoice.paid`/`invoice.payment_succeeded` webhooks (which now also confirm the subscription Active — the A2 dunning-recovery signal) and god-recorded bank transfers (`POST /api/admin/tenants/:id/receipts`). RCPT-S numbering, idempotent on the invoice id (`source_ref` UNIQUE), 7% VAT breakdown ONLY when `RECEIPT_ISSUER_TAX_ID` is configured (else a plain ใบเสร็จรับเงิน — never a false tax-invoice claim), `saas_receipt` email via the A1 outbox, bilingual A4 document via the shared PdfRenderer (HTML fallback). Tenant self-serve: `GET /api/billing/receipts` + printable `/:no/pdf`, hard-scoped to the caller's own tenant (foreign number = 404); `/billing` gains a receipts card. ToE: `onboarding` 186→194. No ICFR control change (platform revenue paper trail; tenant GL untouched). |
 | 1.5 | 2026-07-21 | Platform | **A3 — add-on BILLING + tenant self-serve purchase.** Checkout now carries purchased add-ons as extra **recurring Stripe line items** on the same subscription (amount interval-scaled: annual = 10× monthly; keys in session metadata → the webhook stamps `subscriptions.addons` on completion). New tenant self-serve `POST /api/billing/addons` (perm `users`, ALWAYS the caller's own tenant): entitlement applies immediately; a live Stripe subscription gets its add-on line items **reconciled** (`syncAddonItems` — items identified by `metadata.addon_key`, default proration both directions), else entitlement-only (mock/dev/Trialing). Pricing fail-closed: unknown key → 400 `UNKNOWN_ADDON`, non-THB checkout with add-ons → 400 `ADDON_CURRENCY_UNSUPPORTED`, plan-included add-ons dropped from the charge. `/billing` gains an add-on card (toggle + save, "รวมในแพ็กเกจแล้ว" for included ones). ToE: `onboarding` 178→186. No ICFR control change. |

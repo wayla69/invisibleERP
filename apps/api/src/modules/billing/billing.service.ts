@@ -383,8 +383,10 @@ export class BillingService {
   // Price the REQUESTED add-ons for a plan/interval: unknown keys fail closed (UNKNOWN_ADDON), keys the
   // plan already includes are dropped (they cost nothing extra), and amounts follow the platform pricing
   // rule (annual = 10 × monthly, "2 months free"). Add-on prices are THB-denominated — a non-THB checkout
-  // that carries add-ons is refused rather than silently mispriced.
-  private resolveAddonCharges(
+  // that carries add-ons is refused rather than silently mispriced. PUBLIC: the wave-C payment-claims
+  // service reuses it to suggest the transfer amount due (plan + purchased add-ons) — keep it the ONE
+  // pricing rule for add-ons.
+  resolveAddonCharges(
     plan: { code: string; features: unknown },
     interval: 'monthly' | 'annual',
     currency: string,

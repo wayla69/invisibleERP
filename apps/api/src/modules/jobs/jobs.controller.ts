@@ -3,6 +3,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { JobQueueService } from './job-queue.service';
 import { SchedulerHeartbeatService } from './scheduler-heartbeat.service';
 import { runtimeMetrics } from '../../observability/runtime-metrics';
+import { evaluateHealthAlerts } from './health-alerts';
 
 // Read-only status surface for async jobs. RLS-scoped: a tenant only sees its own jobs (the service reads
 // inside the request's tenant tx). Gated by `dashboard` — any authenticated staff principal can poll the
@@ -23,19 +24,24 @@ export class JobsController {
     const jobs = await this.queue.opsCounts();
     const rt = runtimeMetrics();
     const poolMax = Number(process.env.DB_POOL_MAX ?? 20);
+    const pool = {
+      max: poolMax,
+      in_flight_tx: rt.in_flight_tx,
+      peak_in_flight_tx: rt.peak_in_flight_tx,
+      saturation_pct: poolMax > 0 ? Math.round((rt.in_flight_tx / poolMax) * 100) : 0,
+      saturation_events: rt.saturation_events, // times in-flight crossed POOL_SATURATION_WARN_PCT since boot
+    };
+    // docs/27 R1-5: due-sweep trigger liveness — 'stale' means the cron/tick died silently (alert fires
+    // via the worker's reap cycle; this field makes it poll-able by an external monitor too).
+    const scheduler = await this.heartbeat.checkStale();
     return {
-      pool: {
-        max: poolMax,
-        in_flight_tx: rt.in_flight_tx,
-        peak_in_flight_tx: rt.peak_in_flight_tx,
-        saturation_pct: poolMax > 0 ? Math.round((rt.in_flight_tx / poolMax) * 100) : 0,
-        saturation_events: rt.saturation_events, // times in-flight crossed POOL_SATURATION_WARN_PCT since boot
-      },
+      pool,
       requests: { total_tx: rt.total_tx, slow_tx_count: rt.slow_tx_count, slow_threshold_ms: Number(process.env.SLOW_TX_MS ?? 1000) },
       jobs, // { queued, running, failed, stuck } — failed = dead-letters; stuck = zombie 'running' past threshold
-      // docs/27 R1-5: due-sweep trigger liveness — 'stale' means the cron/tick died silently (alert fires
-      // via the worker's reap cycle; this field makes it poll-able by an external monitor too).
-      scheduler: await this.heartbeat.checkStale(),
+      scheduler,
+      // D4 — server-evaluated alert rules over the fields above (PLATFORM_ALERT_* envs; see
+      // health-alerts.ts). The console banner + any external poller read this instead of re-deriving.
+      alerts: evaluateHealthAlerts({ pool, jobs, scheduler }),
     };
   }
 

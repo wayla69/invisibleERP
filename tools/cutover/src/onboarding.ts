@@ -614,6 +614,97 @@ async function main() {
     JSON.stringify(obsSum ?? obsRes.json).slice(0, 200));
   const obsDenied = await inj('GET', '/api/admin/entitlement-observations', lcLogin.json.token);
   ok('B1: a tenant admin cannot read the observation ledger (403 — god-only)', obsDenied.status === 403, `${obsDenied.status}`);
+
+  // ── 3g-sexies. Wave C — Thai payment rails: payment-info (platform PromptPay QR + bank details, amount
+  //               due from plan + add-ons), tenant slip claims (dup-slip fail-closed, own-tenant only),
+  //               and the god verify queue (approve → A4 receipt + subscription Active + email; reject →
+  //               reasoned email; decided claims immutable). ──
+  // Pin the fixture subscription to a known price point (earlier A2/A4 blocks moved it around).
+  await pg.query(`UPDATE subscriptions SET plan_code='business', billing_interval='monthly', addons=NULL WHERE tenant_id=${lcTid2}`);
+  const infoBare = await inj('GET', '/api/billing/payment-info', lcLogin.json.token);
+  ok('C: payment-info without PLATFORM_PROMPTPAY_ID/BANK envs → rails hidden (nulls), amount due still priced',
+    infoBare.status === 200 && infoBare.json.qr_payload === null && infoBare.json.bank_details === null && Number(infoBare.json.amount_due) === 4900,
+    JSON.stringify({ st: infoBare.status, due: infoBare.json.amount_due, qr: infoBare.json.qr_payload }));
+  process.env.PLATFORM_PROMPTPAY_ID = '0812345678';
+  process.env.PLATFORM_BANK_ACCOUNT = 'KBank 123-4-56789-0 บจก. อินวิซิเบิล';
+  const info = await inj('GET', '/api/billing/payment-info', lcLogin.json.token);
+  ok('C: payment-info with envs → dynamic EMVCo PromptPay payload (THB, amount due) + QR image + bank details',
+    info.status === 200 && String(info.json.qr_payload).startsWith('000201') && String(info.json.qr_payload).includes('5303764')
+    && String(info.json.qr_payload).includes('54074900.00') && String(info.json.qr_image).startsWith('data:image/png')
+    && info.json.bank_details.includes('KBank') && info.json.promptpay_id === '0812345678',
+    String(info.json.qr_payload));
+  const claim1 = await inj('POST', '/api/billing/payment-claims', lcLogin.json.token, { amount: 4900, period: '2026-08', slip_ref: 'TXN-778899', note: 'โอนจาก KBank' });
+  ok('C: tenant files a slip claim (201 Pending)', claim1.status === 201 && claim1.json.status === 'Pending', JSON.stringify(claim1.json));
+  const dupSlip = await inj('POST', '/api/billing/payment-claims', lcLogin.json.token, { amount: 4900, slip_ref: 'TXN-778899' });
+  ok('C: refiling the same slip reference → 400 DUPLICATE_SLIP', dupSlip.status === 400 && dupSlip.json.error?.code === 'DUPLICATE_SLIP', `${dupSlip.status} ${dupSlip.json.error?.code}`);
+  const otherClaims = await inj('GET', '/api/billing/payment-claims', qLogin.json.token);
+  ok('C: another tenant lists ZERO of these claims (data-leak test)', otherClaims.status === 200 && (otherClaims.json.claims ?? []).length === 0, `n=${(otherClaims.json.claims ?? []).length}`);
+  const claimsDenied = await inj('GET', '/api/admin/payment-claims', lcLogin.json.token);
+  ok('C: a tenant admin cannot read the verify queue (403 — god-only)', claimsDenied.status === 403, `${claimsDenied.status}`);
+  const queue = await inj('GET', '/api/admin/payment-claims?status=Pending', owner);
+  const qRow = (queue.json.claims ?? []).find((c: any) => c.slip_ref === 'TXN-778899');
+  ok('C: god verify queue lists the pending claim with the tenant name joined', queue.status === 200 && !!qRow && typeof qRow.tenant === 'string', JSON.stringify(qRow ?? queue.json).slice(0, 160));
+  await pg.query(`UPDATE subscriptions SET status='PastDue' WHERE tenant_id=${lcTid2}`);
+  const rcptMailsBefore = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).filter((m: any) => m.template === 'saas_receipt' && m.to_email === 'life@c.com').length;
+  const appr = await inj('POST', `/api/admin/payment-claims/${claim1.json.id}/approve`, owner);
+  const subAfter = (await pg.query(`SELECT status FROM subscriptions WHERE tenant_id=${lcTid2}`)).rows[0] as any;
+  ok('C: approve → A4 receipt issued (RCPT-S, idempotent on claim:<id>) + subscription re-activated',
+    appr.status === 200 && /^RCPT-S-\d{6}$/.test(appr.json.receipt_no) && subAfter.status === 'Active',
+    JSON.stringify({ st: appr.status, r: appr.json.receipt_no, sub: subAfter.status }));
+  const rcptRow = (await pg.query(`SELECT source, amount::numeric a FROM saas_receipts WHERE source_ref='claim:${claim1.json.id}'`)).rows[0] as any;
+  const rcptMailsAfter = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).filter((m: any) => m.template === 'saas_receipt' && m.to_email === 'life@c.com').length;
+  ok('C: the receipt row carries source bank_transfer + the claimed amount, and the customer is emailed',
+    rcptRow?.source === 'bank_transfer' && Number(rcptRow?.a) === 4900 && rcptMailsAfter === rcptMailsBefore + 1,
+    JSON.stringify({ rcptRow, before: rcptMailsBefore, after: rcptMailsAfter }));
+  const reAppr = await inj('POST', `/api/admin/payment-claims/${claim1.json.id}/approve`, owner);
+  ok('C: a decided claim cannot be re-decided (400 CLAIM_NOT_PENDING)', reAppr.status === 400 && reAppr.json.error?.code === 'CLAIM_NOT_PENDING', `${reAppr.status} ${reAppr.json.error?.code}`);
+  const claim2 = await inj('POST', '/api/billing/payment-claims', lcLogin.json.token, { amount: 1500, slip_ref: 'TXN-BAD-1' });
+  const payRej = await inj('POST', `/api/admin/payment-claims/${claim2.json.id}/reject`, owner, { reason: 'ไม่พบยอดเงินเข้าตามอ้างอิง' });
+  const payRejMail = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).find((m: any) => m.template === 'payment_claim_rejected' && m.to_email === 'life@c.com');
+  const myPayClaims = await inj('GET', '/api/billing/payment-claims', lcLogin.json.token);
+  const myRej = (myPayClaims.json.claims ?? []).find((c: any) => c.slip_ref === 'TXN-BAD-1');
+  ok('C: reject → reasoned email to the customer + the tenant sees status/reason on its own list',
+    payRej.status === 200 && !!payRejMail && myRej?.status === 'Rejected' && myRej?.reject_reason === 'ไม่พบยอดเงินเข้าตามอ้างอิง',
+    JSON.stringify({ st: payRej.status, mail: !!payRejMail, myRej: myRej?.status }));
+  delete process.env.PLATFORM_PROMPTPAY_ID;
+  delete process.env.PLATFORM_BANK_ACCOUNT;
+
+  // ── 3g-septies. Wave D — console ops depth: (D1) god-inbox events pushed to PLATFORM_ALERT_EMAIL via
+  //                the A1 outbox; (D2) full tenant data export (auto-discovered tenant-scoped tables);
+  //                (D3) optional god hardening — IP allowlist + mandatory MFA (fail-closed 403s). ──
+  process.env.PLATFORM_ALERT_EMAIL = 'god@platform.co';
+  const alertClaim = await inj('POST', '/api/billing/payment-claims', lcLogin.json.token, { amount: 900, slip_ref: 'TXN-ALERT-1' });
+  const alertMail = ((await inj('GET', '/api/admin/emails', owner)).json.emails ?? []).find((m: any) => m.template === 'platform_alert' && m.to_email === 'god@platform.co');
+  ok('D1: a god-inbox event (payment claim) is ALSO pushed to PLATFORM_ALERT_EMAIL (platform_alert queued)',
+    alertClaim.status === 201 && !!alertMail && String(alertMail.subject).includes('แจ้งโอนค่าบริการ'),
+    JSON.stringify({ st: alertClaim.status, subj: alertMail?.subject }));
+  delete process.env.PLATFORM_ALERT_EMAIL;
+
+  const exportRes = await inj('GET', `/api/admin/tenants/${lcTid2}/export`, owner);
+  const exportDoc = (() => { try { return JSON.parse(String(exportRes.body ?? '')); } catch { return exportRes.json; } })();
+  ok('D2: full tenant export returns the tenant row + auto-discovered tenant-scoped tables (subscriptions + receipts present)',
+    exportRes.status === 200 && exportDoc?.tenant?.id === lcTid2 && !!exportDoc.tables?.subscriptions && !!exportDoc.tables?.saas_receipts
+    && exportDoc.table_count > 2 && exportDoc.row_total > 0,
+    JSON.stringify({ st: exportRes.status, tables: exportDoc?.table_count, rows: exportDoc?.row_total }));
+  const exportDenied = await inj('GET', `/api/admin/tenants/${lcTid2}/export`, lcLogin.json.token);
+  ok('D2: a tenant admin cannot export (403 — god-only)', exportDenied.status === 403, `${exportDenied.status}`);
+
+  process.env.PLATFORM_IP_ALLOWLIST = '203.0.113.0/24';
+  const ipBlocked = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: PLATFORM_IP_ALLOWLIST — a god from outside the allowlist is refused (403 PLATFORM_IP_BLOCKED)',
+    ipBlocked.status === 403 && ipBlocked.json.error?.code === 'PLATFORM_IP_BLOCKED', `${ipBlocked.status} ${ipBlocked.json.error?.code}`);
+  process.env.PLATFORM_IP_ALLOWLIST = '127.0.0.1, 203.0.113.0/24';
+  const ipAllowed = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: the loopback entry admits the harness god again (200)', ipAllowed.status === 200, `${ipAllowed.status}`);
+  delete process.env.PLATFORM_IP_ALLOWLIST;
+
+  process.env.PLATFORM_REQUIRE_MFA = 'true';
+  const mfaBlocked = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: PLATFORM_REQUIRE_MFA — a god WITHOUT TOTP enrolled is refused (403 PLATFORM_MFA_REQUIRED)',
+    mfaBlocked.status === 403 && mfaBlocked.json.error?.code === 'PLATFORM_MFA_REQUIRED', `${mfaBlocked.status} ${mfaBlocked.json.error?.code}`);
+  delete process.env.PLATFORM_REQUIRE_MFA;
+  const mfaOffAgain = await inj('GET', '/api/admin/payment-claims', owner);
+  ok('D3: with the knob off the god passes again (default behaviour unchanged)', mfaOffAgain.status === 200, `${mfaOffAgain.status}`);
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked

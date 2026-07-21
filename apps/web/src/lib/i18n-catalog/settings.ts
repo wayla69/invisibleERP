@@ -929,4 +929,20 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.bill.col_receipt_no': { th: 'เลขที่', en: 'Receipt no.' },
   'st.bill.col_period': { th: 'งวด', en: 'Period' },
   'st.bill.col_date': { th: 'วันที่', en: 'Date' },
+
+  // ── Wave C: pay by bank transfer / PromptPay on /billing ──────────────────
+  'st.bill.pay_title': { th: 'ชำระด้วยการโอน / พร้อมเพย์', en: 'Pay by bank transfer / PromptPay' },
+  'st.bill.pay_sub': { th: 'โอนตามยอดด้านล่างแล้วแจ้งเลขอ้างอิงจากสลิป — ทีมแพลตฟอร์มตรวจสอบยอดเข้าบัญชีแล้วออกใบเสร็จและเปิดใช้งานให้ทันที', en: 'Transfer the amount below, then file the slip reference — the platform team verifies the money arrived, issues your receipt, and re-activates the subscription.' },
+  'st.bill.pay_amount_due': { th: 'ยอดที่ต้องชำระ ({plan} · {interval})', en: 'Amount due ({plan} · {interval})' },
+  'st.bill.pay_qr_hint': { th: 'สแกนด้วยแอปธนาคารเพื่อโอนตามยอด', en: 'Scan with your banking app to pay the amount due.' },
+  'st.bill.pay_bank_title': { th: 'บัญชีธนาคาร', en: 'Bank account' },
+  'st.bill.pay_claim_title': { th: 'แจ้งโอนเงิน', en: 'File a payment claim' },
+  'st.bill.pay_slip_ref': { th: 'เลขอ้างอิงจากสลิป', en: 'Slip reference' },
+  'st.bill.pay_slip_ref_ph': { th: 'เช่น เลขอ้างอิงการโอนบนสลิปธนาคาร', en: 'e.g. the transfer reference on the bank slip' },
+  'st.bill.pay_note': { th: 'หมายเหตุ (ถ้ามี)', en: 'Note (optional)' },
+  'st.bill.pay_claim_submit': { th: 'แจ้งโอน', en: 'Submit claim' },
+  'st.bill.pay_claim_filed': { th: 'แจ้งโอนแล้ว — รอทีมแพลตฟอร์มตรวจสอบ', en: 'Claim filed — awaiting platform verification' },
+  'st.bill.pay_status_pending': { th: 'รอตรวจสอบ', en: 'Pending' },
+  'st.bill.pay_status_approved': { th: 'ตรวจสอบแล้ว', en: 'Verified' },
+  'st.bill.pay_status_rejected': { th: 'ไม่ผ่าน', en: 'Rejected' },
 };
