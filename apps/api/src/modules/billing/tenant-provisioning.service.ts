@@ -14,7 +14,12 @@ import { isPlatformAdmin } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
+import { MailerService } from '../mailer/mailer.service';
 import { wipeTenantRefs, tenantIdColumns } from './tenant-wipe';
+
+// Web-app base for links inside transactional emails (login / signup deep-links). Mirrors the Stripe
+// checkout return-URL convention (APP_BASE_URL), trailing slash tolerated.
+const appBaseUrl = (): string => (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 
 // Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
 // DISABLED unconditionally — only the platform owner ("god", godmimi) opens a new company (directly via
@@ -83,6 +88,7 @@ export class TenantProvisioningService {
     private readonly password: PasswordService,
     private readonly ledger?: LedgerService,
     private readonly platformNotifs?: PlatformNotificationsService,
+    private readonly mailer?: MailerService, // A1 — optional so hand-constructed test instances still work
   ) {}
 
   // ───────────────────── PUBLIC self-serve signup ─────────────────────
@@ -116,6 +122,18 @@ export class TenantProvisioningService {
       companyName: opts.company_name ?? null, planCode: opts.plan_code ?? null, email: opts.email ?? null,
       expiresAt,
     }).returning({ id: signupInvites.id });
+    // A1 — when the god gave an invitee address, email the single-use link directly (the console still
+    // shows the raw token once for copy-paste; the query param is future-proofing for a signup deep-link).
+    if (opts.email) {
+      await this.mailer?.send({
+        template: 'signup_invite', to: opts.email,
+        vars: {
+          company: opts.company_name ?? null,
+          signup_url: `${appBaseUrl()}/signup?invite_token=${rawToken}`,
+          expires_at: expiresAt.toISOString(),
+        },
+      }).catch((e) => logger.warn({ invite_id: Number(row!.id), err: (e as Error)?.message }, 'signup_invite email enqueue failed'));
+    }
     return { id: Number(row!.id), invite_token: rawToken, expires_at: expiresAt.toISOString(),
       company_name: opts.company_name ?? null, email: opts.email ?? null };
   }
@@ -220,13 +238,29 @@ export class TenantProvisioningService {
       },
     );
     await this.db.update(signupRequests).set({ createdTenantId: result.tenant_id }).where(eq(signupRequests.id, id));
+    // A1 — tell the requester their company is live (outbox + job; never blocks/undoes the approval).
+    if (req.email) {
+      await this.mailer?.send({
+        template: 'signup_approved', to: req.email, aboutTenantId: result.tenant_id,
+        vars: { company: req.companyName, username: req.adminUsername, login_url: `${appBaseUrl()}/login` },
+      }).catch((e) => logger.warn({ request_id: id, err: (e as Error)?.message }, 'signup_approved email enqueue failed'));
+    }
     return { ...result, request_id: id, status: 'approved' };
   }
 
   async rejectSignupRequest(id: number, reviewedBy: string, reason?: string) {
     const claimed = await this.db.update(signupRequests).set({ status: 'rejected', reviewedBy, reviewedAt: new Date(), rejectReason: reason ?? null })
-      .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending'))).returning({ id: signupRequests.id });
+      .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending')))
+      .returning({ id: signupRequests.id, email: signupRequests.email, companyName: signupRequests.companyName });
     if (!claimed.length) throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: 'Request not pending', messageTh: 'คำขอนี้ไม่อยู่ในสถานะรออนุมัติ' });
+    // A1 — tell the requester the outcome (with the reviewer's reason when given).
+    const row = claimed[0]!;
+    if (row.email) {
+      await this.mailer?.send({
+        template: 'signup_rejected', to: row.email,
+        vars: { company: row.companyName, reason: reason ?? null },
+      }).catch((e) => logger.warn({ request_id: id, err: (e as Error)?.message }, 'signup_rejected email enqueue failed'));
+    }
     return { request_id: id, status: 'rejected' };
   }
 

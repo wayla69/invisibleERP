@@ -450,6 +450,35 @@ async function main() {
   const req2 = await inj('POST', '/api/auth/signup-requests', undefined, { company_name: 'RejectCo', tenant_code: 'rejectco1', admin_username: 'rejectco_admin', admin_password: 'rejectco12345', email: 'r@c.com' });
   const rej = await inj('POST', `/api/admin/signup-requests/${req2.json.request_id}/reject`, owner, { reason: 'not a fit' });
   ok('Reject → status rejected (no tenant created)', rej.status === 200 && rej.json.status === 'rejected', `${rej.status}`);
+
+  // ── 3d-bis. A1 transactional email: every onboarding decision lands in the platform_emails outbox
+  //            (Queued), the god deliver-pending sweep delivers via the mock provider (MAIL_PROVIDER
+  //            unset ⇒ no network), and the outbox is god-only. The background worker delivers the same
+  //            rows in production; the sweep makes it deterministic here. ──
+  const outboxDenied = await inj('GET', '/api/admin/emails', qLogin);
+  ok('A1: the email outbox is platform-admin only (403 for a company Admin)', outboxDenied.status === 403, `${outboxDenied.status}`);
+  const outbox1 = await inj('GET', '/api/admin/emails', owner);
+  const mailRows = (outbox1.json.emails ?? []) as any[];
+  const invMail = mailRows.find((m) => m.template === 'signup_invite' && m.to_email === 'i@c.com');
+  const apprMail = mailRows.find((m) => m.template === 'signup_approved' && m.to_email === 'q@c.com');
+  const rejMail = mailRows.find((m) => m.template === 'signup_rejected' && m.to_email === 'r@c.com');
+  ok('A1: invite + approval + rejection each queued an outbox email (status Queued)',
+    outbox1.status === 200 && !!invMail && !!apprMail && !!rejMail
+    && [invMail, apprMail, rejMail].every((m) => m.status === 'Queued'),
+    `st=${outbox1.status} inv=${invMail?.status} appr=${apprMail?.status} rej=${rejMail?.status}`);
+  ok('A1: the approval email is pinned to the provisioned company (about_tenant_id) with a login link subject',
+    Number(apprMail?.about_tenant_id) === Number(approve.json.tenant_id) && String(apprMail?.subject ?? '').includes('QueueCo'),
+    `about=${apprMail?.about_tenant_id} tid=${approve.json.tenant_id} subj=${apprMail?.subject}`);
+  const sweep = await inj('POST', '/api/admin/emails/deliver-pending', owner, {});
+  ok('A1: deliver-pending sweep delivers every queued email (mock provider, 0 failed)',
+    sweep.status === 200 && sweep.json.attempted >= 3 && sweep.json.sent >= 3 && sweep.json.failed === 0,
+    JSON.stringify(sweep.json));
+  const outbox2 = await inj('GET', '/api/admin/emails', owner);
+  const after = (outbox2.json.emails ?? []) as any[];
+  const sentSet = [invMail, apprMail, rejMail].map((m) => after.find((x) => x.id === m?.id));
+  ok('A1: the three onboarding emails are Sent with provider=mock + a provider message id',
+    sentSet.every((m) => m?.status === 'Sent' && m?.provider === 'mock' && !!m?.provider_msg_id && !!m?.sent_at),
+    sentSet.map((m) => `${m?.template}=${m?.status}/${m?.provider}`).join(' '));
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked

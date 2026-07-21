@@ -2976,6 +2976,13 @@
       "when": 2023820000390,
       "tag": "0451_signup_pack_addons",
       "breakpoints": true
+    },
+    {
+      "idx": 426,
+      "version": "7",
+      "when": 2023820000391,
+      "tag": "0452_platform_emails",
+      "breakpoints": true
     }
   ]
 }

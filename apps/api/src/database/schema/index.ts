@@ -48,6 +48,7 @@ export * from './billing';
 export * from './signup-invites';
 export * from './signup-requests';
 export * from './platform-notifications';
+export * from './platform-emails';
 export * from './self-approvals';
 export * from './sme-review-signoffs';
 export * from './platform-sme-defaults';

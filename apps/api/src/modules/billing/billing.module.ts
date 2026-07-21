@@ -10,6 +10,7 @@ import { TenantController } from './tenant.controller';
 import { StripeWebhookController } from './stripe-webhook.controller';
 import { PlanGuard } from './plan.guard';
 import { PlatformNotificationsModule } from '../platform-notifications/platform-notifications.module';
+import { MailerModule } from '../mailer/mailer.module';
 import { BillingBiReports } from './billing-bi-reports';
 import { StarterPackService } from './starter-pack.service';
 
@@ -19,7 +20,7 @@ import { StarterPackService } from './starter-pack.service';
 // PlanGuard is exported so AppModule can register it as APP_GUARD and so AdminUsersModule can
 // inject BillingService for the user-limit check.
 @Module({
-  imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule],
+  imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule, MailerModule],
   controllers: [BillingController, TenantController, StripeWebhookController],
   providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasMetricsService, PlanGuard, StarterPackService],
   exports: [BillingService, PlanGuard],

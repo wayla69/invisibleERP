@@ -8,6 +8,7 @@ import type { JwtUser } from '../../common/decorators';
 import { PLAN_SUITES, isAddonKey } from '@ierp/shared';
 import { computeProration } from './proration';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
+import { MailerService } from '../mailer/mailer.service';
 import { StripeBilling } from './stripe-gateway';
 import { TenantProvisioningService, type SignupDto } from './tenant-provisioning.service';
 import { PlatformAdminService } from './platform-admin.service';
@@ -72,8 +73,9 @@ export class BillingService {
     private readonly password: PasswordService,
     @Optional() private readonly ledger?: LedgerService, // optional so hand-constructed test instances still work
     @Optional() private readonly platformNotifs?: PlatformNotificationsService, // god event feed; optional for partial harnesses
+    @Optional() private readonly mailer?: MailerService, // A1 transactional email; optional for partial harnesses
   ) {
-    this.provisioning = new TenantProvisioningService(db, password, ledger, platformNotifs);
+    this.provisioning = new TenantProvisioningService(db, password, ledger, platformNotifs, mailer);
     this.platformAdmin = new PlatformAdminService(db, platformNotifs);
     this.metering = new BillingMeteringService(db, this.stripe);
   }
