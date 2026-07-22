@@ -34,6 +34,7 @@ from .contracts import (
 )
 from .forecasting import forecast_series
 from .optimization import EngineItemFailure, solve_item, solve_joint, sample_lead_times, _validated_scenarios
+from .reconcile import ReconcileError, reconcile
 
 CACHE_TTL_S = 900
 CACHE_MAX = 64
@@ -112,8 +113,25 @@ def run_forecast(req: ForecastRequest) -> ForecastResponse:
                 errors.append(EngineItemError(ref=s.series_id, code=code, message=str(exc) or code))
     order = {s.series_id: i for i, s in enumerate(req.series)}
     results.sort(key=lambda r: order.get(r.series_id, 0))
+
+    # docs/58 C2 — coherent hierarchical reconciliation (post-processing over the base results).
+    reconciled = []
+    if req.reconciliation is not None and req.reconciliation.method != "none":
+        try:
+            reconciled = reconcile(
+                req.reconciliation, {r.series_id: r for r in results}, req.quantiles
+            )
+        except ReconcileError as exc:
+            errors.append(EngineItemError(ref="reconciliation", code=exc.code, message=str(exc)))
+        except Exception as exc:  # noqa: BLE001 — reconciliation must never fail the base forecast
+            errors.append(EngineItemError(ref="reconciliation", code="RECONCILE_ERROR", message=str(exc)))
+
     return ForecastResponse(
-        contract_version=CONTRACT_VERSION, request_id=req.request_id, results=results, errors=errors
+        contract_version=CONTRACT_VERSION,
+        request_id=req.request_id,
+        results=results,
+        reconciled=reconciled,
+        errors=errors,
     )
 
 

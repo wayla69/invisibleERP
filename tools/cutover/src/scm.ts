@@ -49,7 +49,7 @@ const dayStr = (back: number) => ymd(new Date(Date.now() - back * 86400_000));
 
 /** In-process engine stub: verifies our HMAC, then answers with contract-valid canned data. */
 function startEngineStub(secret: string) {
-  const state = { signed: 0, rejected: 0, forecasts: 0, optimizes: 0 };
+  const state = { signed: 0, rejected: 0, forecasts: 0, optimizes: 0, reconRequests: 0, reconCoherent: false };
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c) => chunks.push(c));
@@ -75,32 +75,50 @@ function startEngineStub(secret: string) {
         const k = body.scenario_count ?? 20;
         const start = new Date(`${ymd()}T00:00:00Z`);
         const day = (i: number) => new Date(start.getTime() + (i + 1) * 86400_000).toISOString().slice(0, 10);
-        res.end(JSON.stringify({
-          contract_version: '2',
-          request_id: body.request_id,
-          results: (body.series ?? []).map((ser: any) => {
-            // Flat 10/day so downstream assertions are arithmetic, not statistical.
-            const level = 10;
-            // A1: echo whether the API sent GOVERNED promo regressors (server-derived) so the harness
-            // can prove promo attribution flows end to end without a real Prophet fit.
-            const hasPromo = Array.isArray(ser.regressors) && ser.regressors.some((r: any) => r.promo_flag);
-            return {
-              series_id: ser.series_id,
-              model: 'prophet',
-              points: Array.from({ length: horizon }, (_, i) => ({
-                ds: day(i), yhat: level, q: { '0.1': level * 0.8, '0.5': level, '0.9': level * 1.2 },
-              })),
-              sample_paths: Array.from({ length: k }, () => Array.from({ length: horizon }, () => level)),
-              accuracy: { wape: 0.12, cutoffs: 1 },
-              attribution: {
-                promo_uplift_pct: hasPromo ? 0.3 : null,
-                price_elasticity: null,
-                regressors_used: hasPromo ? ['payday', 'promo'] : ['payday'],
-              },
-            };
-          }),
-          errors: [],
+        const points = Array.from({ length: horizon }, (_, i) => ({
+          ds: day(i), yhat: 10, q: { '0.1': 8, '0.5': 10, '0.9': 12 },
         }));
+        const flatPaths = () => Array.from({ length: k }, () => Array.from({ length: horizon }, () => 10));
+        const results = (body.series ?? []).map((ser: any) => {
+          // Flat 10/day so downstream assertions are arithmetic, not statistical.
+          // A1: echo whether the API sent GOVERNED promo regressors (server-derived).
+          const hasPromo = Array.isArray(ser.regressors) && ser.regressors.some((r: any) => r.promo_flag);
+          return {
+            series_id: ser.series_id, model: 'prophet', points, sample_paths: flatPaths(),
+            accuracy: { wape: 0.12, cutoffs: 1 },
+            attribution: {
+              promo_uplift_pct: hasPromo ? 0.3 : null, price_elasticity: null,
+              regressors_used: hasPromo ? ['payday', 'promo'] : ['payday'],
+            },
+          };
+        });
+        // C2: bottom-up reconcile the requested forest — leaves unchanged, an aggregate = Σ children.
+        let reconciled: any[] = [];
+        const recon = body.reconciliation;
+        if (recon && recon.method && recon.method !== 'none' && Array.isArray(recon.nodes)) {
+          state.reconRequests++;
+          const byId: Record<string, any> = Object.fromEntries(recon.nodes.map((n: any) => [n.node_id, n]));
+          const kids = (id: string) => recon.nodes.filter((n: any) => n.parent_id === id).map((n: any) => n.node_id);
+          const leafSids = (id: string): string[] =>
+            byId[id].series_id ? [byId[id].series_id] : kids(id).flatMap(leafSids);
+          const sumGrid = (sids: string[]) =>
+            Array.from({ length: k }, (_, r) => Array.from({ length: horizon }, () => 10 * sids.length));
+          reconciled = recon.nodes.map((n: any) => {
+            const sids = leafSids(n.node_id);
+            const paths = n.series_id ? flatPaths() : sumGrid(sids);
+            const nn = sids.length;
+            return {
+              node_id: n.node_id, level: n.series_id ? 0 : 1, method: 'bottom_up',
+              points: Array.from({ length: horizon }, (_, i) => ({ ds: day(i), yhat: 10 * nn, q: { '0.1': 8 * nn, '0.5': 10 * nn, '0.9': 12 * nn } })),
+              sample_paths: paths, accuracy: { wape: null, cutoffs: 0 },
+            };
+          });
+          // coherence: TOTAL (a root) equals the sum of all leaf forecasts (10 × #leaves)
+          const root = recon.nodes.find((n: any) => n.parent_id == null);
+          const nLeaves = recon.nodes.filter((n: any) => n.series_id).length;
+          state.reconCoherent = !!root && reconciled.find((x) => x.node_id === root.node_id)?.sample_paths?.[0]?.[0] === 10 * nLeaves;
+        }
+        res.end(JSON.stringify({ contract_version: '2', request_id: body.request_id, results, reconciled, errors: [] }));
         return;
       }
 
@@ -392,6 +410,14 @@ async function main() {
   ) as any).rows?.[0]?.n ?? 0;
   ok('A1 governed promo is tenant-scoped (T2 sees 0 of HQ promos)', Number(t2SeesHqPromo) === 0,
     `t2 rows=${t2SeesHqPromo}`);
+
+  // ── docs/58 Track C (C2) — bottom-up reconciliation flows end-to-end ──
+  // Every engine-backed run sends a reconciliation forest (TOTAL over the branch's menu series); the
+  // engine returns a COHERENT reconciled block (aggregate == Σ leaves) and the API explodes the
+  // reconciled leaf paths (bottom-up ⇒ leaves unchanged, so plans are unaffected but now coherent).
+  ok('C2 engine run sends a coherent reconciliation (bottom-up) and still produces menu forecasts',
+    engine.state.reconRequests > 0 && engine.state.reconCoherent === true && promoFc.length > 0,
+    `reconRequests=${engine.state.reconRequests} coherent=${engine.state.reconCoherent} menuFc=${promoFc.length}`);
 
   // 7 — plans exist with actionable lines
   const plans = await inj('GET', '/api/scm-planning/plans', tPlanner);

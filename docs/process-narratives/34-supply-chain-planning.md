@@ -219,6 +219,21 @@ can see that a line's lift is the approved weekend promo — and tie it back to 
 trend. Advisory what-ifs run with `scenario=true` and are barred from the auto-convert path; a production run
 is always `scenario=false`. Price elasticity is a later phase (A2); A1 carries the promo/discount lever.
 
+### 7.11 Coherent forecast reconciliation (docs/58 Track C · C2)
+
+Independent per-(branch, item) forecasts do not naturally sum to a coherent chain total. Track C adds a
+**reconciliation step** between forecasting and order sizing: on each engine-backed run the API sends the
+forecast engine an aggregation forest (currently a bottom-up TOTAL over the branch's menu series, using the
+hierarchy declared in §7.9 or the synthesized default), and the engine returns a **reconciled** result per
+node — leaves *and* aggregates — that sum coherently, reconciled on the sample paths (not the quantiles,
+which are not additive). The API then explodes the **reconciled leaf** paths to ingredients. For bottom-up
+the leaves are unchanged (so branch order quantities are unaffected) while the aggregates now equal their
+children exactly, giving the planner a coherent multi-level view. A **trust boundary** applies: the API
+checks the returned aggregate really equals the sum of its leaves within tolerance and, on any violation,
+falls back to the base forecast rather than persisting an incoherent one. This is a forecast-quality
+property, not a new authority — it introduces **no new control** (SCM-01/02/03 still govern the run and its
+approval) and changes no GL posting. Top-down and the optimal MinT reconciliation are later phases (C3/C4).
+
 ## 8. Process flow
 
 ```mermaid
@@ -315,5 +330,6 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |
 | 0.3 | 2026-07-22 | Supply-chain / Planning | Added §7.10 — promotion & price-effect demand (docs/56 Track A · A1): server-derived promo/discount regressors from approved `promotions` under RLS (never client input), Prophet `add_regressor` + capped Croston/bootstrap uplift, attribution persisted on `scm_demand_forecasts` (migration 0462). New control **SCM-04** (promo-forecast governance) in the control matrix. Harness `cutover/scm.ts` +3 A1 checks. |
 | 0.2 | 2026-07-22 | Supply-chain / Planning | Added §7.9 — forecast reconciliation hierarchy (docs/58 Track C · C1): declare/synthesize aggregation structures via `scm_forecast_hierarchy` (migration `0461`) and `GET/PUT/DELETE /api/scm-planning/hierarchy(/forest)`. Definition only — no new control (SCM-01/02/03 unchanged), no forecast-number change yet (reconciliation lands with C2). Harness `cutover/scm.ts` +4 C1 checks. |
