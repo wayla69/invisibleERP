@@ -11,7 +11,7 @@ from conftest import SECRET, load_fixture, post_signed, signed_headers
 def test_healthz_is_open(client):
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json()["contract_version"] == "1"
+    assert r.json()["contract_version"] == "2"
 
 
 def test_unsigned_request_rejected(client):
@@ -57,7 +57,7 @@ def test_missing_secret_fails_closed(client, monkeypatch):
 
 
 def test_contract_version_mismatch(client):
-    payload = {**load_fixture("forecast_request.json"), "contract_version": "2"}
+    payload = {**load_fixture("forecast_request.json"), "contract_version": "1"}  # stale engine: v1 request now mismatches
     r = post_signed(client, "/v1/forecast", payload)
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "CONTRACT_VERSION_MISMATCH"

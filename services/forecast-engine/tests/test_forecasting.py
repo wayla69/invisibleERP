@@ -166,3 +166,72 @@ def test_prophet_learns_a_holiday_uplift():
     lifted = next(p for p in out.points if p.ds == target.isoformat())
     others = [p.yhat for p in out.points if p.ds != target.isoformat()]
     assert lifted.yhat > 1.3 * (sum(others) / len(others))
+
+
+# ── docs/56 A1 — promo/price regressors ───────────────────────────────────────
+
+from app.contracts import SeriesRegressor  # noqa: E402
+from app.forecasting import build_regctx, _uplift_vector  # noqa: E402
+
+
+def _short_series_with_promo(promo_days, price_days=None):
+    """A short-history series (→ baseline_dow, the regressor-less uplift path) with governed
+    regressors over history∪horizon. promo_days/price_days index into the 7-day horizon."""
+    hist = daily_history(40, 12.0, weekend_lift=1.2)
+    last = dt.date.fromisoformat(hist[-1]['ds'])
+    fut = [last + dt.timedelta(days=i + 1) for i in range(7)]
+    regs = [SeriesRegressor(ds=p['ds'], promo_flag=False, price=60.0) for p in hist]
+    for i, fd in enumerate(fut):
+        regs.append(SeriesRegressor(
+            ds=fd.isoformat(),
+            promo_flag=i in promo_days,
+            discount_pct=0.25 if i in promo_days else 0.0,
+            price=(48.0 if (price_days and i in price_days) else 60.0),
+        ))
+    return SeriesInput(series_id="P1", class_hint="auto", history=hist, regressors=regs)
+
+
+def _run(s, promo=True, price=True, seed=7):
+    return forecast_series(
+        series=s, holidays=[], closures=set(), horizon=7, k=40, quantiles=[0.1, 0.5, 0.9],
+        payday_regressor=True, promo_regressor=promo, price_regressor=price,
+        rng=np.random.default_rng(seed),
+    )
+
+
+def test_promo_regressor_lifts_the_promo_day():
+    s = _short_series_with_promo(promo_days={3})
+    on = _run(s, promo=True)
+    off = _run(s, promo=False)
+    # the promo horizon day (index 3) is strictly higher with the promo regressor on
+    assert on.points[3].yhat > off.points[3].yhat
+    # a non-promo day (index 0) is unchanged
+    assert on.points[0].yhat == pytest.approx(off.points[0].yhat, rel=1e-9)
+    assert "promo" in (on.attribution.regressors_used if on.attribution else [])
+    assert on.attribution.promo_uplift_pct is not None and on.attribution.promo_uplift_pct > 0
+
+
+def test_promo_uplift_is_capped_at_u_max():
+    from app.forecasting import U_MAX
+    s = _short_series_with_promo(promo_days={0, 1, 2, 3, 4, 5, 6})
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    fut = [dt.date.fromisoformat(r.ds) for r in (s.regressors or [])][-7:]
+    uplift = _uplift_vector(fut, reg)
+    assert float(uplift.max()) <= U_MAX + 1e-9
+
+
+def test_regressors_determinism_same_seed():
+    s = _short_series_with_promo(promo_days={2, 5})
+    a = _run(s, seed=11)
+    b = _run(s, seed=11)
+    assert a.sample_paths == b.sample_paths
+
+
+def test_no_regressors_is_byte_identical_to_baseline():
+    # A series without regressors forecasts exactly as if promo/price were off (v1 behaviour).
+    hist = daily_history(40, 12.0, weekend_lift=1.2)
+    s = SeriesInput(series_id="N1", class_hint="auto", history=hist)
+    with_flags = _run(s, promo=True, price=True, seed=3)
+    without = _run(s, promo=False, price=False, seed=3)
+    assert with_flags.sample_paths == without.sample_paths
+    assert (with_flags.attribution.regressors_used if with_flags.attribution else []) == ["payday"]

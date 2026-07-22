@@ -98,6 +98,8 @@ def run_forecast(req: ForecastRequest) -> ForecastResponse:
             k=req.scenario_count,
             quantiles=req.quantiles,
             payday_regressor=req.payday_regressor,
+            promo_regressor=req.promo_regressor,
+            price_regressor=req.price_regressor,
             rng=seeded_rng(req.request_id, s.series_id),
         )
 

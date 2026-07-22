@@ -203,6 +203,22 @@ reconciliation step (C2, forthcoming) consumes. This is **definition only**: it 
 (reconciliation is a forecast-quality property; SCM-01/02/03 still govern the run and its approval) and does
 not yet change any forecast number.
 
+### 7.10 Promotion & price-effect demand (docs/56 Track A · A1) — control SCM-04
+
+Forecasts respond to more than the calendar: a governed **promotion** lifts demand, and the planner should
+order to the promoted level, not the baseline. On each planning run the API assembles the promo signal
+**server-side** (`ScmPromoExtractService`) from the tenant's **approved, active, date-ranged** `promotions`
+(category-scoped) under RLS — a per-`(menu sku, business day)` `promo_flag`/`discount` regressor over the
+history and the horizon. Crucially this is **never taken from the run request**: a run cannot assert a promo
+that does not exist in the governed data, so a fabricated or ungoverned promo has no way into the forecast
+(**control SCM-04**, preventive). The forecast engine consumes the regressor — Prophet fits it as a learned
+coefficient (generalizing the existing payday regressor); the intermittent/bootstrap paths apply a
+capped multiplicative uplift (`U_MAX`, so a fat-fingered discount cannot plant an absurd path). Each forecast
+persists its **attribution** (promo uplift %, the regressors used) onto `scm_demand_forecasts`, so a reviewer
+can see that a line's lift is the approved weekend promo — and tie it back to its source — rather than a
+trend. Advisory what-ifs run with `scenario=true` and are barred from the auto-convert path; a production run
+is always `scenario=false`. Price elasticity is a later phase (A2); A1 carries the promo/discount lever.
+
 ## 8. Process flow
 
 ```mermaid
@@ -241,6 +257,7 @@ flowchart TD
 | **SCM-01** | Preventive · Automated | Per plan | An order plan is built and submitted by a planner but can only be approved by a different user holding `scm_approve`; self-approval is refused. Only an approved plan converts, and conversion raises a purchase requisition through the purchasing API, idempotently. Engine quantities are clamped before storage. | Order plans with maker/checker identities, the GOV-01 queue entry, the linked requisition number |
 | **SCM-02** | Detective/Preventive · Automated | Per scheduled run | Planning jobs ride the shared queue (retry → dead-letter → ops alert). A duplicate nightly enqueue plans exactly once (database-enforced); the spike scan is watermarked so any cadence is idempotent; spike events are deduped per day with a cooldown. | Plan-run register (status, engine, error), spike-event register, background-job rows |
 | **SCM-03** | Preventive/Detective · Automated | Per planning run | Demand is extracted by channel partition so a dine-in dish is counted once; closed and stockout days are excluded; menu demand is exploded per scenario; order size respects shelf life, lead-time variability and FEFO stock; every line records its rationale. The shelf-life cap holds even when the external engine is unavailable. | Demand forecasts per run with accuracy, order-plan lines with full rationale |
+| **SCM-04** | Preventive · Automated | Per planning run | Promo/price forecast inputs are governed and auditable: the `promo_flag`/`discount` regressors on a production run are **server-derived** from the tenant's approved `promotions` under RLS (never the request body), so a fabricated promo cannot inflate a forecast. Advisory what-ifs are `scenario`-flagged and barred from auto-convert; a per-day uplift cap plus the order clamp bound any residual lift; each forecast persists its promo attribution. | Demand forecasts carrying promo/price attribution tied to approved promotions |
 | INV-10 | — | Per waste event | Waste/spoilage capture feeds the observed spoilage rate used to calibrate planning. | Waste log by reason |
 | GOV-01 | Detective | Continuous | Submitted plans appear in the unified pending-approvals monitor with their age. | Pending-approvals worklist |
 
@@ -298,4 +315,5 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.3 | 2026-07-22 | Supply-chain / Planning | Added §7.10 — promotion & price-effect demand (docs/56 Track A · A1): server-derived promo/discount regressors from approved `promotions` under RLS (never client input), Prophet `add_regressor` + capped Croston/bootstrap uplift, attribution persisted on `scm_demand_forecasts` (migration 0462). New control **SCM-04** (promo-forecast governance) in the control matrix. Harness `cutover/scm.ts` +3 A1 checks. |
 | 0.2 | 2026-07-22 | Supply-chain / Planning | Added §7.9 — forecast reconciliation hierarchy (docs/58 Track C · C1): declare/synthesize aggregation structures via `scm_forecast_hierarchy` (migration `0461`) and `GET/PUT/DELETE /api/scm-planning/hierarchy(/forest)`. Definition only — no new control (SCM-01/02/03 unchanged), no forecast-number change yet (reconciliation lands with C2). Harness `cutover/scm.ts` +4 C1 checks. |
