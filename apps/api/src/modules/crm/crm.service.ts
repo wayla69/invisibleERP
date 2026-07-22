@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
-import { eq, and, isNotNull, desc, sql, gt, gte, lt, inArray } from 'drizzle-orm';
+import { eq, and, isNotNull, desc, sql, gt, gte, lt, lte, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, promoAudienceRules } from '../../database/schema/crm';
 import { posMembers } from '../../database/schema/loyalty-members';
@@ -143,6 +143,27 @@ export class CrmService {
     });
 
     return { member_id: memberId, rfm_segment: segment, total_orders: totalOrders, total_spend: totalSpend, rfm_recency: rfmRecency, rfm_frequency: rfmFrequency, rfm_monetary: rfmMonetary, churn_risk: churnRisk, predicted_ltv: predictedLtv, score_version: SCORE_VERSION, preferred_hour: preferredHour };
+  }
+
+  // docs/60 Phase 3 — per-member paid revenue in a window, for campaign-lift measurement. A single-domain
+  // READ over dine_in_orders (the member↔sale link, `openedAt` business time), returned as a
+  // member_id → revenue map so a caller (marketing-intel) can measure incrementality WITHOUT a cross-domain
+  // join. Tenant-scoped; members with no orders in the window are simply absent from the map (revenue 0).
+  async revenueByMembers(tenantId: number, memberIds: number[], from: Date, to: Date): Promise<Map<number, number>> {
+    const out = new Map<number, number>();
+    const ids = [...new Set(memberIds.map((x) => Number(x)).filter(Boolean))];
+    if (!ids.length) return out;
+    const rows: any[] = await this.db.select({ memberId: dineInOrders.memberId, total: dineInOrders.total })
+      .from(dineInOrders)
+      .where(and(
+        eq(dineInOrders.tenantId, tenantId),
+        inArray(dineInOrders.memberId, ids),
+        isNotNull(dineInOrders.saleNo),
+        gte(dineInOrders.openedAt, from),
+        lte(dineInOrders.openedAt, to),
+      ));
+    for (const r of rows) { const m = Number(r.memberId); out.set(m, (out.get(m) ?? 0) + n(r.total)); }
+    return out;
   }
 
   // Phase F2 (docs/27) — bulk RFM re-profiling. Sweeps the tenant's ACTIVE members in id-keyed batches

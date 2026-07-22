@@ -43,6 +43,7 @@ def sync_erp_data(self) -> Dict[str, int]:
         logger.info("ERP sync as %s (tenant %s, scopes %s)", me.get("principal"), me.get("tenant_id"), me.get("scopes"))
         counts["sales_daily"] = _sync_sales(erp, date_from.isoformat(), date_to.isoformat())
         counts["customer_facts"] = _sync_customers(erp, date_from.isoformat(), date_to.isoformat())
+        counts["experiment_outcomes"] = _sync_experiment_outcomes(erp)
     logger.info("ERP sync complete: %s", counts)
     return counts
 
@@ -102,6 +103,45 @@ def _sync_customers(erp: ErpClient, date_from: str, date_to: str) -> int:
                 "order_count = EXCLUDED.order_count, total_spend = EXCLUDED.total_spend, "
                 "avg_order_value = EXCLUDED.avg_order_value, first_order_date = EXCLUDED.first_order_date, "
                 "last_order_date = EXCLUDED.last_order_date, synced_at = now()"
+            ),
+            payload,
+        )
+    return len(payload)
+
+
+def _sync_experiment_outcomes(erp: ErpClient) -> int:
+    """docs/60 Phase 3 pull-back — the ERP's MEASURED campaign lift (treatment vs holdout control). Landing
+    these realised outcomes closes the loop: the next MMM fit can use campaign incrementality as a regressor
+    instead of relying on observational attribution alone."""
+    rows = erp.fetch_experiment_outcomes(limit=500)
+    if not rows:
+        logger.info("ERP experiment-outcomes returned no measured experiments yet")
+        return 0
+    payload = [
+        {
+            "eno": r["experiment_no"],
+            "seg": (r.get("segment") or "")[:80],
+            "inc": (float(r["incremental_revenue"]) if r.get("incremental_revenue") is not None else None),
+            "lift": (float(r["lift_pct"]) if r.get("lift_pct") is not None else None),
+            "tc": int(r.get("treatment_count") or 0),
+            "cc": int(r.get("control_count") or 0),
+            "wd": int(r.get("window_days") or 0),
+            "mat": _as_date(r.get("measured_at")),
+        }
+        for r in rows
+        if r.get("experiment_no")
+    ]
+    with connection() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO staging.erp_experiment_outcomes "
+                "(experiment_no, segment, incremental_revenue, lift_pct, treatment_count, control_count, window_days, measured_at) "
+                "VALUES (:eno, :seg, :inc, :lift, :tc, :cc, :wd, :mat) "
+                "ON CONFLICT (experiment_no) DO UPDATE SET "
+                "segment = EXCLUDED.segment, incremental_revenue = EXCLUDED.incremental_revenue, "
+                "lift_pct = EXCLUDED.lift_pct, treatment_count = EXCLUDED.treatment_count, "
+                "control_count = EXCLUDED.control_count, window_days = EXCLUDED.window_days, "
+                "measured_at = EXCLUDED.measured_at, synced_at = now()"
             ),
             payload,
         )

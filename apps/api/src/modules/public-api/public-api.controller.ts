@@ -6,6 +6,7 @@ import { PublicApiGuard, Scopes } from './public-api.guard';
 import { PublicApiService } from './public-api.service';
 import { PublicLoyaltyService } from './public-loyalty.service';
 import { MarketingIntelService, PushSnapshotsBody } from '../marketing-intel/marketing-intel.service';
+import { MiExperimentsService } from '../marketing-intel/mi-experiments.service';
 import { buildOpenApi } from './openapi';
 import { renderApiReferenceHtml } from './api-reference';
 
@@ -26,6 +27,7 @@ export class PublicApiController {
     private readonly svc: PublicApiService,
     private readonly loyalty: PublicLoyaltyService,
     private readonly mi: MarketingIntelService,
+    private readonly experiments: MiExperimentsService,
   ) {}
 
   // ── Discovery (open) ────────────────────────────────────────────────
@@ -38,7 +40,7 @@ export class PublicApiController {
       version: 'v1',
       documentation: '/api/v1/openapi.json',
       authentication: 'Bearer ierp_… (API key)',
-      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/sales/daily', '/api/v1/customers/transactions', '/api/v1/analytics/snapshots', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
+      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/sales/daily', '/api/v1/customers/transactions', '/api/v1/marketing/experiment-outcomes', '/api/v1/analytics/snapshots', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
     };
   }
 
@@ -134,4 +136,12 @@ export class PublicApiController {
   @Scopes('analytics:write')
   @HttpCode(200)
   pushAnalytics(@Body(new ZodValidationPipe(PushSnapshotsBody)) b: any, @CurrentUser() u: JwtUser) { return this.mi.pushSnapshots(b, u); }
+
+  // ── Closed-loop pull-back (docs/60 Phase 3) — the platform pulls measured campaign LIFT so the next MMM
+  // fit can use realised incrementality as a regressor (the loop's feedback edge). Read-only, tenant-scoped. ──
+  @Get('marketing/experiment-outcomes')
+  @Scopes('analytics:read')
+  experimentOutcomes(@Query('limit') limit: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.experiments.outcomes(u, limit ? Number(limit) : 100);
+  }
 }

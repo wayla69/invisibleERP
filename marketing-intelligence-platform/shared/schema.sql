@@ -40,6 +40,20 @@ CREATE TABLE IF NOT EXISTS staging.erp_customer_facts (
     synced_at          TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
+-- Measured campaign LIFT pulled from the ERP (docs/60 Phase 3 closed-loop). Treatment vs holdout control
+-- incrementality — the loop's feedback edge: available to the next MMM fit as a realised-lift regressor.
+CREATE TABLE IF NOT EXISTS staging.erp_experiment_outcomes (
+    experiment_no       VARCHAR(60)   PRIMARY KEY,
+    segment             VARCHAR(80),
+    incremental_revenue NUMERIC(14,2),
+    lift_pct            NUMERIC(8,2),
+    treatment_count     INTEGER       NOT NULL DEFAULT 0,
+    control_count       INTEGER       NOT NULL DEFAULT 0,
+    window_days         INTEGER       NOT NULL DEFAULT 0,
+    measured_at         DATE,
+    synced_at           TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+
 -- ── CORE ───────────────────────────────────────────────────────────────────────────────────────────
 -- Cleaned daily social sentiment, derived from staging.social_raw_feeds.
 CREATE TABLE IF NOT EXISTS core.social_sentiment_trends (
@@ -103,6 +117,12 @@ CREATE TABLE IF NOT EXISTS analytics.customer_rfm_segments (
     sentiment_multiplier NUMERIC(5,3),
     weighted_rfm_score   NUMERIC(8,3),
     segment              VARCHAR(40),
+    -- Customer Intelligence (docs/60 Phase 2) — per-customer forward-looking scores pushed to the ERP
+    -- (mi_clv / mi_churn_risk / mi_nba). Interpretable first cut; a BG/NBD + churn classifier is governed
+    -- under Phase 4. Nullable so a fresh run without sentiment still writes the RFM base.
+    predicted_clv        NUMERIC(14,2),   -- 12-month forward value proxy (฿)
+    churn_probability    NUMERIC(5,4),    -- [0,1]
+    next_best_action     VARCHAR(40),     -- WINBACK|UPSELL|VIP_CARE|REACTIVATE|RETAIN|NURTURE|CROSS_SELL
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

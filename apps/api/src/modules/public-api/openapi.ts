@@ -192,6 +192,15 @@ export function buildOpenApi() {
           responses: listResponse({ $ref: '#/components/schemas/CustomerPurchaseFacts' }),
         },
       },
+      '/marketing/experiment-outcomes': {
+        get: {
+          summary: 'Measured campaign lift — closed-loop pull-back (tenant-scoped)',
+          description: 'The ERP\'s measured campaign incrementality (treatment vs randomised holdout control): `{ outcomes: [{ experiment_no, segment, incremental_revenue, lift_pct, treatment_count, control_count, window_days, measured_at }] }`. The Marketing Intelligence Platform pulls these realised outcomes so the next MMM fit can use campaign lift as a regressor. Read-only, RLS tenant-scoped.',
+          security: [{ apiKey: ['analytics:read'] }],
+          parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer' } }],
+          responses: { '200': { description: 'measured experiment outcomes' }, '403': { description: 'INSUFFICIENT_SCOPE (needs analytics:read)' } },
+        },
+      },
       '/analytics/snapshots': {
         post: {
           summary: 'Push computed analytics results into the ERP (MMM / RFM / TOWS)',
