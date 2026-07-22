@@ -60,3 +60,7 @@ Navigation: **Next / Prev** buttons, clickable progress dots, and the
 
 > Presentation assets only — this directory is not imported by `apps/web` or
 > `apps/api` and has no effect on application behavior, builds, or CI gates.
+
+> **Standing rule (2026-07-22, per owner):** money figures use **no ฿ symbol** and no T-scale
+> numbers — express everything in **M (million)** with an explicit "unit: baht / หน่วย: บาท" caption
+> on each money slide (per-month prices annotated "baht per month").

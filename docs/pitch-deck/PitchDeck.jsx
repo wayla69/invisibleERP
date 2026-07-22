@@ -355,7 +355,7 @@ function MarketSlide() {
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Market Opportunity" title="A huge market still running on paper and spreadsheets" tone="amber" />
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat value="฿1.4T+" label="Thai food-service market (est.)" tone="amber" />
+        <Stat value="1,400,000M+" label="Thai food-service market (M baht, est.)" tone="amber" />
         <Stat value="600k+" label="F&B outlets in Thailand (est.)" tone="blue" />
         <Stat value="<10%" label="Mid-market chains on a real ERP (est.)" tone="rose" />
       </div>
@@ -406,23 +406,24 @@ function BusinessModelSlide() {
       <div className="space-y-2.5">
         <div className="flex items-stretch gap-2.5">
           <PlanLineTag tone="blue">POS line · per branch</PlanLineTag>
-          <PlanTier name="POS Lite" price="฿590" per="/br/mo" sub="counter register · 3 seats" tone="blue" />
-          <PlanTier name="POS Pro" price="฿1,190" per="/br/mo" sub="full front of house · QR · channels" tone="blue" />
+          <PlanTier name="POS Lite" price="590" per="/br/mo" sub="counter register · 3 seats" tone="blue" />
+          <PlanTier name="POS Pro" price="1,190" per="/br/mo" sub="full front of house · QR · channels" tone="blue" />
         </div>
         <div className="flex items-stretch gap-2.5">
           <PlanLineTag tone="emerald">ERP line · per company</PlanLineTag>
-          <PlanTier name="ERP Essentials" price="฿1,900" per="/mo" sub="finance · orders · inventory" tone="emerald" />
-          <PlanTier name="ERP Growth" price="฿3,900" per="/mo" sub="+ procurement · planning" tone="emerald" />
+          <PlanTier name="ERP Essentials" price="1,900" per="/mo" sub="finance · orders · inventory" tone="emerald" />
+          <PlanTier name="ERP Growth" price="3,900" per="/mo" sub="+ procurement · planning" tone="emerald" />
         </div>
         <div className="flex items-stretch gap-2.5">
           <PlanLineTag tone="violet">Complete bundles</PlanLineTag>
-          <PlanTier name="Solo" price="฿690" per="/mo" sub="1 seat" tone="slate" />
-          <PlanTier name="Standard" price="฿2,900" per="/mo" sub="+ procurement" tone="violet" />
-          <PlanTier name="Business" price="฿4,900" per="/mo" sub="multi-branch" tone="violet" />
-          <PlanTier name="Professional" price="฿9,900" per="/mo" sub="planning · AI" tone="amber" />
-          <PlanTier name="Franchise" price="฿14,900" per="/mo" sub="verticals" tone="rose" />
+          <PlanTier name="Solo" price="690" per="/mo" sub="1 seat" tone="slate" />
+          <PlanTier name="Standard" price="2,900" per="/mo" sub="+ procurement" tone="violet" />
+          <PlanTier name="Business" price="4,900" per="/mo" sub="multi-branch" tone="violet" />
+          <PlanTier name="Professional" price="9,900" per="/mo" sub="planning · AI" tone="amber" />
+          <PlanTier name="Franchise" price="14,900" per="/mo" sub="verticals" tone="rose" />
           <PlanTier name="Enterprise" price="Custom" per="" sub="unlimited" tone="rose" />
         </div>
+        <p className="pt-1 text-right text-[11px] font-semibold text-slate-400">unit: baht per month · หน่วย: บาท/เดือน — yearly billing priced at ten months</p>
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card icon={Wallet} tone="emerald" title="Per-company subscriptions">
@@ -577,22 +578,22 @@ function ProjectCostSlide() {
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Project Cost" title="The seed buys a platform that already exists" />
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat value="฿67M+" label="Replacement cost to date (est.)" tone="blue" />
+        <Stat value="67M+" label="Replacement cost to date (est.)" tone="blue" />
         <Stat value="~14" label="Person-years of senior engineering" tone="violet" />
         <Stat value="307" label="Documented controls shipped" tone="emerald" />
       </div>
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
         <div className="mb-3 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">
-          Where the ฿67M of build value sits (replacement-cost estimate)
+          Where the 67M of build value sits (replacement-cost estimate · unit: M baht)
         </div>
-        <CostBar tone="blue" label="Engineering — core platform & 10 domain modules" sub="POS → GL, WMS, MRP, projects, CRM, BI" pct={64} amount="฿43M" />
-        <CostBar tone="violet" label="AI/ML & data science" sub="demand-forecast engine (ML + optimization), marketing intelligence platform" pct={9} amount="฿6M" />
-        <CostBar tone="emerald" label="Compliance & audit readiness" sub="RCM, process narratives, control-test harnesses" pct={12} amount="฿8M" />
-        <CostBar tone="amber" label="Integrations & Thai localization" sub="e-Tax, payment rails incl. PromptPay slip-verify, delivery channels" pct={10} amount="฿7M" />
-        <CostBar tone="rose" label="Security" sub="third-party reviews, pentests, remediation" pct={5} amount="฿3M" />
+        <CostBar tone="blue" label="Engineering — core platform & 10 domain modules" sub="POS → GL, WMS, MRP, projects, CRM, BI" pct={64} amount="43M" />
+        <CostBar tone="violet" label="AI/ML & data science" sub="demand-forecast engine (ML + optimization), marketing intelligence platform" pct={9} amount="6M" />
+        <CostBar tone="emerald" label="Compliance & audit readiness" sub="RCM, process narratives, control-test harnesses" pct={12} amount="8M" />
+        <CostBar tone="amber" label="Integrations & Thai localization" sub="e-Tax, payment rails incl. PromptPay slip-verify, delivery channels" pct={10} amount="7M" />
+        <CostBar tone="rose" label="Security" sub="third-party reviews, pentests, remediation" pct={5} amount="3M" />
       </div>
       <p className="mt-4 text-center text-xs text-slate-400">
-        Replacement-cost model at blended senior-team rates — illustrative, for discussion.
+        Replacement-cost model at blended senior-team rates — unit: M baht (หน่วย: ล้านบาท); illustrative, for discussion.
       </p>
     </div>
   );
@@ -603,18 +604,18 @@ function UseOfFundsSlide() {
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Use of Funds" title="An 18-month plan to Series A readiness" tone="emerald" />
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat value="฿70M" label="Seed raise (~US$2.0M)" tone="emerald" />
-        <Stat value="฿3.5M" label="Average monthly burn" tone="amber" />
+        <Stat value="70M" label="Seed raise (~US$2.0M)" tone="emerald" />
+        <Stat value="3.5M" label="Average monthly burn" tone="amber" />
         <Stat value="18–20" label="Months of runway" tone="blue" />
       </div>
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
         <div className="mb-3 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">
-          Allocation of the ฿70M raise
+          Allocation of the 70M raise (unit: M baht)
         </div>
-        <CostBar tone="blue" label="Product & engineering — 45%" sub="AI-native ops, SEA localization, platform depth" pct={45} amount="฿31.5M" />
-        <CostBar tone="emerald" label="Go-to-market & sales — 30%" sub="mid-market chain sales team, partner channel" pct={30} amount="฿21.0M" />
-        <CostBar tone="violet" label="Compliance & external audit — 15%" sub="SOX-ICFR audit fees, ISO 27001 certification" pct={15} amount="฿10.5M" />
-        <CostBar tone="amber" label="Cloud infra & operations — 10%" sub="multi-region hosting, monitoring, support" pct={10} amount="฿7.0M" />
+        <CostBar tone="blue" label="Product & engineering — 45%" sub="AI-native ops, SEA localization, platform depth" pct={45} amount="31.5M" />
+        <CostBar tone="emerald" label="Go-to-market & sales — 30%" sub="mid-market chain sales team, partner channel" pct={30} amount="21.0M" />
+        <CostBar tone="violet" label="Compliance & external audit — 15%" sub="SOX-ICFR audit fees, ISO 27001 certification" pct={15} amount="10.5M" />
+        <CostBar tone="amber" label="Cloud infra & operations — 10%" sub="multi-region hosting, monitoring, support" pct={10} amount="7.0M" />
       </div>
       <p className="mt-4 text-center text-xs text-slate-400">Operating model assumptions — illustrative, for discussion.</p>
     </div>
@@ -624,23 +625,23 @@ function UseOfFundsSlide() {
 function TheAskSlide() {
   return (
     <div className="flex h-full flex-col justify-center">
-      <SlideHeading kicker="Seed Round — The Ask" title="฿70M to turn an audited platform into a market leader" tone="violet" />
+      <SlideHeading kicker="Seed Round — The Ask" title="70M baht to turn an audited platform into a market leader" tone="violet" />
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <div className="grid grid-cols-2 gap-3">
-            <Stat value="฿70M" label="Raise (~US$2.1M)" tone="violet" />
-            <Stat value="฿320M" label="Pre-money (~US$9.5M)" tone="blue" />
+            <Stat value="70M" label="Raise (~US$2.1M)" tone="violet" />
+            <Stat value="320M" label="Pre-money (~US$9.5M)" tone="blue" />
             <Stat value="~18%" label="Equity, post-money" tone="emerald" />
             <Stat value="18–20" label="Months of runway" tone="amber" />
           </div>
-          <p className="mt-3 text-xs text-slate-400">Priced equity or SAFE; terms illustrative, for discussion.</p>
+          <p className="mt-3 text-xs text-slate-400">Unit: M baht (หน่วย: ล้านบาท) · priced equity or SAFE; terms illustrative, for discussion.</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
           <div className="mb-2 text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">
             Milestones this round unlocks — the Series A story
           </div>
           <Milestone title="30+ paying companies live" sub="mid-market F&B chains on the full stack" />
-          <Milestone title="฿40M ARR run-rate (~US$1.2M)" sub="subscription, premium AI suites + usage revenue" />
+          <Milestone title="40M ARR run-rate (~US$1.2M)" sub="subscription, premium AI suites + usage revenue" />
           <Milestone title="First external SOX-ICFR audit passed" sub="controls evidence produced by the platform itself" />
           <Milestone title="2 SEA markets localized" sub="tax, language, and payment rails beyond Thailand" />
         </div>
@@ -651,16 +652,16 @@ function TheAskSlide() {
 
 function ValuationSlide() {
   const rows = [
-    ["฿25M (bear)", 150, 200, 250],
-    ["฿40M (base)", 240, 320, 400],
-    ["฿55M (bull)", 330, 440, 550],
+    ["25M (bear)", 150, 200, 250],
+    ["40M (base)", 240, 320, 400],
+    ["55M (bull)", 330, 440, 550],
   ];
   return (
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Valuation Model" title="Triangulated, not hand-waved" tone="amber" />
       <div className="grid gap-4 md:grid-cols-3">
         <Card icon={Layers} tone="blue" title="Replacement-cost floor">
-          ฿67M+ to rebuild the platform — including the ML forecasting and marketing-intelligence
+          67M+ baht to rebuild the platform — including the ML forecasting and marketing-intelligence
           stack — before the compliance moat: 307 controls, harnesses, and audit artifacts a
           copycat must also rebuild.
         </Card>
@@ -669,14 +670,14 @@ function ValuationSlide() {
           pre-money — we sit mid-range with audit-grade differentiation.
         </Card>
         <Card icon={TrendingUp} tone="violet" title="Forward-multiple method">
-          Series A target of ฿40M forward ARR at an 8× multiple implies ฿320M — the pre-money
+          Series A target of 40M-baht forward ARR at an 8× multiple implies 320M baht — the pre-money
           we are asking for today. AI planning and marketing intelligence lift the base case:
           both are premium-tier suites that pull customers up the pricing ladder.
         </Card>
       </div>
       <div className="mt-5">
         <div className="mb-2 text-center text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">
-          Implied valuation (฿M) — forward ARR at Series A × revenue multiple
+          Implied valuation (M baht) — forward ARR at Series A × revenue multiple
         </div>
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full border-collapse text-sm tabular-nums">
@@ -702,7 +703,7 @@ function ValuationSlide() {
         </div>
       </div>
       <p className="mt-4 text-center text-xs text-slate-400">
-        All figures are an illustrative financing model, not an offer of securities.
+        All figures in M baht (หน่วย: ล้านบาท) — an illustrative financing model, not an offer of securities.
       </p>
     </div>
   );
