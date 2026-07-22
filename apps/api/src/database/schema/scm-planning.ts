@@ -99,6 +99,10 @@ export const scmDemandForecasts = pgTable('scm_demand_forecasts', {
   p90: jsonb('p90'), // NULL for point-forecast fallbacks
   dataDays: integer('data_days'),
   wape: numeric('wape', { precision: 10, scale: 4 }),
+  // docs/56 A1 — promo/price attribution (migration 0462). Null when no governed regressor applied.
+  promoUpliftPct: numeric('promo_uplift_pct', { precision: 10, scale: 4 }),
+  priceElasticity: numeric('price_elasticity', { precision: 10, scale: 4 }),
+  regressorsUsed: jsonb('regressors_used').default([]), // string[] subset of promo|price|payday|analog|cross
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_forecasts_tenant').on(t.tenantId, t.runId, t.branchId, t.itemId) }));
 

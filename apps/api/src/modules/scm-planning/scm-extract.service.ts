@@ -9,6 +9,7 @@ import { n, ymd } from '../../database/queries';
 import { addDaysYmd, TH_FIXED_HOLIDAYS } from '../demand-ml/forecast-algorithms';
 import type { JwtUser } from '../../common/decorators';
 import { ScmStockExtractService } from './scm-extract-stock.service';
+import { ScmPromoExtractService } from './scm-promo-extract.service';
 import type {
   DenseSeries, ExtractedTenantData, RecipeEdge, ScmSettingsView,
 } from './scm-planning.types';
@@ -51,9 +52,11 @@ const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
 export class ScmExtractService {
   private readonly stock: ScmStockExtractService;
+  private readonly promo: ScmPromoExtractService;
 
   constructor(private readonly db: DrizzleDb) {
     this.stock = new ScmStockExtractService(db);
+    this.promo = new ScmPromoExtractService(db);
   }
 
   // ── settings ────────────────────────────────────────────────────────────────
@@ -340,6 +343,18 @@ export class ScmExtractService {
     ]);
 
     const today = ymd();
+
+    // docs/56 A1 — governed promo regressors for the menu skus actually being forecast, over the
+    // history∪horizon window. Server-derived (SCM-04); empty ⇒ pre-A1 baseline behaviour.
+    const forecastSkus = [...new Set(scoped.map((s) => s.itemId))];
+    const windowStart = scoped.reduce((min, s) => (s.startDate < min ? s.startDate : min), today);
+    const regressors = await this.promo.regressorsFor(
+      tenantId, forecastSkus, windowStart, addDaysYmd(today, settings.horizon_days + 1),
+    );
+    const promoCoverage = forecastSkus.length
+      ? forecastSkus.filter((sku) => (regressors.get(sku)?.length ?? 0) > 0).length / forecastSkus.length
+      : 0;
+
     return {
       settings,
       branchIds: allBranches,
@@ -350,6 +365,8 @@ export class ScmExtractService {
       holidays: this.holidays(addDaysYmd(today, -settings.lookback_days), addDaysYmd(today, settings.horizon_days + 1)),
       ingredientIds: ingredientIds.filter((i) => params.has(i)),
       branchNullShare,
+      regressors,
+      promoCoverage,
     };
   }
 }

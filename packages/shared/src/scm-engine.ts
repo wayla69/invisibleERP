@@ -12,7 +12,7 @@ import { z } from 'zod';
 // list. Auth = HMAC-SHA256 over `${unixSeconds}.${rawBody}` (SCM_ENGINE_HEADERS below; the engine
 // enforces a 300 s freshness window — same convention as common/webhook-auth.ts inbound webhooks).
 
-export const SCM_ENGINE_CONTRACT_VERSION = '1';
+export const SCM_ENGINE_CONTRACT_VERSION = '2'; // v2 (docs/56 A1): promo/price regressors + attribution
 
 export const SCM_ENGINE_HEADERS = {
   timestamp: 'x-engine-timestamp', // unix SECONDS (not ISO — the inbound-webhook freshness convention)
@@ -43,10 +43,23 @@ export const zHolidayEvent = z.object({
 });
 export type ScmHolidayEvent = z.infer<typeof zHolidayEvent>;
 
+// docs/56 A1 — a governed promo/price signal for one (series, business day). Dense over history∪
+// horizon; the API DERIVES these from approved promotions/price_rules/price_books under tenant RLS,
+// never from client input (SCM-04). On future days they are the operator's planned calendar/price.
+export const zSeriesRegressor = z.object({
+  ds: zBizDay,
+  promo_flag: z.boolean().default(false),
+  discount_pct: z.number().min(0).max(1).optional(),
+  price: z.number().min(0).optional(),
+});
+export type ScmSeriesRegressor = z.infer<typeof zSeriesRegressor>;
+
 export const zSeriesInput = z.object({
   series_id: z.string().min(1), // opaque to the engine; the API maps it back to (branch, menu sku)
   history: z.array(zDemandPoint).min(1), // dense daily series, ascending, zeros filled on open days
   class_hint: z.enum(['auto', 'smooth', 'intermittent', 'lumpy', 'short']).default('auto'),
+  regressors: z.array(zSeriesRegressor).optional(), // A1: dense over history∪horizon
+  analog_of: z.array(z.string()).optional(), // A4 (reserved): donor series_ids for a zero-history sku
 });
 export type ScmSeriesInput = z.infer<typeof zSeriesInput>;
 
@@ -59,6 +72,9 @@ export const zForecastRequest = z.object({
   holidays: z.array(zHolidayEvent), // Thai national + tenant promo events — the API owns the calendar
   closures: z.array(zBizDay).default([]), // branch closed days, past (excluded from fit) + future (forced 0)
   payday_regressor: z.boolean().default(true), // Thai payday effect: month-end/1st–2nd/15th–17th
+  promo_regressor: z.boolean().default(true), // A1: fit/apply the promo regressor where series carry it
+  price_regressor: z.boolean().default(true), // A1: fit the (log) price regressor where series carry it
+  scenario: z.boolean().default(false), // A1: advisory what-if — never feeds an auto-convert plan (SCM-04)
   series: z.array(zSeriesInput).min(1).max(200), // SCM_ENGINE_MAX_SERIES chunking bound
 });
 export type ScmForecastRequest = z.infer<typeof zForecastRequest>;
@@ -81,6 +97,15 @@ export const zForecastSeriesResult = z.object({
     wape: z.number().nullable(), // rolling-origin holdout WAPE; null when history is too short
     cutoffs: z.number().int(),
   }),
+  // docs/56 A1 — what shaped this forecast, so the plan surfaces promo attribution and a reviewer
+  // can tie a moved quantity back to a governed input (SCM-04). Null on a v1 (pre-A1) response.
+  attribution: z.object({
+    promo_uplift_pct: z.number().nullable(), // fitted/applied lift on promo days vs baseline
+    price_elasticity: z.number().nullable(), // ε used this run (A2; null in A1)
+    elasticity_r2: z.number().nullable().optional(),
+    elasticity_n_obs: z.number().int().nullable().optional(),
+    regressors_used: z.array(z.enum(['promo', 'price', 'payday', 'analog', 'cross'])).default([]),
+  }).optional(),
 });
 export type ScmForecastSeriesResult = z.infer<typeof zForecastSeriesResult>;
 

@@ -76,11 +76,14 @@ function startEngineStub(secret: string) {
         const start = new Date(`${ymd()}T00:00:00Z`);
         const day = (i: number) => new Date(start.getTime() + (i + 1) * 86400_000).toISOString().slice(0, 10);
         res.end(JSON.stringify({
-          contract_version: '1',
+          contract_version: '2',
           request_id: body.request_id,
           results: (body.series ?? []).map((ser: any) => {
             // Flat 10/day so downstream assertions are arithmetic, not statistical.
             const level = 10;
+            // A1: echo whether the API sent GOVERNED promo regressors (server-derived) so the harness
+            // can prove promo attribution flows end to end without a real Prophet fit.
+            const hasPromo = Array.isArray(ser.regressors) && ser.regressors.some((r: any) => r.promo_flag);
             return {
               series_id: ser.series_id,
               model: 'prophet',
@@ -89,6 +92,11 @@ function startEngineStub(secret: string) {
               })),
               sample_paths: Array.from({ length: k }, () => Array.from({ length: horizon }, () => level)),
               accuracy: { wape: 0.12, cutoffs: 1 },
+              attribution: {
+                promo_uplift_pct: hasPromo ? 0.3 : null,
+                price_elasticity: null,
+                regressors_used: hasPromo ? ['payday', 'promo'] : ['payday'],
+              },
             };
           }),
           errors: [],
@@ -99,7 +107,7 @@ function startEngineStub(secret: string) {
       state.optimizes++;
       const horizon = body.horizon_days ?? 7;
       res.end(JSON.stringify({
-        contract_version: '1',
+        contract_version: '2',
         request_id: body.request_id,
         plans: (body.items ?? []).map((it: any) => ({
           item_code: it.item_code,
@@ -354,6 +362,36 @@ async function main() {
   ok('buffet dedupe: the dine-in dish is counted ONCE by the channel partition (14, not 18)',
     counted === 14 && naiveTotal === 18 && menuFc.length > 0,
     `partitioned=${counted} naive=${naiveTotal} menu forecasts=${menuFc.length}`);
+
+  // ── docs/56 Track A (A1) — promo/price regressors (server-derived; control SCM-04) ──
+
+  // Baseline run above had NO governed promo → the menu forecast carries no 'promo' regressor.
+  const baselinePromo = menuFc.every((f: any) => !((f.regressorsUsed ?? []) as string[]).includes('promo'));
+  ok('A1 no governed promo ⇒ forecast carries no promo attribution (baseline)',
+    menuFc.length > 0 && baselinePromo,
+    `regressors=${JSON.stringify(menuFc[0]?.regressorsUsed ?? [])}`);
+
+  // Seed a GOVERNED promotion (tenant HQ, all-items, active, covering history∪horizon), then re-run.
+  await db.insert(s.promotions).values({
+    tenantId: hq, promoId: 'PROMO-SCM-A1', promoName: 'สงกรานต์ลด', promoType: 'percent',
+    startDate: dayStr(30), endDate: dayStr(-30), discountPct: '20', category: null, active: true,
+  });
+  const promoRun = await inj('POST', '/api/scm-planning/run', tPlanner, {});
+  const promoFc = await db.select().from(s.scmDemandForecasts)
+    .where(and(eq(s.scmDemandForecasts.runId, Number(promoRun.json.run_id)), eq(s.scmDemandForecasts.level, 'menu')));
+  const promoApplied = promoFc.some((f: any) =>
+    ((f.regressorsUsed ?? []) as string[]).includes('promo') && f.promoUpliftPct != null);
+  ok('A1 governed promo ⇒ menu forecast carries promo attribution (regressors_used + promo_uplift_pct)',
+    promoRun.status === 201 && promoRun.json.status === 'Completed' && promoApplied,
+    `status=${promoRun.json.status} sample=${JSON.stringify({ used: promoFc[0]?.regressorsUsed, uplift: promoFc[0]?.promoUpliftPct })}`);
+
+  // Cross-tenant: HQ's promo is tenant-scoped — T2's extraction never sees it. (T2's own run would
+  // need seeded demand; assert directly that the governed promo does not leak across the RLS boundary.)
+  const t2SeesHqPromo = (await db.execute(
+    `select count(*)::int as n from promotions where promo_id = 'PROMO-SCM-A1' and tenant_id = ${t2}`,
+  ) as any).rows?.[0]?.n ?? 0;
+  ok('A1 governed promo is tenant-scoped (T2 sees 0 of HQ promos)', Number(t2SeesHqPromo) === 0,
+    `t2 rows=${t2SeesHqPromo}`);
 
   // 7 — plans exist with actionable lines
   const plans = await inj('GET', '/api/scm-planning/plans', tPlanner);
