@@ -25,11 +25,13 @@ test('bottom summary bar totals update and stay inside the viewport', async ({ p
   await expect(bar).toBeVisible();
   await expect(bar).toContainText('฿4,900');
 
-  // Hydration gate (no mount API call to anchor on): retry the first switch toggle until the bar's
+  // Hydration gate (no mount API call to anchor on): retry the switch toggle until the bar's
   // total reflects it — a pre-hydration click changes nothing and must be re-dispatched, never slept on.
+  // Target the planning module add-on by testid: on Growth the advanced supply-chain add-on is
+  // INCLUDED (✓ badge, no switch), and the module-add-on group renders first.
   await expect(async () => {
-    await page.getByRole('switch').first().click();
-    await expect(bar).toContainText('฿6,400', { timeout: 1_000 }); // 4,900 + 1,500 supply-chain add-on
+    await page.getByTestId('addon-planning').getByRole('switch').click();
+    await expect(bar).toContainText('฿6,800', { timeout: 1_000 }); // 4,900 + 1,900 planning module
   }).toPass();
 
   // Expand the itemized summary; the page and the bar must stay overflow-free with it open.
