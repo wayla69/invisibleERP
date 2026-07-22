@@ -41,7 +41,10 @@ def load_tows() -> pd.DataFrame:
 try:
     tows = load_tows()
 except Exception as exc:
-    st.error(f"Could not load TOWS data: {exc}")
+    if "does not exist" in str(exc).lower() or "undefinedtable" in str(exc).lower():
+        st.warning("No TOWS analysis yet — start the ingestion worker, then run the analytics engine, and refresh.")
+    else:
+        st.error(f"Could not load TOWS data: {exc}")
     st.stop()
 
 if tows.empty:

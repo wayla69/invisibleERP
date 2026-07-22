@@ -483,6 +483,8 @@ const API_KEY_SCOPES: { key: string; label: string }[] = [
   { key: 'inventory:read', label: 'st.set.scope_inventory' },
   { key: 'orders:read', label: 'st.set.scope_orders' },
   { key: 'invoices:read', label: 'st.set.scope_invoices' },
+  { key: 'analytics:read', label: 'st.set.scope_analytics_read' },
+  { key: 'analytics:write', label: 'st.set.scope_analytics_write' },
 ];
 
 function ApiKeys() {
