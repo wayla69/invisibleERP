@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 302,
+    "total": 303,
     "by_status": {
-      "Implemented": 299,
+      "Implemented": 300,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 25,
+      "CRM — Loyalty": 26,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2467,6 +2467,25 @@
       "tod": "Inspect the per-tenant SLA policy (rating threshold + hours), the breach computation (unreplied <=threshold review older than the window), the exclusion of replied/high-rated reviews, and the tenant_id filter on the worklist.",
       "toe": "Re-perform (reputation harness, MKT-16 checks): an OLD unreplied 2★ review is flagged breached, a RECENT one open, a 5★ review excluded; tightening the threshold to <=1★ drops the 2★ reviews; a reply clears the breach; a non-marketing user is refused 403; a T2 tenant sees only its OWN breach, never any of T1's reviews.",
       "evidence": "reputation_response_settings policy; the breach/open worklist (counts + rows); the schedulable reputation_response_sla digest",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-17",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A marketing budget-reallocation decision is taken from an MMM recommendation with no independent approval — the person who proposes the channel spend split also authorises it — so a large budget shift is self-approved; or the recommended allocation is non-reproducible / not tied to a recorded MMM run; or one tenant's budget plans surface for another tenant.",
+      "assertion": "Authorization/Accuracy",
+      "description": "Budget Optimizer (docs/60 Phase 1, MKT-17): the /marketing-intel Budget Planner turns a pushed MMM run's per-channel SATURATION (response) curves into a prescriptive allocation. POST /api/marketing-intel/optimize returns the spend split that maximises predicted incremental sales via a PURE, deterministic greedy water-filling allocator over Hill-saturation curves (POST /simulate re-performs any what-if identically), reproducible from the recorded MMM snapshot (basis = its model_run_ref, or 'derived' when the platform has not pushed saturation params). A recommendation NEVER posts spend: it is STAGED as an advisory plan (mi_budget_plans, status Pending) via POST /budget-plan, and requires MAKER-CHECKER approval by a DIFFERENT user — POST /budget-plan/approve routes through assertMakerChecker (approver != requester -> SOD_SELF_APPROVAL, binds even Admin under the enterprise control profile). mi_budget_plans is tenant-scoped (canonical 0232 org-clause RLS + explicit tenant_id filter + leading tenant index) so a plan can never surface for another tenant. Gated to marketing/exec (read/optimise), pr_raise (stage), exec/approvals (approve). A plan/read model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per budget plan",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-intel/mmm-optimizer.ts (pure Hill-saturation response curves + greedy water-filling allocator — unit-tested test/mmm-optimizer.test.ts); marketing-intel.service.ts (responseCurves/simulate/optimize; stageBudgetPlan + approveBudgetPlan maker-checker); marketing-intel.controller.ts GET response-curves + POST simulate/optimize/budget-plan + POST budget-plan/approve (assertMakerChecker); schema/marketing-intel.ts mi_budget_plans + migration 0462 (canonical RLS, tenant-leading index); cutover/ext.ts (MKT-17 ToE, 9 checks)",
+      "tod": "Inspect the deterministic optimiser + its unit tests, the advisory Pending plan (never posts spend), the assertMakerChecker approver!=requester check, and the tenant_id filter/RLS on mi_budget_plans.",
+      "toe": "Re-perform (ext harness, 9 MKT-17 checks): response-curves derive per-channel curves; optimize spends ~the whole budget with predicted sales>0 and simulate reproduces it identically; a staged plan is Pending; a DIFFERENT user approves it (Approved) but the requester's self-approval is rejected SOD_SELF_APPROVAL; a missing plan -> 404; every plan is tenant-scoped (cf2 only, none for HQ).",
+      "evidence": "mi_budget_plans staged/approved plans (requester + approver); the deterministic optimiser + its unit tests; the maker-checker SoD test",
       "status": "Implemented"
     },
     {
