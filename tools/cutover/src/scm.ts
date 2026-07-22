@@ -216,6 +216,12 @@ async function main() {
     { tenantId: hq, recipeId: Number(recipe.id), ingredientItemId: 'ING-RICE', qtyPer: '0.15', uom: 'kg', yieldFactor: '1.0000', wasteFactor: '0.0000' },
   ]);
 
+  // A3: a governed cross-elasticity (MENU-KP responds to sibling MENU-B's price, γ=0.5, category 'main').
+  // Seeded in setup so the read-through cache is warm with it before the first scenario call.
+  await db.insert(s.scmCrossElasticity).values({
+    tenantId: hq, itemA: 'MENU-KP', itemB: 'MENU-B', category: 'main', gamma: '0.5', r2: '0.7', nObs: 40,
+  });
+
   // ── demand history ──
   // Retail leg: 90 days of plain POS sales (10 dishes/day) at the branch.
   // Deterministic jitter around 10/day: a PERFECTLY constant series has zero variance, and the
@@ -462,6 +468,34 @@ async function main() {
   const elastB = await inj('GET', '/api/scm-planning/elasticity', tPlannerB);
   ok('A2 elasticity is tenant-isolated (T2 sees 0 of HQ elasticities)',
     (elastB.json.items?.length ?? 0) === 0, `t2=${elastB.json.items?.length}`);
+
+  // ── docs/56 Track A (A3) — category-scoped cannibalization/halo cross-elasticity ──
+  // The estimator math is proven in apps/api vitest; here we prove the WIRING: a persisted γ (seeded in
+  // setup, before app boot, as a substitute pair MENU-KP↔MENU-B γ=0.5) is applied by the scenario tool
+  // ONLY to sibling items whose price also moved in the scenario, and it is tenant-isolated.
+  const xlist = await inj('GET', '/api/scm-planning/cross-elasticity', tPlanner);
+  ok('A3 persisted cross-elasticity is readable',
+    xlist.status === 200 && (xlist.json.pairs ?? []).some((p: any) => p.itemA === 'MENU-KP' && p.itemB === 'MENU-B' && Number(p.gamma) === 0.5),
+    `pairs=${JSON.stringify(xlist.json.pairs)}`);
+
+  // Scenario WITH the sibling in item_ids ⇒ MENU-KP's response folds in γ (its price rise is partly
+  // offset by cannibalization). Scenario WITHOUT the sibling ⇒ no cross term (category-scoped to the
+  // items whose price actually moved).
+  const scPair = await inj('POST', '/api/scm-planning/scenario', tPlanner,
+    { branch_id: branchId, item_ids: ['MENU-KP', 'MENU-B'], horizon_days: 7, demand_multiplier: 3, price_multiplier: 1.5 });
+  const scSolo = await inj('POST', '/api/scm-planning/scenario', tPlanner,
+    { branch_id: branchId, item_ids: ['MENU-KP'], horizon_days: 7, demand_multiplier: 3, price_multiplier: 1.5 });
+  const kpPair = (scPair.json.price_attribution ?? []).find((p: any) => p.item_id === 'MENU-KP');
+  const kpSolo = (scSolo.json.price_attribution ?? []).find((p: any) => p.item_id === 'MENU-KP');
+  ok('A3 scenario folds the sibling cross-term in ONLY when the sibling is in the scenario (category-scoped)',
+    Math.abs(Number(kpPair?.cross_elasticity_sum) - 0.5) < 1e-9 && Number(kpSolo?.cross_elasticity_sum) === 0
+      && Number(kpPair?.demand_response) > Number(kpSolo?.demand_response),
+    `pair={x:${kpPair?.cross_elasticity_sum},resp:${kpPair?.demand_response}} solo={x:${kpSolo?.cross_elasticity_sum},resp:${kpSolo?.demand_response}}`);
+
+  // Cross-tenant: HQ's cross-elasticities never appear for T2 (RLS).
+  const xlistB = await inj('GET', '/api/scm-planning/cross-elasticity', tPlannerB);
+  ok('A3 cross-elasticity is tenant-isolated (T2 sees 0 of HQ cross pairs)',
+    (xlistB.json.pairs?.length ?? 0) === 0, `t2=${xlistB.json.pairs?.length}`);
 
   // 7 — plans exist with actionable lines
   const plans = await inj('GET', '/api/scm-planning/plans', tPlanner);

@@ -152,6 +152,10 @@ export class ScmPlanningController {
   @Get('elasticity')
   listElasticity(@CurrentUser() u: JwtUser) { return this.svc.listElasticity(u); }
 
+  // docs/56 A3 — persisted category-scoped cross-elasticities (cannibalization/halo; read-only).
+  @Get('cross-elasticity')
+  listCrossElasticity(@CurrentUser() u: JwtUser) { return this.svc.listCrossElasticity(u); }
+
   // ── runs ──
   @Post('run')
   run(@Body(new ZodValidationPipe(RunBody)) b: z.infer<typeof RunBody>, @CurrentUser() u: JwtUser) {

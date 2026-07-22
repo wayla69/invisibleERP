@@ -19,6 +19,7 @@ import { ScmEngineClientService } from './scm-engine-client.service';
 import { ScmExtractService } from './scm-extract.service';
 import { ScmHierarchyService, type HierAxis, type HierDeclareDto } from './scm-hierarchy.service';
 import { ScmElasticityService } from './scm-elasticity.service';
+import { ScmCrossElasticityService } from './scm-cross-elasticity.service';
 import { ScmLiveService, type ScmLiveEvent } from './scm-live.service';
 import { ScmFallbackPlanner } from './scm-planner';
 import { ScmRunService } from './scm-run.service';
@@ -34,6 +35,7 @@ export class ScmPlanningService {
   readonly extract: ScmExtractService;
   readonly hierarchy: ScmHierarchyService;
   readonly elasticity: ScmElasticityService;
+  readonly cross: ScmCrossElasticityService;
   private readonly fallback: ScmFallbackPlanner;
   private readonly runner: ScmRunService;
 
@@ -49,11 +51,12 @@ export class ScmPlanningService {
     this.extract = new ScmExtractService(db);
     this.hierarchy = new ScmHierarchyService(db);
     this.elasticity = new ScmElasticityService(db);
+    this.cross = new ScmCrossElasticityService(db);
     this.fallback = new ScmFallbackPlanner(demandMl);
     this.runner = new ScmRunService(
       db, this.extract, engine, this.fallback, docNo, statusLog,
       (tenantId, type, extra) => this.emit(tenantId, type, extra),
-      this.elasticity,
+      this.elasticity, this.cross,
     );
   }
 
@@ -154,6 +157,11 @@ export class ScmPlanningService {
   // estimated server-side by the engine, upserted on each run).
   async listElasticity(user: JwtUser) {
     return { items: await this.elasticity.list(user.tenantId ?? null) };
+  }
+
+  // docs/56 A3 — the persisted category-scoped cross-elasticities (cannibalization/halo), read-only.
+  async listCrossElasticity(user: JwtUser) {
+    return { pairs: await this.cross.list(user.tenantId ?? null) };
   }
 
   suggestShelfLife(user: JwtUser) {
@@ -413,8 +421,16 @@ export class ScmPlanningService {
     // docs/56 A2 — an optional price what-if applies the persisted own-price elasticity per menu item:
     // demand × (price_multiplier)^ε. With no ε on file the response is 1 (unchanged) — the honest
     // default. Advisory only: scenario persists nothing and never becomes an order.
+    // docs/56 A3 — when the price moves, a menu item's demand responds through BOTH its own-price
+    // elasticity (A2) AND the CATEGORY-SCOPED cross-elasticity of every sibling whose price also moved
+    // in this scenario: total exponent = ε_i + Σ_{j∈scenario, same category} γ_{i,j}, so
+    // demand_i × (price_multiplier)^(that exponent). Cannibalization (γ>0) offsets the own-price lift
+    // from a price cut; halo (γ<0) reinforces it. No ε/γ on file ⇒ response 1 (unchanged).
     const priceMultiplier = dto.price_multiplier != null ? Math.min(Math.max(dto.price_multiplier, 0.1), 5) : 1;
-    const elasticities = priceMultiplier !== 1 ? await this.elasticity.list(tenantId) : [];
+    const priceWhatIf = priceMultiplier !== 1;
+    const elasticities = priceWhatIf ? await this.elasticity.list(tenantId) : [];
+    const crosses = priceWhatIf ? await this.cross.list(tenantId) : [];
+    const scenarioItems = new Set(dto.item_ids);
     const epsFor = (itemId: string): number | null => {
       const forItem = elasticities.filter((e) => e.itemId === itemId);
       if (!forItem.length) return null;
@@ -424,7 +440,12 @@ export class ScmPlanningService {
       }
       return forItem.find((e) => e.branchId == null)?.elasticity ?? forItem[0]!.elasticity;
     };
-    const priceAttribution: { item_id: string; elasticity: number | null; demand_response: number }[] = [];
+    const crossSumFor = (itemId: string): number =>
+      crosses.filter((c) => c.itemA === itemId && scenarioItems.has(c.itemB)).reduce((a, c) => a + c.gamma, 0);
+    const clamp5 = (v: number) => Math.min(Math.max(v, 0.1), 5);
+    const priceAttribution: {
+      item_id: string; elasticity: number | null; cross_elasticity_sum: number; demand_response: number;
+    }[] = [];
 
     const scenarioData: ExtractedTenantData = {
       ...data,
@@ -434,9 +455,15 @@ export class ScmPlanningService {
         service_level: dto.service_level ?? data.settings.service_level,
       },
       series: data.series.map((s) => {
-        const eps = priceMultiplier !== 1 ? epsFor(s.itemId) : null;
-        const priceResp = this.elasticity.demandResponse(eps, priceMultiplier);
-        if (priceMultiplier !== 1) priceAttribution.push({ item_id: s.itemId, elasticity: eps, demand_response: Number(priceResp.toFixed(4)) });
+        if (!priceWhatIf) return { ...s, values: s.values.map((v) => v * multiplier) };
+        const eps = epsFor(s.itemId);
+        const crossSum = crossSumFor(s.itemId);
+        const exponent = (eps ?? 0) + crossSum;
+        const priceResp = (eps == null && crossSum === 0) ? 1 : clamp5(Math.pow(priceMultiplier, exponent));
+        priceAttribution.push({
+          item_id: s.itemId, elasticity: eps,
+          cross_elasticity_sum: Number(crossSum.toFixed(4)), demand_response: Number(priceResp.toFixed(4)),
+        });
         return { ...s, values: s.values.map((v) => v * multiplier * priceResp) };
       }),
     };

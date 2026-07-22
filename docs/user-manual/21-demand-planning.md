@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.6**
+**Status: DRAFT v0.7**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -215,6 +215,13 @@ requisition is created — it is purely for thinking.
 > movement to learn from, its demand is left unchanged — the system will not invent a sensitivity it cannot
 > see. As with everything on this screen, a price what-if is advisory: nothing is saved and no order results.
 
+> **Neighbours react too.** When you change the price of items that sit in the same category, the system
+> also accounts for how they compete or complement each other — cut one dish's price and a similar dish
+> beside it may sell a little less (cannibalization), while some pairings lift together (halo). So a price
+> what-if that includes several items in a category shows each one's demand after both its own price effect
+> and the pull of its neighbours whose price you also moved. This only applies **within a category** and
+> only to items you actually included in the what-if; as ever, nothing is saved.
+
 ---
 
 ## 8. To act on a demand spike
@@ -269,6 +276,7 @@ design; ask your administrator.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.7 | 2026-07-22 | Added §7 note "Neighbours react too" — docs/56 Track A · A3: a price what-if across same-category items now also reflects category-scoped cannibalization/halo between the items whose price moved. Advisory only. |
 | 0.6 | 2026-07-22 | Added §7 note "Try a price change too" — docs/56 Track A · A2: the scenario what-if gains a price multiplier that applies each item's learned own-price elasticity (unchanged when none is on file). Advisory only. |
 | 0.5 | 2026-07-22 | Added §2 "To declare your supply network (optional)" — docs/57 Track B · B1: describe the supplier→DC→branch topology on `/network` (nodes + lanes as governed master data, with a live validity banner). Definition only; changes no order quantity (the two-echelon optimizer arrives in B2). |
 | 0.1 | 2026-07-21 | New chapter — docs/54 supply-chain planning: demand forecasting, order plans with maker-checker approval, purchase-requisition hand-off, scenario planning and demand-spike alerts. |
