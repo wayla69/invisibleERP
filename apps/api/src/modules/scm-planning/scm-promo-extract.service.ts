@@ -13,8 +13,10 @@ import { addDaysYmd } from '../demand-ml/forecast-algorithms';
 // stock extractor.
 //
 // Scope note: `promotions` is category-scoped (or all-items) and tenant-wide (no branch column), so a
-// promo regressor is the same across a menu sku's branch series. Price elasticity is A2; A1 carries
-// the promo_flag + discount depth, which is the headline demand lever.
+// promo regressor is the same across a menu sku's branch series. A1 carries the promo_flag + discount
+// depth (the headline demand lever); docs/56 A2 adds a GOVERNED effective PRICE per day (base price ×
+// (1 − discount)), so a promotion's price cut becomes the price variation the engine's log-log
+// elasticity estimator needs — still server-derived, never from the request body.
 export class ScmPromoExtractService {
   constructor(private readonly db: DrizzleDb) {}
 
@@ -46,16 +48,18 @@ export class ScmPromoExtractService {
     ));
     if (!promos.length) return out;
 
-    // sku → category (shared `items` master has no tenant_id; category is free-text).
-    const itemRows = await this.db.select({ itemId: items.itemId, category: items.category })
+    // sku → category + base price (shared `items` master has no tenant_id; category is free-text).
+    const itemRows = await this.db.select({ itemId: items.itemId, category: items.category, unitPrice: items.unitPrice })
       .from(items).where(inArray(items.itemId, skus));
     const catBySku = new Map(itemRows.map((r) => [r.itemId, (r.category ?? '').trim()]));
+    const priceBySku = new Map(itemRows.map((r) => [r.itemId, r.unitPrice != null ? Number(r.unitPrice) : 0]));
 
     const allDays = this.daysBetween(fromDay, toDay);
     const isAll = (c: string | null) => !c || c.trim() === '' || c.trim().toLowerCase() === 'all';
 
     for (const sku of skus) {
       const cat = catBySku.get(sku) ?? '';
+      const basePrice = priceBySku.get(sku) ?? 0;
       const rows: ScmSeriesRegressor[] = [];
       for (const day of allDays) {
         // The strongest matching promo for this (sku, day): all-items or same-category, in range.
@@ -68,7 +72,15 @@ export class ScmPromoExtractService {
           const pct = p.discountPct != null ? Math.min(1, Math.max(0, Number(p.discountPct) / 100)) : 0;
           best = best == null ? pct : Math.max(best, pct);
         }
-        if (best != null) rows.push({ ds: day, promo_flag: true, discount_pct: best });
+        // A2: emit the effective price on EVERY day (baseline off-promo, discounted on-promo) when the
+        // base price is known — that promo-driven variation is what identifies the elasticity. When no
+        // base price exists, keep the A1 sparse promo-only rows (no price signal to give).
+        if (basePrice > 0) {
+          const price = best != null ? basePrice * (1 - best) : basePrice;
+          rows.push({ ds: day, promo_flag: best != null, discount_pct: best ?? undefined, price: Number(price.toFixed(4)) });
+        } else if (best != null) {
+          rows.push({ ds: day, promo_flag: true, discount_pct: best });
+        }
       }
       if (rows.length) out.set(sku, rows);
     }

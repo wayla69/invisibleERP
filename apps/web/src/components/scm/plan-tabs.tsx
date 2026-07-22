@@ -434,6 +434,7 @@ export function ScenarioTab() {
   const [items, setItems] = useState('');
   const [branch, setBranch] = useState('');
   const [multiplier, setMultiplier] = useState(1.5);
+  const [priceMult, setPriceMult] = useState(1);
   const [horizon, setHorizon] = useState(7);
 
   const run = useMutation({
@@ -444,6 +445,8 @@ export function ScenarioTab() {
         item_ids: items.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 25),
         horizon_days: horizon,
         demand_multiplier: multiplier,
+        // docs/56 A2 — only send a price what-if when the operator moved it off 1 (neutral).
+        ...(priceMult !== 1 ? { price_multiplier: priceMult } : {}),
       }),
     }),
     onError: (e: Error) => notifyError(e.message),
@@ -469,6 +472,10 @@ export function ScenarioTab() {
           <div>
             <Label>{t('scm.f_multiplier')}</Label>
             <Input type="number" step="0.1" min={0.1} max={5} value={multiplier} onChange={(e) => setMultiplier(Number(e.target.value))} />
+          </div>
+          <div>
+            <Label>{t('scm.f_price_multiplier')}</Label>
+            <Input type="number" step="0.05" min={0.1} max={5} value={priceMult} onChange={(e) => setPriceMult(Number(e.target.value))} />
           </div>
           <div>
             <Label>{t('scm.f_horizon')}</Label>
