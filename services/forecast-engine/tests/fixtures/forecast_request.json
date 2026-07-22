@@ -353,5 +353,26 @@
   ],
   "promo_regressor": true,
   "price_regressor": true,
-  "scenario": false
+  "scenario": false,
+  "reconciliation": {
+    "method": "bottom_up",
+    "covariance": "wls_struct",
+    "reconcile_paths": true,
+    "nodes": [
+      {
+        "node_id": "TOTAL",
+        "parent_id": null
+      },
+      {
+        "node_id": "N0",
+        "parent_id": "TOTAL",
+        "series_id": "1:MENU-KAPRAO"
+      },
+      {
+        "node_id": "N1",
+        "parent_id": "TOTAL",
+        "series_id": "1:MENU-SPECIAL"
+      }
+    ]
+  }
 }
