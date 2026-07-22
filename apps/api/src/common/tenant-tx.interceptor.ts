@@ -84,7 +84,17 @@ export class TenantTxInterceptor implements NestInterceptor {
       : null;
     // Read-only inspection — a god can enter a company to look without any risk of writing. When set, we
     // reject mutating requests (safe support view). GETs (incl. their incidental pref writes) still work.
-    const actAsReadOnly = actAsTenant != null && req.headers?.['x-act-as-read-only'] === '1';
+    //
+    // Keyed on `isGod`, NOT on `actAsTenant != null`. A @PlatformAdmin route deliberately keeps its full
+    // bypass (so the switcher's own company directory still lists every company), which left actAsTenant
+    // null there — so the read-only rail silently did NOT apply to the platform surface, and a god who had
+    // entered "read-only company view" to inspect a customer could still fire POST /api/admin/tenants/:id/
+    // purge or item-maintenance/force-purge. Since the flag is a client header a god can simply omit, this
+    // is a SAFETY rail for the operator rather than a boundary against an attacker — but an operator firing
+    // a destructive fleet action while believing they are in look-only mode is exactly the accident it
+    // exists to prevent. Widening it is strictly more restrictive and the web only sends the header when a
+    // company is selected read-only, so no existing flow changes.
+    const actAsReadOnly = isGod && req.headers?.['x-act-as-read-only'] === '1';
     if (actAsReadOnly) {
       const method = String(req.method ?? '').toUpperCase();
       if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {

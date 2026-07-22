@@ -2,7 +2,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, gte, lte, desc, asc, ilike, sql, isNotNull, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { auditLog, dataChangeLog } from '../../database/schema';
-import { auditRowHash } from '../../common/audit.interceptor';
+import { auditRowHash } from '../../common/audit-writer';
 import { PdpaService } from '../pdpa/pdpa.service';
 
 export interface ChangeFilters { table?: string; row_pk?: string; actor?: string; from?: string; to?: string; tenantId?: number | null }
