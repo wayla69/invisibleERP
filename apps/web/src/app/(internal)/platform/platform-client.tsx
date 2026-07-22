@@ -760,7 +760,11 @@ export default function PlatformConsole({
     onError: (e: any) => notifyError(e.message),
   });
   const forcePurge = useMutation({
-    mutationFn: () => api<{ items_deleted: number; ref_rows_deleted: number }>('/api/admin/item-maintenance/force-purge', { method: 'POST', body: JSON.stringify({ confirm: 'FORCE-PURGE-ITEMS' }) }),
+    // `expected_ref_rows` echoes the blast radius this operator just saw. The server recomputes it and
+    // refuses (409 BLAST_RADIUS_MISMATCH) if it differs — so the preview is enforced, not merely advised,
+    // and a catalogue that changed since the preview cannot be destroyed on stale numbers. The button is
+    // only reachable once `forcePreview` is set, so the non-null assertion holds.
+    mutationFn: () => api<{ items_deleted: number; ref_rows_deleted: number }>('/api/admin/item-maintenance/force-purge', { method: 'POST', body: JSON.stringify({ confirm: 'FORCE-PURGE-ITEMS', expected_ref_rows: forcePreview?.total_ref_rows ?? -1 }) }),
     onSuccess: (r) => { notifySuccess(t('plt.mnt_force_done', { n: r.items_deleted, rows: r.ref_rows_deleted })); setForcePreview(null); setUnusedPreview(null); },
     onError: (e: any) => notifyError(e.message),
   });

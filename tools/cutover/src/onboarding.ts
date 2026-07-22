@@ -119,6 +119,53 @@ async function main() {
   const platLogin = await login('platco_admin', 'platco12345');
   ok('The newly platform-created Admin can log in', !!platLogin.json.token, `st=${platLogin.status}`);
 
+  // ── 3b1. ITGC-AC-16 — the platform-owner surface is audited on READS as well as writes. A @PlatformAdmin
+  //         route runs under a full cross-tenant RLS bypass, so a god GET (e.g. the whole-company export)
+  //         is a cross-tenant data access; auditing only mutations left 13 of the 38 god routes traceless.
+  //         Also asserts the cross-tenant scope marker actually lands (it was read before TenantTxInterceptor
+  //         set it, so `meta.rls_bypass` was silently never written), and that ordinary tenant reads stay
+  //         UNaudited (the chain must not drown in routine GETs). ──
+  // The audit write is fire-and-forget (deliberately — it must never break the request), so poll for it.
+  // `want` polls until a row matching the predicate appears — NOT merely until the action has any row.
+  // Several of these actions already have rows from earlier calls, so "≥1 row" would return instantly and
+  // read a stale set before the row under test had landed.
+  const auditFor = async (action: string, want?: (r: any) => boolean, tries = 60): Promise<any[]> => {
+    for (let i = 0; i < tries; i++) {
+      const r = (await pg.query('SELECT actor, status, meta FROM audit_log WHERE action = $1 ORDER BY id DESC', [action])).rows as any[];
+      if (want ? r.some(want) : r.length) return r;
+      await new Promise((res) => setTimeout(res, 25));
+    }
+    return (await pg.query('SELECT actor, status, meta FROM audit_log WHERE action = $1 ORDER BY id DESC', [action])).rows as any[];
+  };
+  const godRead = await inj('GET', '/api/admin/tenants', owner);
+  ok('God READ of the company directory succeeds (GET /api/admin/tenants)', godRead.status === 200, `${godRead.status}`);
+  const godReadAudit = await auditFor('GET /api/admin/tenants');
+  ok('AC-16: a platform-owner READ leaves an audit row (was untraced — 13 of 38 god routes are GETs)',
+    godReadAudit.length >= 1 && godReadAudit[0].actor === 'owner1' && godReadAudit[0].status === 'success',
+    JSON.stringify({ n: godReadAudit.length, actor: godReadAudit[0]?.actor, st: godReadAudit[0]?.status }));
+  ok('AC-16: the god read is marked platform_read + carries the cross-tenant scope marker rls_bypass',
+    godReadAudit[0]?.meta?.platform_read === true && godReadAudit[0]?.meta?.rls_bypass === true,
+    JSON.stringify(godReadAudit[0]?.meta ?? null));
+  const godWriteAudit = (await auditFor('POST /api/admin/tenants')).filter((r: any) => r.meta?.platform_denied !== true);
+  ok('AC-18: a god MUTATION now records rls_bypass too (the marker was read before TenantTx set it)',
+    godWriteAudit.some((r) => r.status === 'success' && r.meta?.rls_bypass === true) && godWriteAudit.every((r) => r.meta?.platform_read === undefined),
+    JSON.stringify(godWriteAudit.map((r) => ({ st: r.status, meta: r.meta }))));
+  // A REFUSED attempt at god authority must be recorded too. Nest runs guards BEFORE interceptors, so a
+  // PlatformAdminGuard rejection never reaches AuditInterceptor — denied fleet access used to leave no
+  // trace at all. `denied` above is the 403 PLATFORM_ADMIN_REQUIRED from before owner1 was a platform owner.
+  const denyAudit = await auditFor('POST /api/admin/tenants', (r) => r.meta?.platform_denied === true);
+  const deniedRow = denyAudit.find((r) => r.meta?.platform_denied === true);
+  ok('AC-16: a REFUSED platform-admin attempt is audited (guards run before interceptors — was untraced)',
+    !!deniedRow && deniedRow.status === 'fail' && deniedRow.meta?.error === 'PLATFORM_ADMIN_REQUIRED' && deniedRow.actor === 'owner1',
+    JSON.stringify({ actor: deniedRow?.actor, st: deniedRow?.status, meta: deniedRow?.meta }));
+  // The other two refusal paths (IP allowlist, MFA gate) are audited beside their own D3 checks in 3g-septies.
+
+  const tenantRead = await inj('GET', '/api/tenant/profile', platLogin.json.token);
+  await new Promise((res) => setTimeout(res, 150)); // give any (unwanted) audit write time to land
+  const tenantReadAudit = (await pg.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'GET /api/tenant/profile'")).rows as any[];
+  ok('AC-16: an ordinary tenant READ is still NOT audited (RLS-confined; would drown the chain)',
+    tenantRead.status === 200 && tenantReadAudit[0].n === 0, JSON.stringify({ st: tenantRead.status, rows: tenantReadAudit[0].n }));
+
   // ── 3b2. ITGC-AC-02: ONLY the platform owner may grant the Admin role. platco_admin is a per-tenant
   //         Admin (holds `users`) but is NOT a platform owner — it must not be able to mint another Admin,
   //         while the platform owner (owner1) can. A non-Admin role is unaffected. ──
@@ -697,12 +744,22 @@ async function main() {
   const ipAllowed = await inj('GET', '/api/admin/payment-claims', owner);
   ok('D3: the loopback entry admits the harness god again (200)', ipAllowed.status === 200, `${ipAllowed.status}`);
   delete process.env.PLATFORM_IP_ALLOWLIST;
+  const ipAudit = (await auditFor('GET /api/admin/payment-claims', (r: any) => r.meta?.error === 'PLATFORM_IP_BLOCKED'))
+    .find((r: any) => r.meta?.error === 'PLATFORM_IP_BLOCKED');
+  ok('AC-16: the off-network refusal is audited (platform_denied) — a guard rejection never reaches the interceptor',
+    !!ipAudit && ipAudit.status === 'fail' && ipAudit.meta?.platform_denied === true && ipAudit.actor === 'owner1',
+    JSON.stringify({ st: ipAudit?.status, meta: ipAudit?.meta }));
 
   process.env.PLATFORM_REQUIRE_MFA = 'true';
   const mfaBlocked = await inj('GET', '/api/admin/payment-claims', owner);
   ok('D3: PLATFORM_REQUIRE_MFA — a god WITHOUT TOTP enrolled is refused (403 PLATFORM_MFA_REQUIRED)',
     mfaBlocked.status === 403 && mfaBlocked.json.error?.code === 'PLATFORM_MFA_REQUIRED', `${mfaBlocked.status} ${mfaBlocked.json.error?.code}`);
   delete process.env.PLATFORM_REQUIRE_MFA;
+  const mfaAudit = (await auditFor('GET /api/admin/payment-claims', (r: any) => r.meta?.error === 'PLATFORM_MFA_REQUIRED'))
+    .find((r: any) => r.meta?.error === 'PLATFORM_MFA_REQUIRED');
+  ok('AC-16: the MFA refusal is audited (platform_denied + the refusing code)',
+    !!mfaAudit && mfaAudit.status === 'fail' && mfaAudit.meta?.platform_denied === true && mfaAudit.actor === 'owner1',
+    JSON.stringify({ st: mfaAudit?.status, meta: mfaAudit?.meta }));
   const mfaOffAgain = await inj('GET', '/api/admin/payment-claims', owner);
   ok('D3: with the knob off the god passes again (default behaviour unchanged)', mfaOffAgain.status === 200, `${mfaOffAgain.status}`);
 
@@ -988,16 +1045,32 @@ async function main() {
   ok('Force-preview shows the blast radius per company (HQ loses its GC-USED PO line)',
     fpPreview.status === 200 && fpPreview.json.items === 1 && !!fpHq && fpHq.ref_rows >= 1 && fpPreview.json.total_ref_rows >= 1,
     `items=${fpPreview.json.items} total_ref_rows=${fpPreview.json.total_ref_rows} by=${JSON.stringify((fpPreview.json.by_tenant ?? []).slice(0, 3))}`);
-  const fpBad = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'PURGE-UNUSED-ITEMS' });
+  const blast = Number(fpPreview.json.total_ref_rows);
+  // The kill switch is fail-closed: with ALLOW_ITEM_FORCE_PURGE unset the route refuses outright, however
+  // correct the confirm phrase — a leaked god session cannot wipe the shared catalogue on a normal deploy.
+  const fpOff = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'FORCE-PURGE-ITEMS', expected_ref_rows: blast });
+  ok('Force-purge is DISABLED unless ALLOW_ITEM_FORCE_PURGE is set (403 FORCE_PURGE_DISABLED)',
+    fpOff.status === 403 && fpOff.json.error?.code === 'FORCE_PURGE_DISABLED', `${fpOff.status} ${fpOff.json.error?.code}`);
+  process.env.ALLOW_ITEM_FORCE_PURGE = '1'; // open the maintenance window for the rest of this block
+  const fpBad = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'PURGE-UNUSED-ITEMS', expected_ref_rows: blast });
   ok('Force-purge rejects the normal confirm phrase (needs the stronger FORCE-PURGE-ITEMS) → 400', fpBad.status === 400 && fpBad.json.error?.code === 'CONFIRM_MISMATCH', `${fpBad.status} ${fpBad.json.error?.code}`);
+  // The blast radius must be echoed from force-preview: a destructive call that never previewed (or whose
+  // preview is stale because the catalogue moved) is refused rather than allowed to destroy a different set.
+  const fpNoPreview = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'FORCE-PURGE-ITEMS', expected_ref_rows: blast + 99 });
+  ok('Force-purge refuses a blast radius that does not match the live preview (409 BLAST_RADIUS_MISMATCH)',
+    fpNoPreview.status === 409 && fpNoPreview.json.error?.code === 'BLAST_RADIUS_MISMATCH' && fpNoPreview.json.error?.details?.expected === blast,
+    `${fpNoPreview.status} ${fpNoPreview.json.error?.code} ${JSON.stringify(fpNoPreview.json.error?.details ?? {})}`);
+  const stillThere = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length === 1;
+  ok('Force-purge: both refusals were non-destructive (the item is still there)', stillThere, `present=${stillThere}`);
   const poBefore = (await db.select().from(s.poItems).where(eq(s.poItems.itemId, 'GC-USED'))).length;
-  const fpPurge = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'FORCE-PURGE-ITEMS' });
+  const fpPurge = await inj('POST', '/api/admin/item-maintenance/force-purge', owner, { item_ids: ['GC-USED'], confirm: 'FORCE-PURGE-ITEMS', expected_ref_rows: blast });
   ok('Force-purge (god + strong confirm) deletes the referenced item AND its cross-tenant reference rows',
     fpPurge.status === 200 && fpPurge.json.status === 'force_purged' && fpPurge.json.items_deleted === 1 && fpPurge.json.ref_rows_deleted >= 1,
     `${fpPurge.status} ${JSON.stringify({ items: fpPurge.json.items_deleted, refs: fpPurge.json.ref_rows_deleted, blocked: fpPurge.json.blocked })}`);
   const usedGoneNow = (await db.select().from(s.items).where(eq(s.items.itemId, 'GC-USED'))).length === 0;
   const poGoneNow = (await db.select().from(s.poItems).where(eq(s.poItems.itemId, 'GC-USED'))).length === 0;
   ok('Force-purge removed the item and its PO line (nothing dangles)', usedGoneNow && poGoneNow, JSON.stringify({ usedGoneNow, poGoneNow, poBefore }));
+  delete process.env.ALLOW_ITEM_FORCE_PURGE; // close the maintenance window again
 
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 

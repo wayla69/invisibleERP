@@ -9,6 +9,10 @@ import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { logger } from '../../observability/logger';
 import { previewUnusedItems as previewUnusedItemsQuery, purgeUnusedItems as purgeUnusedItemsQuery, forcePurgePreview as forcePurgePreviewQuery, forcePurgeItems as forcePurgeItemsQuery } from './item-cleanup';
 
+// Kill switch for the forced catalogue purge (see forcePurgeItems). Same spelling set as the platform D3
+// knobs — anything that is not an explicit truthy value leaves the route DISABLED (fail-closed).
+const ITEM_FORCE_PURGE_TRUTHY = new Set(['1', 'true', 'on', 'yes']);
+
 // Item-posting SETUP master data (docs/33 PR3, GL-21). Maintains the account/tax profile that the
 // AccountDeterminationService resolves at posting time: item categories, tax codes, and the per-item override.
 // All writes validate any GL account against the canonical CoA (postable) up front — the same fail-closed
@@ -385,10 +389,38 @@ export class ItemSetupService {
     return forcePurgePreviewQuery(this.db, itemIds);
   }
 
-  async forcePurgeItems(user: JwtUser, itemIds: string[] | undefined, confirm: string) {
+  // Two fail-closed gates on top of the god check + confirm phrase, because this is the widest-blast-radius
+  // route in the system (omit `item_ids` and it targets the WHOLE catalogue, deleting referencing rows in
+  // every company). Maker-checker is not available here — the platform owner list is often a single human —
+  // so the controls are: an ops-controlled kill switch, and proof the operator actually saw the damage.
+  async forcePurgeItems(user: JwtUser, itemIds: string[] | undefined, confirm: string, expectedRefRows?: number) {
     this.assertItemGcAllowed(user);
+    // (1) Kill switch — inert unless an operator deliberately opens a maintenance window (ALLOW_* idiom,
+    // as with the tenancy boot-check opt-outs). A leaked god session cannot wipe the catalogue on a normal
+    // deploy; enabling it is a separate, logged, deploy-level act.
+    if (!ITEM_FORCE_PURGE_TRUTHY.has(String(process.env.ALLOW_ITEM_FORCE_PURGE ?? '').trim().toLowerCase())) {
+      throw new ForbiddenException({
+        code: 'FORCE_PURGE_DISABLED',
+        message: 'Forced item purge is disabled — set ALLOW_ITEM_FORCE_PURGE for a maintenance window',
+        messageTh: 'การลบสินค้าแบบบังคับถูกปิดไว้ — ต้องเปิด ALLOW_ITEM_FORCE_PURGE ก่อน',
+      });
+    }
     if ((confirm ?? '').trim() !== 'FORCE-PURGE-ITEMS') {
       throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type FORCE-PURGE-ITEMS to confirm the forced deletion', messageTh: 'พิมพ์ FORCE-PURGE-ITEMS เพื่อยืนยันการลบแบบบังคับ' });
+    }
+    // (2) The blast-radius preview was "mandatory" by documentation only — the API accepted a destructive
+    // call that had never previewed anything. Requiring the caller to echo the number of cross-tenant rows
+    // it will destroy makes force-preview genuinely load-bearing (that number cannot be known otherwise) AND
+    // closes the TOCTOU: if the catalogue changed since the preview, the counts diverge and we refuse rather
+    // than destroy a different, larger set than the operator approved.
+    const live = await forcePurgePreviewQuery(this.db, itemIds);
+    if (!Number.isInteger(expectedRefRows) || expectedRefRows !== live.total_ref_rows) {
+      throw new ConflictException({
+        code: 'BLAST_RADIUS_MISMATCH',
+        message: `Run force-preview first and echo its total_ref_rows: expected ${live.total_ref_rows}, got ${expectedRefRows ?? 'none'}`,
+        messageTh: `ต้องเรียก force-preview ก่อนแล้วส่งค่า total_ref_rows กลับมา (ค่าจริง ${live.total_ref_rows}, ได้รับ ${expectedRefRows ?? 'ไม่ได้ส่ง'})`,
+        details: { expected: live.total_ref_rows, received: expectedRefRows ?? null, items: live.items, by_tenant: live.by_tenant },
+      });
     }
     const result = await forcePurgeItemsQuery(this.db, itemIds);
     logger.warn({ event: 'items_force_purged', by: user.username, items: result.items_deleted, ref_rows: result.ref_rows_deleted, scoped: !!(itemIds && itemIds.length), blocked: result.blocked }, 'FORCE-purged shared-catalogue items incl. cross-tenant references (god)');
