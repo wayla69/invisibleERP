@@ -26,7 +26,13 @@
 
 ---
 
-## Phase 1 — Budget Optimizer (prescriptive MMM) — *recommended first*
+## Phase 1 — Budget Optimizer (prescriptive MMM) — **DELIVERED**
+
+> **Status: DELIVERED** — platform emits the response-curve contract; ERP stores/serves it, optimises,
+> and stages maker-checker budget plans; web "Budget Planner" tab; MKT-17. Contract mapping (Hill only,
+> raw-spend units): `slope = α`, `kappa = γ · ref_scale`, `beta = spend_beta` — algebraically exact
+> against the platform's ref-scaled Hill; `log` saturation omits the fields and the ERP falls back to a
+> derived curve. Platform: `mmm_model.py contributions()`; ERP: `mmm-optimizer.ts curvesFromMmm`.
 
 **Goal.** Turn "here is each channel's ROI" into "here is where your **next** baht should go." Answer
 *"given a ฿X budget, what allocation maximises predicted sales, and what's the marginal return of one more
@@ -167,3 +173,4 @@ earlier data (response curves, per-customer scores, campaign outcomes).
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-07-22 | Initial 4-phase depth roadmap (prescriptive · customer-intel · closed-loop · governance). |
+| v0.2 | 2026-07-22 | Phase 1 DELIVERED — platform emits Hill response-curve contract (`saturation.{beta,kappa,slope}`, raw-spend); ERP optimiser/simulate/staged budget plans + web Budget Planner tab + MKT-17. |

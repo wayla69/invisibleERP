@@ -81,6 +81,26 @@ def test_mmm_summary_is_json_ready():
     assert z.loc[0, "roi"] is None
 
 
+def test_hill_saturation_emits_erp_optimizer_contract():
+    """Hill runs push raw-spend {beta, kappa, slope} for the ERP Budget Optimizer (docs/60)."""
+    df = _synthetic_mmm_frame(60)
+    model = MarketingMixModel(
+        [ChannelSpec("A", "a_spend"), ChannelSpec("B", "b_spend")], "revenue",
+        saturation="hill", hill_alpha=1.5, hill_gamma=0.5,
+    ).fit(df)
+    for ch in model.summary_dict()["channels"]:
+        sat = ch["saturation"]
+        assert sat["type"] == "hill"
+        assert set(sat) >= {"beta", "kappa", "slope"}
+        assert sat["slope"] == round(model.hill_alpha, 4)                 # slope = Hill exponent α
+        assert sat["kappa"] == round(model.hill_gamma * sat["ref_scale"], 2)  # kappa = γ · ref_scale (raw spend)
+        assert sat["kappa"] > 0 and sat["slope"] > 0
+    # log saturation has no matching raw-spend Hill form → the ERP fields are omitted (ERP falls back).
+    log_ch = MarketingMixModel([ChannelSpec("A", "a_spend")], "revenue", saturation="log").fit(df).summary_dict()["channels"][0]
+    assert log_ch["saturation"]["type"] == "log"
+    assert "kappa" not in log_ch["saturation"] and "slope" not in log_ch["saturation"]
+
+
 def test_mmm_simulate_scales_with_spend():
     df = _synthetic_mmm_frame(80)
     model = MarketingMixModel([ChannelSpec("A", "a_spend"), ChannelSpec("B", "b_spend")], "revenue").fit(df)
