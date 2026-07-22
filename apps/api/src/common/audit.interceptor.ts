@@ -13,7 +13,7 @@ import { Observable, tap } from 'rxjs';
 import type { FastifyRequest } from 'fastify';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { auditAction, auditClientIp, auditRequestId, writeAuditRow } from './audit-writer';
-import { PLATFORM_ADMIN_KEY, type JwtUser } from './decorators';
+import { AUDIT_READ_KEY, PLATFORM_ADMIN_KEY, type JwtUser } from './decorators';
 
 const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -25,8 +25,11 @@ const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 // `GET /api/admin/tenants/:id/export` alone streams every row of every tenant-scoped table for any company.
 // Leaving those unlogged would let the platform's strongest credential read the entire fleet with no trace —
 // so the god surface is audited on EVERY method (ITGC-AC-16 / ITGC-AC-18; PDPA accountability).
-export function auditRequired(method: string, isPlatformRoute: boolean): boolean {
-  return MUTATING.has((method ?? '').toUpperCase()) || isPlatformRoute;
+// A third case joins them: a READ explicitly marked @AuditRead — a bulk export hands data OUT of the system
+// (every customer row as a file; the audit trail itself as CSV), so the act of taking it is evidence in its
+// own right. Ordinary reads stay unlogged: they are RLS-confined and would drown the chain.
+export function auditRequired(method: string, isPlatformRoute: boolean, isAuditedRead = false): boolean {
+  return MUTATING.has((method ?? '').toUpperCase()) || isPlatformRoute || isAuditedRead;
 }
 
 @Injectable()
@@ -50,7 +53,8 @@ export class AuditInterceptor implements NestInterceptor {
     }>();
     const method = (req.method ?? '').toUpperCase();
     const isPlatformRoute = this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]) === true;
-    if (!auditRequired(method, isPlatformRoute)) return next.handle();
+    const auditReadReason = this.reflector.getAllAndOverride<string>(AUDIT_READ_KEY, [ctx.getHandler(), ctx.getClass()]);
+    if (!auditRequired(method, isPlatformRoute, !!auditReadReason)) return next.handle();
 
     const rid = auditRequestId(req);
     const action = auditAction(req);
@@ -78,7 +82,9 @@ export class AuditInterceptor implements NestInterceptor {
     };
     // A god READ is only recorded because the route is @PlatformAdmin — mark it so the trail separates
     // "the platform owner looked at company X" from an ordinary mutation.
-    const platformRead = !MUTATING.has(method) ? { platform_read: true } : undefined;
+    const platformRead = isPlatformRoute && !MUTATING.has(method) ? { platform_read: true } : undefined;
+    // A marked bulk export records WHAT left the system, not merely that a GET happened.
+    const auditRead = auditReadReason && !MUTATING.has(method) ? { audit_read: auditReadReason } : undefined;
 
     // Service-attached audit metadata (appendAuditMeta) is read at tap-time — after the handler ran —
     // so a deep service's evidence (e.g. an SoD-override reason) lands in the same hash-chained row.
@@ -86,13 +92,13 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: () => {
-          const meta = { ...(xtenant() ?? {}), ...(platformRead ?? {}), ...(svcMeta() ?? {}) };
+          const meta = { ...(xtenant() ?? {}), ...(platformRead ?? {}), ...(auditRead ?? {}), ...(svcMeta() ?? {}) };
           void writeAuditRow(this.db, { action, actor, tenantId, ip, requestId: rid, status: 'success', meta: Object.keys(meta).length ? meta : undefined });
         },
         error: (err) =>
           void writeAuditRow(this.db, {
             action, actor, tenantId, ip, requestId: rid, status: 'fail',
-            meta: { error: err?.message ?? String(err), ...(xtenant() ?? {}), ...(platformRead ?? {}), ...(svcMeta() ?? {}) },
+            meta: { error: err?.message ?? String(err), ...(xtenant() ?? {}), ...(platformRead ?? {}), ...(auditRead ?? {}), ...(svcMeta() ?? {}) },
           }),
       }),
     );

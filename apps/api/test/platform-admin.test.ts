@@ -45,6 +45,13 @@ describe('platform-surface audit coverage (ITGC-AC-16)', () => {
   it('audits a platform-owner mutation (unchanged)', () => {
     expect(auditRequired('POST', true)).toBe(true);
   });
+  it('audits a marked bulk-export READ (@AuditRead) on an ordinary tenant route', () => {
+    expect(auditRequired('GET', false, true)).toBe(true);
+    expect(auditRequired('HEAD', false, true)).toBe(true);
+  });
+  it('leaves an unmarked read on that same controller unaudited (only egress is)', () => {
+    expect(auditRequired('GET', false, false)).toBe(false);
+  });
   it('is case- and null-safe on the method', () => {
     expect(auditRequired('post', false)).toBe(true);
     expect(auditRequired('get', true)).toBe(true);

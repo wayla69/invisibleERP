@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { SmeReviewService, type RegistryFilters } from './sme-review.service';
 
@@ -43,6 +43,7 @@ export class SmeReviewController {
   }
 
   // Registry CSV export (auditor download).
+  @AuditRead('sme_self_approval_registry_csv')
   @Get('registry/export') @Permissions('sme_review', 'exec', 'users')
   async registryExport(@Query() q: Record<string, string | undefined>, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const csv = await this.svc.registryCsv(u, registryFilters(q));

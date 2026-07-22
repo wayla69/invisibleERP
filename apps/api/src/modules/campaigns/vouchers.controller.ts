@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { VouchersService } from './vouchers.service';
@@ -50,6 +50,7 @@ export class VouchersController {
   @Get('campaigns/:id/codes') @Permissions('promos', 'pricelist', 'marketing', 'exec')
   codes(@Param('id') id: string, @CurrentUser() u: JwtUser, @Query('state') state?: string, @Query('limit') limit?: string) { return this.vouchers.listCodes(u, +id, { state, limit: limit ? +limit : undefined }); }
 
+  @AuditRead('voucher_codes_csv')
   @Get('campaigns/:id/codes.csv') @Permissions('promos', 'pricelist', 'marketing', 'exec')
   async codesCsv(@Param('id') id: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
     const csv = await this.vouchers.exportCodesCsv(u, +id);

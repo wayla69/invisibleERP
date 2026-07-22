@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Query, Body, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { MasterDataService } from './masterdata.service';
@@ -41,6 +41,7 @@ export class MasterDataController {
   @Post('import-approvals/:reqNo/reject') @Permissions('exec', 'approvals')
   rejectBatch(@Param('reqNo') reqNo: string, @Body(new ZodValidationPipe(RejectBody)) b: z.infer<typeof RejectBody>, @CurrentUser() u: JwtUser) { return this.svc.rejectBatch(reqNo, u, b.reason); }
 
+  @AuditRead('masterdata_export')
   @Get(':entity/export')
   async export(@Param('entity') entity: string, @Query('format') format: string | undefined, @Res() reply: FastifyReply) {
     if (format === 'csv') {
