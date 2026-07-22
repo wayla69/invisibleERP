@@ -4,13 +4,26 @@ import { from, firstValueFrom, finalize } from 'rxjs';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, globalDbALS, type DrizzleDb } from '../database/database.module';
 import { tenantALS } from './tenant-context';
-import { NO_TX_KEY, isPlatformAdmin } from './decorators';
+import { AUDIT_READ_KEY, NO_TX_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin } from './decorators';
+import { auditRequired } from './audit.interceptor';
 import { txStart, txEnd } from '../observability/runtime-metrics';
 import { logger as pino } from '../observability/logger';
 
 // A request whose tenant DB transaction is held longer than this is logged as a slow path (operational
 // visibility — a p95 regression or a missing index surfaces here without an external APM). Env-tunable.
 const SLOW_TX_MS = Number(process.env.SLOW_TX_MS ?? 1000);
+
+// ITGC-AC-16 completeness (migration 0464). AuditInterceptor writes the trail OUTSIDE the business
+// transaction so a logging failure can never roll back a posted journal — the right trade-off, but it means
+// a dropped row is invisible: `audit_log.seq` comes from the last SUCCESSFULLY written row, so an omission
+// leaves no gap to find. The counter below is the missing half: bumped INSIDE the business transaction, it
+// is durable exactly when the mutation committed, so `written >= expected` becomes a checkable invariant and
+// a shortfall is provable loss (reconciled by GET /api/admin/audit/verify).
+//
+// Sharded because one row per tenant would hold a row lock for the whole business transaction and serialise
+// that tenant's concurrent writes. The shard is picked per request; reconciliation sums the shards.
+const AUDIT_EXPECT_SHARDS = 16;
+let auditShardCursor = 0;
 
 // Wraps each (non-SSE) request in a tenant-scoped transaction:
 //   SET LOCAL ROLE app_user  +  set_config('app.tenant_id'|'app.bypass_rls')
@@ -124,6 +137,14 @@ export class TenantTxInterceptor implements NestInterceptor {
     req.__rlsOrgScope = orgScope;
     req.__actAsTenant = actAsTenant; // audit: which company a god narrowed its view to (null = global)
 
+    // Will AuditInterceptor write a row for this request? Same predicate, same metadata keys — read here so
+    // the expectation is counted for exactly the set of requests the trail is supposed to contain.
+    const auditOwed = auditRequired(
+      String(req?.method ?? ''),
+      this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]) === true,
+      !!this.reflector.getAllAndOverride<string>(AUDIT_READ_KEY, [ctx.getHandler(), ctx.getClass()]),
+    );
+
     // Bracket the request's DB transaction for ops metrics + slow-path logging (operational visibility).
     const started = Date.now();
     txStart();
@@ -153,6 +174,22 @@ export class TenantTxInterceptor implements NestInterceptor {
           set_config('app.tenant_id', ${effectiveTenantId != null ? String(effectiveTenantId) : ''}, true),
           set_config('app.org_id', ${orgScope != null ? String(orgScope) : ''}, true),
           set_config('app.actor', ${user?.username ?? ''}, true)`);
+        // Record that this request OWES an audit row — atomically with the business change it describes.
+        // Best-effort in the same sense as the trail itself: if the counter cannot be bumped we do NOT fail
+        // the business request (that would make an integrity ledger an availability risk); the reconciliation
+        // then simply under-counts, which is the SAFE direction — it can only hide a loss, never invent one.
+        if (auditOwed) {
+          try {
+            const shard = (auditShardCursor = (auditShardCursor + 1) % AUDIT_EXPECT_SHARDS);
+            // Keyed on the tenant the AUDIT ROW will carry — AuditInterceptor snapshots req.user.tenantId
+            // before this interceptor repoints it for act-as, so use the pre-repoint value, not the
+            // effective one, or a god acting-as would bump a different tenant than it credits.
+            await tx.execute(sql`insert into audit_expectations (tenant_id, shard, expected) values (${tenantId ?? 0}, ${shard}, 1)
+              on conflict (tenant_id, shard) do update set expected = audit_expectations.expected + 1, updated_at = now()`);
+          } catch (e) {
+            pino.warn({ err: (e as Error)?.message }, 'audit expectation bump failed — reconciliation will under-count');
+          }
+        }
         // NB: we intentionally do NOT force the tx READ ONLY for GETs — several GET handlers perform
         // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects
         // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant

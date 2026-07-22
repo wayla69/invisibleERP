@@ -690,6 +690,53 @@ async function main() {
   const v2 = await inj('GET', '/api/admin/audit/verify', admin);
   ok('ITGC-AC-16: a past row altered behind the trigger is DETECTED → ok=false, hash mismatch', v2.json?.ok === false && /hash mismatch/.test(v2.json?.reason ?? ''), JSON.stringify({ ok: v2.json?.ok, at: v2.json?.broken_at, reason: v2.json?.reason }));
 
+  // ── AC-16 COMPLETENESS half (migration 0464) — the chain proves nothing was ALTERED; it cannot prove
+  //    nothing was OMITTED (seq comes from the last WRITTEN row, so a dropped write leaves no gap). The
+  //    expectation ledger, bumped inside each business transaction, makes `written >= expected` checkable. ──
+  // v2 above deliberately broke the chain; restore the tampered row so the completeness assertions read a
+  // clean walk rather than inheriting the injected hash mismatch.
+  await pg.exec(`ALTER TABLE audit_log DISABLE TRIGGER USER`);
+  await pg.query(`UPDATE audit_log SET actor='admin' WHERE actor='tamper'`);
+  await pg.exec(`ALTER TABLE audit_log ENABLE TRIGGER USER`);
+  const vc = await inj('GET', '/api/admin/audit/verify', admin);
+  const expRows = (await pg.query(`SELECT coalesce(sum(expected),0)::int n FROM audit_expectations`)).rows as any[];
+  ok('ITGC-AC-16: the expectation ledger is populated by ordinary mutations (bumped inside the business tx)',
+    Number(expRows[0].n) > 0, `expected_total=${expRows[0].n}`);
+  ok('ITGC-AC-16: completeness reconciles — every committed mutation is accounted for (written >= expected)',
+    vc.json?.ok === true && vc.json?.completeness?.available === true && vc.json?.completeness?.ok === true && (vc.json?.completeness?.shortfalls ?? []).length === 0,
+    JSON.stringify({ ok: vc.json?.ok, c: vc.json?.completeness?.ok, short: vc.json?.completeness?.shortfalls }));
+  // Simulate a LOST audit row: inflate the expectation for one tenant beyond what was written. This is the
+  // failure the hash chain is structurally blind to — a row that was never written leaves no gap to find.
+  const someTenant = ((await pg.query(`SELECT tenant_id FROM audit_expectations ORDER BY expected DESC LIMIT 1`)).rows as any[])[0];
+  const LOST = 100_000; // must exceed the legitimate written-over-expected slack, else no shortfall appears
+  await pg.query(`UPDATE audit_expectations SET expected = expected + ${LOST} WHERE tenant_id = ${someTenant.tenant_id} AND shard = (SELECT shard FROM audit_expectations WHERE tenant_id = ${someTenant.tenant_id} LIMIT 1)`);
+  const vLost = await inj('GET', '/api/admin/audit/verify', admin);
+  const short = (vLost.json?.completeness?.shortfalls ?? [])[0];
+  ok('ITGC-AC-16: a DROPPED audit row is now DETECTED (shortfall reported) — the gap the chain cannot see',
+    vLost.json?.completeness?.ok === false && vLost.json?.ok === false && !!short && short.missing >= 1,
+    JSON.stringify({ c: vLost.json?.completeness?.ok, short }));
+  // The chain walk itself is still intact — the failure is reported as a COMPLETENESS shortfall, not
+  // misattributed to tampering (an auditor must be able to tell "a row was lost" from "a row was edited").
+  ok('ITGC-AC-16: the loss is reported as a completeness shortfall, NOT as a hash/sequence break',
+    vLost.json?.rows_checked > 0 && !vLost.json?.reason,
+    JSON.stringify({ rows: vLost.json?.rows_checked, reason: vLost.json?.reason ?? null }));
+  await pg.query(`UPDATE audit_expectations SET expected = expected - ${LOST} WHERE tenant_id = ${someTenant.tenant_id} AND shard = (SELECT shard FROM audit_expectations WHERE tenant_id = ${someTenant.tenant_id} LIMIT 1)`);
+
+  // ── AC-16 data-EGRESS reads (@AuditRead) — a bulk export leaves the system, so taking one is itself
+  //    evidence. Ordinary reads stay unlogged; a marked export records WHAT left via meta.audit_read. ──
+  const egressBefore = Number(((await pg.query(`SELECT count(*)::int n FROM audit_log WHERE action LIKE 'GET %/audit/export%'`)).rows as any[])[0].n);
+  const auditCsv = await inj('GET', '/api/admin/audit/export', admin);
+  await new Promise((r) => setTimeout(r, 200));
+  const egressRow = ((await pg.query(`SELECT actor, status, meta FROM audit_log WHERE action LIKE 'GET %/audit/export%' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];
+  ok('ITGC-AC-16: exporting the audit trail itself is audited (@AuditRead → meta.audit_read)',
+    auditCsv.status === 200 && egressBefore === 0 && !!egressRow && egressRow.meta?.audit_read === 'audit_log_csv' && egressRow.actor === 'admin',
+    JSON.stringify({ st: auditCsv.status, meta: egressRow?.meta ?? null }));
+  const plainRead = await inj('GET', '/api/admin/audit?limit=5', admin);
+  await new Promise((r) => setTimeout(r, 150));
+  const plainRows = Number(((await pg.query(`SELECT count(*)::int n FROM audit_log WHERE action LIKE 'GET %/admin/audit?%'`)).rows as any[])[0].n);
+  ok('ITGC-AC-16: an ordinary (unmarked) read of the same viewer is still NOT audited — only egress is',
+    plainRead.status === 200 && plainRows === 0, JSON.stringify({ st: plainRead.status, rows: plainRows }));
+
   // ════════════════════ ITGC-AC-14 — field-level before/after change log (financial tables) ════════════════════
   // The DB triggers (0116) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
   // ap_transactions through the app (apclerk created the bill Unpaid; fincon's approval set it Paid), so the
