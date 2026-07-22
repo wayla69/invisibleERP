@@ -1,0 +1,73 @@
+# Ops utility (manual dispatch): prove the docs/54 SCM forecast-engine end-to-end IN PRODUCTION.
+#
+# Runs the EXACT signed round-trip that ScmEngineClientService makes — from INSIDE the invisibleERP
+# API container over `railway ssh`, so it uses the container's own SCM_ENGINE_URL
+# (http://forecast-engine.railway.internal:8000) + SCM_ENGINE_SECRET and traverses the real
+# private-network hop, the same path a live scm-run takes. No DB, no tenant data, no prod mutations —
+# pure engine compute (tools/ops/scm-engine-e2e-probe.mjs):
+#
+#   GET  /readyz       — unauth; the CBC/PuLP solver self-test + Prophet import must both be "ok"
+#   POST /v1/forecast  — HMAC-signed; a clean ~90-day series → a Prophet probabilistic forecast
+#   POST /v1/optimize  — HMAC-signed; a perishable order plan solved as MILP (shelf-life/MOQ/pack bind)
+#
+# Why in CI: dev sandboxes cannot reach Railway, and the engine has NO public domain (private-network
+# only) — the only place that can reach forecast-engine.railway.internal is another service in the
+# project's Railway network, i.e. the API container. Same RAILWAY_TOKEN binding as deploy.yml.
+# The probe is delivered as base64 over ssh, so it does not depend on the deployed image already
+# carrying the file. Idempotent, read-only against the engine.
+name: Ops — SCM engine end-to-end probe (docs/54)
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'API service to run the in-container probe from (must be wired to the engine)'
+        default: 'invisibleERP'
+        required: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    environment: production   # RAILWAY_TOKEN is an environment secret (same binding as deploy.yml)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Signed forecast + optimize round-trip from inside the API container
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SVC: ${{ inputs.service || 'invisibleERP' }}
+        run: |
+          set -uo pipefail
+          [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured on the production environment"; exit 1; }
+          rw() { npx -y @railway/cli "$@"; }
+
+          echo "railway CLI version:"; rw --version || true
+          echo "::group::railway ssh --help (for diagnostics)"; rw ssh --help || true; echo "::endgroup::"
+
+          # Deliver the probe as base64 (survives any image without the file) and run it in-container.
+          # A leading sentinel proves the ssh TRANSPORT connected, independent of the probe's own result.
+          B64=$(base64 -w0 tools/ops/scm-engine-e2e-probe.mjs)
+          REMOTE="echo __SSH_CONNECTED__; echo $B64 | base64 -d | node -"
+
+          CONNECTED=0
+          OUT=""
+          for form in quoted dash-shc bare-shc; do
+            echo "── attempting: railway ssh ($form) ──"
+            case "$form" in
+              quoted)   OUT=$(rw ssh --service "$SVC" "$REMOTE" 2>&1) ;;
+              dash-shc) OUT=$(rw ssh --service "$SVC" -- sh -c "$REMOTE" 2>&1) ;;
+              bare-shc) OUT=$(rw ssh --service "$SVC" sh -c "$REMOTE" 2>&1) ;;
+            esac
+            echo "$OUT"
+            if echo "$OUT" | grep -q "__SSH_CONNECTED__"; then CONNECTED=1; break; fi
+            echo "── form '$form' did not connect; trying next ──"
+          done
+
+          [ "$CONNECTED" = 1 ] || { echo "::error::railway ssh could not exec inside $SVC (all invocation forms failed — see help above)"; exit 1; }
+          if echo "$OUT" | grep -q "E2E: OK"; then
+            echo "✅ END-TO-END CONFIRMED — the engine served a signed Prophet forecast + MILP optimize over the private network from inside $SVC."
+          else
+            echo "::error::engine round-trip did NOT pass (no 'E2E: OK' marker). See the E2E lines above for the failing step."
+            exit 1
+          fi
