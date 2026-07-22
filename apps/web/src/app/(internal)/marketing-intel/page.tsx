@@ -6,7 +6,7 @@
 // page reads the ERP's OWN store (GET /api/marketing-intel/summary) — no cross-database join, and it keeps
 // working when the platform is offline. Gated to the marketing/exec duty. Plain client page (pastel
 // marketing dashboard), matching its marketing-analytics siblings (/mmm, /reputation, /marketing).
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   BarChart3, Wallet, TrendingUp, TrendingDown, Layers, Users, Sparkles, Megaphone, History,
@@ -18,6 +18,8 @@ import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { BudgetPlanner } from '@/components/marketing-intel/budget-planner';
 
 interface Summary {
   mmm: { payload: any; model_run_ref: string | null; pushed_at: string | null } | null;
@@ -58,6 +60,7 @@ const segHue = (name: string, i: number) => SEGMENT_HUE[name] ?? HUES[i % HUES.l
 
 export default function MarketingIntelPage() {
   const { t } = useLang();
+  const [tab, setTab] = useState<'overview' | 'planner'>('overview');
   const q = useQuery<Summary>({ queryKey: ['marketing-intel', 'summary'], queryFn: () => api('/api/marketing-intel/summary') });
   const histQ = useQuery<{ runs: any[] }>({ queryKey: ['marketing-intel', 'mmm-history'], queryFn: () => api('/api/marketing-intel/mmm-history') });
   const activate = useMutation({
@@ -107,6 +110,12 @@ export default function MarketingIntelPage() {
         </div>
       </div>
 
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'overview' | 'planner')}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="overview">{t('mi.tab_overview')}</TabsTrigger>
+          <TabsTrigger value="planner">{t('mi.tab_planner')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview">
       <StateView q={q}>
         {q.data && (!q.data.has_data ? (
           <div
@@ -308,6 +317,11 @@ export default function MarketingIntelPage() {
           </div>
         ))}
       </StateView>
+        </TabsContent>
+        <TabsContent value="planner">
+          <BudgetPlanner />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
