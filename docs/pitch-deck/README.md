@@ -5,7 +5,7 @@ interactive 16-slide investor presentation for Invisible ERP:
 
 1. Title — Next-Gen Enterprise ERP
 2. The Problem — legacy ERPs: bulky, slow, weak controls, brittle integrations
-3. The Solution — lean ~260k-LOC TypeScript architecture, QR-order → GL data flow
+3. The Solution — lean ~275k-LOC TypeScript architecture, QR-order → GL data flow
 4. Product Tour — one platform, every business cycle (POS → BI)
 5. Security & Compliance — SOX-ICFR, fail-closed RLS, 24 roles / 82 permissions / 26 SoD rules
 6. Omnichannel & Integrations — untrusted webhook boundary vs. trusted API tier

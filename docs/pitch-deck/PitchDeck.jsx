@@ -3,6 +3,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Boxes,
+  BrainCircuit,
   Building2,
   Check,
   ChevronLeft,
@@ -21,6 +22,7 @@ import {
   Landmark,
   Layers,
   Lock,
+  Megaphone,
   MessageSquare,
   Minus,
   Monitor,
@@ -209,7 +211,7 @@ function SolutionSlide() {
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="The Solution" title="A lean, high-performance architecture" />
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat value="~260k" label="Lines of code — total" tone="blue" />
+        <Stat value="~275k" label="Lines of code — total" tone="blue" />
         <Stat value="100%" label="TypeScript end-to-end" tone="emerald" />
         <Stat value="1" label="Source of truth — the ledger" tone="violet" />
       </div>
@@ -251,6 +253,10 @@ function ProductSlide() {
         <ModuleTile icon={ClipboardList} tone="sky" label="Projects & PPM" sub="WBS, EVM, subcontracts" />
         <ModuleTile icon={HeartHandshake} tone="rose" label="CRM & Loyalty" sub="members, points, campaigns" />
         <ModuleTile icon={TrendingUp} tone="emerald" label="BI & Analytics" sub="live KPIs, scheduled reports" />
+        <ModuleTile icon={BrainCircuit} tone="violet" label="AI Demand Planning" sub="ML forecasts → order plans → PR" />
+        <ModuleTile icon={Megaphone} tone="amber" label="Marketing Intelligence" sub="RFM, budget optimizer, closed-loop" />
+        <ModuleTile icon={Wallet} tone="blue" label="Thai Payment Rails" sub="PromptPay QR, slip verify & OCR" />
+        <ModuleTile icon={Users} tone="sky" label="HR & Payroll" sub="time, leave, payroll to GL" />
       </div>
       <p className="mt-7 text-center text-sm text-slate-600">
         Every module posts to the <span className="font-bold text-emerald-700">same audited ledger</span> —
@@ -275,8 +281,8 @@ function SecuritySlide() {
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat value="24" label="User roles" tone="blue" />
-        <Stat value="80" label="Granular permissions" tone="blue" />
-        <Stat value="23" label="SoD rules on GL posting" tone="emerald" />
+        <Stat value="82" label="Granular permissions" tone="blue" />
+        <Stat value="24" label="Segregation-of-duty rules" tone="emerald" />
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Card icon={Lock} tone="emerald" title="Row-Level Security multi-tenancy">
@@ -507,13 +513,13 @@ function WhyWeWinSlide() {
 function RoadmapSlide() {
   const items = [
     { icon: BadgeCheck, tone: "emerald", dot: "bg-emerald-400", title: "Delivered",
-      body: "Full ERP spine — POS to GL, WMS, MRP, projects, CRM, BI — with 187 documented controls and automated harnesses." },
+      body: "Full ERP spine — POS to GL, WMS, MRP, projects, CRM, BI — plus ML demand forecasting, marketing intelligence, and Thai payment rails, with 307 documented controls and automated harnesses." },
     { icon: FileCheck2, tone: "blue", dot: "bg-blue-400", title: "Now — IPO readiness",
       body: "External audit support, SOX-ICFR evidence packs, pentest remediation ratchets, ISO 27001 alignment." },
     { icon: Globe, tone: "amber", dot: "bg-amber-400", title: "Next — regional scale",
       body: "SEA localization (tax, language, payments), partner & franchise marketplace, deeper channel coverage." },
     { icon: Sparkles, tone: "violet", dot: "bg-violet-400", title: "Future — AI-native ops",
-      body: "Forecast-driven ordering, anomaly-detecting controls, and a conversational copilot over the audited ledger." },
+      body: "Self-tuning forecast models at fleet scale, anomaly-detecting controls, and multi-echelon autonomous replenishment — on the forecasting spine already shipped." },
   ];
   return (
     <div className="flex h-full flex-col justify-center">
@@ -573,7 +579,7 @@ function ProjectCostSlide() {
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat value="฿60M+" label="Replacement cost to date (est.)" tone="blue" />
         <Stat value="~12" label="Person-years of senior engineering" tone="violet" />
-        <Stat value="187" label="Documented controls shipped" tone="emerald" />
+        <Stat value="307" label="Documented controls shipped" tone="emerald" />
       </div>
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
         <div className="mb-3 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">
@@ -653,7 +659,7 @@ function ValuationSlide() {
       <SlideHeading kicker="Valuation Model" title="Triangulated, not hand-waved" tone="amber" />
       <div className="grid gap-4 md:grid-cols-3">
         <Card icon={Layers} tone="blue" title="Replacement-cost floor">
-          ฿60M+ to rebuild the platform — before the compliance moat: 187 controls, harnesses,
+          ฿60M+ to rebuild the platform — before the compliance moat: 307 controls, harnesses,
           and audit artifacts a copycat must also rebuild.
         </Card>
         <Card icon={Scale} tone="emerald" title="Comparable seed rounds">

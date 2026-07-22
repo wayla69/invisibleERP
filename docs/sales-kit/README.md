@@ -42,7 +42,7 @@ product-line split (2026-07-21)**: the POS line (per branch) and ERP line
 Professional / Franchise / Enterprise), with the à-la-carte add-on SKUs. All
 collateral is **industry-neutral** per the owner's positioning directive
 (multi-industry ERP + POS; F&B/retail/services as verticals) and states the
-verified control counts (24 roles / 80 permissions / 23 SoD rules). Re-check
+verified control counts (24 roles / 82 permissions / 24 SoD rules as of 2026-07-22; RCM at 307 controls). Re-check
 against the seed if it changes. ROI math (§12) remains an illustrative model. To regenerate the PDF after
 editing the HTML: print `sales-kit.html` to PDF with headless Chromium (A4).
 
