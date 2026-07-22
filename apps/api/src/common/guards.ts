@@ -11,6 +11,7 @@ import { type Role } from '@ierp/shared';
 import { requiresMfaEnrollment, enforcePrivilegedMfa } from './mfa-gate';
 import { AUTH_COOKIE, CSRF_COOKIE, readCookie, signedCsrf } from './cookies';
 import { scopesToPermissions } from './api-scopes';
+import { auditAction, auditClientIp, auditRequestId, writeAuditRow } from './audit-writer';
 
 // State-changing methods that require a CSRF double-submit check when authenticated via cookie.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -282,6 +283,32 @@ export class PlatformAdminGuard implements CanActivate {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
   ) {}
 
+  // Record a REFUSAL on the platform surface, then throw it. Nest runs guards BEFORE interceptors, so a
+  // guard rejection never reaches AuditInterceptor — which is why denied god access previously left no trace
+  // at all. On a fleet-wide surface an ATTEMPT is as much signal as a success: a non-owner (or a leaked API
+  // key, or an off-network/TOTP-less owner) probing /api/admin/* is exactly what a detective control should
+  // surface. Scoped deliberately to this guard: auditing every 401/403 app-wide would flood the per-tenant
+  // hash chain (each append takes a FOR UPDATE lock), whereas the god surface is low-volume by construction.
+  // Fire-and-forget, like every other audit write — logging must never change the response.
+  private deny(req: any, code: string, message: string, messageTh: string): never {
+    void writeAuditRow(this.db, {
+      action: auditAction(req),
+      actor: req.user?.username ?? null,
+      tenantId: req.user?.tenantId ?? null,
+      ip: auditClientIp(req),
+      requestId: auditRequestId(req),
+      status: 'fail',
+      // `platform_denied` is the queryable marker for "someone tried to use god authority and was refused";
+      // `api_key_prefix` names the machine principal when a key was the one attempting it (pentest P3).
+      meta: {
+        platform_denied: true,
+        error: code,
+        ...(req.user?.apiKeyPrefix ? { api_key_prefix: req.user.apiKeyPrefix } : {}),
+      },
+    });
+    throw new ForbiddenException({ code, message, messageTh });
+  }
+
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const needs = this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (!needs) return true;
@@ -292,12 +319,12 @@ export class PlatformAdminGuard implements CanActivate {
     // be an MFA-free "god" credential granting full fleet control if leaked (pentest P3). Only an interactive
     // god session (no apiKeyPrefix) may pass; the key's machine identity is carried on `apiKeyPrefix`.
     if (user?.apiKeyPrefix || !isPlatformAdmin(user?.username)) {
-      throw new ForbiddenException({ code: 'PLATFORM_ADMIN_REQUIRED', message: 'Platform-admin access required', messageTh: 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น' });
+      this.deny(req, 'PLATFORM_ADMIN_REQUIRED', 'Platform-admin access required', 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น');
     }
     // D3 — optional IP allowlist on the platform surface (403 from outside; unset = unrestricted).
     const allowlist = (process.env.PLATFORM_IP_ALLOWLIST ?? '').trim();
     if (allowlist && !ipv4InAllowlist(String(req.ip ?? ''), allowlist)) {
-      throw new ForbiddenException({ code: 'PLATFORM_IP_BLOCKED', message: 'Platform-admin access is not allowed from this network', messageTh: 'ไม่อนุญาตให้เข้าถึงส่วนผู้ดูแลแพลตฟอร์มจากเครือข่ายนี้' });
+      this.deny(req, 'PLATFORM_IP_BLOCKED', 'Platform-admin access is not allowed from this network', 'ไม่อนุญาตให้เข้าถึงส่วนผู้ดูแลแพลตฟอร์มจากเครือข่ายนี้');
     }
     // D3 — optional mandatory MFA for gods: read the live enrolment flag (never trust a stale token claim).
     // `users` is under FORCE RLS, so this pre-tenant identity read uses the same bypass-tx pattern as
@@ -315,7 +342,7 @@ export class PlatformAdminGuard implements CanActivate {
         enrolled = false;
       }
       if (!enrolled) {
-        throw new ForbiddenException({ code: 'PLATFORM_MFA_REQUIRED', message: 'Platform admins must enrol MFA before using the platform console', messageTh: 'ผู้ดูแลแพลตฟอร์มต้องเปิดใช้ MFA ก่อนใช้งานศูนย์ควบคุม' });
+        this.deny(req, 'PLATFORM_MFA_REQUIRED', 'Platform admins must enrol MFA before using the platform console', 'ผู้ดูแลแพลตฟอร์มต้องเปิดใช้ MFA ก่อนใช้งานศูนย์ควบคุม');
       }
     }
     req.__platformBypass = true; // honoured by TenantTxInterceptor to bypass RLS for tenant provisioning

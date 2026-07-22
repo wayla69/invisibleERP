@@ -60,6 +60,13 @@ jobs:
         # tools/ci/maker-checker-baseline.json "exempt" with a reason. A new sensitive route in a non-enforcing
         # module fails the build; add the check (common/control-profile.ts) or justify an exemption.
         run: node tools/ci/check-maker-checker.mjs
+      - name: platform-owner surface ratchet (cross-tenant privilege may not grow unreviewed)
+        # A @PlatformAdmin route runs under a FULL cross-tenant RLS bypass — one credential reads/writes
+        # EVERY company's data. That surface grew 26 → 38 unnoticed because nothing watched it. The reviewed
+        # inventory lives in tools/ci/platform-surface-baseline.json: a route missing from it fails, a stale
+        # entry fails, and @PlatformAdmin + @Public fails outright. Prefer a tenant-scoped @Permissions duty;
+        # if god authority is genuinely required, run --update and add a "reason" in the same PR.
+        run: node tools/ci/check-platform-surface.mjs
       # Hand the compiled output to the harness shards so they don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4
