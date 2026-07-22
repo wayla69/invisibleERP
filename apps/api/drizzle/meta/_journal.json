@@ -3074,6 +3074,13 @@
       "when": 2023820000404,
       "tag": "0465_audit_completeness",
       "breakpoints": true
+    },
+    {
+      "idx": 440,
+      "version": "7",
+      "when": 2023820000405,
+      "tag": "0466_scm_cross_elasticity",
+      "breakpoints": true
     }
   ]
 }

@@ -229,8 +229,28 @@ export const scmPriceElasticity = pgTable('scm_price_elasticity', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_price_elasticity_tenant').on(t.tenantId, t.itemId) }));
 
+// docs/56 Track A (A3) — CATEGORY-SCOPED cross-price elasticity (cannibalization / halo). γ is the
+// slope of item_a's log-demand on item_b's log-price, estimated only for sibling pairs sharing an
+// item_categories category (never the full cross-product), with the same identifiability floor as A2.
+// A credible γ means a promotion on item_b moves its sibling item_a's demand: γ>0 substitutes
+// (cannibalization), γ<0 complements (halo). Migration 0466 applies the canonical 0232-form RLS loop +
+// the leading (tenant_id, item_a) index.
+export const scmCrossElasticity = pgTable('scm_cross_elasticity', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemA: text('item_a').notNull(),              // the responding item (its demand moves)
+  itemB: text('item_b').notNull(),              // the driver item (its price changed)
+  category: text('category'),                    // the shared category that scopes the pair
+  gamma: numeric('gamma', { precision: 10, scale: 4 }).notNull(), // ∂log(demand_a)/∂log(price_b)
+  r2: numeric('r2', { precision: 6, scale: 4 }),
+  nObs: integer('n_obs').notNull().default(0),
+  estimatedAt: timestamp('estimated_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: index('idx_scm_cross_elasticity_tenant').on(t.tenantId, t.itemA) }));
+
 export type ScmSettingsRow = typeof scmSettings.$inferSelect;
 export type ScmPriceElasticityRow = typeof scmPriceElasticity.$inferSelect;
+export type ScmCrossElasticityRow = typeof scmCrossElasticity.$inferSelect;
 export type ScmItemPolicy = typeof scmItemPolicies.$inferSelect;
 export type ScmPlanRun = typeof scmPlanRuns.$inferSelect;
 export type ScmDemandForecast = typeof scmDemandForecasts.$inferSelect;
