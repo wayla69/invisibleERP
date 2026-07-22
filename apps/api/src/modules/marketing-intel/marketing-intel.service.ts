@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { miAnalyticsSnapshots, miBudgetPlans, customerProfiles, posMembers } from '../../database/schema';
@@ -17,8 +17,18 @@ export const MI_SNAPSHOT_KINDS = ['mmm', 'rfm', 'tows'] as const;
 export type MiSnapshotKind = (typeof MI_SNAPSHOT_KINDS)[number];
 
 // An rfm snapshot MAY carry per-customer assignments (customer_no ⇒ segment) so the ERP can act on them
-// (campaign targeting). Bounded so a runaway push can't balloon the request.
-const RfmMember = z.object({ customer_no: z.string().min(1).max(120), segment: z.string().min(1).max(80) });
+// (campaign targeting). Bounded so a runaway push can't balloon the request. docs/60 Phase 2 adds the
+// optional per-customer Customer-Intelligence scores (CLV / churn probability / next-best-action code) the
+// platform computes — landed on customer_profiles.mi_clv / mi_churn_risk / mi_nba (advisory, SEPARATE from
+// the ERP's own explainable scores). A Phase-1-style push (segment only) leaves existing scores untouched.
+const NBA_CODES = ['WINBACK', 'UPSELL', 'VIP_CARE', 'REACTIVATE', 'RETAIN', 'NURTURE', 'CROSS_SELL'] as const;
+const RfmMember = z.object({
+  customer_no: z.string().min(1).max(120),
+  segment: z.string().min(1).max(80),
+  clv: z.number().nonnegative().max(1e12).optional(),
+  churn_risk: z.number().min(0).max(1).optional(),
+  nba: z.string().min(1).max(40).optional(),
+});
 export const PushSnapshotsBody = z.object({
   snapshots: z.array(z.object({
     kind: z.enum(MI_SNAPSHOT_KINDS),
@@ -59,19 +69,28 @@ export class MarketingIntelService {
     const principal = user.apiKeyPrefix ?? user.username ?? 'apikey';
     const written: string[] = [];
     let membersApplied = 0;
+    let scoresApplied = 0;
     for (const s of body.snapshots) {
       await this.db.insert(miAnalyticsSnapshots)
         .values({ tenantId, kind: s.kind, payload: s.payload, modelRunRef: s.model_run_ref ?? null, source: 'mi-platform', pushedBy: principal });
-      if (s.kind === 'rfm' && s.members?.length) membersApplied += await this.applyRfmMembers(tenantId, s.members);
+      if (s.kind === 'rfm' && s.members?.length) {
+        const r = await this.applyRfmMembers(tenantId, s.members);
+        membersApplied += r.segments;
+        scoresApplied += r.scores;
+      }
       written.push(s.kind);
     }
-    return { pushed: written.length, kinds: written, members_applied: membersApplied };
+    return { pushed: written.length, kinds: written, members_applied: membersApplied, scores_applied: scoresApplied };
   }
 
   // Map the pushed customer_no (== pos_members.member_code) to member_id and stamp mi_rfm_segment on the
   // profile. Reset the tenant's assignments first so a customer dropped from a segment is cleared, then
-  // set the current membership one UPDATE per segment.
-  private async applyRfmMembers(tenantId: number, members: { customer_no: string; segment: string }[]): Promise<number> {
+  // set the current membership one UPDATE per segment. docs/60 Phase 2: also stamp the per-customer
+  // Customer-Intelligence scores when the push carries them (else leave existing scores untouched).
+  private async applyRfmMembers(
+    tenantId: number,
+    members: z.infer<typeof RfmMember>[],
+  ): Promise<{ segments: number; scores: number }> {
     const codes = [...new Set(members.map((m) => m.customer_no))];
     const rows = await this.db.select({ id: posMembers.id, code: posMembers.memberCode })
       .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.memberCode, codes)));
@@ -85,14 +104,40 @@ export class MarketingIntelService {
       if (id == null) continue;
       (idsBySegment.get(m.segment) ?? idsBySegment.set(m.segment, []).get(m.segment)!).push(id);
     }
-    let applied = 0;
+    let segments = 0;
     for (const [segment, ids] of idsBySegment) {
       if (!ids.length) continue;
       await this.db.update(customerProfiles).set({ miRfmSegment: segment })
         .where(and(eq(customerProfiles.tenantId, tenantId), inArray(customerProfiles.memberId, ids)));
-      applied += ids.length;
+      segments += ids.length;
     }
-    return applied;
+    const scores = await this.applyMemberScores(tenantId, members, idByCode);
+    return { segments, scores };
+  }
+
+  // Stamp the per-customer CLV / churn / NBA scores (docs/60 Phase 2). Only runs when the push carries at
+  // least one score field — a segment-only push leaves existing scores untouched. Scores differ per member,
+  // so a single set-based UPDATE ... FROM json_to_recordset applies them in one round-trip (bounded input).
+  private async applyMemberScores(
+    tenantId: number,
+    members: z.infer<typeof RfmMember>[],
+    idByCode: Map<string, number>,
+  ): Promise<number> {
+    if (!members.some((m) => m.clv != null || m.churn_risk != null || m.nba != null)) return 0;
+    const scored = members
+      .map((m) => ({ id: idByCode.get(m.customer_no), clv: m.clv ?? null, churn: m.churn_risk ?? null, nba: m.nba ?? null }))
+      .filter((s): s is { id: number; clv: number | null; churn: number | null; nba: string | null } => s.id != null);
+    // Reset first so a customer dropped from the scored set is cleared (mirrors the segment reset).
+    await this.db.update(customerProfiles).set({ miClv: null, miChurnRisk: null, miNba: null }).where(eq(customerProfiles.tenantId, tenantId));
+    if (!scored.length) return 0;
+    const json = JSON.stringify(scored);
+    await this.db.execute(sql`
+      UPDATE customer_profiles cp
+      SET mi_clv = v.clv, mi_churn_risk = v.churn, mi_nba = v.nba
+      FROM json_to_recordset(${json}::json) AS v(id bigint, clv numeric, churn numeric, nba text)
+      WHERE cp.tenant_id = ${tenantId} AND cp.member_id = v.id
+    `);
+    return scored.length;
   }
 
   // READ (internal, /marketing-intel page). RLS scopes to the caller's tenant; returns the latest snapshot
@@ -157,6 +202,56 @@ export class MarketingIntelService {
     const counts = new Map<string, number>();
     for (const r of rows) { if (r.segment) counts.set(r.segment as string, (counts.get(r.segment as string) ?? 0) + 1); }
     return { segments: [...counts.entries()].map(([segment, members]) => ({ segment, members })).sort((a, b) => b.members - a.members) };
+  }
+
+  // READ — Customer Intelligence drill-down (docs/60 Phase 2, control MKT-18). Given a pushed RFM segment,
+  // return its members with the platform's per-customer CLV / churn / next-best-action, plus a little ERP
+  // context (own churn/LTV, spend, recency) so each row IS the intelligence card. Scores are ADVISORY —
+  // any contact still goes through the consent-gated campaign draft (activateSegment), never auto-sent.
+  // pos_members is read in a SEPARATE query and stitched in JS (no cross-domain SQL join — arch rule 3).
+  async segmentDrilldown(user: JwtUser, opts: { segment: string; sort?: 'clv' | 'churn'; limit?: number }) {
+    const tenantId = user.tenantId;
+    const seg = (opts.segment ?? '').trim();
+    if (tenantId == null || !seg) return { segment: seg, sort: opts.sort ?? 'clv', count: 0, customers: [] };
+    const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+    const profiles = await this.db.select({
+      memberId: customerProfiles.memberId,
+      miClv: customerProfiles.miClv,
+      miChurnRisk: customerProfiles.miChurnRisk,
+      miNba: customerProfiles.miNba,
+      ownChurn: customerProfiles.churnRisk,
+      ownLtv: customerProfiles.predictedLtv,
+      totalSpend: customerProfiles.totalSpend,
+      lastOrderAt: customerProfiles.lastOrderAt,
+    }).from(customerProfiles)
+      .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.miRfmSegment, seg)));
+
+    const ids = profiles.map((p) => Number(p.memberId)).filter((n) => Number.isFinite(n));
+    const memberRows = ids.length
+      ? await this.db.select({ id: posMembers.id, code: posMembers.memberCode, name: posMembers.name })
+          .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids)))
+      : [];
+    const memberById = new Map(memberRows.map((r) => [Number(r.id), r]));
+
+    const customers = profiles.map((p) => {
+      const m = memberById.get(Number(p.memberId));
+      return {
+        customer_no: m?.code ?? null,
+        name: m?.name ?? null,
+        clv: p.miClv == null ? null : Number(p.miClv),
+        churn_risk: p.miChurnRisk == null ? null : Number(p.miChurnRisk),
+        nba: p.miNba ?? null,
+        own_churn_risk: p.ownChurn == null ? null : Number(p.ownChurn),
+        own_predicted_ltv: p.ownLtv == null ? null : Number(p.ownLtv),
+        total_spend: p.totalSpend == null ? null : Number(p.totalSpend),
+        last_order_at: p.lastOrderAt,
+      };
+    });
+    const sort = opts.sort === 'churn' ? 'churn' : 'clv';
+    customers.sort((a, b) => sort === 'churn'
+      ? (b.churn_risk ?? -1) - (a.churn_risk ?? -1)
+      : (b.clv ?? -1) - (a.clv ?? -1));
+    return { segment: seg, sort, count: customers.length, customers: customers.slice(0, limit) };
   }
 
   // ACTION LOOP — turn a pushed RFM segment into a DRAFT ERP campaign (audience=mi_segment). It reuses the

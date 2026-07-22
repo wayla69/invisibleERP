@@ -103,6 +103,12 @@ CREATE TABLE IF NOT EXISTS analytics.customer_rfm_segments (
     sentiment_multiplier NUMERIC(5,3),
     weighted_rfm_score   NUMERIC(8,3),
     segment              VARCHAR(40),
+    -- Customer Intelligence (docs/60 Phase 2) — per-customer forward-looking scores pushed to the ERP
+    -- (mi_clv / mi_churn_risk / mi_nba). Interpretable first cut; a BG/NBD + churn classifier is governed
+    -- under Phase 4. Nullable so a fresh run without sentiment still writes the RFM base.
+    predicted_clv        NUMERIC(14,2),   -- 12-month forward value proxy (฿)
+    churn_probability    NUMERIC(5,4),    -- [0,1]
+    next_best_action     VARCHAR(40),     -- WINBACK|UPSELL|VIP_CARE|REACTIVATE|RETAIN|NURTURE|CROSS_SELL
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

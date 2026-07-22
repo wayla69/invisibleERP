@@ -21,7 +21,7 @@ from shared import connection, ensure_schema, fetch_df, get_engine, write_df  # 
 from shared import ErpApiError, ErpClient  # noqa: E402
 
 from mmm_model import ChannelSpec, MarketingMixModel  # noqa: E402
-from rfm_model import rfm_from_facts, sentiment_weighted_rfm  # noqa: E402
+from rfm_model import rfm_from_facts, sentiment_weighted_rfm, customer_intelligence  # noqa: E402
 from tows_analyzer import TowsAnalyzer  # noqa: E402
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -99,6 +99,10 @@ def _run_rfm() -> Optional[pd.DataFrame]:
     base = rfm_from_facts(facts)
     result = sentiment_weighted_rfm(base, sentiment)
 
+    # docs/60 Phase 2 — attach forward-looking CLV / churn / next-best-action per customer.
+    intel = customer_intelligence(result)
+    result = result.merge(intel, on="customer_no", how="left")
+
     persist = result.drop(columns=["category"])  # category is derived; the table stores the segment label
     with get_engine().begin() as conn:
         conn.exec_driver_sql("TRUNCATE analytics.customer_rfm_segments")
@@ -153,11 +157,18 @@ def _push_to_erp() -> None:
     rfm = fetch_df("SELECT segment, COUNT(*) AS customers, SUM(monetary) AS monetary FROM analytics.customer_rfm_segments GROUP BY segment ORDER BY customers DESC")
     if not rfm.empty:
         # Per-customer assignments so the ERP can ACT on the segments (campaign targeting via mi_segment).
-        members = fetch_df("SELECT customer_no, segment FROM analytics.customer_rfm_segments WHERE customer_no IS NOT NULL")
+        # docs/60 Phase 2 also carries CLV / churn / next-best-action → the ERP mi_clv / mi_churn_risk / mi_nba.
+        members = fetch_df(
+            "SELECT customer_no, segment, predicted_clv AS clv, churn_probability AS churn_risk, "
+            "next_best_action AS nba FROM analytics.customer_rfm_segments WHERE customer_no IS NOT NULL"
+        )
+        # Drop null score fields so a segment-only run doesn't wipe the ERP's existing scores (its push
+        # contract leaves scores untouched when none are present).
+        member_records = [{k: v for k, v in rec.items() if v is not None} for rec in members.to_dict(orient="records")]
         snapshots.append({
             "kind": "rfm",
             "payload": {"segments": rfm.to_dict(orient="records")},
-            "members": members.to_dict(orient="records"),
+            "members": member_records,
         })
 
     tows = fetch_df("SELECT quadrant, factor, recommendation, priority FROM analytics.tows_matrix ORDER BY priority ASC, quadrant ASC")

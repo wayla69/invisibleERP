@@ -71,7 +71,13 @@ can't approve their own request. **Doc-sync:** PN-29 §budget-optimizer + user m
 
 ---
 
-## Phase 2 — Customer Intelligence (CLV / Churn / Next-Best-Action)
+## Phase 2 — Customer Intelligence (CLV / Churn / Next-Best-Action) — **DELIVERED**
+
+> **Status: DELIVERED** — platform pushes per-customer CLV / churn / next-best-action (interpretable
+> first cut in `rfm_model.customer_intelligence`); ERP lands them on SEPARATE `customer_profiles.mi_clv` /
+> `mi_churn_risk` / `mi_nba` (migration 0463, never clobbering the own churn/LTV; a segment-only push
+> leaves them intact); read-only drill-down `GET /api/marketing-intel/segment/:segment/customers`; web
+> Customer Intelligence tab; advisory (sole contact = the consent-gated campaign draft); control MKT-18.
 
 **Goal.** Deepen RFM from "which segment" to "what is this customer worth, how likely to churn, and what to
 do next."
@@ -174,3 +180,4 @@ earlier data (response curves, per-customer scores, campaign outcomes).
 |---|---|---|
 | v0.1 | 2026-07-22 | Initial 4-phase depth roadmap (prescriptive · customer-intel · closed-loop · governance). |
 | v0.2 | 2026-07-22 | Phase 1 DELIVERED — platform emits Hill response-curve contract (`saturation.{beta,kappa,slope}`, raw-spend); ERP optimiser/simulate/staged budget plans + web Budget Planner tab + MKT-17. |
+| v0.3 | 2026-07-22 | Phase 2 DELIVERED — platform pushes per-customer CLV / churn / next-best-action; ERP lands them on separate `customer_profiles.mi_*` (migration 0463) + read-only segment drill-down + web Customer Intelligence tab; advisory, consent-gated; MKT-18. |

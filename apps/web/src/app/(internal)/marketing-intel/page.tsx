@@ -20,6 +20,7 @@ import { StateView } from '@/components/state-view';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BudgetPlanner } from '@/components/marketing-intel/budget-planner';
+import { CustomerIntel } from '@/components/marketing-intel/customer-intel';
 
 interface Summary {
   mmm: { payload: any; model_run_ref: string | null; pushed_at: string | null } | null;
@@ -60,7 +61,7 @@ const segHue = (name: string, i: number) => SEGMENT_HUE[name] ?? HUES[i % HUES.l
 
 export default function MarketingIntelPage() {
   const { t } = useLang();
-  const [tab, setTab] = useState<'overview' | 'planner'>('overview');
+  const [tab, setTab] = useState<'overview' | 'planner' | 'customers'>('overview');
   const q = useQuery<Summary>({ queryKey: ['marketing-intel', 'summary'], queryFn: () => api('/api/marketing-intel/summary') });
   const histQ = useQuery<{ runs: any[] }>({ queryKey: ['marketing-intel', 'mmm-history'], queryFn: () => api('/api/marketing-intel/mmm-history') });
   const activate = useMutation({
@@ -110,10 +111,11 @@ export default function MarketingIntelPage() {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'overview' | 'planner')}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'overview' | 'planner' | 'customers')}>
         <TabsList className="mb-4">
           <TabsTrigger value="overview">{t('mi.tab_overview')}</TabsTrigger>
           <TabsTrigger value="planner">{t('mi.tab_planner')}</TabsTrigger>
+          <TabsTrigger value="customers">{t('mi.tab_customers')}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
       <StateView q={q}>
@@ -320,6 +322,9 @@ export default function MarketingIntelPage() {
         </TabsContent>
         <TabsContent value="planner">
           <BudgetPlanner />
+        </TabsContent>
+        <TabsContent value="customers">
+          <CustomerIntel />
         </TabsContent>
       </Tabs>
     </div>

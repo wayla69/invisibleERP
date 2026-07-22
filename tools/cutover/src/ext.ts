@@ -937,6 +937,26 @@ async function main() {
   const emptyActivate = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'Nonexistent Segment' });
   ok('Push-back: activating an empty segment → 400 EMPTY_SEGMENT (no members)', emptyActivate.status === 400 && emptyActivate.json.error?.code === 'EMPTY_SEGMENT', `${emptyActivate.status} ${emptyActivate.json.error?.code}`);
 
+  // ── Customer Intelligence (docs/60 Phase 2, MKT-18) — a push MAY carry per-customer CLV / churn / NBA
+  //    scores, landed on customer_profiles.mi_clv / mi_churn_risk / mi_nba (SEPARATE from the ERP's own
+  //    explainable churn_risk / predicted_ltv). Advisory: contact still goes through the consent-gated draft. ──
+  const ciPush = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs', clv: 8400.5, churn_risk: 0.72, nba: 'WINBACK' }] }] });
+  ok('CustIntel: an rfm push with per-customer scores stamps them (scores_applied ≥ 1)', ciPush.status === 200 && ciPush.json.scores_applied >= 1, `${ciPush.status} scores=${ciPush.json.scores_applied}`);
+  const ciProf = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('CustIntel: mi_clv / mi_churn_risk / mi_nba set WITHOUT clobbering the ERP own churn_risk/predicted_ltv', Number(ciProf?.miClv) === 8400.5 && Math.abs(Number(ciProf?.miChurnRisk) - 0.72) < 1e-6 && ciProf?.miNba === 'WINBACK' && ciProf?.churnRisk == null && ciProf?.predictedLtv == null, `mi_clv=${ciProf?.miClv} mi_churn=${ciProf?.miChurnRisk} mi_nba=${ciProf?.miNba} own_churn=${ciProf?.churnRisk ?? null}`);
+
+  const ciDrill = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers`, cf2admin);
+  ok('CustIntel: GET segment drill-down returns the member with CLV/churn/NBA (sort=clv default)', ciDrill.status === 200 && ciDrill.json.count >= 1 && ciDrill.json.sort === 'clv' && ciDrill.json.customers.some((c: any) => c.customer_no === 'M-CF2A' && c.clv === 8400.5 && Math.abs(c.churn_risk - 0.72) < 1e-6 && c.nba === 'WINBACK'), `${ciDrill.status} count=${ciDrill.json.count} ${JSON.stringify(ciDrill.json.customers?.[0] ?? {})}`);
+  const ciDrillChurn = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers?sort=churn`, cf2admin);
+  ok('CustIntel: drill-down accepts sort=churn (highest churn first)', ciDrillChurn.status === 200 && ciDrillChurn.json.sort === 'churn', `${ciDrillChurn.status} sort=${ciDrillChurn.json.sort}`);
+  const ciDrillHq = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers`, cf2admin);
+  ok('CustIntel: drill-down is tenant-scoped — no HQ member (M-HQA) leaks into cf2 results', !ciDrillHq.json.customers?.some((c: any) => c.customer_no === 'M-HQA'), `${(ciDrillHq.json.customers ?? []).map((c: any) => c.customer_no).join(',')}`);
+
+  // A Phase-1-style push (segment only, no scores) must LEAVE the existing scores untouched (back-compat).
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs' }] }] });
+  const ciProf2 = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('CustIntel: a segment-only push leaves the previously-pushed scores intact (back-compat)', Number(ciProf2?.miClv) === 8400.5 && ciProf2?.miNba === 'WINBACK', `mi_clv=${ciProf2?.miClv} mi_nba=${ciProf2?.miNba}`);
+
   // ── Budget Optimizer (docs/60 Phase 1, MKT-17) — prescriptive MMM: response curves + what-if + optimise,
   //    then a STAGED budget plan under maker-checker (advisory, never posts spend). MMM was pushed above so
   //    the curves derive a fallback from spend/roi (no saturation params pushed → derived=true). ──

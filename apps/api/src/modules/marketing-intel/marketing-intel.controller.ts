@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -36,6 +36,18 @@ export class MarketingIntelController {
   @Permissions('marketing', 'exec')
   segments(@CurrentUser() u: JwtUser) {
     return this.svc.segmentCounts(u);
+  }
+
+  // Customer Intelligence drill-down (docs/60 Phase 2, MKT-18) — the members of a pushed segment with the
+  // platform's per-customer CLV / churn / next-best-action. Read-only + advisory; gated marketing/exec.
+  @Get('segment/:segment/customers')
+  @Permissions('marketing', 'exec')
+  segmentCustomers(
+    @Param('segment') segment: string,
+    @Query('sort') sort: string | undefined,
+    @CurrentUser() u: JwtUser,
+  ) {
+    return this.svc.segmentDrilldown(u, { segment, sort: sort === 'churn' ? 'churn' : 'clv' });
   }
 
   // Turn a pushed RFM segment into a DRAFT campaign (audience=mi_segment) — the action loop. Gated to the

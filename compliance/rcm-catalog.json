@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 303,
+    "total": 304,
     "by_status": {
-      "Implemented": 300,
+      "Implemented": 301,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 26,
+      "CRM — Loyalty": 27,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2486,6 +2486,25 @@
       "tod": "Inspect the deterministic optimiser + its unit tests, the advisory Pending plan (never posts spend), the assertMakerChecker approver!=requester check, and the tenant_id filter/RLS on mi_budget_plans.",
       "toe": "Re-perform (ext harness, 9 MKT-17 checks): response-curves derive per-channel curves; optimize spends ~the whole budget with predicted sales>0 and simulate reproduces it identically; a staged plan is Pending; a DIFFERENT user approves it (Approved) but the requester's self-approval is rejected SOD_SELF_APPROVAL; a missing plan -> 404; every plan is tenant-scoped (cf2 only, none for HQ).",
       "evidence": "mi_budget_plans staged/approved plans (requester + approver); the deterministic optimiser + its unit tests; the maker-checker SoD test",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-18",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "Per-customer marketing scores pushed by the external platform (predicted CLV, churn probability, next-best-action) are treated as authoritative and drive an automatic customer contact / offer without human review or consent; or the pushed scores CLOBBER the ERP's own explainable churn/LTV figures; or one tenant's per-customer scores surface for another tenant.",
+      "assertion": "Accuracy/Authorization/Occurrence",
+      "description": "Customer Intelligence (docs/60 Phase 2, MKT-18): the external Marketing Intelligence platform computes per-customer CLV / churn probability / next-best-action and PUSHES them (scope analytics:write) into customer_profiles.mi_clv / mi_churn_risk / mi_nba — columns SEPARATE from the ERP's OWN explainable churn_risk / predicted_ltv (Growth Engine G3), so the two never clobber each other (exactly as mi_rfm_segment stays distinct from rfm_segment). The scores are ADVISORY: GET /api/marketing-intel/segment/:segment/customers is a READ-ONLY drill-down (marketing/exec), and the only contact path remains the consent-gated campaign DRAFT (POST /segments/activate → audience mi_segment, a human edits + sends). Nothing auto-sends. customer_profiles is tenant-scoped (canonical org-clause RLS + explicit tenant_id filter); the drill-down reads pos_members in a SEPARATE query stitched in-app (no cross-domain SQL join). A read/enrichment model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per push / per drill-down read",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-intel.service.ts (applyMemberScores stamps mi_clv/mi_churn_risk/mi_nba, gated on score presence so a segment-only push is untouched; segmentDrilldown read); marketing-intel.controller.ts GET segment/:segment/customers; schema/crm.ts customer_profiles.mi_clv/mi_churn_risk/mi_nba + migration 0463; the external marketing-intelligence-platform rfm_model.customer_intelligence (interpretable CLV/churn/NBA); cutover/ext.ts (MKT-18 ToE, 6 checks)",
+      "tod": "Inspect that the pushed scores land on SEPARATE mi_* columns (own churn/LTV untouched), the drill-down is read-only + tenant-scoped, and the only contact path is the consent-gated campaign draft.",
+      "toe": "Re-perform (ext harness, 6 MKT-18 checks): a push with per-customer scores stamps mi_clv/mi_churn_risk/mi_nba WITHOUT clobbering the ERP own columns; the drill-down returns the member's CLV/churn/NBA (sort clv/churn) and is tenant-scoped (no other tenant's member leaks); a segment-only push leaves existing scores intact.",
+      "evidence": "customer_profiles.mi_* scored rows; the read-only drill-down; the consent-gated campaign draft as the sole contact path",
       "status": "Implemented"
     },
     {

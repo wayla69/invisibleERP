@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.10** _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.11** _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -474,6 +474,31 @@ Once an MMM run has been pushed in, the Budget Planner answers the forward quest
 
 **Good to know:** the Budget Planner never posts to the general ledger — a plan is advice until a
 person acts on it in your normal budgeting/PR process. Each company sees only its own plans.
+
+---
+
+## 5d. Customer Intelligence — drill-down (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Customer Intelligence**. **Who:**
+`marketing` or `exec` (read-only).
+
+Once the platform has pushed the advanced RFM, each segment can be opened to see **who** is in it and
+**what to do** with each customer. For every member the platform estimates a **12-month value (CLV)**,
+a **churn risk** (how likely they are to stop buying), and a **next-best-action** (e.g. *ดึงกลับ /
+WINBACK*, *ขายเพิ่ม / UPSELL*, *ดูแลลูกค้า VIP / VIP_CARE*, *กระตุ้นให้กลับมา / REACTIVATE*).
+
+**To review a segment's customers:**
+
+1. Open **Customer Intelligence** and pick a **segment** (e.g. *At Risk VIPs*). The members appear as a
+   sortable list.
+2. Sort by **มูลค่า (CLV)** to see your most valuable customers first, or by **ความเสี่ยงเลิกใช้
+   (churn)** to see who is most likely to leave. Each row shows the recommended **next action**.
+3. To act, press **สร้างแคมเปญ (Create campaign)** — this opens a **draft** campaign aimed at that
+   segment, which you **edit and send** through the normal messaging screen.
+
+> These scores are **advice**, kept separate from the company's own churn/value figures — they never
+> overwrite them. Nothing is sent automatically: a customer is only contacted through a campaign a
+> person reviews and sends, and only if they have consented. Each company sees only its own customers.
 
 ---
 

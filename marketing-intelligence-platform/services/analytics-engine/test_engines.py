@@ -11,7 +11,7 @@ from mmm_model import (
     hill_saturation,
     log_saturation,
 )
-from rfm_model import compute_rfm, rfm_from_facts, sentiment_weighted_rfm
+from rfm_model import compute_rfm, rfm_from_facts, sentiment_weighted_rfm, customer_intelligence
 
 
 # ── transformations ────────────────────────────────────────────────────────────────────────────────
@@ -160,3 +160,32 @@ def test_rfm_handles_low_cardinality_without_crashing():
     base = pd.DataFrame({"customer_no": ["A", "B"], "recency_days": [1, 100], "frequency": [10, 1], "monetary": [500, 10]})
     out = sentiment_weighted_rfm(base, pd.DataFrame(columns=["customer_no", "sentiment_score"]))
     assert len(out) == 2 and "segment" in out.columns
+
+
+# ── Customer Intelligence (docs/60 Phase 2) ──────────────────────────────────────────────────────────
+def test_customer_intelligence_scores_and_actions():
+    base = pd.DataFrame({
+        "customer_no": [f"C{i}" for i in range(10)],
+        "recency_days": [1, 3, 5, 10, 20, 40, 60, 90, 120, 200],
+        "frequency": [20, 18, 15, 10, 8, 6, 4, 3, 2, 1],
+        "monetary": [9000, 8000, 7000, 5000, 4000, 3000, 2000, 1200, 800, 300],
+    })
+    scored = sentiment_weighted_rfm(base, pd.DataFrame({"customer_no": ["C0", "C9"], "sentiment_score": [0.8, -0.6]}))
+    intel = customer_intelligence(scored).set_index("customer_no")
+
+    assert set(intel.columns) == {"predicted_clv", "churn_probability", "next_best_action"}
+    # every probability is a valid [0,1]; CLV non-negative.
+    assert (intel["churn_probability"].between(0.0, 1.0)).all()
+    assert (intel["predicted_clv"] >= 0).all()
+    # the engaged top customer churns far less than the lapsed bottom one.
+    assert intel.loc["C0", "churn_probability"] < intel.loc["C9", "churn_probability"]
+    # the best customer is worth more than the worst.
+    assert intel.loc["C0", "predicted_clv"] > intel.loc["C9", "predicted_clv"]
+    # NBA codes are all from the ERP allow-list.
+    allow = {"WINBACK", "UPSELL", "VIP_CARE", "REACTIVATE", "RETAIN", "NURTURE", "CROSS_SELL"}
+    assert set(intel["next_best_action"]).issubset(allow)
+
+
+def test_customer_intelligence_empty_frame():
+    out = customer_intelligence(pd.DataFrame(columns=["customer_no", "r_score", "f_score", "m_score", "sentiment_score", "segment", "frequency", "monetary"]))
+    assert list(out.columns) == ["customer_no", "predicted_clv", "churn_probability", "next_best_action"] and out.empty
