@@ -30,7 +30,10 @@ export const customerProfiles = pgTable('customer_profiles', {
   rfmRecency: integer('rfm_recency'),        // days since last order
   rfmFrequency: integer('rfm_frequency'),    // order count in last 90d
   rfmMonetary: numeric('rfm_monetary', { precision: 14, scale: 2 }), // spend in last 90d
-  rfmSegment: text('rfm_segment'),           // Champions|Loyal|At Risk|Lost|New
+  rfmSegment: text('rfm_segment'),           // Champions|Loyal|At Risk|Lost|New (ERP's own RFM — CrmService owns)
+  // Advanced RFM segment pushed by the external Marketing Intelligence platform (migration 0460). A SEPARATE
+  // column from rfmSegment so the two engines never clobber each other; campaigns target it via `mi_segment`.
+  miRfmSegment: text('mi_rfm_segment'),
   preferredChannel: text('preferred_channel'), // dine_in|delivery|online|kiosk
   favoriteItemIds: jsonb('favorite_item_ids'), // top 3 item ids
   visitCount: integer('visit_count').notNull().default(0),
