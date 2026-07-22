@@ -123,7 +123,7 @@ export class AuditViewerService {
     }
     // The walk above answers "was anything ALTERED or DELETED?". It cannot answer "was anything NEVER
     // WRITTEN?" — seq comes from the last successfully written row, so an omission leaves no gap. The
-    // completeness half (migration 0464) answers that: TenantTxInterceptor counts, inside the business
+    // completeness half (migration 0465) answers that: TenantTxInterceptor counts, inside the business
     // transaction, every request the trail owes a row for. `written >= expected` must hold per tenant.
     const completeness = await this.verifyCompleteness(chains);
     return { ok: completeness.ok, chains: chains.size, rows_checked: checked, completeness };
@@ -131,7 +131,7 @@ export class AuditViewerService {
 
   // Reconcile written audit rows against the expectations recorded atomically with each business mutation.
   // Written may legitimately EXCEED expected (rolled-back requests still write a 'fail' row but roll their
-  // bump back; @NoTx handlers and guard refusals write without bumping; every row predating 0464 has no
+  // bump back; @NoTx handlers and guard refusals write without bumping; every row predating 0465 has no
   // expectation). A SHORTFALL has no benign explanation — it is provable audit loss.
   private async verifyCompleteness(chains: Map<string, any[]>) {
     const shortfalls: { tenant: string | null; written: number; expected: number; missing: number }[] = [];
@@ -142,7 +142,7 @@ export class AuditViewerService {
         .groupBy(auditExpectations.tenantId);
       // Iterate the RLS-SCOPED chains and look up each one's expectation — never the other way round. The
       // expectations table is permissive (it must be: a scoped policy would abort the business transaction it
-      // is bumped in — see migration 0464), so walking IT would compare a tenant admin against companies
+      // is bumped in — see migration 0465), so walking IT would compare a tenant admin against companies
       // whose audit rows it cannot see and report a phantom shortfall on a healthy system.
       const expectedByTenant = new Map<string, number>();
       for (const r of rows) expectedByTenant.set(Number(r.tenantId) === 0 ? '' : String(r.tenantId), Number(r.expected ?? 0));
@@ -152,9 +152,9 @@ export class AuditViewerService {
         if (written < expected) shortfalls.push({ tenant: key || null, written, expected, missing: expected - written });
       }
     } catch {
-      // Pre-0464 databases have no expectations table; report the check as unavailable rather than failing
+      // Pre-0465 databases have no expectations table; report the check as unavailable rather than failing
       // the whole verify walk (which still proves tamper-evidence on its own).
-      return { available: false, ok: true, note: 'expectation ledger unavailable (pre-0464) — completeness not evidenced', shortfalls: [] as typeof shortfalls };
+      return { available: false, ok: true, note: 'expectation ledger unavailable (pre-0465) — completeness not evidenced', shortfalls: [] as typeof shortfalls };
     }
     return {
       available: true,

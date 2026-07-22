@@ -13,7 +13,7 @@ import { logger as pino } from '../observability/logger';
 // visibility — a p95 regression or a missing index surfaces here without an external APM). Env-tunable.
 const SLOW_TX_MS = Number(process.env.SLOW_TX_MS ?? 1000);
 
-// ITGC-AC-16 completeness (migration 0464). AuditInterceptor writes the trail OUTSIDE the business
+// ITGC-AC-16 completeness (migration 0465). AuditInterceptor writes the trail OUTSIDE the business
 // transaction so a logging failure can never roll back a posted journal — the right trade-off, but it means
 // a dropped row is invisible: `audit_log.seq` comes from the last SUCCESSFULLY written row, so an omission
 // leaves no gap to find. The counter below is the missing half: bumped INSIDE the business transaction, it

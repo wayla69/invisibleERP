@@ -91,6 +91,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'scm.f_branch': { th: 'สาขา', en: 'Branch' },
   'scm.f_branch_all': { th: 'ว่าง = ไม่ระบุสาขา', en: 'Blank = untagged unit' },
   'scm.f_multiplier': { th: 'ตัวคูณดีมานด์', en: 'Demand multiplier' },
+  'scm.f_price_multiplier': { th: 'ตัวคูณราคา', en: 'Price multiplier' },
   'scm.f_horizon': { th: 'จำนวนวัน', en: 'Horizon (days)' },
   'scm.calculate': { th: 'คำนวณ', en: 'Calculate' },
   'scm.calculating': { th: 'กำลังคำนวณ…', en: 'Calculating…' },

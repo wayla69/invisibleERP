@@ -12,6 +12,7 @@ import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
 import { ScmEngineClientService } from './scm-engine-client.service';
 import { ScmExtractService } from './scm-extract.service';
+import { ScmElasticityService } from './scm-elasticity.service';
 import { explodePaths, planHelpers, ScmFallbackPlanner } from './scm-planner';
 import {
   PLAN_STATUS, SYSTEM_ACTOR, type BranchPlanDraft, type ExtractedTenantData, type PlanRunResult,
@@ -33,6 +34,7 @@ export class ScmRunService {
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
     private readonly emit: (tenantId: number | null, type: 'scm_run_completed' | 'scm_run_failed', extra: Record<string, unknown>) => void,
+    private readonly elasticity: ScmElasticityService,
   ) {}
 
   async executePlanRun(
@@ -346,7 +348,9 @@ export class ScmRunService {
     r: {
       model: string; points: { q: Record<string, number> }[]; accuracy: { wape: number | null };
       attribution?: {
-        promo_uplift_pct: number | null; price_elasticity: number | null; regressors_used: string[];
+        promo_uplift_pct: number | null; price_elasticity: number | null;
+        elasticity_r2?: number | null; elasticity_n_obs?: number | null;
+        regressors_used: string[];
       } | null;
     },
     today: string, horizon: number,
@@ -366,6 +370,15 @@ export class ScmRunService {
       priceElasticity: a?.price_elasticity != null ? String(a.price_elasticity) : null,
       regressorsUsed: a?.regressors_used ?? [],
     });
+    // docs/56 A2 — persist a CREDIBLE menu-level elasticity so the advisory scenario tool can apply a
+    // price response without re-fitting. The engine returns null when its identifiability floor is not
+    // met, so only identified estimates land (server-derived; never client input).
+    if (level === 'menu' && a?.price_elasticity != null) {
+      await this.elasticity.upsert(
+        tenantId, itemId, branchId, a.price_elasticity,
+        a.elasticity_r2 ?? null, a.elasticity_n_obs ?? 0,
+      );
+    }
   }
 
   /** Persist one Draft plan per branch that has at least one suggested line. */

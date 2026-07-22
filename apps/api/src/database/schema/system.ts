@@ -77,7 +77,7 @@ export const docCountersTenant = pgTable(
 );
 
 // Append-only audit log (move #4) — tamper-evident trail of mutations (who/what/when/tenant/trace)
-// ITGC-AC-16 completeness half (migration 0464). The hash chain evidences that no past row was ALTERED;
+// ITGC-AC-16 completeness half (migration 0465). The hash chain evidences that no past row was ALTERED;
 // this evidences that none was OMITTED. TenantTxInterceptor bumps `expected` inside the BUSINESS
 // transaction, so it is durable exactly when the mutation committed, giving the one-directional invariant
 // `written >= expected` — a shortfall is provable audit loss. Sharded because a single row per tenant would

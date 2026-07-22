@@ -690,7 +690,7 @@ async function main() {
   const v2 = await inj('GET', '/api/admin/audit/verify', admin);
   ok('ITGC-AC-16: a past row altered behind the trigger is DETECTED → ok=false, hash mismatch', v2.json?.ok === false && /hash mismatch/.test(v2.json?.reason ?? ''), JSON.stringify({ ok: v2.json?.ok, at: v2.json?.broken_at, reason: v2.json?.reason }));
 
-  // ── AC-16 COMPLETENESS half (migration 0464) — the chain proves nothing was ALTERED; it cannot prove
+  // ── AC-16 COMPLETENESS half (migration 0465) — the chain proves nothing was ALTERED; it cannot prove
   //    nothing was OMITTED (seq comes from the last WRITTEN row, so a dropped write leaves no gap). The
   //    expectation ledger, bumped inside each business transaction, makes `written >= expected` checkable. ──
   // v2 above deliberately broke the chain; restore the tampered row so the completeness assertions read a

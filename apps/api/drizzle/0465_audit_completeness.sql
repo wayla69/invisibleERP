@@ -1,4 +1,4 @@
--- 0464 — audit-trail COMPLETENESS evidence (ITGC-AC-16).
+-- 0465 — audit-trail COMPLETENESS evidence (ITGC-AC-16).
 --
 -- The hash chain proves nobody EDITED history. It cannot prove nothing was OMITTED: `audit_log.seq` is
 -- derived from the last SUCCESSFULLY written row, so a dropped write leaves no gap for the verify walk to
