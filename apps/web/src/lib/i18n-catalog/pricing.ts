@@ -100,4 +100,13 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'price.a_cdp_d': { th: 'ส่งเซกเมนต์ลูกค้า (ตาม PDPA) ไปยังแพลตฟอร์มโฆษณาและ CDP', en: 'PDPA-aware audience segments exported to ad networks and CDPs.' },
   'price.a_sandbox': { th: 'สภาพแวดล้อมทดสอบ (Sandbox/Staging) เฉพาะราย', en: 'Dedicated Sandbox / Staging Environment' },
   'price.a_sandbox_d': { th: 'สภาพแวดล้อมแยกพร้อม API key สำหรับทดสอบการเชื่อมต่อ', en: 'An isolated environment with API keys for integration testing.' },
+  // Per-module add-ons (2026-07-21) — whole modules à la carte.
+  'price.a_planning': { th: 'วางแผน & พยากรณ์ (Planning/MRP)', en: 'Planning & Forecasting (MRP)' },
+  'price.a_planning_d': { th: 'วางแผนซัพพลายเชน สั่งผลิต/เติมสต๊อก และพยากรณ์ยอดขาย', en: 'Supply-chain planning, replenishment and sales forecasting.' },
+  'price.a_marketing': { th: 'การตลาด & แคมเปญ', en: 'Marketing & Campaigns' },
+  'price.a_marketing_d': { th: 'แคมเปญ วิเคราะห์การตลาด และ marketing automation', en: 'Campaigns, marketing analytics and automation.' },
+  'price.a_loyalty': { th: 'CRM & ระบบสมาชิกสะสมแต้ม', en: 'CRM & Loyalty' },
+  'price.a_loyalty_d': { th: 'สมาชิก สะสมแต้ม คูปอง และแบบสำรวจความพึงพอใจ', en: 'Membership, points, coupons and satisfaction surveys.' },
+  'price.a_ai': { th: 'ผู้ช่วย AI (พร้อมโควตา 100k token/วัน)', en: 'AI Copilot (100k tokens/day included)' },
+  'price.a_ai_d': { th: 'ผู้ช่วย AI ถาม-ตอบข้อมูลธุรกิจ พร้อมโควตารายวันและคิดส่วนเกินตามจริง', en: 'Business copilot with a daily token band; overage metered at ฿12/1k.' },
 };

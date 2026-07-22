@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { applyAiAddonFeatures } from '@ierp/shared';
 import { eq, sql, and, desc } from 'drizzle-orm';
 import type { DrizzleDb } from '../../database/database.module';
 import { plans, subscriptions, aiTokenUsage, aiOverageBillingRuns, usageEvents, usageOverageBillingRuns } from '../../database/schema';
@@ -22,11 +23,12 @@ export class BillingMeteringService {
   // "X of Y tokens used today". Read through the normal (tenant-scoped) connection.
   async aiUsage(tenantId: number) {
     const db = this.db;
-    const [planRow] = await db.select({ features: plans.features })
+    const [planRow] = await db.select({ features: plans.features, addons: subscriptions.addons })
       .from(subscriptions).leftJoin(plans, eq(subscriptions.planCode, plans.code))
       .where(and(eq(subscriptions.tenantId, tenantId), sql`${subscriptions.status} in ('Active','Trialing')`))
       .orderBy(desc(subscriptions.createdAt)).limit(1);
-    const features: any = planRow?.features ?? {};
+    // A purchased 'ai' add-on carries its own token band — overlay so the usage card shows the real limits.
+    const features: any = applyAiAddonFeatures(planRow?.features as Record<string, unknown> | null, planRow?.addons);
     const dailyLimit = features.ai_tokens_daily != null ? Number(features.ai_tokens_daily) : 50000; // included daily cap (default Pro-tier)
     // Hard ceiling + overage economics (ceiling + metered-overage model). A plan that omits the max has no
     // overage band → the included cap IS the ceiling. The rate prices the (included, max] band.

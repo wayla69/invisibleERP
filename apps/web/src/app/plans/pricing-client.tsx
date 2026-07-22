@@ -11,9 +11,9 @@ import * as React from 'react';
 import Link from 'next/link';
 import {
   ArrowLeftRight, BarChart3, Bike, BookOpenCheck, Boxes, Building2, CalendarRange, Check, ChefHat,
-  ChevronUp, Factory, FileCheck2, FlaskConical, Gift, Handshake, KeyRound, LayoutDashboard, Network,
-  Percent, Phone, QrCode, Share2, ShieldCheck, Sparkles, Store, TrendingUp, Truck, UserCog, Users,
-  Webhook,
+  ChevronUp, Factory, FileCheck2, FlaskConical, Gift, Handshake, KeyRound, LayoutDashboard, Megaphone,
+  Network, Percent, Phone, QrCode, Share2, ShieldCheck, Sparkles, Store, TrendingUp, Truck, UserCog,
+  Users, Webhook,
 } from 'lucide-react';
 import { useLang } from '@/lib/i18n';
 
@@ -139,6 +139,12 @@ const ADDONS: Addon[] = [
   { id: 'integrations', nameKey: 'price.a_webhook', descKey: 'price.a_webhook_d', icon: Webhook, kind: 'erp', priceMonthly: 990 },
   { id: 'cdp', nameKey: 'price.a_cdp', descKey: 'price.a_cdp_d', icon: Share2, kind: 'erp', priceMonthly: 1290 },
   { id: 'sandbox', nameKey: 'price.a_sandbox', descKey: 'price.a_sandbox_d', icon: FlaskConical, kind: 'erp', priceMonthly: 2900 },
+  // Per-MODULE add-ons (2026-07-21): whole suites previously reachable only by upgrading to Scale/Professional.
+  // Keep ids + prices in lock-step with @ierp/shared ADDONS (the server prices/gates from that map).
+  { id: 'planning', nameKey: 'price.a_planning', descKey: 'price.a_planning_d', icon: CalendarRange, kind: 'erp', priceMonthly: 1900 },
+  { id: 'marketing', nameKey: 'price.a_marketing', descKey: 'price.a_marketing_d', icon: Megaphone, kind: 'erp', priceMonthly: 1290 },
+  { id: 'crm_loyalty', nameKey: 'price.a_loyalty', descKey: 'price.a_loyalty_d', icon: Gift, kind: 'pos', priceMonthly: 1490 },
+  { id: 'ai', nameKey: 'price.a_ai', descKey: 'price.a_ai_d', icon: Sparkles, kind: 'erp', priceMonthly: 1990 },
 ];
 
 /** Effective per-month price under the active billing interval. */

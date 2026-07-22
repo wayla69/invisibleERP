@@ -39,7 +39,8 @@ PLAN (free / starter / business / pro / enterprise)
 | **inventory** | warehouse, lots, locations |
 | **procurement** | procurement, pr_raise |
 | **masterdata** | masterdata, bom_master |
-| **planning** | planner, marketing |
+| **planning** | planner *(2026-07-21 split — sellable per-module)* |
+| **marketing** | marketing *(2026-07-21 split — sellable per-module)* |
 | **crm_loyalty** | loyalty, survey |
 | **ai** | ai_chat |
 | **multibranch** | branch |
@@ -81,6 +82,26 @@ migration. Positioning + market evidence: docs/53 + docs/ops/pricing-market-stud
 + `cutover:saas-metrics` (0457 per-branch checkout block). Locations caps remain advisory (display +
 billing quantity) exactly as on the pre-existing plans — a hard branch-creation check is a separate
 hardening item.
+
+### 3c. Per-module add-ons (2026-07-21) — sell the module, not the tier
+
+| Add-on (key) | โมดูล | THB/mo | THB/yr (2 mo free) | Grants |
+|---|---|---|---|---|
+| `scm_advanced` | ซัพพลายเชน & เส้นทางอนุมัติจัดซื้อขั้นสูง | 1,500 | 15,000 | scm_advanced + procurement |
+| `integrations` | Webhook ขาเข้า (แชต/CRM) | 990 | 9,900 | integrations |
+| `cdp` | ส่งออกกลุ่มเป้าหมายโฆษณา (CDP) | 1,290 | 12,900 | cdp |
+| `sandbox` | Sandbox/Staging เฉพาะราย | 2,900 | 29,000 | sandbox |
+| `planning` | วางแผน & พยากรณ์ (MRP) | **1,900** | 19,000 | planning (planner token) |
+| `marketing` | การตลาด & แคมเปญ | **1,290** | 12,900 | marketing (marketing token) |
+| `crm_loyalty` | CRM & สมาชิกสะสมแต้ม | **1,490** | 14,900 | crm_loyalty (loyalty + survey) |
+| `ai` | ผู้ช่วย AI | **1,990** | 19,900 | ai (ai_chat) **+ its own token band** — 100k/day included, 200k ceiling, overage ฿12/1k (`AI_ADDON_FEATURES`, overlaid by `applyAiAddonFeatures` at the PlanGuard feature gate, the agent budget gate, and the /billing usage card; a plan's own bigger band always wins, legacy -1 preserved) |
+
+**Pricing rationale:** the module add-ons price the Business→Professional differentiators individually.
+Sum of the four = ฿6,670/mo vs the ฿5,000 bundle step — 1–2 modules à la carte undercut the upgrade;
+wanting 3+ makes Professional the better deal (and it carries the bigger AI band). The `planning`
+suite was **split** into `planning` (planner) + `marketing` (marketing) so each sells separately;
+every plan that carried the combined suite lists BOTH (grandfathered — bundle breadth unchanged,
+`seedPlans()` refreshes the DB rows at boot). Sold whole-module by design — no sub-feature slicing.
 
 **SME single-operator edition (docs/49):** the `sme` plan is the DEFAULT a `control_profile='sme'` company
 provisions onto (`provisionTenant` picks `sme` when the edition is SME and no explicit `plan_code` is passed;
@@ -292,6 +313,7 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.11 | 2026-07-21 | Platform | **Per-module add-ons (no migration).** Suite split `planning`→`planning`(planner)+`marketing`(marketing) with every combined-suite plan grandfathered to BOTH (seedPlans refresh; invariant 46 modules/22 suites green). Four new sellable add-ons `planning` ฿1,900 / `marketing` ฿1,290 / `crm_loyalty` ฿1,490 / `ai` ฿1,990 (§3c) — ai carries its own token band via `AI_ADDON_FEATURES` + `applyAiAddonFeatures`, overlaid at the PlanGuard feature gate (enforce AND legacy paths), the agent budget gate, and the /billing usage card. /plans configurator + /billing + Platform Console pick the new SKUs up from the shared maps. ToE: `plan-gating` 59→65, `onboarding` 216→217, vitest `module-addons.test.ts` (8). Sold whole-module (no sub-feature slicing) per the commercial decision of 2026-07-21. |
 | 1.10 | 2026-07-21 | Platform | **Slip-OCR pre-fill (wave C UX; no migration, no new control).** `@ierp/shared` `slip-qr.ts` (`parseTlv`/`slipTransferRef` — Slip-Verify mini-QR TLV, nested containers contribute sub-values only, mixed-alnum outranks digits-only) decoded client-side via the existing `lib/qr-decode` frame decoder; `POST /api/doc-ai/slip-extract` (perm `users`) on the doc-ai honesty ladder (vision when keyed / Thai-slip regex rules for text / EMPTY otherwise, `normalizeSlipFields` bounds); /billing claim form gains the อ่านจากสลิป upload (bounded 1600px JPEG re-encode before upload). ToE: `onboarding` 214→216, vitest `slip-extract.test.ts` (8), `billing-slip.spec.ts` e2e (prefill from stubbed extraction). |
 | 1.9 | 2026-07-21 | Platform | **Wave D — Platform Console ops depth (no migration; knobs default off).** D1 god-inbox → email push (`PLATFORM_ALERT_EMAIL`, `platform_alert` template over the A1 outbox, wired inside `PlatformNotificationsService.emit` — best-effort, never breaks the emitting action). D2 full tenant export `GET /api/admin/tenants/:id/export` (tenant row + every tenant-scoped table auto-discovered from the drizzle schema via `getTableConfig` — `tenant_id`/`about_tenant_id`; 50k/table cap with `truncated` flag; drawer download button). D3 god hardening in `PlatformAdminGuard`: `PLATFORM_REQUIRE_MFA` (live `users.mfa_enabled` check, fail-closed 403 `PLATFORM_MFA_REQUIRED`) + `PLATFORM_IP_ALLOWLIST` (IPv4/CIDR, fail-closed 403 `PLATFORM_IP_BLOCKED`). D4 `evaluateHealthAlerts` on `/api/jobs/ops-metrics` (`PLATFORM_ALERT_*` thresholds + stale scheduler) + console breach banner. ToE: `onboarding` 207→214, vitest `health-alerts.test.ts` (14 incl. guard helpers), template suite auto-covers `platform_alert`. No ICFR control change (optional hardening strengthens ITGC-AC-18 operationally). |
 | 1.8 | 2026-07-21 | Platform | **Wave C — Thai payment rails (migration `0458`).** `saas_payment_claims` slip-claim ledger: `GET /api/billing/payment-info` (platform PromptPay dynamic EMVCo QR via the POS `buildPromptPayPayload` + `PLATFORM_PROMPTPAY_ID`/`PLATFORM_BANK_ACCOUNT`; amount due = plan + add-ons via the shared `resolveAddonCharges`, now public), tenant slip claims (`POST/GET /api/billing/payment-claims`, own-tenant only, `(tenant, slip_ref)` UNIQUE → `DUPLICATE_SLIP`, god-inbox notify), god verify queue (`/api/admin/payment-claims` + Platform Console การชำระเงิน tab: approve → A4 receipt source `bank_transfer` idempotent on `claim:<id>` + subscription Active + receipt email; reject → `payment_claim_rejected` email; decided = immutable `CLAIM_NOT_PENDING`). `/billing` gains the ชำระด้วยการโอน card (QR + bank + claim form + status list). ToE: `onboarding` 196→207, platform e2e 5→6. No ICFR control change (platform revenue collection; tenant GL untouched). |

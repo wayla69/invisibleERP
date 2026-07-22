@@ -25,6 +25,7 @@ export type SuiteKey =
   | 'procurement'
   | 'masterdata'
   | 'planning'
+  | 'marketing' // split out of `planning` (2026-07-21) so each is sellable per-module as an add-on
   | 'crm_loyalty'
   | 'ai'
   | 'multibranch'
@@ -70,8 +71,11 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   procurement: ['procurement', 'pr_raise'],
   // Master data & BoM master.
   masterdata: ['masterdata', 'bom_master'],
-  // Supply-chain planning & marketing analytics.
-  planning: ['planner', 'marketing'],
+  // Supply-chain planning / forecasting (split 2026-07-21: `marketing` moved to its own sellable suite —
+  // every plan that carried the combined suite lists BOTH, so bundle breadth is unchanged/grandfathered).
+  planning: ['planner'],
+  // Marketing & campaigns (own suite so it can be sold per-module as an add-on).
+  marketing: ['marketing'],
   // CRM loyalty / surveys (loyalty back-office single-duties are granted directly, not suite-gated).
   crm_loyalty: ['loyalty', 'survey'],
   // AI copilot / chat (also token-metered separately).
@@ -118,7 +122,8 @@ export const SUITE_LABELS: Record<SuiteKey, { en: string; th: string }> = {
   inventory: { en: 'Inventory & Warehouse', th: 'คลังสินค้า' },
   procurement: { en: 'Procurement', th: 'จัดซื้อ' },
   masterdata: { en: 'Master Data', th: 'ข้อมูลหลัก' },
-  planning: { en: 'Planning & Analytics', th: 'วางแผน & วิเคราะห์' },
+  planning: { en: 'Planning & Forecasting', th: 'วางแผน & พยากรณ์' },
+  marketing: { en: 'Marketing & Campaigns', th: 'การตลาด & แคมเปญ' },
   crm_loyalty: { en: 'CRM & Loyalty', th: 'CRM & สมาชิก' },
   ai: { en: 'AI Copilot', th: 'ผู้ช่วย AI' },
   multibranch: { en: 'Multi-branch', th: 'หลายสาขา' },
@@ -147,7 +152,7 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   // (control_profile='sme'), not a suite. Upgrading to Enterprise adds the verticals + multi-seat.
   sme: [
     'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
-    'procurement', 'planning', 'crm_loyalty', 'ai',
+    'procurement', 'planning', 'marketing', 'crm_loyalty', 'ai',
   ],
   // Standard (current 'starter'): finance-first core. docs/53 Q1 — BASE procurement (PR→PO→blind-count
   // GRN, the F&B/retail receiving-controls story) is included from Standard up; the ADVANCED routing
@@ -166,21 +171,21 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   // web-to-lead was un-gated, so the plan that had planning keeps both.
   pro: [
     'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
-    'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
+    'procurement', 'planning', 'marketing', 'crm_loyalty', 'ai', 'multibranch',
     'scm_advanced', 'integrations', 'cdp',
   ],
   // Franchise (multi-brand, between Professional and Enterprise — the /plans configurator's 4th pack):
   // Professional + the central-kitchen/ops verticals (manufacturing, projects) + every add-on suite.
   franchise: [
     'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
-    'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
+    'procurement', 'planning', 'marketing', 'crm_loyalty', 'ai', 'multibranch',
     'manufacturing', 'projects',
     'scm_advanced', 'integrations', 'cdp', 'sandbox',
   ],
   // Enterprise: everything, incl. the premium/add-on suites (custom deals tune via features.suites).
   enterprise: [
     'core', 'finance', 'sales', 'pos_frontoffice', 'inventory', 'masterdata', 'portal', 'selfservice',
-    'procurement', 'planning', 'crm_loyalty', 'ai', 'multibranch',
+    'procurement', 'planning', 'marketing', 'crm_loyalty', 'ai', 'multibranch',
     'manufacturing', 'projects', 'hcm', 'realestate',
     'scm_advanced', 'integrations', 'cdp', 'sandbox',
   ],
@@ -195,35 +200,76 @@ export const PLAN_SUITES: Record<string, SuiteKey[]> = {
   // ERP Essentials: register-less back office — finance + order-to-cash + inventory.
   erp_essentials: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'selfservice'],
   // ERP Growth: + base procurement + planning + multi-branch consolidation (3 locations).
-  erp_growth: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'selfservice', 'procurement', 'planning', 'multibranch'],
+  erp_growth: ['core', 'finance', 'sales', 'inventory', 'masterdata', 'selfservice', 'procurement', 'planning', 'marketing', 'multibranch'],
 };
 
 // ── À-la-carte add-ons (the /plans configurator) ────────────────────────────────────────────────
-// An add-on IS one of the token-less add-on suites above, purchasable per tenant on top of any plan
-// (stored on subscriptions.addons; resolveEntitledSuites unions them in). Prices are indicative THB,
-// annual = 10 × monthly like every seeded plan.
-export type AddonKey = 'scm_advanced' | 'integrations' | 'cdp' | 'sandbox';
-export const ADDON_KEYS: AddonKey[] = ['scm_advanced', 'integrations', 'cdp', 'sandbox'];
+// An add-on is a sellable suite purchasable per tenant on top of any plan (stored on
+// subscriptions.addons; resolveEntitledSuites unions them in). Two families:
+//   • the original token-less add-on suites (scm_advanced/integrations/cdp/sandbox), and
+//   • per-MODULE add-ons (2026-07-21): planning / marketing / crm_loyalty / ai — full token-bearing
+//     suites previously only reachable by upgrading to Professional. Priced so the sum of the module
+//     add-ons (1,900+1,290+1,490+1,990 = ฿6,670) exceeds the Business→Professional step (฿5,000):
+//     buying 1–2 modules is cheaper than upgrading; wanting 3+ makes the bundle the better deal.
+// Prices are indicative THB, annual = 10 × monthly like every seeded plan.
+export type AddonKey = 'scm_advanced' | 'integrations' | 'cdp' | 'sandbox' | 'planning' | 'marketing' | 'crm_loyalty' | 'ai';
+export const ADDON_KEYS: AddonKey[] = ['scm_advanced', 'integrations', 'cdp', 'sandbox', 'planning', 'marketing', 'crm_loyalty', 'ai'];
 export const ADDONS: Record<AddonKey, { priceMonthly: number; labels: { en: string; th: string } }> = {
   scm_advanced: { priceMonthly: 1500, labels: SUITE_LABELS.scm_advanced },
   integrations: { priceMonthly: 990, labels: SUITE_LABELS.integrations },
   cdp: { priceMonthly: 1290, labels: SUITE_LABELS.cdp },
   sandbox: { priceMonthly: 2900, labels: SUITE_LABELS.sandbox },
+  planning: { priceMonthly: 1900, labels: SUITE_LABELS.planning },
+  marketing: { priceMonthly: 1290, labels: SUITE_LABELS.marketing },
+  crm_loyalty: { priceMonthly: 1490, labels: SUITE_LABELS.crm_loyalty },
+  ai: { priceMonthly: 1990, labels: SUITE_LABELS.ai }, // carries its own token band — see AI_ADDON_FEATURES
 };
 export const isAddonKey = (x: unknown): x is AddonKey => typeof x === 'string' && (ADDON_KEYS as string[]).includes(x);
 
-// What a purchased add-on actually GRANTS. Mostly just its own token-less suite, but an add-on whose
-// surfaces sit behind a module token must carry that base suite too, or buying it on a plan without the
-// token would grant nothing: scm_advanced's RFQ/three-way-match endpoints are @Permissions('procurement'),
+// What a purchased add-on actually GRANTS. Mostly just its own suite, but an add-on whose surfaces sit
+// behind another module token must carry that base suite too, or buying it on a plan without the token
+// would grant nothing: scm_advanced's RFQ/three-way-match endpoints are @Permissions('procurement'),
 // so the add-on includes the procurement suite (you cannot route procurement without procurement). The
 // cdp endpoints pass via their 'exec' alternate token (finance, in every paid plan); integrations is
 // enforced in-service against the 'integrations' suite alone; sandbox rides the always-on 'users' token.
+// The per-module add-ons grant exactly their own token-bearing suite.
 export const ADDON_GRANTS: Record<AddonKey, SuiteKey[]> = {
   scm_advanced: ['scm_advanced', 'procurement'],
   integrations: ['integrations'],
   cdp: ['cdp'],
   sandbox: ['sandbox'],
+  planning: ['planning'],
+  marketing: ['marketing'],
+  crm_loyalty: ['crm_loyalty'],
+  ai: ['ai'],
 };
+
+// ── AI add-on token band ────────────────────────────────────────────────────────────────────────
+// AI is not just a route gate — it has real upstream token COGS, so the plan features carry a metered
+// band (ai_tokens_daily / _max / overage rate) that is 0 on non-AI plans. A purchased `ai` add-on must
+// therefore ALSO confer a band, or the buyer would be entitled to the routes and blocked at the first
+// token. Solo-tier band at ฿1,990/mo: 100k tokens/day included, hard ceiling 200k, overage ฿12/1k —
+// same economics as the `sme` plan (docs/ops/pricing-and-ai-cogs.md); heavier use is what Professional
+// (200k/500k) is for. applyAiAddonFeatures overlays these onto the plan's features wherever AI limits
+// are read (PlanGuard feature check, agent budget gate, billing usage view).
+export const AI_ADDON_FEATURES = { ai_chat: true, ai_tokens_daily: 100_000, ai_tokens_daily_max: 200_000, ai_overage_rate_thb_per_1k: 12 } as const;
+
+/** Overlay the AI add-on's feature band onto a plan's features. No-op unless `addons` includes 'ai'.
+ *  Numeric limits merge as MAX (an add-on can only widen), preserving a legacy -1 "unlimited"; the
+ *  overage rate applies only when the plan itself prices none. Returns a NEW object; input untouched. */
+export function applyAiAddonFeatures(features: Record<string, unknown> | null | undefined, addons?: unknown): Record<string, unknown> {
+  const base: Record<string, unknown> = { ...(features ?? {}) };
+  if (!Array.isArray(addons) || !addons.includes('ai')) return base;
+  const widen = (key: 'ai_tokens_daily' | 'ai_tokens_daily_max') => {
+    const cur = Number(base[key] ?? 0);
+    base[key] = cur === -1 ? -1 : Math.max(Number.isFinite(cur) ? cur : 0, AI_ADDON_FEATURES[key]);
+  };
+  base.ai_chat = true;
+  widen('ai_tokens_daily');
+  widen('ai_tokens_daily_max');
+  if (!(Number(base.ai_overage_rate_thb_per_1k ?? 0) > 0)) base.ai_overage_rate_thb_per_1k = AI_ADDON_FEATURES.ai_overage_rate_thb_per_1k;
+  return base;
+}
 
 // Marketing pack id (the /plans configurator tiers) → seeded plan code. The signup request stores the
 // REAL plan code so the approve flow can provision it directly.

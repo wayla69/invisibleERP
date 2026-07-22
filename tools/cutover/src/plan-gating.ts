@@ -171,6 +171,29 @@ async function main() {
   ok('legacy: addon @RequiresSuite gates NOT enforced when kill-switch off',
     (await run('legacy', { user: tenantUser(), required: ['users'], suite: 'sandbox', rows: [planRow('starter')] })).allowed === true);
 
+  // ── Per-MODULE add-ons (2026-07-21): planning/marketing suite split + planning/marketing/crm_loyalty/ai
+  //    sold à la carte — a purchased module add-on entitles its token(s); the ai add-on also confers the
+  //    ai_chat feature band (applyAiAddonFeatures) so it works even where the plan says ai_chat:false. ──
+  ok('module-addons: split — pro grandfathers BOTH planning (planner) and marketing tokens',
+    (await run('enforce', { user: tenantUser('Sales'), required: ['planner'], rows: [planRow('pro')] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Sales'), required: ['marketing'], rows: [planRow('pro')] })).allowed === true);
+  ok('module-addons: starter blocks planner/marketing/loyalty without the add-on',
+    (await run('enforce', { user: tenantUser('Sales'), required: ['planner'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED'
+    && (await run('enforce', { user: tenantUser('Sales'), required: ['marketing'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED'
+    && (await run('enforce', { user: tenantUser('Sales'), required: ['loyalty'], rows: [planRow('starter')] })).code === 'SUITE_NOT_ENTITLED');
+  ok('module-addons: purchased planning add-on entitles the planner token (marketing stays blocked)',
+    (await run('enforce', { user: tenantUser('Sales'), required: ['planner'], rows: [addonRow('starter', ['planning'])] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Sales'), required: ['marketing'], rows: [addonRow('starter', ['planning'])] })).code === 'SUITE_NOT_ENTITLED');
+  ok('module-addons: purchased marketing + crm_loyalty add-ons entitle their tokens',
+    (await run('enforce', { user: tenantUser('Sales'), required: ['marketing'], rows: [addonRow('starter', ['marketing'])] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Sales'), required: ['loyalty'], rows: [addonRow('starter', ['crm_loyalty'])] })).allowed === true);
+  ok('module-addons: ai add-on entitles the ai_chat token AND the ai_chat plan feature (band overlay)',
+    (await run('enforce', { user: tenantUser('Sales'), required: ['ai_chat'], feature: 'ai_chat', rows: [addonRow('starter', ['ai'])] })).allowed === true
+    && (await run('enforce', { user: tenantUser('Sales'), required: ['ai_chat'], feature: 'ai_chat', rows: [planRow('starter', 'Active', { ai_chat: false })] })).code === 'SUITE_NOT_ENTITLED');
+  ok('module-addons: legacy mode — ai add-on unlocks the ai_chat feature gate TODAY (no flags needed)',
+    (await run('legacy', { user: tenantUser('Sales'), feature: 'ai_chat', rows: [addonRow('starter', ['ai'])] })).allowed === true
+    && (await run('legacy', { user: tenantUser('Sales'), feature: 'ai_chat', rows: [planRow('starter', 'Active', { ai_chat: false })] })).code === 'PLAN_FEATURE_REQUIRED');
+
   // ── 1.4 — PastDue grace window (pure decision) ──
   const DAY = 86400000;
   ok('grace: within window + GET → allow', evaluatePastDueGrace({ currentPeriodEnd: new Date(Date.now() - 2 * DAY), graceDays: 7, now: Date.now(), method: 'GET' }) === 'allow');
