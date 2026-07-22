@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v0.2**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -67,6 +67,24 @@ You can also record, per item (or per item *and* branch), a **shelf life**, a se
 quantity or pack size, and what a shortage or a spoiled unit actually costs you. The more accurate those are,
 the better the order sizing. Shelf life can be **suggested from your own goods-receipt history** — the system
 looks at the expiry dates you have been receiving and proposes the typical figure.
+
+### To declare a reporting hierarchy (optional)
+
+By default the system rolls your branches up to one company total, and your items up by their category — so a
+"whole chain" number is simply the sum of the branches. If your business has an **in-between tier** — regions,
+zones, or a custom item grouping — you can declare it so future coherent roll-ups and reconciliation know the
+shape of your organisation:
+
+1. Decide the levels for an axis. For branches this is usually **branch → region → company**; for items it is
+   **item → category → total**.
+2. Ask your administrator to declare it (`PUT /api/scm-planning/hierarchy`): each node names its parent, and
+   the top node has no parent. For example `BKK01 → CENTRAL → บริษัท`.
+3. The system checks the structure is a valid tree — every parent must exist and there can be no loops
+   (a loop is rejected as *invalid hierarchy*).
+
+You do **not** have to declare anything: if you skip this, the system builds the obvious two-level structure
+(each branch under one total, each category under one total) automatically. Declaring a hierarchy changes no
+forecast number on its own — it prepares the coherent multi-level view that reconciliation will use.
 
 ---
 
@@ -212,3 +230,4 @@ design; ask your administrator.
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-07-21 | New chapter — docs/54 supply-chain planning: demand forecasting, order plans with maker-checker approval, purchase-requisition hand-off, scenario planning and demand-spike alerts. |
+| 0.2 | 2026-07-22 | Added §2 "To declare a reporting hierarchy (optional)" — docs/58 Track C · C1: declare branch→region→company / item→category→total structures (or let the system synthesize the obvious two-level tree). Definition only; changes no forecast number. |

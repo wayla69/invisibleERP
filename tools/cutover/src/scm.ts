@@ -500,6 +500,58 @@ async function main() {
     scenario.status === 201 && runsAfter === runsBefore && Array.isArray(scenario.json.lines),
     `status=${scenario.status} lines=${scenario.json.lines?.length} runs ${runsBefore}→${runsAfter}`);
 
+  // ── docs/58 Track C (C1) — forecast hierarchy definition + assembler ──
+
+  // Synthesized branch forest: no declaration yet ⇒ one TOTAL root + one leaf per active branch (BKK01).
+  const synthBranch = await inj('GET', '/api/scm-planning/hierarchy/forest?axis=branch', tPlanner);
+  const synthNodes = synthBranch.json.nodes ?? [];
+  const synthRoot = synthNodes.find((x: any) => x.parent_id === null);
+  const synthLeaf = synthNodes.find((x: any) => x.ref_kind === 'branch' && x.ref_id === String(branchId));
+  ok('C1 synthesized branch forest (TOTAL root + BKK01 leaf) when none declared',
+    synthBranch.json.source === 'synthesized' && !!synthRoot && !!synthLeaf && synthLeaf.parent_id === synthRoot.node_id,
+    `source=${synthBranch.json.source} nodes=${synthNodes.length}`);
+
+  // Declare a branch → region → company structure; levels computed (leaf 0, region 1, total 2).
+  const declare = await inj('PUT', '/api/scm-planning/hierarchy', tPlanner, {
+    axis: 'branch',
+    nodes: [
+      { node_code: 'TOTAL', parent_code: null, name: 'บริษัท', ref_kind: 'group' },
+      { node_code: 'CENTRAL', parent_code: 'TOTAL', name: 'ภาคกลาง', ref_kind: 'group' },
+      { node_code: 'BKK01', parent_code: 'CENTRAL', name: 'สาขาสีลม', ref_kind: 'branch', ref_id: String(branchId) },
+    ],
+  });
+  const declLevels = Object.fromEntries((declare.json.nodes ?? []).map((x: any) => [x.nodeCode, x.level]));
+  ok('C1 declare branch→region→company (levels: leaf 0, region 1, total 2)',
+    declare.status === 200 && declLevels.BKK01 === 0 && declLevels.CENTRAL === 1 && declLevels.TOTAL === 2,
+    `status=${declare.status} levels=${JSON.stringify(declLevels)}`);
+
+  // Forest now reads from the declaration (3 nodes, source 'declared').
+  const declForest = await inj('GET', '/api/scm-planning/hierarchy/forest?axis=branch', tPlanner);
+  ok('C1 forest reads the declared structure after declaration',
+    declForest.json.source === 'declared' && (declForest.json.nodes?.length ?? 0) === 3,
+    `source=${declForest.json.source} nodes=${declForest.json.nodes?.length}`);
+
+  // A cycle is rejected (SCM_HIERARCHY_INVALID) — the forest guard.
+  const cycle = await inj('PUT', '/api/scm-planning/hierarchy', tPlanner, {
+    axis: 'item',
+    nodes: [
+      { node_code: 'A', parent_code: 'B' },
+      { node_code: 'B', parent_code: 'A' },
+    ],
+  });
+  ok('C1 cyclic hierarchy rejected (SCM_HIERARCHY_INVALID)',
+    cycle.status === 400 && cycle.json.error?.code === 'SCM_HIERARCHY_INVALID',
+    `status=${cycle.status} code=${cycle.json.error?.code}`);
+
+  // Cross-tenant boundary: T2's plannerB sees 0 of HQ's declared nodes, and its synthesized branch
+  // forest has no HQ branch (T2 has no branches ⇒ just the TOTAL root).
+  const listB = await inj('GET', '/api/scm-planning/hierarchy', tPlannerB);
+  const forestB = await inj('GET', '/api/scm-planning/hierarchy/forest?axis=branch', tPlannerB);
+  const bSeesHq = (forestB.json.nodes ?? []).some((x: any) => x.ref_id === String(branchId));
+  ok('C1 cross-tenant isolation (T2 sees 0 HQ hierarchy nodes)',
+    (listB.json.nodes?.length ?? 0) === 0 && !bSeesHq,
+    `T2 declared=${listB.json.nodes?.length} seesHqBranch=${bSeesHq}`);
+
   await app.close();
   await engine.close();
 

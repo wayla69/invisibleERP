@@ -184,6 +184,29 @@ export const scmSpikeEvents = pgTable('scm_spike_events', {
   detectedAt: timestamp('detected_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_spike_events_tenant').on(t.tenantId, t.status, t.detectedAt) }));
 
+// docs/58 Track C (C1) — declared aggregation structures for forecast reconciliation. One row per
+// node, self-referencing parent (the projects.parentId precedent), governed as planning master data.
+// A tenant maps branch → region → company (region rows are ref_kind='group') or an arbitrary item
+// roll-up; absent ⇒ the API SYNTHESIZES the forest from branches + item_categories (Track C stays off
+// until a structure is declared). Migration 0461 applies the canonical 0232-form RLS loop + the leading
+// (tenant_id, axis) index. No other module writes this table (no cross-writer NULL-tenant sweep).
+export const scmForecastHierarchy = pgTable('scm_forecast_hierarchy', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  axis: text('axis').notNull(),                 // 'branch' | 'item'
+  nodeCode: text('node_code').notNull(),        // natural key per (tenant, axis)
+  name: text('name'),
+  nameTh: text('name_th'),
+  parentId: bigint('parent_id', { mode: 'number' }), // → scm_forecast_hierarchy(id); null = a root (total)
+  level: integer('level').notNull().default(0), // 0 = leaf, increasing toward the root (denormalized)
+  refKind: text('ref_kind'),                    // 'branch' | 'item_category' | 'group'
+  refId: text('ref_id'),                        // branches.id / item_categories.code for a leaf/mid node
+  active: boolean('active').notNull().default(true),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: index('idx_scm_forecast_hierarchy_tenant').on(t.tenantId, t.axis) }));
+
 export type ScmSettingsRow = typeof scmSettings.$inferSelect;
 export type ScmItemPolicy = typeof scmItemPolicies.$inferSelect;
 export type ScmPlanRun = typeof scmPlanRuns.$inferSelect;
@@ -192,3 +215,4 @@ export type ScmOrderPlan = typeof scmOrderPlans.$inferSelect;
 export type ScmOrderPlanLine = typeof scmOrderPlanLines.$inferSelect;
 export type ScmDemandBaseline = typeof scmDemandBaselines.$inferSelect;
 export type ScmSpikeEvent = typeof scmSpikeEvents.$inferSelect;
+export type ScmForecastHierarchyRow = typeof scmForecastHierarchy.$inferSelect;

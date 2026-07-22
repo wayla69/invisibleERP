@@ -187,6 +187,22 @@ Planners can ask "what if?" — a bounded, synchronous evaluation over a handful
 demand multiplier, service level or horizon (for example, doubling demand for a festival). Scenarios are
 advisory: they compute and return, and **write nothing**.
 
+### 7.9 Forecast reconciliation hierarchy (docs/58 Track C · C1)
+
+Per-(branch, item) forecasts are produced independently, so their roll-ups do not naturally sum coherently
+across item→category→total or branch→region→company. To prepare for coherent multi-level views and
+reconciliation (Track C), a planner can **declare an aggregation structure** as governed master data:
+`PUT /api/scm-planning/hierarchy` accepts, per axis (`branch` or `item`), a set of nodes each naming its
+parent (branch → region → company, region rows tagged `group`). The service validates the declaration is a
+forest — unique node codes, every parent resolvable, no cycle (a violation is rejected `SCM_HIERARCHY_INVALID`)
+— and stores it in `scm_forecast_hierarchy` (tenant-scoped, RLS). Where a tenant declares nothing, the
+**forest is synthesized** from the native structure — one *Total* root over one leaf per active branch, or
+one leaf per item category — so Track C stays off (docs/54 behaviour) until a tenant opts in. `GET
+…/hierarchy/forest?axis=` returns the assembled forest (source `declared` or `synthesized`) that the
+reconciliation step (C2, forthcoming) consumes. This is **definition only**: it introduces no new control
+(reconciliation is a forecast-quality property; SCM-01/02/03 still govern the run and its approval) and does
+not yet change any forecast number.
+
 ## 8. Process flow
 
 ```mermaid
@@ -282,3 +298,4 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.2 | 2026-07-22 | Supply-chain / Planning | Added §7.9 — forecast reconciliation hierarchy (docs/58 Track C · C1): declare/synthesize aggregation structures via `scm_forecast_hierarchy` (migration `0461`) and `GET/PUT/DELETE /api/scm-planning/hierarchy(/forest)`. Definition only — no new control (SCM-01/02/03 unchanged), no forecast-number change yet (reconciliation lands with C2). Harness `cutover/scm.ts` +4 C1 checks. |

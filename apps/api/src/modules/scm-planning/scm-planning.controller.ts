@@ -7,6 +7,7 @@ import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-pro
 import { ScmPlanningService } from './scm-planning.service';
 import { ScmSpikeService } from './scm-spike.service';
 import { ScmLiveService } from './scm-live.service';
+import { HierDeclareBody, type HierAxis, type HierDeclareDto } from './scm-hierarchy.service';
 
 // docs/54 — the supply-chain planning API.
 // Route prefix is `api/scm-planning` because `api/planning` already belongs to the EPM budget module.
@@ -119,6 +120,29 @@ export class ScmPlanningController {
   @Post('items/shelf-life')
   applyShelfLife(@Body(new ZodValidationPipe(ShelfLifeBody)) b: z.infer<typeof ShelfLifeBody>, @CurrentUser() u: JwtUser) {
     return this.svc.applyShelfLife(b, u);
+  }
+
+  // ── forecast hierarchy (docs/58 Track C · C1) ──
+  @Get('hierarchy')
+  listHierarchy(@Query('axis') axis: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.svc.listHierarchy(u, axis === 'branch' || axis === 'item' ? axis : undefined);
+  }
+
+  // The assembled forest: a tenant's declared structure, else synthesized from branches/categories.
+  @Get('hierarchy/forest')
+  hierarchyForest(@Query('axis') axis: string | undefined, @CurrentUser() u: JwtUser) {
+    const a: HierAxis = axis === 'item' ? 'item' : 'branch';
+    return this.svc.hierarchyForest(u, a);
+  }
+
+  @Put('hierarchy')
+  declareHierarchy(@Body(new ZodValidationPipe(HierDeclareBody)) b: HierDeclareDto, @CurrentUser() u: JwtUser) {
+    return this.svc.declareHierarchy(b, u);
+  }
+
+  @Delete('hierarchy/:id')
+  deleteHierarchyNode(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
+    return this.svc.deleteHierarchyNode(id, u);
   }
 
   // ── runs ──
