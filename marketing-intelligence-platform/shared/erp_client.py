@@ -153,6 +153,17 @@ class ErpClient:
         params = {"status": status} if status else {}
         return list(self._paginate("/api/v1/invoices", params))
 
+    def fetch_experiment_outcomes(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """GET /api/v1/marketing/experiment-outcomes — measured campaign LIFT (docs/60 Phase 3 pull-back).
+
+        The ERP splits an activated segment into a treatment arm and a randomised holdout control, then
+        measures the incremental revenue the campaign caused. Pulling these realised outcomes lets the next
+        MMM fit use campaign lift as a regressor — the loop's feedback edge. Returns a list of
+        ``{experiment_no, segment, incremental_revenue, lift_pct, treatment_count, control_count,
+        window_days, measured_at}``.
+        """
+        return self._get("/api/v1/marketing/experiment-outcomes", {"limit": limit}).get("outcomes", [])
+
     def close(self) -> None:
         self._session.close()
 

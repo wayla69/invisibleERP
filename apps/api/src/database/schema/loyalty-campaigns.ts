@@ -2,7 +2,7 @@
 // messaging gateways + message_log. Sends respect PDPA marketing consent and are idempotent (a 'sent' campaign
 // won't re-send). Per-recipient delivery is audited in message_log (campaign = the campaign_code). tenant_id
 // REQUIRED → RLS.
-import { pgTable, bigserial, bigint, text, integer, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, integer, timestamp, jsonb } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 export const loyaltyCampaigns = pgTable('loyalty_campaigns', {
@@ -11,8 +11,9 @@ export const loyaltyCampaigns = pgTable('loyalty_campaigns', {
   campaignCode: text('campaign_code').notNull(),          // CMP-…
   name: text('name').notNull(),
   channel: text('channel').notNull().default('sms'),      // sms | email | line
-  audience: text('audience').notNull().default('all'),    // all | segment | tier | birthdays_today | saved_segment
+  audience: text('audience').notNull().default('all'),    // all | segment | tier | birthdays_today | saved_segment | members
   segment: text('segment'),                               // RFM segment (audience=segment)
+  memberIds: jsonb('member_ids'),                         // explicit member-id list (audience=members) — docs/60 Phase 3 treatment arm
   tier: text('tier'),                                     // loyalty tier (audience=tier)
   savedSegmentId: bigint('saved_segment_id', { mode: 'number' }), // saved_segments.id (audience=saved_segment)
   body: text('body').notNull(),

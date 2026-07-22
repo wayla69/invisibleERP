@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.11** _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.12** _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -499,6 +499,32 @@ WINBACK*, *ขายเพิ่ม / UPSELL*, *ดูแลลูกค้า V
 > These scores are **advice**, kept separate from the company's own churn/value figures — they never
 > overwrite them. Nothing is sent automatically: a customer is only contacted through a campaign a
 > person reviews and sends, and only if they have consented. Each company sees only its own customers.
+
+---
+
+## 5e. Incrementality — did the campaign actually work? (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Incrementality**. **Who:** `marketing`
+or `exec`.
+
+A jump in sales after a campaign isn't proof the campaign *caused* it — sales can rise for many
+reasons. The honest way to know is an **A/B holdout test**: contact most of a segment (the **treatment**
+group) but deliberately hold back a small random slice (the **control** group), then compare. The
+difference is the real **lift**.
+
+**To run a holdout test:**
+
+1. Open **Incrementality**, pick a **segment**, set the **holdout %** (e.g. 20% held back) and a
+   **measurement window** (e.g. 14 days), and press **เริ่มการทดลอง (Start test)**. The system splits
+   the members and sends the campaign to the **treatment** group only — the **control** group is fixed
+   at that moment and **never contacted**.
+2. After the window has passed, press **วัดผล (Measure)**. The system compares the average sales per
+   person in each group and reports the **lift %** and the **incremental revenue** the campaign caused.
+
+> The control group is chosen once and never contacted, so the comparison is fair. You can't measure
+> before the window ends, and a test can't be re-measured (the result is locked). Each company sees
+> only its own tests. These measured results also flow back to the analytics platform so future
+> recommendations learn from what actually worked.
 
 ---
 

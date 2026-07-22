@@ -3060,6 +3060,13 @@
 			"when": 2023820000402,
 			"tag": "0463_mi_customer_intel",
 			"breakpoints": true
+		},
+		{
+			"idx": 438,
+			"version": "7",
+			"when": 2023820000403,
+			"tag": "0464_mi_campaign_experiments",
+			"breakpoints": true
 		}
 	]
 }

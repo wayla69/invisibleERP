@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 304,
+    "total": 305,
     "by_status": {
-      "Implemented": 301,
+      "Implemented": 302,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 27,
+      "CRM — Loyalty": 28,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2505,6 +2505,25 @@
       "tod": "Inspect that the pushed scores land on SEPARATE mi_* columns (own churn/LTV untouched), the drill-down is read-only + tenant-scoped, and the only contact path is the consent-gated campaign draft.",
       "toe": "Re-perform (ext harness, 6 MKT-18 checks): a push with per-customer scores stamps mi_clv/mi_churn_risk/mi_nba WITHOUT clobbering the ERP own columns; the drill-down returns the member's CLV/churn/NBA (sort clv/churn) and is tenant-scoped (no other tenant's member leaks); a segment-only push leaves existing scores intact.",
       "evidence": "customer_profiles.mi_* scored rows; the read-only drill-down; the consent-gated campaign draft as the sole contact path",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-19",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A marketing campaign's effectiveness is claimed from pre-vs-post sales with no counterfactual (regression-to-the-mean / seasonality booked as 'lift'); or the holdout control group is contacted anyway (contaminating the comparison) or re-selected after the fact to flatter the result; or the outcome read crosses into another tenant's sales.",
+      "assertion": "Accuracy/Occurrence",
+      "description": "Closed-loop Measurement (docs/60 Phase 3, MKT-19): activating a pushed mi_segment splits its eligible members ONCE into a TREATMENT arm (contacted) and a randomised HOLDOUT CONTROL arm (deliberately not contacted), fixed at send time. The arms are IMMUTABLE — a deterministic hash assigns them and a unique index (tenant_id, experiment_id, member_id) prevents re-randomisation; the treatment-only campaign uses audience 'members' (an explicit id list) so the control arm is STRUCTURALLY never contacted. After the window elapses (WINDOW_NOT_ELAPSED before), lift = treatment-per-head vs control-per-head on REAL POS revenue read through CrmService.revenueByMembers (a single-domain read over dine_in_orders — NO cross-domain SQL join), with the incremental revenue attributable to the campaign; measurement is idempotent (ALREADY_MEASURED) and read-only. mi_campaign_experiments + mi_experiment_arms are tenant-scoped (canonical 0232 org-clause RLS + explicit tenant_id filter + leading tenant index). Measured outcomes are exposed read-only for the platform pull-back (GET /api/v1/marketing/experiment-outcomes, scope analytics:read) so the next MMM fit can use realised lift as a regressor. A measurement model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per experiment",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-intel/mi-experiments.service.ts (deterministic immutable arm split; treatment-only 'members' campaign; measureExperiment lift via CrmService.revenueByMembers, WINDOW_NOT_ELAPSED/ALREADY_MEASURED/NO_CONTROL guards); crm.service.ts revenueByMembers (single-domain dine_in_orders read); campaigns.service.ts audience 'members'; schema/marketing-intel.ts mi_campaign_experiments/mi_experiment_arms + migration 0464 (canonical RLS, tenant-leading + unique indexes); public-api.controller.ts GET marketing/experiment-outcomes (analytics:read); cutover/ext.ts (MKT-19 ToE, 9 checks)",
+      "tod": "Inspect the immutable arm split (unique index, no re-randomise), the treatment-only campaign that excludes controls, the read-API lift math (no cross-domain join), and the tenant_id filter/RLS.",
+      "toe": "Re-perform (ext harness, 9 MKT-19 checks): start splits treatment/control (both non-empty, arms immutable + partition the segment); the treatment-only campaign excludes every control member; measure computes positive lift (seeded ฿1000 vs ฿100/head → ~900%) and is idempotent (ALREADY_MEASURED); measuring before the window → WINDOW_NOT_ELAPSED; empty segment → EMPTY_SEGMENT; outcomes are pullable via the public API (analytics:read), tenant-scoped.",
+      "evidence": "mi_campaign_experiments/mi_experiment_arms fixed arms + measured lift; the treatment-only campaign recipient list; the read-only outcome read",
       "status": "Implemented"
     },
     {

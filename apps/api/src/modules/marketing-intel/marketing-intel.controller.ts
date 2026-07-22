@@ -6,6 +6,7 @@ import {
   MarketingIntelService,
   SimulateBody, OptimizeBody, StageBudgetPlanBody, ApproveBudgetPlanBody,
 } from './marketing-intel.service';
+import { MiExperimentsService, StartExperimentBody, MeasureExperimentBody } from './mi-experiments.service';
 
 const ActivateBody = z.object({
   segment: z.string().min(1).max(80),
@@ -18,7 +19,10 @@ const ActivateBody = z.object({
 // PublicApiController POST /api/v1/analytics/snapshots (scope analytics:write).
 @Controller('api/marketing-intel')
 export class MarketingIntelController {
-  constructor(private readonly svc: MarketingIntelService) {}
+  constructor(
+    private readonly svc: MarketingIntelService,
+    private readonly experiments: MiExperimentsService,
+  ) {}
 
   @Get('summary')
   @Permissions('marketing', 'exec')
@@ -95,5 +99,26 @@ export class MarketingIntelController {
   @Permissions('exec', 'approvals')
   approveBudgetPlan(@Body(new ZodValidationPipe(ApproveBudgetPlanBody)) b: z.infer<typeof ApproveBudgetPlanBody>, @CurrentUser() u: JwtUser) {
     return this.svc.approveBudgetPlan(u, b);
+  }
+
+  // ─── Closed-loop Measurement (docs/60 Phase 3, control MKT-19) ───────────────────────────────────────
+  @Get('experiments')
+  @Permissions('marketing', 'exec')
+  experiments_(@CurrentUser() u: JwtUser) {
+    return this.experiments.listExperiments(u);
+  }
+
+  // START an experiment: fix treatment/control arms (+ optionally send the treatment-only campaign).
+  @Post('experiments')
+  @Permissions('crm_campaign', 'marketing', 'exec')
+  startExperiment(@Body(new ZodValidationPipe(StartExperimentBody)) b: z.infer<typeof StartExperimentBody>, @CurrentUser() u: JwtUser) {
+    return this.experiments.startExperiment(u, b);
+  }
+
+  // MEASURE lift once the window has elapsed (read-only outcome).
+  @Post('experiments/measure')
+  @Permissions('marketing', 'exec')
+  measureExperiment(@Body(new ZodValidationPipe(MeasureExperimentBody)) b: z.infer<typeof MeasureExperimentBody>, @CurrentUser() u: JwtUser) {
+    return this.experiments.measureExperiment(u, b);
   }
 }

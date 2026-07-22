@@ -104,7 +104,13 @@ offer — routed through the **existing consent-gated delivery** as a draft.
 
 ---
 
-## Phase 3 — Closed-loop Measurement (incrementality feedback)
+## Phase 3 — Closed-loop Measurement (incrementality feedback) — **DELIVERED**
+
+> **Status: DELIVERED** — activating a pushed segment splits it into a treatment arm + a randomised
+> immutable holdout control (migration 0464; treatment-only `audience:'members'` campaign so controls are
+> never contacted); after the window `POST /experiments/measure` computes lift on real POS revenue via
+> `CrmService.revenueByMembers` (no cross-domain join); outcomes pull-back `GET /api/v1/marketing/
+> experiment-outcomes` (analytics:read) feeds the platform; web Incrementality tab; control MKT-19.
 
 **Goal.** Prove (and learn from) whether an activated campaign actually **caused** sales — and feed that back
 so MMM/attribution improves over time. This is what makes the loop *closed*.
@@ -181,3 +187,4 @@ earlier data (response curves, per-customer scores, campaign outcomes).
 | v0.1 | 2026-07-22 | Initial 4-phase depth roadmap (prescriptive · customer-intel · closed-loop · governance). |
 | v0.2 | 2026-07-22 | Phase 1 DELIVERED — platform emits Hill response-curve contract (`saturation.{beta,kappa,slope}`, raw-spend); ERP optimiser/simulate/staged budget plans + web Budget Planner tab + MKT-17. |
 | v0.3 | 2026-07-22 | Phase 2 DELIVERED — platform pushes per-customer CLV / churn / next-best-action; ERP lands them on separate `customer_profiles.mi_*` (migration 0463) + read-only segment drill-down + web Customer Intelligence tab; advisory, consent-gated; MKT-18. |
+| v0.4 | 2026-07-22 | Phase 3 DELIVERED — holdout A/B experiments (immutable treatment/control arms, migration 0464; treatment-only `audience:'members'` campaign) + real-revenue lift via `CrmService.revenueByMembers` + outcomes pull-back (`GET /api/v1/marketing/experiment-outcomes`) + web Incrementality tab; MKT-19. |

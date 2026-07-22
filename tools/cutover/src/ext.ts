@@ -995,6 +995,60 @@ async function main() {
   const planRows = await db.select().from(s.miBudgetPlans);
   ok('BudgetOpt: budget plans stored tenant-scoped (cf2 only, none for HQ)', planRows.length >= 2 && planRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${planRows.length} tenants=${[...new Set(planRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
 
+  // ── Closed-loop Measurement (docs/60 Phase 3, MKT-19) — an activated segment is split into a treatment arm
+  //    (contacted) and a randomised HOLDOUT control (never contacted); after the window, lift = treatment vs
+  //    control per-head on real POS revenue proves incrementality. Seed several cf2 members in a fresh segment. ──
+  const liftIds: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const [m] = await db.insert(s.posMembers).values({ tenantId: cf2.id, memberCode: `M-LIFT${i}`, name: `Lift ${i}`, active: true }).returning({ id: s.posMembers.id });
+    await db.insert(s.customerProfiles).values({ tenantId: cf2.id, memberId: m.id, miRfmSegment: 'LiftTest', totalOrders: 1, totalSpend: '100' });
+    liftIds.push(Number(m.id));
+  }
+  // Start an experiment: 50% holdout, measurable immediately (window 0), and send the treatment-only campaign.
+  const startExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'LiftTest', control_pct: 0.5, window_days: 0, activate: true });
+  const expNo = startExp.json.experiment_no;
+  ok('CloseLoop: start experiment splits treatment/control arms (sum = members, both non-empty)', (startExp.status === 200 || startExp.status === 201) && startExp.json.treatment_count + startExp.json.control_count === 8 && startExp.json.treatment_count > 0 && startExp.json.control_count > 0, `${startExp.status} t=${startExp.json.treatment_count} c=${startExp.json.control_count}`);
+
+  // Learn the arm assignment (fixed at creation) to seed revenue per arm.
+  const expRow = (await db.select().from(s.miCampaignExperiments)).find((r: any) => r.experimentNo === expNo && Number(r.tenantId) === cf2.id);
+  const armRows = (await db.select().from(s.miExperimentArms)).filter((a: any) => Number(a.experimentId) === Number(expRow?.id));
+  const treatIds = armRows.filter((a: any) => a.arm === 'treatment').map((a: any) => Number(a.memberId));
+  const ctrlIds = armRows.filter((a: any) => a.arm === 'control').map((a: any) => Number(a.memberId));
+  ok('CloseLoop: arms are immutable + partition the segment (no member in both arms; all 8 assigned)', armRows.length === 8 && treatIds.length + ctrlIds.length === 8 && treatIds.every((id: number) => !ctrlIds.includes(id)), `arms=${armRows.length} t=${treatIds.length} c=${ctrlIds.length}`);
+
+  // The treatment-only campaign never lists a control member (holdout integrity).
+  const liftCamp = (await db.select().from(s.loyaltyCampaigns)).find((c: any) => Number(c.id) === Number(startExp.json.campaign_id));
+  ok('CloseLoop: treatment-only campaign excludes every control member (never contacted)', !!liftCamp && liftCamp.audience === 'members' && Array.isArray(liftCamp.memberIds) && ctrlIds.every((id: number) => !liftCamp.memberIds.includes(id)) && treatIds.every((id: number) => liftCamp.memberIds.includes(id)), `aud=${liftCamp?.audience} ids=${(liftCamp?.memberIds ?? []).length}`);
+
+  // Seed post-send revenue: treatment ฿1000/head, control ฿100/head (in the measurement window).
+  let ordSeq = 0;
+  for (const mid of treatIds) await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-LIFT-${ordSeq++}`, memberId: mid, total: '1000', saleNo: `S-LIFT-${ordSeq}`, openedAt: new Date() });
+  for (const mid of ctrlIds) await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-LIFT-${ordSeq++}`, memberId: mid, total: '100', saleNo: `S-LIFT-${ordSeq}`, openedAt: new Date() });
+
+  const measure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
+  ok('CloseLoop: measure computes positive lift (฿1000/head treatment vs ฿100/head control → ~900%)', (measure.status === 200 || measure.status === 201) && measure.json.status === 'Measured' && Number(measure.json.lift_pct) > 500 && Number(measure.json.incremental_revenue) > 0, `${measure.status} lift=${measure.json.lift_pct}% inc=${measure.json.incremental_revenue}`);
+
+  // A measured experiment is not re-measured (idempotent guard).
+  const remeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
+  ok('CloseLoop: re-measuring a Measured experiment → 400 ALREADY_MEASURED', remeasure.status === 400 && remeasure.json.error?.code === 'ALREADY_MEASURED', `${remeasure.status} ${remeasure.json.error?.code}`);
+
+  // A still-open window can't be measured early.
+  const openExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'LiftTest', control_pct: 0.5, window_days: 30 });
+  const openMeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: openExp.json.experiment_no });
+  ok('CloseLoop: measuring before the window elapses → 400 WINDOW_NOT_ELAPSED', openMeasure.status === 400 && openMeasure.json.error?.code === 'WINDOW_NOT_ELAPSED', `${openMeasure.status} ${openMeasure.json.error?.code}`);
+
+  // Starting on an empty segment is rejected.
+  const emptyExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'NoSuchSegment', control_pct: 0.5 });
+  ok('CloseLoop: starting an experiment on an empty segment → 400 EMPTY_SEGMENT', emptyExp.status === 400 && emptyExp.json.error?.code === 'EMPTY_SEGMENT', `${emptyExp.status} ${emptyExp.json.error?.code}`);
+
+  // Measured outcomes are exposed for the platform pull-back (analytics:read), tenant-scoped.
+  const outcomes = await inj('GET', '/api/v1/marketing/experiment-outcomes', anKeyCf2, undefined);
+  ok('CloseLoop: measured outcomes are pullable via the public API (analytics:read), tenant-scoped', outcomes.status === 200 && Array.isArray(outcomes.json.outcomes) && outcomes.json.outcomes.some((o: any) => o.experiment_no === expNo && Number(o.lift_pct) > 500), `${outcomes.status} n=${(outcomes.json.outcomes ?? []).length}`);
+
+  // Storage is tenant-scoped: every experiment belongs to cf2.
+  const expAll = await db.select().from(s.miCampaignExperiments);
+  ok('CloseLoop: experiments stored tenant-scoped (cf2 only, none for HQ)', expAll.length >= 2 && expAll.every((r: any) => Number(r.tenantId) === cf2.id), `n=${expAll.length} tenants=${[...new Set(expAll.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

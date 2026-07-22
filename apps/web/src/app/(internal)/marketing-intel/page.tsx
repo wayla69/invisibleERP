@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BudgetPlanner } from '@/components/marketing-intel/budget-planner';
 import { CustomerIntel } from '@/components/marketing-intel/customer-intel';
+import { Experiments } from '@/components/marketing-intel/experiments';
 
 interface Summary {
   mmm: { payload: any; model_run_ref: string | null; pushed_at: string | null } | null;
@@ -61,7 +62,7 @@ const segHue = (name: string, i: number) => SEGMENT_HUE[name] ?? HUES[i % HUES.l
 
 export default function MarketingIntelPage() {
   const { t } = useLang();
-  const [tab, setTab] = useState<'overview' | 'planner' | 'customers'>('overview');
+  const [tab, setTab] = useState<'overview' | 'planner' | 'customers' | 'experiments'>('overview');
   const q = useQuery<Summary>({ queryKey: ['marketing-intel', 'summary'], queryFn: () => api('/api/marketing-intel/summary') });
   const histQ = useQuery<{ runs: any[] }>({ queryKey: ['marketing-intel', 'mmm-history'], queryFn: () => api('/api/marketing-intel/mmm-history') });
   const activate = useMutation({
@@ -111,11 +112,12 @@ export default function MarketingIntelPage() {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'overview' | 'planner' | 'customers')}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'overview' | 'planner' | 'customers' | 'experiments')}>
         <TabsList className="mb-4">
           <TabsTrigger value="overview">{t('mi.tab_overview')}</TabsTrigger>
           <TabsTrigger value="planner">{t('mi.tab_planner')}</TabsTrigger>
           <TabsTrigger value="customers">{t('mi.tab_customers')}</TabsTrigger>
+          <TabsTrigger value="experiments">{t('mi.tab_experiments')}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
       <StateView q={q}>
@@ -325,6 +327,9 @@ export default function MarketingIntelPage() {
         </TabsContent>
         <TabsContent value="customers">
           <CustomerIntel />
+        </TabsContent>
+        <TabsContent value="experiments">
+          <Experiments />
         </TabsContent>
       </Tabs>
     </div>
