@@ -18,7 +18,10 @@ overrides:
   # Step 7 (fastify-5 / Nest-11): clear the remaining transitive runtime advisories the major bump alone
   # doesn't — a stale fast-uri@2.x copy lingers, and @nestjs/platform-fastify still pulls @fastify/middie@8.
   # middie 9 peers fastify 5 (now satisfied) and we use Nest guards (not middie middleware), so forcing it is safe.
-  "fast-uri@<3.1.2": ">=3.1.2"
+  # 2026-07-21: two new fast-uri high advisories (GHSA-4c8g-83qw-93j6 host confusion, patched 3.1.3;
+  # GHSA-v2hh-gcrm-f6hx backslash authority delimiter, patched 3.1.4) — bump the floor from 3.1.2 to 3.1.4
+  # so both are remediated (not ignored). Still transitive via @nestjs/platform-fastify>fastify>ajv.
+  "fast-uri@<3.1.4": ">=3.1.4"
   "@fastify/middie@<9.3.2": ">=9.3.2"
   # 2026-07-20 (GHSA-3jxr-9vmj-r5cp, GHSA-52cp-r559-cp3m): brace-expansion exponential-expansion DoS across
   # all three major lines (transitive via exceljs→archiver/unzipper→glob, @nestjs/cli, @vitest/coverage-v8)
@@ -48,4 +51,6 @@ auditConfig:
     #     fastify (GHSA-jx2c — now 5.x), fast-uri (GHSA-q3j6/v39h — override ≥3.1.2).
     # --- runtime: still accepted under documented remediation ---
     - GHSA-q7rr-3cgh-j5r3 # @opentelemetry/sdk-node Prometheus exporter crash (metrics endpoint not public; OTel optional)
+    - GHSA-45rx-2jwx-cxfr # @opentelemetry/propagator-jaeger<2.9.0 DoS via malformed Jaeger trace header (transitive via @opentelemetry/sdk-node>sdk-trace-node). OTel is optional (ALLOW_NO_OBSERVABILITY) and the Jaeger propagator is only active if Jaeger propagation is configured — not enabled in prod; DoS not RCE. Accept under remediation; track the OTel SDK bump to propagator-jaeger≥2.9.0.
+    - GHSA-f88m-g3jw-g9cj # sharp<0.35 inherited libvips CVEs (CVE-2026-33327/33328/35590/35591) — transitive via next>sharp (image optimizer). Malicious-image parsing; our image pipeline routes through the SSRF/isSafeObjectKey guards and sizes are bounded. Forcing sharp≥0.35 via override risks the Next build (native binary + optionalDependency), so accept under remediation and track the Next upgrade that bundles sharp≥0.35.
     # (GHSA-gpj5-g38j-94v9 drizzle-orm — REMEDIATED: upgraded to 0.45.2; removed from ignore-list. See vulnerability-triage.md.)
