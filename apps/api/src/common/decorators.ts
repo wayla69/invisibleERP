@@ -12,6 +12,17 @@ export const NO_TX_KEY = 'noTx';
 // (static config/health) — applying this to a tenant-reading handler reintroduces cross-tenant leaks.
 export const NoTx = () => SetMetadata(NO_TX_KEY, true);
 
+export const AUDIT_READ_KEY = 'auditRead';
+// Mark a READ route as a data-EGRESS act that must leave an audit_log row, even though reads are otherwise
+// unlogged. Ordinary reads are RLS-confined and logging them would drown the per-tenant hash chain — but a
+// BULK EXPORT is not an ordinary read: `GET /api/masterdata/customers/export` hands over every customer row
+// as a file, `GET /api/admin/audit/export` hands over the audit trail itself. Those leave the system, so the
+// act of taking them is itself evidence an auditor needs (and PDPA accountability requires for personal
+// data). The reason string is recorded as meta.audit_read so the trail says WHAT left, not merely that a GET
+// happened. Read the flag via Reflector in AuditInterceptor — same seam as @PlatformAdmin, so no service
+// needs to hand-write an audit row (cf. the one-off CRM.CDP_EXPORT insert this generalises).
+export const AuditRead = (reason: string) => SetMetadata(AUDIT_READ_KEY, reason);
+
 export const PLATFORM_ADMIN_KEY = 'platformAdmin';
 // Restrict a route to a PLATFORM owner (cross-tenant operator, not a per-tenant Admin) and grant it an RLS
 // bypass so it can provision a brand-new tenant. PlatformAdminGuard verifies the caller's username is in

@@ -75,7 +75,7 @@ can't approve their own request. **Doc-sync:** PN-29 §budget-optimizer + user m
 
 > **Status: DELIVERED** — platform pushes per-customer CLV / churn / next-best-action (interpretable
 > first cut in `rfm_model.customer_intelligence`); ERP lands them on SEPARATE `customer_profiles.mi_clv` /
-> `mi_churn_risk` / `mi_nba` (migration 0466, never clobbering the own churn/LTV; a segment-only push
+> `mi_churn_risk` / `mi_nba` (migration 0467, never clobbering the own churn/LTV; a segment-only push
 > leaves them intact); read-only drill-down `GET /api/marketing-intel/segment/:segment/customers`; web
 > Customer Intelligence tab; advisory (sole contact = the consent-gated campaign draft); control MKT-18.
 
@@ -107,7 +107,7 @@ offer — routed through the **existing consent-gated delivery** as a draft.
 ## Phase 3 — Closed-loop Measurement (incrementality feedback) — **DELIVERED**
 
 > **Status: DELIVERED** — activating a pushed segment splits it into a treatment arm + a randomised
-> immutable holdout control (migration 0467; treatment-only `audience:'members'` campaign so controls are
+> immutable holdout control (migration 0468; treatment-only `audience:'members'` campaign so controls are
 > never contacted); after the window `POST /experiments/measure` computes lift on real POS revenue via
 > `CrmService.revenueByMembers` (no cross-domain join); outcomes pull-back `GET /api/v1/marketing/
 > experiment-outcomes` (analytics:read) feeds the platform; web Incrementality tab; control MKT-19.
@@ -138,7 +138,7 @@ must exist as an API/event first.
 
 ## Phase 4 — Model Governance (SOX / ICFR-fit) — **DELIVERED**
 
-> **Status: DELIVERED** — opt-in per-tenant governance (migration 0468): a pushed run lands Pending and
+> **Status: DELIVERED** — opt-in per-tenant governance (migration 0469): a pushed run lands Pending and
 > needs approval by a second person (≠ the pusher; `assertMakerChecker`), consumers gated (Approved-only
 > curves; `ANALYTICS_NOT_APPROVED` activate); model cards on each run; drift vs the prior approved R²
 > flagged into GOV-01 + the BiLive SSE bus and blocked without a reason; a run → plan → experiment audit
@@ -192,6 +192,6 @@ earlier data (response curves, per-customer scores, campaign outcomes).
 |---|---|---|
 | v0.1 | 2026-07-22 | Initial 4-phase depth roadmap (prescriptive · customer-intel · closed-loop · governance). |
 | v0.2 | 2026-07-22 | Phase 1 DELIVERED — platform emits Hill response-curve contract (`saturation.{beta,kappa,slope}`, raw-spend); ERP optimiser/simulate/staged budget plans + web Budget Planner tab + MKT-17. |
-| v0.3 | 2026-07-22 | Phase 2 DELIVERED — platform pushes per-customer CLV / churn / next-best-action; ERP lands them on separate `customer_profiles.mi_*` (migration 0466) + read-only segment drill-down + web Customer Intelligence tab; advisory, consent-gated; MKT-18. |
-| v0.4 | 2026-07-22 | Phase 3 DELIVERED — holdout A/B experiments (immutable treatment/control arms, migration 0467; treatment-only `audience:'members'` campaign) + real-revenue lift via `CrmService.revenueByMembers` + outcomes pull-back (`GET /api/v1/marketing/experiment-outcomes`) + web Incrementality tab; MKT-19. |
-| v0.5 | 2026-07-22 | **Phase 4 DELIVERED — ALL FOUR PHASES COMPLETE.** Opt-in per-tenant model governance (migration 0468): maker-checker approval (approver ≠ pusher) on spend/contact-driving runs + gated consumers, model cards, drift → GOV-01 + SSE + block-without-reason, and a run → plan → experiment audit trail; web Governance tab; MKT-20. |
+| v0.3 | 2026-07-22 | Phase 2 DELIVERED — platform pushes per-customer CLV / churn / next-best-action; ERP lands them on separate `customer_profiles.mi_*` (migration 0467) + read-only segment drill-down + web Customer Intelligence tab; advisory, consent-gated; MKT-18. |
+| v0.4 | 2026-07-22 | Phase 3 DELIVERED — holdout A/B experiments (immutable treatment/control arms, migration 0468; treatment-only `audience:'members'` campaign) + real-revenue lift via `CrmService.revenueByMembers` + outcomes pull-back (`GET /api/v1/marketing/experiment-outcomes`) + web Incrementality tab; MKT-19. |
+| v0.5 | 2026-07-22 | **Phase 4 DELIVERED — ALL FOUR PHASES COMPLETE.** Opt-in per-tenant model governance (migration 0469): maker-checker approval (approver ≠ pusher) on spend/contact-driving runs + gated consumers, model cards, drift → GOV-01 + SSE + block-without-reason, and a run → plan → experiment audit trail; web Governance tab; MKT-20. |
