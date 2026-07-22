@@ -224,4 +224,11 @@ export const planHelpers = {
   stockFor(stock: StockPosition[], branchId: number | null, itemId: string) {
     return stock.find((s) => s.branchId === branchId && s.itemId === itemId);
   },
+  /** Mean over all values of a K×H sample-path grid (docs/58 C2 coherence check). */
+  meanOfPaths(paths: number[][]): number {
+    let sum = 0;
+    let n = 0;
+    for (const row of paths) for (const v of row) { sum += v; n++; }
+    return n > 0 ? sum / n : 0;
+  },
 };

@@ -1,4 +1,4 @@
--- 0463_mi_customer_intel
+-- 0464_mi_customer_intel
 -- docs/60 Phase 2 — Customer Intelligence (CLV / Churn / Next-Best-Action). The external Marketing
 -- Intelligence platform computes per-customer predicted CLV, churn probability, and a next-best-action
 -- code, and PUSHES them into the ERP (scope analytics:write). They land on customer_profiles as columns

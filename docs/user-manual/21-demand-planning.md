@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.2**
+**Status: DRAFT v0.4**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -42,6 +42,13 @@ Two kinds of day are deliberately ignored when learning the pattern:
 
 Thai public holidays, promotions and the pay cycle are supplied to the forecast so it anticipates the
 Songkran rush rather than being surprised by it.
+
+> **Promotions lift the forecast automatically.** When you run a promotion, the forecast now expects the
+> extra demand on the promo days and orders for it — so a 25%-off weekend does not stock out on day one. Only
+> your **approved** promotions count: the system reads them from your promotions list itself, so nobody can
+> inflate an order by typing in a promotion that was never approved. Each forecast records *why* a quantity
+> moved (for example "+30% — weekend promo"), so a reviewer can see the promotion behind the number. A
+> "what-if" you try in the scenario tool is clearly marked advisory and can never turn into a real order.
 
 ---
 
@@ -85,6 +92,11 @@ shape of your organisation:
 You do **not** have to declare anything: if you skip this, the system builds the obvious two-level structure
 (each branch under one total, each category under one total) automatically. Declaring a hierarchy changes no
 forecast number on its own — it prepares the coherent multi-level view that reconciliation will use.
+
+> **Totals now add up.** The system reconciles the branch forecasts so a "whole chain" figure equals the sum
+> of the branches it is built from — a regional or company total no longer disagrees with the branch plans
+> underneath it. With the default (bottom-up) reconciliation your per-branch order quantities are unchanged;
+> only the roll-up view becomes coherent.
 
 ---
 
@@ -230,4 +242,6 @@ design; ask your administrator.
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-07-21 | New chapter — docs/54 supply-chain planning: demand forecasting, order plans with maker-checker approval, purchase-requisition hand-off, scenario planning and demand-spike alerts. |
+| 0.4 | 2026-07-22 | Added §2 note — branch forecasts now reconcile so chain/region totals equal the sum of their branches (docs/58 Track C · C2); default bottom-up leaves per-branch quantities unchanged. |
+| 0.3 | 2026-07-22 | Added §1 note — promotions now lift the forecast automatically (docs/56 Track A · A1); server-derived from approved promotions only (a fabricated promo cannot inflate an order), with promo attribution shown per line. |
 | 0.2 | 2026-07-22 | Added §2 "To declare a reporting hierarchy (optional)" — docs/58 Track C · C1: declare branch→region→company / item→category→total structures (or let the system synthesize the obvious two-level tree). Definition only; changes no forecast number. |

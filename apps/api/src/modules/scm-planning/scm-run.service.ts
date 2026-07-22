@@ -156,16 +156,50 @@ export class ScmRunService {
           holidays: data.holidays.map((h) => ({ ...h, lower_window: 0, upper_window: 0 })),
           closures: [...new Set([...closures, ...chunk.flatMap((s) => s.closedDays)])],
           payday_regressor: true,
+          // docs/56 A1 — governed promo/price regressors (server-derived; SCM-04). scenario=false:
+          // a production run is never an advisory what-if and can never be auto-conversion-barred.
+          promo_regressor: true,
+          price_regressor: true,
+          scenario: false,
+          // docs/58 C2 — reconcile the branch's menu series up to a coherent TOTAL (bottom_up: leaves
+          // unchanged, the aggregate is their exact sum). Absent history/axis depth ⇒ a flat 2-level
+          // forest; C3/C4 deepen it (categories, MinT). Explosion consumes the RECONCILED leaf paths.
+          reconciliation: {
+            method: 'bottom_up' as const,
+            covariance: 'wls_struct' as const,
+            reconcile_paths: true,
+            nodes: [
+              { node_id: 'TOTAL', parent_id: null },
+              ...chunk.map((s) => ({ node_id: `L:${s.itemId}`, parent_id: 'TOTAL', series_id: s.itemId })),
+            ],
+          },
           series: chunk.map((s) => ({
             series_id: s.itemId,
             class_hint: 'auto' as const,
             history: s.values.map((y, i) => ({ ds: addDaysYmd(s.startDate, i), y })),
+            ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
           })),
         };
         digestParts.push(createHash('sha256').update(JSON.stringify(req)).digest('hex'));
         const res = await this.engine.forecast(req);
+
+        // C2 trust boundary: use the reconciled (coherent) leaf paths only when the returned aggregate
+        // really equals their sum within tolerance; else degrade to the base forecast. A malformed
+        // hierarchy makes the engine return an error + empty `reconciled`, so we fall back safely.
+        const reconLeaf = new Map<string, number[][]>();
+        const totalNode = res.reconciled.find((node) => node.node_id === 'TOTAL');
+        for (const node of res.reconciled) {
+          if (node.node_id.startsWith('L:')) reconLeaf.set(node.node_id.slice(2), node.sample_paths);
+        }
+        let coherent = reconLeaf.size > 0 && !!totalNode;
+        if (coherent && totalNode) {
+          const leafMeanSum = [...reconLeaf.values()].reduce((a, pg) => a + planHelpers.meanOfPaths(pg), 0);
+          const totalMean = planHelpers.meanOfPaths(totalNode.sample_paths);
+          coherent = Math.abs(leafMeanSum - totalMean) <= 1e-6 * Math.max(1, Math.abs(totalMean));
+        }
         for (const r of res.results) {
-          menuPaths.set(r.series_id, r.sample_paths);
+          const paths = coherent ? (reconLeaf.get(r.series_id) ?? r.sample_paths) : r.sample_paths;
+          menuPaths.set(r.series_id, paths);
           await this.saveForecast(tenantId, runId, branchId, r.series_id, 'menu', r, today, horizon);
         }
         for (const err of res.errors) engineErrors.push(`${err.ref}: ${err.code}`);
@@ -309,9 +343,17 @@ export class ScmRunService {
   private async saveForecast(
     tenantId: number | null, runId: number, branchId: number | null, itemId: string,
     level: 'menu' | 'ingredient',
-    r: { model: string; points: { q: Record<string, number> }[]; accuracy: { wape: number | null } },
+    r: {
+      model: string; points: { q: Record<string, number> }[]; accuracy: { wape: number | null };
+      attribution?: {
+        promo_uplift_pct: number | null; price_elasticity: number | null; regressors_used: string[];
+      } | null;
+    },
     today: string, horizon: number,
   ) {
+    // docs/56 A1 — persist attribution so the plan can surface promo reasons and a reviewer can tie
+    // a moved quantity back to a governed input (SCM-04).
+    const a = r.attribution ?? null;
     await this.db.insert(scmDemandForecasts).values({
       tenantId: tenantId ?? null, runId, branchId, itemId, level, method: r.model,
       horizon, startDate: addDaysYmd(today, 1),
@@ -320,6 +362,9 @@ export class ScmRunService {
       p50: r.points.map((p) => p.q['0.5'] ?? null),
       p90: r.points.map((p) => p.q['0.9'] ?? null),
       wape: r.accuracy.wape != null ? String(r.accuracy.wape) : null,
+      promoUpliftPct: a?.promo_uplift_pct != null ? String(a.promo_uplift_pct) : null,
+      priceElasticity: a?.price_elasticity != null ? String(a.price_elasticity) : null,
+      regressorsUsed: a?.regressors_used ?? [],
     });
   }
 

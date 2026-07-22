@@ -1,6 +1,7 @@
 // docs/54 — shared types + job identifiers for the SCM planning module.
 // Pure types and consts only (no DI, no imports from sibling services) so any file in the module can
 // import this without creating a cycle. Wire types for the Python engine come from @ierp/shared.
+import type { ScmSeriesRegressor } from '@ierp/shared';
 
 export const SCM_NIGHTLY_JOB = 'scm_nightly_plan';
 export const SCM_REPLAN_JOB = 'scm_replan';
@@ -100,6 +101,10 @@ export interface ExtractedTenantData {
   holidays: { name: string; ds: string }[];
   ingredientIds: string[];
   branchNullShare: number; // fraction of demand that landed in the untagged unit (config warning)
+  // docs/56 A1 — governed promo/price regressors per menu sku (server-derived; SCM-04). Empty ⇒ no
+  // governed promo in the window, so the forecast is byte-identical to the pre-A1 baseline.
+  regressors: Map<string, ScmSeriesRegressor[]>;
+  promoCoverage: number; // share of forecast series that carry ≥1 promo day (a data-quality signal)
 }
 
 export interface PlanRunResult {
