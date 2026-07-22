@@ -333,6 +333,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.planning': { th: 'งบประมาณ & แผน', en: 'Budgets & Plans' },
   'nav.budget': { th: 'งบประมาณเทียบจริง (Budget vs Actual)', en: 'Budget vs Actual' },
   'nav.demand': { th: 'พยากรณ์ความต้องการ (สถิติ + backtest)', en: 'Demand Forecast (statistical)' }, // docs/27 R4-5: classical models honestly labeled — not ML
+  'nav.network': { th: 'เครือข่ายซัพพลาย', en: 'Supply network' }, // docs/57 Track B (B1) — multi-echelon topology master data
   'nav.projects': { th: 'โครงการ (Projects)', en: 'Projects' },
   'nav.pm_portfolio': { th: 'พอร์ตโครงการ', en: 'Portfolio' },
   'nav.pm_action_center': { th: 'ศูนย์งานที่ต้องทำ', en: 'Action Center' },
