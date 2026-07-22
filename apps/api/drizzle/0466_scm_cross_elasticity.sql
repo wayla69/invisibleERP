@@ -28,10 +28,20 @@ CREATE INDEX IF NOT EXISTS idx_scm_cross_elasticity_tenant ON scm_cross_elastici
 --> statement-breakpoint
 
 -- app_user grants + re-apply the CANONICAL org-scoped tenant_isolation policy (0232 form). Idempotent.
+--
+-- EXCLUDES `audit_expectations` (migration 0465). That table carries a tenant_id column, so this generic
+-- loop would sweep it in — but its tenant_isolation policy is DELIBERATELY permissive (USING/ WITH CHECK
+-- true), and re-scoping it here is a real bug, not bureaucracy: the completeness counter is bumped INSIDE
+-- the business transaction and is keyed on the AUDIT ROW's tenant (the operator's own), while a god
+-- acting-as another company runs with app.tenant_id pinned to the TARGET and bypass OFF. A scoped WITH
+-- CHECK therefore REJECTS that bump, and a statement that fails inside the business tx ABORTS it (25P02) —
+-- taking every god act-as POST/PATCH/DELETE down with it (bit cutover:sme's god sign-off). 0465 chose a
+-- permissive policy over a savepoint on purpose (see its header); this loop must not silently undo that.
+-- Any future migration copying this loop MUST keep this exclusion.
 DO $$ DECLARE r record; BEGIN
   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user';
   EXECUTE 'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_user';
-  FOR r IN SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id' LOOP
+  FOR r IN SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id' AND table_name <> 'audit_expectations' LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.table_name);
     EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', r.table_name);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON public.%I', r.table_name);

@@ -498,7 +498,16 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   loop; `tenants` has no `tenant_id` column) so tenants-level org isolation + `pg-smoke` can look green while
   data-table sharing is broken — `pg-core` now **hard-asserts** data-table sharing (`org1===2`). **NB PGlite
   DOES execute the `DO`-loop** (verified 0.2.17) — a DO-loop migration needs no parallel statement list. Full
-  model: `docs/ops/tenancy-model.md`.
+  model: `docs/ops/tenancy-model.md`. **Mirror-image trap — the generic loop also CLOBBERS an intentionally
+  NON-canonical policy.** `audit_expectations` (0465) has a DELIBERATELY **permissive** `tenant_isolation`
+  (`USING/WITH CHECK true`) because its completeness counter is bumped INSIDE the business tx keyed on the
+  AUDIT ROW's tenant (the operator's own) while a god acting-as another company runs bypass-OFF with
+  `app.tenant_id` pinned to the TARGET — a scoped `WITH CHECK` REJECTS that bump and the failing statement
+  ABORTS the whole tx (25P02), 500-ing **every god act-as POST/PATCH/DELETE** (bit `cutover:sme`'s god
+  sign-off — the first migration whose generic loop ran *after* 0465, A3's `0466`, re-scoped it and broke it).
+  So the generic loop's `SELECT … WHERE column_name='tenant_id'` **MUST exclude `audit_expectations`**
+  (`AND table_name <> 'audit_expectations'`) — 0465 chose permissive over a savepoint on purpose; the loop
+  must not silently undo it. Any new migration copying the loop keeps this exclusion.
 - **drizzle-orm is on `^0.45.2`** (bumped from 0.36.4 in W4, 2026-06-30 — the SQLi advisory is remediated).
   **0.45 wraps every driver error in a `DrizzleQueryError` with the original pg/PGlite error (SQLSTATE
   `code`/`constraint`/`detail`) nested under `.cause`** — so never read `e.code`/`e.constraint` directly on a
