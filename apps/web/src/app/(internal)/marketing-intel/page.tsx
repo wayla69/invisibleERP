@@ -30,11 +30,14 @@ interface Summary {
 // Pastel palette built from the app's own chart tokens (theme-aware in light + dark). `color-mix` blends the
 // token with the card surface, so a "tint" stays soft in both themes while the full token drives accents.
 const HUES = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
-const tintBg = (h: string, pctMix = 12): CSSProperties => ({
+// Softer pastel: lighter tint mix on surfaces, and accents (bars/donut/dots) desaturated toward the card so
+// the palette reads gentle rather than punchy — still theme-aware via color-mix.
+const tintBg = (h: string, pctMix = 9): CSSProperties => ({
   background: `color-mix(in oklch, ${h} ${pctMix}%, var(--card))`,
-  borderColor: `color-mix(in oklch, ${h} 22%, var(--border))`,
+  borderColor: `color-mix(in oklch, ${h} 16%, var(--border))`,
 });
-const softText = (h: string): CSSProperties => ({ color: `color-mix(in oklch, ${h} 72%, var(--foreground))` });
+const softText = (h: string): CSSProperties => ({ color: `color-mix(in oklch, ${h} 66%, var(--foreground))` });
+const fill = (h: string): string => `color-mix(in oklch, ${h} 78%, var(--card))`; // muted accent for bars/donut/dots
 const compactBaht = (v: number): string =>
   v >= 1e6 ? `฿${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `฿${Math.round(v / 1e3)}K` : `฿${Math.round(v)}`;
 
@@ -78,12 +81,12 @@ export default function MarketingIntelPage() {
         className="relative overflow-hidden rounded-2xl border p-6 sm:p-7"
         style={{
           background:
-            'linear-gradient(135deg, color-mix(in oklch, var(--chart-1) 15%, var(--card)), color-mix(in oklch, var(--chart-5) 15%, var(--card)) 48%, color-mix(in oklch, var(--chart-2) 15%, var(--card)))',
-          borderColor: 'color-mix(in oklch, var(--chart-5) 22%, var(--border))',
+            'linear-gradient(135deg, color-mix(in oklch, var(--chart-1) 11%, var(--card)), color-mix(in oklch, var(--chart-5) 11%, var(--card)) 48%, color-mix(in oklch, var(--chart-2) 11%, var(--card)))',
+          borderColor: 'color-mix(in oklch, var(--chart-5) 16%, var(--border))',
         }}
       >
-        <div className="pointer-events-none absolute -right-8 -top-10 size-40 rounded-full opacity-50 blur-2xl"
-          style={{ background: 'color-mix(in oklch, var(--chart-4) 40%, transparent)' }} />
+        <div className="pointer-events-none absolute -right-8 -top-10 size-40 rounded-full opacity-40 blur-2xl"
+          style={{ background: 'color-mix(in oklch, var(--chart-4) 26%, transparent)' }} />
         <div className="relative flex flex-wrap items-start gap-4">
           <div className="flex size-12 items-center justify-center rounded-2xl bg-background/70 shadow-sm backdrop-blur">
             <Sparkles className="size-6" style={softText('var(--chart-5)')} />
@@ -145,7 +148,7 @@ export default function MarketingIntelPage() {
                         const share = totalSpend ? (Number(c?.spend) || 0) / totalSpend * 100 : 0;
                         return (
                           <div key={String(c.channel)} className="flex items-center gap-2 text-xs">
-                            <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: hue }} />
+                            <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: fill(hue) }} />
                             <span className="flex-1 truncate">{String(c.channel)}</span>
                             <span className="tabular-nums text-muted-foreground">{num(share, 1)}%</span>
                           </div>
@@ -161,10 +164,10 @@ export default function MarketingIntelPage() {
                     const roi = Number(c?.roi) || 0;
                     const isTop = topChannel && String(c.channel) === String(topChannel.channel);
                     return (
-                      <div key={String(c.channel)} className="rounded-xl border p-4" style={tintBg(hue)}>
+                      <div key={String(c.channel)} className="rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={tintBg(hue)}>
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2 font-medium">
-                            <span className="inline-block size-2.5 rounded-full" style={{ background: hue }} />
+                            <span className="inline-block size-2.5 rounded-full" style={{ background: fill(hue) }} />
                             {String(c.channel)}
                             {isTop && (
                               <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2 py-0.5 text-[11px] font-semibold shadow-sm" style={softText('var(--chart-4)')}>
@@ -178,7 +181,7 @@ export default function MarketingIntelPage() {
                         </div>
                         <div className="mt-3 flex items-center gap-3">
                           <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-background/60">
-                            <div className="h-full rounded-full" style={{ width: `${Math.max(4, (roi / maxRoi) * 100)}%`, background: hue }} />
+                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(4, (roi / maxRoi) * 100)}%`, background: fill(hue) }} />
                           </div>
                           <div className="w-40 shrink-0 text-right text-xs text-muted-foreground">
                             <span className="tabular-nums">{baht(c.spend ?? 0)}</span>
@@ -194,14 +197,17 @@ export default function MarketingIntelPage() {
                 {/* Run history — period comparison strip */}
                 {histRuns.length > 1 && (
                   <div className="space-y-2 pt-1">
-                    <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><History className="size-4" /> {t('mi.history_heading')}</h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><History className="size-4" /> {t('mi.history_heading')}</h3>
+                      <Sparkline values={[...histRuns].reverse().map((r) => Number(r?.r2)).filter((n) => !Number.isNaN(n))} hue="var(--chart-2)" />
+                    </div>
                     <div className="flex gap-3 overflow-x-auto pb-1">
                       {histRuns.map((r, i) => {
                         const prev = histRuns[i + 1];
                         const r2 = Number(r?.r2);
                         const delta = prev != null ? r2 - Number(prev?.r2) : 0;
                         return (
-                          <div key={String(r.pushed_at ?? r.model_run_ref ?? i)} className="min-w-[150px] shrink-0 rounded-xl border p-3" style={tintBg('var(--chart-2)', 9)}>
+                          <div key={String(r.pushed_at ?? r.model_run_ref ?? i)} className="min-w-[150px] shrink-0 rounded-xl border p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm" style={tintBg('var(--chart-2)', 8)}>
                             <div className="text-xs text-muted-foreground">{r.pushed_at ? new Date(r.pushed_at).toLocaleDateString() : '—'}</div>
                             <div className="mt-1 flex items-baseline gap-1.5">
                               <span className="text-lg font-semibold tabular-nums">{r2 != null && !Number.isNaN(r2) ? r2.toFixed(2) : '—'}</span>
@@ -232,7 +238,7 @@ export default function MarketingIntelPage() {
                     const hue = segHue(String(s.segment), i);
                     const share = totalCustomers ? (Number(s.customers) || 0) / totalCustomers * 100 : 0;
                     return (
-                      <div key={String(s.segment)} className="flex flex-col rounded-2xl border p-5" style={tintBg(hue)}>
+                      <div key={String(s.segment)} className="flex flex-col rounded-2xl border p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg" style={tintBg(hue)}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span className="flex size-9 items-center justify-center rounded-xl bg-background/70 shadow-sm">
@@ -252,7 +258,7 @@ export default function MarketingIntelPage() {
                           </div>
                         </div>
                         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-background/60">
-                          <div className="h-full rounded-full" style={{ width: `${Math.max(3, share)}%`, background: hue }} />
+                          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(3, share)}%`, background: fill(hue) }} />
                         </div>
                         <Button
                           size="sm" variant="outline"
@@ -278,7 +284,7 @@ export default function MarketingIntelPage() {
                     const hue = HUES[i % HUES.length];
                     const code = String(it.quadrant ?? '').trim().split(/[\s(]/)[0] || '•';
                     return (
-                      <div key={`${it.quadrant}-${it.factor ?? it.recommendation ?? i}`} className="rounded-2xl border p-5" style={tintBg(hue)}>
+                      <div key={`${it.quadrant}-${it.factor ?? it.recommendation ?? i}`} className="rounded-2xl border p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={tintBg(hue)}>
                         <div className="flex items-center gap-2.5">
                           <span className="flex size-9 items-center justify-center rounded-xl bg-background/70 text-sm font-bold shadow-sm" style={softText(hue)}>{code}</span>
                           <span className="text-sm font-semibold">{String(it.quadrant)}</span>
@@ -315,7 +321,7 @@ function SectionTitle({ icon: Icon, hue, children }: { icon: typeof BarChart3; h
 
 function KpiCard({ hue, icon: Icon, label, value }: { hue: string; icon: typeof BarChart3; label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border p-5" style={tintBg(hue)}>
+    <div className="rounded-2xl border p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={tintBg(hue)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-muted-foreground">{label}</p>
@@ -329,6 +335,30 @@ function KpiCard({ hue, icon: Icon, label, value }: { hue: string; icon: typeof 
   );
 }
 
+// Tiny inline-SVG sparkline (no chart lib) — R² across recent MMM runs, oldest → newest, with a soft area
+// fill and an end marker.
+function Sparkline({ values, hue, width = 132, height = 34 }: { values: number[]; hue: string; width?: number; height?: number }) {
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const pad = 4;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * (width - pad * 2) + pad;
+    const y = height - pad - ((v - min) / span) * (height - pad * 2);
+    return [x, y] as const;
+  });
+  const last = pts[pts.length - 1];
+  const area = `M ${pts.map((p) => p.join(' ')).join(' L ')} L ${last[0]} ${height} L ${pts[0][0]} ${height} Z`;
+  return (
+    <svg width={width} height={height} className="shrink-0" aria-hidden>
+      <path d={area} fill={hue} opacity={0.1} />
+      <polyline points={pts.map((p) => p.join(',')).join(' ')} fill="none" stroke={hue} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={last[0]} cy={last[1]} r={2.6} fill={hue} />
+    </svg>
+  );
+}
+
 // Pure-CSS conic-gradient donut (no chart lib → deterministic render, theme-agnostic). Segments size by
 // value; the centre punches out to the card surface via an inset circle.
 function Donut({ segments, center }: { segments: { label: string; value: number; hue: string }[]; center: string }) {
@@ -339,7 +369,7 @@ function Donut({ segments, center }: { segments: { label: string; value: number;
       const start = (acc / total) * 100;
       acc += s.value;
       const end = (acc / total) * 100;
-      return `${s.hue} ${start}% ${end}%`;
+      return `${fill(s.hue)} ${start}% ${end}%`;
     })
     .join(', ');
   return (
