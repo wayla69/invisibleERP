@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, jsonb, timestamp, numeric, index } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Marketing Intelligence push-back store (migration 0460, docs/48 phase 3).
@@ -19,3 +19,23 @@ export const miAnalyticsSnapshots = pgTable('mi_analytics_snapshots', {
   pushedBy: text('pushed_by'),
   pushedAt: timestamp('pushed_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenantKind: index('idx_mi_snapshots_tenant').on(t.tenantId, t.kind) }));
+
+// Budget Optimizer plans (migration 0462, docs/60 Phase 1). A prescriptive MMM allocation the planner
+// STAGES for approval — advisory only, never posts spend. Maker-checker: the approver (approved_by) must
+// differ from the requester (requested_by), enforced in the service via assertMakerChecker (control MKT-17).
+// Tenant-scoped: 0462 applies the canonical 0232-form org RLS loop + a leading (tenant_id, …) index.
+export const miBudgetPlans = pgTable('mi_budget_plans', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  planNo: text('plan_no').notNull(),
+  totalBudget: numeric('total_budget').notNull(),
+  allocation: jsonb('allocation').notNull().default({}), // { channel: spend }
+  predictedSales: numeric('predicted_sales'),
+  basis: text('basis'), // the MMM model_run_ref the curves came from, or 'derived'
+  status: text('status').notNull().default('Pending'), // Pending | Approved | Rejected
+  note: text('note'),
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, (t) => ({ byTenant: index('idx_mi_budget_plans_tenant').on(t.tenantId, t.status, t.createdAt) }));

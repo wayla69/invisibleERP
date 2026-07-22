@@ -2,7 +2,10 @@ import { Controller, Get, Post, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { MarketingIntelService } from './marketing-intel.service';
+import {
+  MarketingIntelService,
+  SimulateBody, OptimizeBody, StageBudgetPlanBody, ApproveBudgetPlanBody,
+} from './marketing-intel.service';
 
 const ActivateBody = z.object({
   segment: z.string().min(1).max(80),
@@ -41,5 +44,44 @@ export class MarketingIntelController {
   @Permissions('crm_campaign', 'marketing', 'exec')
   activate(@Body(new ZodValidationPipe(ActivateBody)) b: z.infer<typeof ActivateBody>, @CurrentUser() u: JwtUser) {
     return this.svc.activateSegment(b, u);
+  }
+
+  // ─── Budget Optimizer (docs/60 Phase 1, control MKT-17) ──────────────────────────────────────────────
+  @Get('response-curves')
+  @Permissions('marketing', 'exec')
+  responseCurves(@CurrentUser() u: JwtUser) {
+    return this.svc.responseCurves(u);
+  }
+
+  @Post('simulate')
+  @Permissions('marketing', 'exec')
+  simulate(@Body(new ZodValidationPipe(SimulateBody)) b: z.infer<typeof SimulateBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.simulate(u, b);
+  }
+
+  @Post('optimize')
+  @Permissions('marketing', 'exec')
+  optimize(@Body(new ZodValidationPipe(OptimizeBody)) b: z.infer<typeof OptimizeBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.optimize(u, b);
+  }
+
+  @Get('budget-plans')
+  @Permissions('marketing', 'exec')
+  budgetPlans(@CurrentUser() u: JwtUser) {
+    return this.svc.listBudgetPlans(u);
+  }
+
+  // STAGE a budget plan (advisory; never posts spend). A DIFFERENT user must approve it.
+  @Post('budget-plan')
+  @Permissions('marketing', 'exec', 'pr_raise')
+  stageBudgetPlan(@Body(new ZodValidationPipe(StageBudgetPlanBody)) b: z.infer<typeof StageBudgetPlanBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.stageBudgetPlan(u, b);
+  }
+
+  // APPROVE a staged plan — maker-checker (approver ≠ requester), gated to the approver duties.
+  @Post('budget-plan/approve')
+  @Permissions('exec', 'approvals')
+  approveBudgetPlan(@Body(new ZodValidationPipe(ApproveBudgetPlanBody)) b: z.infer<typeof ApproveBudgetPlanBody>, @CurrentUser() u: JwtUser) {
+    return this.svc.approveBudgetPlan(u, b);
   }
 }

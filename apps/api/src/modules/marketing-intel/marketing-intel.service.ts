@@ -1,10 +1,12 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { miAnalyticsSnapshots, customerProfiles, posMembers } from '../../database/schema';
+import { miAnalyticsSnapshots, miBudgetPlans, customerProfiles, posMembers } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { CampaignsService } from '../campaigns/campaigns.service';
+import { curvesFromMmm, predictSales, optimizeAllocation, type ResponseCurve } from './mmm-optimizer';
 
 // Marketing Intelligence push-back store (docs/48 phase 3). The standalone Python platform computes
 // advanced MMM / Sentiment-Weighted RFM / TOWS in its own warehouse and PUSHES the results into the ERP
@@ -26,6 +28,19 @@ export const PushSnapshotsBody = z.object({
   })).min(1).max(MI_SNAPSHOT_KINDS.length),
 });
 export type PushSnapshotsDto = z.infer<typeof PushSnapshotsBody>;
+
+// Budget Optimizer (docs/60 Phase 1) request bodies.
+export const SimulateBody = z.object({ allocation: z.record(z.number().nonnegative()).refine((a) => Object.keys(a).length > 0, 'allocation required') });
+export const OptimizeBody = z.object({
+  budget: z.number().positive().max(1e12),
+  caps: z.record(z.number().nonnegative()).optional(),
+});
+export const StageBudgetPlanBody = z.object({
+  total_budget: z.number().positive().max(1e12),
+  allocation: z.record(z.number().nonnegative()).refine((a) => Object.keys(a).length > 0, 'allocation required'),
+  note: z.string().max(500).optional(),
+});
+export const ApproveBudgetPlanBody = z.object({ plan_no: z.string().min(1).max(60), self_approval_reason: z.string().max(500).optional() });
 
 @Injectable()
 export class MarketingIntelService {
@@ -161,5 +176,98 @@ export class MarketingIntelService {
       segment: seg,
       body: dto.body ?? `ข้อความถึงกลุ่ม ${seg} (แก้ไขก่อนส่ง)`,
     });
+  }
+
+  // ─── Budget Optimizer (docs/60 Phase 1, control MKT-17) ──────────────────────────────────────────────
+  // Load the latest MMM snapshot's per-channel response curves (pushed saturation params, or a derived
+  // fallback from spend/roi so the planner works before the platform pushes precise params).
+  private async loadCurves(): Promise<{ curves: ResponseCurve[]; basis: string; anyDerived: boolean; hasData: boolean }> {
+    const [row] = await this.db.select({ payload: miAnalyticsSnapshots.payload, modelRunRef: miAnalyticsSnapshots.modelRunRef })
+      .from(miAnalyticsSnapshots).where(eq(miAnalyticsSnapshots.kind, 'mmm'))
+      .orderBy(desc(miAnalyticsSnapshots.pushedAt)).limit(1);
+    if (!row) return { curves: [], basis: 'none', anyDerived: false, hasData: false };
+    const { curves, anyDerived } = curvesFromMmm(row.payload);
+    return { curves, basis: anyDerived ? 'derived' : (row.modelRunRef ?? 'mmm'), anyDerived, hasData: curves.length > 0 };
+  }
+
+  // READ — the response curves + each channel's current spend/predicted, for the planner's charts.
+  async responseCurves(_user: JwtUser) {
+    const { curves, basis, anyDerived, hasData } = await this.loadCurves();
+    const current = predictSales(Object.fromEntries(curves.map((c) => [c.channel, c.currentSpend])), curves);
+    return {
+      has_data: hasData,
+      basis,
+      derived: anyDerived,
+      current_spend: curves.reduce((s, c) => s + c.currentSpend, 0),
+      current_predicted_sales: current.total,
+      channels: curves.map((c) => ({ channel: c.channel, current_spend: c.currentSpend, roi: c.roi, beta: c.beta, kappa: c.kappa, slope: c.slope, derived: c.derived })),
+    };
+  }
+
+  // What-if: predicted incremental sales for a proposed allocation (deterministic, no external call).
+  async simulate(_user: JwtUser, body: z.infer<typeof SimulateBody>) {
+    const { curves, basis, hasData } = await this.loadCurves();
+    if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot to simulate against — push an MMM run first', messageTh: 'ยังไม่มีผล MMM ให้จำลอง (ต้อง push MMM ก่อน)' });
+    const pred = predictSales(body.allocation, curves);
+    return { basis, total_budget: Object.values(body.allocation).reduce((s, v) => s + v, 0), predicted_sales: pred.total, per_channel: pred.perChannel };
+  }
+
+  // Optimise: the allocation of `budget` that maximises predicted incremental sales (greedy water-filling).
+  async optimize(_user: JwtUser, body: z.infer<typeof OptimizeBody>) {
+    const { curves, basis, hasData } = await this.loadCurves();
+    if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot to optimise against — push an MMM run first', messageTh: 'ยังไม่มีผล MMM ให้ค้นหางบที่เหมาะสม (ต้อง push MMM ก่อน)' });
+    const res = optimizeAllocation(body.budget, curves, { caps: body.caps });
+    return { basis, ...res };
+  }
+
+  // STAGE a budget plan for approval (advisory — never posts spend). Maker-checker: a DIFFERENT user must
+  // approve (approveBudgetPlan). Gated to the planning duties in the controller.
+  async stageBudgetPlan(user: JwtUser, body: z.infer<typeof StageBudgetPlanBody>) {
+    const tenantId = user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'no tenant', messageTh: 'ไม่มีผู้เช่า' });
+    const { curves, basis, hasData } = await this.loadCurves();
+    if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot — push an MMM run first', messageTh: 'ยังไม่มีผล MMM (ต้อง push ก่อน)' });
+    const predicted = predictSales(body.allocation, curves).total;
+    const todayCount = (await this.db.select({ id: miBudgetPlans.id }).from(miBudgetPlans).where(eq(miBudgetPlans.tenantId, tenantId))).length;
+    const d = new Date();
+    const planNo = `BP-${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}-${String(todayCount + 1).padStart(3, '0')}`;
+    await this.db.insert(miBudgetPlans).values({
+      tenantId, planNo, totalBudget: String(body.total_budget), allocation: body.allocation,
+      predictedSales: String(predicted), basis, status: 'Pending', note: body.note ?? null,
+      requestedBy: user.username ?? 'user',
+    });
+    return { plan_no: planNo, status: 'Pending', predicted_sales: predicted, basis };
+  }
+
+  async listBudgetPlans(user: JwtUser, limit = 20) {
+    const tenantId = user.tenantId;
+    if (tenantId == null) return { plans: [] };
+    const rows = await this.db.select().from(miBudgetPlans)
+      .where(eq(miBudgetPlans.tenantId, tenantId)).orderBy(desc(miBudgetPlans.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+    return {
+      plans: rows.map((r) => ({
+        plan_no: r.planNo, status: r.status, total_budget: Number(r.totalBudget), predicted_sales: r.predictedSales == null ? null : Number(r.predictedSales),
+        allocation: r.allocation, basis: r.basis, note: r.note, requested_by: r.requestedBy, approved_by: r.approvedBy, created_at: r.createdAt, decided_at: r.decidedAt,
+      })),
+    };
+  }
+
+  // APPROVE a staged plan. Maker-checker (MKT-17): the approver must differ from the requester.
+  async approveBudgetPlan(user: JwtUser, body: z.infer<typeof ApproveBudgetPlanBody>) {
+    const tenantId = user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'no tenant', messageTh: 'ไม่มีผู้เช่า' });
+    const [plan] = await this.db.select().from(miBudgetPlans)
+      .where(and(eq(miBudgetPlans.tenantId, tenantId), eq(miBudgetPlans.planNo, body.plan_no))).limit(1);
+    if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: `budget plan ${body.plan_no} not found`, messageTh: `ไม่พบแผนงบ ${body.plan_no}` });
+    if (plan.status !== 'Pending') throw new BadRequestException({ code: 'PLAN_NOT_PENDING', message: `plan is ${plan.status}`, messageTh: `แผนนี้สถานะ ${plan.status} แล้ว` });
+    await assertMakerChecker(this.db, {
+      user, maker: plan.requestedBy ?? '', event: 'marketing.budget_plan.approve', ref: plan.planNo,
+      reason: body.self_approval_reason, code: 'SOD_SELF_APPROVAL',
+      message: 'Maker-checker: a budget plan must be approved by a different user than the requester',
+      messageTh: 'แบ่งแยกหน้าที่: แผนงบต้องอนุมัติโดยผู้ใช้ที่ต่างจากผู้ขอ', httpStatus: 400,
+    });
+    await this.db.update(miBudgetPlans).set({ status: 'Approved', approvedBy: user.username ?? 'user', decidedAt: new Date() })
+      .where(and(eq(miBudgetPlans.tenantId, tenantId), eq(miBudgetPlans.planNo, body.plan_no)));
+    return { plan_no: plan.planNo, status: 'Approved', approved_by: user.username ?? 'user' };
   }
 }

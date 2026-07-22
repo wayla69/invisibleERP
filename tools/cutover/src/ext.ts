@@ -937,6 +937,44 @@ async function main() {
   const emptyActivate = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'Nonexistent Segment' });
   ok('Push-back: activating an empty segment → 400 EMPTY_SEGMENT (no members)', emptyActivate.status === 400 && emptyActivate.json.error?.code === 'EMPTY_SEGMENT', `${emptyActivate.status} ${emptyActivate.json.error?.code}`);
 
+  // ── Budget Optimizer (docs/60 Phase 1, MKT-17) — prescriptive MMM: response curves + what-if + optimise,
+  //    then a STAGED budget plan under maker-checker (advisory, never posts spend). MMM was pushed above so
+  //    the curves derive a fallback from spend/roi (no saturation params pushed → derived=true). ──
+  const curvesRes = await inj('GET', '/api/marketing-intel/response-curves', cf2admin);
+  ok('BudgetOpt: GET response-curves returns per-channel curves (derived fallback, has_data)', curvesRes.status === 200 && curvesRes.json.has_data === true && (curvesRes.json.channels ?? []).length >= 2 && curvesRes.json.channels.every((c: any) => c.beta > 0 && c.kappa > 0), `${curvesRes.status} n=${(curvesRes.json.channels ?? []).length} derived=${curvesRes.json.derived}`);
+
+  const optRes = await inj('POST', '/api/marketing-intel/optimize', cf2admin, { budget: 100000 });
+  const optSpent = Object.values(optRes.json.allocation ?? {}).reduce((s: number, v: any) => s + Number(v), 0);
+  ok('BudgetOpt: POST optimize spends ~the whole budget with predicted sales > 0', (optRes.status === 200 || optRes.status === 201) && Math.abs(optSpent - 100000) < 1000 && Number(optRes.json.predictedSales) > 0, `${optRes.status} spent=${Math.round(optSpent)} pred=${Math.round(Number(optRes.json.predictedSales || 0))}`);
+
+  const simRes = await inj('POST', '/api/marketing-intel/simulate', cf2admin, { allocation: optRes.json.allocation });
+  ok('BudgetOpt: POST simulate on the optimal allocation reproduces the predicted sales (deterministic)', (simRes.status === 200 || simRes.status === 201) && Math.abs(Number(simRes.json.predicted_sales) - Number(optRes.json.predictedSales)) < 1, `sim=${Math.round(Number(simRes.json.predicted_sales || 0))} opt=${Math.round(Number(optRes.json.predictedSales || 0))}`);
+
+  const simBad = await inj('POST', '/api/marketing-intel/simulate', cf2admin, { allocation: {} });
+  ok('BudgetOpt: simulate with an empty allocation → 400 (validation)', simBad.status === 400, `${simBad.status}`);
+
+  // STAGE a plan as the Planner (cf2ex holds pr_raise). Advisory → Pending, never posts spend.
+  const stageRes = await inj('POST', '/api/marketing-intel/budget-plan', cf2ex, { total_budget: 100000, allocation: optRes.json.allocation, note: 'Q3 reallocation' });
+  const planNo = stageRes.json.plan_no;
+  ok('BudgetOpt: stage a budget plan → Pending (advisory) with a BP- id', (stageRes.status === 200 || stageRes.status === 201) && stageRes.json.status === 'Pending' && /^BP-/.test(planNo ?? ''), `${stageRes.status} ${JSON.stringify({ p: planNo, s: stageRes.json.status })}`);
+
+  // Maker-checker (MKT-17): a DIFFERENT user (cf2admin, exec/approvals) approves the Planner's plan → Approved.
+  const approveOk = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: planNo });
+  ok('BudgetOpt: a different user approves the staged plan → Approved (maker-checker)', (approveOk.status === 200 || approveOk.status === 201) && approveOk.json.status === 'Approved' && approveOk.json.approved_by === 'cf2admin', `${approveOk.status} ${JSON.stringify({ s: approveOk.json.status, by: approveOk.json.approved_by })}`);
+
+  // Self-approval is blocked: the SAME user (cf2admin) that stages a plan cannot approve it.
+  const selfStage = await inj('POST', '/api/marketing-intel/budget-plan', cf2admin, { total_budget: 50000, allocation: optRes.json.allocation });
+  const selfApprove = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: selfStage.json.plan_no });
+  ok('BudgetOpt: the requester cannot approve their OWN plan → SOD_SELF_APPROVAL', selfApprove.status === 400 && selfApprove.json.error?.code === 'SOD_SELF_APPROVAL', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+
+  // Approving a non-existent plan → 404.
+  const approveMissing = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: 'BP-nope-999' });
+  ok('BudgetOpt: approving a non-existent plan → 404 PLAN_NOT_FOUND', approveMissing.status === 404 && approveMissing.json.error?.code === 'PLAN_NOT_FOUND', `${approveMissing.status} ${approveMissing.json.error?.code}`);
+
+  // Storage is tenant-scoped: every staged plan belongs to cf2 (none leaked to HQ).
+  const planRows = await db.select().from(s.miBudgetPlans);
+  ok('BudgetOpt: budget plans stored tenant-scoped (cf2 only, none for HQ)', planRows.length >= 2 && planRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${planRows.length} tenants=${[...new Set(planRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
