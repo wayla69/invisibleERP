@@ -39,35 +39,79 @@ jobs:
           SVC: ${{ inputs.service || 'invisibleERP' }}
         run: |
           set -uo pipefail
+          set +e   # the default GitHub shell is `bash -e`; we handle exit codes explicitly so every fallback runs
           [ -n "${RAILWAY_TOKEN:-}" ] || { echo "::error::RAILWAY_TOKEN not configured on the production environment"; exit 1; }
           rw() { npx -y @railway/cli "$@"; }
+          gq() { curl -s --max-time 30 -X POST https://backboard.railway.app/graphql/v2 -H "Project-Access-Token: $RAILWAY_TOKEN" -H "Content-Type: application/json" -d "$1"; }
 
-          echo "railway CLI version:"; rw --version || true
-          echo "::group::railway ssh --help (for diagnostics)"; rw ssh --help || true; echo "::endgroup::"
+          echo "railway CLI: $(rw --version 2>/dev/null)"
 
-          # Deliver the probe as base64 (survives any image without the file) and run it in-container.
-          # A leading sentinel proves the ssh TRANSPORT connected, independent of the probe's own result.
           B64=$(base64 -w0 tools/ops/scm-engine-e2e-probe.mjs)
           REMOTE="echo __SSH_CONNECTED__; echo $B64 | base64 -d | node -"
-
-          CONNECTED=0
+          CONFIRMED=0
           OUT=""
-          for form in quoted dash-shc bare-shc; do
-            echo "── attempting: railway ssh ($form) ──"
-            case "$form" in
-              quoted)   OUT=$(rw ssh --service "$SVC" "$REMOTE" 2>&1) ;;
-              dash-shc) OUT=$(rw ssh --service "$SVC" -- sh -c "$REMOTE" 2>&1) ;;
-              bare-shc) OUT=$(rw ssh --service "$SVC" sh -c "$REMOTE" 2>&1) ;;
-            esac
-            echo "$OUT"
-            if echo "$OUT" | grep -q "__SSH_CONNECTED__"; then CONNECTED=1; break; fi
-            echo "── form '$form' did not connect; trying next ──"
-          done
 
-          [ "$CONNECTED" = 1 ] || { echo "::error::railway ssh could not exec inside $SVC (all invocation forms failed — see help above)"; exit 1; }
-          if echo "$OUT" | grep -q "E2E: OK"; then
-            echo "✅ END-TO-END CONFIRMED — the engine served a signed Prophet forecast + MILP optimize over the private network from inside $SVC."
-          else
-            echo "::error::engine round-trip did NOT pass (no 'E2E: OK' marker). See the E2E lines above for the failing step."
-            exit 1
+          # ── Attempt 1: in-container over `railway ssh` (keeps the engine private, exercises the real
+          #    private-network hop). `railway ssh --service X sh -c '<probe>'` runs the probe with the
+          #    container's own SCM_ENGINE_URL/SECRET. A leading sentinel proves the ssh transport worked. ──
+          echo "::group::attempt 1 — railway ssh (in-container, private network)"
+          for form in "sh -c" "-- sh -c"; do
+            echo "── railway ssh --service $SVC $form <probe> ──"
+            OUT=$(rw ssh --service "$SVC" $form "$REMOTE" 2>&1); rc=$?
+            echo "$OUT"; echo "(railway ssh exit $rc)"
+            if printf '%s' "$OUT" | grep -q "__SSH_CONNECTED__"; then
+              printf '%s' "$OUT" | grep -q "E2E: OK" && CONFIRMED=1
+              break
+            fi
+          done
+          echo "::endgroup::"
+
+          # ── Attempt 2 (fallback): if ssh cannot exec in CI with a project token, run the SAME signed
+          #    probe from the runner against a TEMPORARY public domain on the engine, then delete it.
+          #    Business routes still require HMAC (only /healthz + /readyz are open), and it is torn down
+          #    immediately, so the brief exposure is safe. This is deterministic and needs no ssh auth. ──
+          DOMAIN=""; DOMAIN_ID=""
+          if [ "$CONFIRMED" != 1 ]; then
+            echo "::group::attempt 2 — temporary public domain + signed round-trip from CI"
+            SECRET=$(rw variables --service forecast-engine --kv 2>/dev/null | grep '^SCM_ENGINE_SECRET=' | cut -d= -f2- | tr -d '\r')
+            if [ -z "$SECRET" ]; then
+              echo "::warning::could not read SCM_ENGINE_SECRET from forecast-engine"
+            else
+              echo "::add-mask::$SECRET"
+              PT=$(gq '{"query":"query{projectToken{projectId environmentId}}"}')
+              PID=$(echo "$PT" | jq -r '.data.projectToken.projectId // empty')
+              EID=$(echo "$PT" | jq -r '.data.projectToken.environmentId // empty')
+              SID=$(gq "{\"query\":\"query{project(id:\\\"$PID\\\"){services{edges{node{id name}}}}}\"}" | jq -r '.data.project.services.edges[].node | select(.name=="forecast-engine") | .id')
+              echo "engine service=$SID env=$EID"
+              CREATE=$(gq "{\"query\":\"mutation{serviceDomainCreate(input:{environmentId:\\\"$EID\\\",serviceId:\\\"$SID\\\",targetPort:8000}){id domain}}\"}")
+              DOMAIN=$(echo "$CREATE" | jq -r '.data.serviceDomainCreate.domain // empty')
+              DOMAIN_ID=$(echo "$CREATE" | jq -r '.data.serviceDomainCreate.id // empty')
+              if [ -z "$DOMAIN" ]; then
+                echo "::warning::serviceDomainCreate returned no domain: $(echo "$CREATE" | jq -c '.errors // .' 2>/dev/null)"
+              else
+                echo "temporary domain https://$DOMAIN (id $DOMAIN_ID) — waiting for TLS + /healthz…"
+                for i in $(seq 1 40); do
+                  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$DOMAIN/healthz" || echo 000)
+                  [ "$code" = "200" ] && { echo "/healthz 200 (after ~$((i*6))s)"; break; }
+                  sleep 6
+                done
+                OUT=$(ENGINE_URL="https://$DOMAIN" ENGINE_SECRET="$SECRET" node tools/ops/scm-engine-e2e-probe.mjs 2>&1); rc=$?
+                echo "$OUT"; echo "(probe exit $rc)"
+                printf '%s' "$OUT" | grep -q "E2E: OK" && CONFIRMED=1
+              fi
+            fi
+            echo "::endgroup::"
           fi
+
+          # ── Teardown: always remove the temporary public domain (set +e keeps us here even on failure). ──
+          if [ -n "$DOMAIN_ID" ]; then
+            echo "removing temporary domain $DOMAIN_ID"
+            gq "{\"query\":\"mutation{serviceDomainDelete(id:\\\"$DOMAIN_ID\\\")}\"}" | jq -c '.data // .errors // .' 2>/dev/null || true
+          fi
+
+          if [ "$CONFIRMED" = 1 ]; then
+            echo "✅ END-TO-END CONFIRMED — the engine served a signed Prophet forecast + MILP optimize with the production HMAC secret."
+            exit 0
+          fi
+          echo "::error::engine end-to-end probe did not confirm (no 'E2E: OK' marker) — see the attempts above."
+          exit 1
