@@ -10,6 +10,7 @@ import type { FastifyRequest } from 'fastify';
 import type { DrizzleDb } from '../database/database.module';
 import { auditLog } from '../database/schema';
 import { logger, requestId } from '../observability/logger';
+import { captureOpsAlert } from '../observability/instrumentation';
 
 // ITGC-AC-16 — bind each audit row to the previous one. Altering/removing any past row breaks every later hash.
 export function auditRowHash(prevHash: string | null, seq: number, r: { actor: string | null; tenantId: number | null; action: string | null; ip: string | null; requestId: string | null; status: string | null; meta: unknown }): string {
@@ -53,6 +54,35 @@ export function auditAction(req: FastifyRequest): string {
   return `${(req.method ?? '').toUpperCase()} ${url}`;
 }
 
+// The audit write is best-effort BY DESIGN: it runs outside the business transaction and swallows its own
+// errors, so a logging failure can never roll back a posted journal. But "best effort" must not mean
+// "silent" — a dropped row is UNDETECTABLE afterwards, because `seq` is derived from the last SUCCESSFULLY
+// written row, so an omission leaves NO GAP for GET /api/admin/audit/verify to find. The hash chain proves
+// nobody EDITED history (ITGC-AC-16); only this alert can tell you a row was never written at all. Without
+// it, the trail's completeness claim would rest on nothing an auditor could test.
+//
+// Throttled to one alert per minute (a down database must not emit one alert per request), and it reports
+// how many writes were lost since the previous alert — the operator needs the SIZE of the hole, not just
+// its existence. Every individual failure still logs a warn line, so nothing is fully silent.
+const AUDIT_ALERT_THROTTLE_MS = 60_000;
+let lastAuditAlertAt = 0;
+let droppedSinceAlert = 0;
+function alertAuditWriteFailed(action: string, err: unknown): void {
+  droppedSinceAlert++;
+  const now = Date.now();
+  if (now - lastAuditAlertAt < AUDIT_ALERT_THROTTLE_MS) return;
+  const dropped = droppedSinceAlert;
+  lastAuditAlertAt = now;
+  droppedSinceAlert = 0;
+  captureOpsAlert('audit_write_failed', {
+    action,
+    dropped,
+    degraded: 'the append-only audit trail (ITGC-AC-10/AC-16) is INCOMPLETE for these requests — the business '
+      + 'mutations SUCCEEDED but left no evidence, and a missing row cannot be detected after the fact (seq is '
+      + 'derived from the last written row, so there is no gap to find). Investigate immediately.',
+  }, err);
+}
+
 export interface AuditRow {
   action: string;
   actor: string | null;
@@ -87,7 +117,8 @@ export async function writeAuditRow(db: DrizzleDb, row: AuditRow): Promise<void>
       await tx.insert(auditLog).values({ actor, tenantId, action, ip, requestId: rid, status, meta: meta ?? null, seq, prevHash, hash });
     });
   } catch (e) {
-    // Audit must never break the request. Log and move on.
+    // Audit must never break the request — but the loss must be LOUD (see alertAuditWriteFailed above).
     logger.warn({ err: (e as Error)?.message, action }, 'audit write failed');
+    alertAuditWriteFailed(action, e);
   }
 }
