@@ -103,6 +103,15 @@ suite was **split** into `planning` (planner) + `marketing` (marketing) so each 
 every plan that carried the combined suite lists BOTH (grandfathered — bundle breadth unchanged,
 `seedPlans()` refreshes the DB rows at boot). Sold whole-module by design — no sub-feature slicing.
 
+**Display honesty (2026-07-22 UX pass):** every surface derives "included in this pack" from the SAME
+shared maps the API charges by (`ADDON_GRANTS ⊆ PLAN_SUITES[PACK_TO_PLAN[tier]]`): the /plans
+configurator shows included add-ons as a badge (no price, no switch — they can never enter the total or
+the signup `addons=` params), groups the list into ขายยกโมดูล vs ส่วนเสริมขั้นสูง, and shows an explicit
+nudge once tier + à-la-carte modules meet the Scale price; the /billing card mirrors the grouping, shows
+the live "+฿X/เดือน" delta of billable selections, the AI band note, and a 3+-modules Professional nudge.
+ToE: `pricing.spec.ts` included-addon honesty (badge, no-double-count totals ฿9,580/฿11,570, nudge
+threshold, CTA params).
+
 **SME single-operator edition (docs/49):** the `sme` plan is the DEFAULT a `control_profile='sme'` company
 provisions onto (`provisionTenant` picks `sme` when the edition is SME and no explicit `plan_code` is passed;
 an explicit plan always wins — the plan and the control profile stay orthogonal). Its differentiator is the

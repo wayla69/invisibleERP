@@ -9,6 +9,10 @@
 // Static page data by design (no API surface) — see docs/user-manual/00-getting-started.md §0.
 import * as React from 'react';
 import Link from 'next/link';
+// Included-add-on truth comes from the SAME shared maps the API prices/gates by (PACK_TO_PLAN →
+// PLAN_SUITES ⊇ ADDON_GRANTS), so the configurator can never show a price for something the chosen
+// pack already includes — the display total always matches what checkout would actually charge.
+import { ADDON_GRANTS, PACK_TO_PLAN, PLAN_SUITES, type AddonKey } from '@ierp/shared';
 import {
   ArrowLeftRight, BarChart3, Bike, BookOpenCheck, Boxes, Building2, CalendarRange, Check, ChefHat,
   ChevronUp, Factory, FileCheck2, FlaskConical, Gift, Handshake, KeyRound, LayoutDashboard, Megaphone,
@@ -147,6 +151,19 @@ const ADDONS: Addon[] = [
   { id: 'ai', nameKey: 'price.a_ai', descKey: 'price.a_ai_d', icon: Sparkles, kind: 'erp', priceMonthly: 1990 },
 ];
 
+// The four whole-module add-ons vs the original advanced extras — rendered as two labelled groups so
+// the list of eight reads as "modules you can buy" + "power-ups", not one undifferentiated wall.
+const MODULE_ADDON_IDS = new Set(['planning', 'marketing', 'crm_loyalty', 'ai']);
+
+/** The seeded plan code behind a tier id (packs map via PACK_TO_PLAN; line-SKU ids ARE plan codes). */
+const tierPlanCode = (tierId: string): string => PACK_TO_PLAN[tierId] ?? tierId;
+
+/** Add-on ids the given tier already includes (ADDON_GRANTS ⊆ the plan's suites — same rule as the API). */
+function includedAddonIdsFor(tierId: string): Set<string> {
+  const suites = PLAN_SUITES[tierPlanCode(tierId)] ?? [];
+  return new Set(ADDONS.filter((a) => (ADDON_GRANTS[a.id as AddonKey] ?? [a.id]).every((s) => (suites as string[]).includes(s))).map((a) => a.id));
+}
+
 /** Effective per-month price under the active billing interval. */
 const perMonth = (monthly: number, billing: Billing): number =>
   billing === 'annual' ? (monthly * ANNUAL_MONTHS) / 12 : monthly;
@@ -183,30 +200,40 @@ export function PricingClient() {
       return next;
     });
 
+  const includedAddonIds = React.useMemo(() => includedAddonIdsFor(tierId), [tierId]);
+
   const totals = React.useMemo(() => {
     const tier = activeTiers.find((x) => x.id === tierId) ?? (activeTiers[0] as Tier);
-    const selectedAddons = ADDONS.filter((a) => addonIds.has(a.id));
+    // An add-on the chosen tier already includes NEVER counts toward the total (or the summary) — the
+    // display must match what checkout actually charges (the API drops plan-included add-ons too).
+    const selectedAddons = ADDONS.filter((a) => addonIds.has(a.id) && !includedAddonIds.has(a.id));
     const tierPrice = tier.perBranch ? tier.priceMonthly * branches : tier.priceMonthly;
     const monthlySum = tierPrice + selectedAddons.reduce((s, a) => s + a.priceMonthly, 0);
+    // Honesty nudge: once tier + à-la-carte modules cost as much as Scale (which includes ALL these
+    // modules + the bigger AI band), say so instead of quietly taking the larger amount.
+    const scale = TIERS.find((x) => x.id === 'scale');
+    const upsellScale = line === 'packs' && !!scale && (tierId === 'essential' || tierId === 'growth')
+      && selectedAddons.some((a) => MODULE_ADDON_IDS.has(a.id)) && monthlySum >= scale.priceMonthly;
     return {
       tier,
       selectedAddons,
+      upsellScale,
       monthlyEq: perMonth(monthlySum, billing),
       billedNow: billing === 'annual' ? monthlySum * ANNUAL_MONTHS : monthlySum,
       annualSavings: billing === 'annual' ? monthlySum * (12 - ANNUAL_MONTHS) : 0,
     };
-  }, [activeTiers, tierId, addonIds, billing, branches]);
+  }, [activeTiers, tierId, addonIds, billing, branches, includedAddonIds, line]);
 
   // Carry the prospect's selection into the signup request (read there from window.location.search),
   // so the platform admin sees "requested: <pack> · <interval> · +add-ons" when approving (ITGC-AC-18).
   const signupHref = React.useMemo(() => {
     const q = new URLSearchParams({ plan: tierId, billing });
-    const addons = ADDONS.filter((a) => addonIds.has(a.id)).map((a) => a.id);
+    const addons = ADDONS.filter((a) => addonIds.has(a.id) && !includedAddonIds.has(a.id)).map((a) => a.id);
     if (addons.length) q.set('addons', addons.join(','));
     const tier = activeTiers.find((x) => x.id === tierId);
     if (tier?.perBranch && branches > 1) q.set('branches', String(branches)); // per-branch quantity (0455)
     return `/signup?${q.toString()}`;
-  }, [activeTiers, tierId, billing, addonIds, branches]);
+  }, [activeTiers, tierId, billing, addonIds, branches, includedAddonIds]);
 
   const summaryLines = (
     <>
@@ -244,6 +271,11 @@ export function PricingClient() {
           </li>
         )}
       </ul>
+      {totals.upsellScale && (
+        <p data-testid="upsell-scale" className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs leading-relaxed text-foreground">
+          💡 {t('price.upsell_scale_hint')}
+        </p>
+      )}
       <div className="mt-4 border-t pt-4">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-sm font-semibold">{t('price.total')}</span>
@@ -411,32 +443,50 @@ export function PricingClient() {
             <h2 className="text-lg font-bold">{t('price.addons_title')}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{t('price.addons_sub')}</p>
             <div className="mt-4 space-y-3">
-              {ADDONS.map((addon) => {
-                const checked = addonIds.has(addon.id);
-                return (
-                  <div key={addon.id} className={`flex items-center gap-3 rounded-xl border bg-card p-4 shadow-sm transition-colors ${checked ? 'border-primary/50 ring-1 ring-primary/30' : ''}`}>
-                    <ModuleChip icon={addon.icon} kind={addon.kind} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold">{t(addon.nameKey)}</div>
-                      <div className="mt-0.5 text-xs text-muted-foreground">{t(addon.descKey)}</div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-sm font-bold">{baht(perMonth(addon.priceMonthly, billing))}</div>
-                      <div className="text-[11px] text-muted-foreground/70">{t('price.per_month')}</div>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={checked}
-                      aria-label={t(addon.nameKey)}
-                      onClick={() => toggleAddon(addon.id)}
-                      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
-                    >
-                      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-card shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`} />
-                    </button>
-                  </div>
-                );
-              })}
+              {([
+                { headerKey: 'price.addons_group_modules', items: ADDONS.filter((a) => MODULE_ADDON_IDS.has(a.id)) },
+                { headerKey: 'price.addons_group_advanced', items: ADDONS.filter((a) => !MODULE_ADDON_IDS.has(a.id)) },
+              ]).map((group) => (
+                <React.Fragment key={group.headerKey}>
+                  <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground first:mt-0">{t(group.headerKey)}</div>
+                  {group.items.map((addon) => {
+                    const included = includedAddonIds.has(addon.id);
+                    const checked = !included && addonIds.has(addon.id);
+                    return (
+                      <div key={addon.id} data-testid={`addon-${addon.id}`} className={`flex items-center gap-3 rounded-xl border bg-card p-4 shadow-sm transition-colors ${checked ? 'border-primary/50 ring-1 ring-primary/30' : ''} ${included ? 'opacity-80' : ''}`}>
+                        <ModuleChip icon={addon.icon} kind={addon.kind} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold">{t(addon.nameKey)}</div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">{t(addon.descKey)}</div>
+                        </div>
+                        {included ? (
+                          /* Already in the chosen tier — no price, no switch: it cannot be double-charged. */
+                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            ✓ {t('price.addon_included')}
+                          </span>
+                        ) : (
+                          <>
+                            <div className="shrink-0 text-right">
+                              <div className="text-sm font-bold">{baht(perMonth(addon.priceMonthly, billing))}</div>
+                              <div className="text-[11px] text-muted-foreground/70">{t('price.per_month')}</div>
+                            </div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={checked}
+                              aria-label={t(addon.nameKey)}
+                              onClick={() => toggleAddon(addon.id)}
+                              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                            >
+                              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-card shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
             </div>
             <p className="mt-8 text-sm">
               <Link href="/login" className="font-medium text-primary hover:underline">{t('price.back_to_login')}</Link>

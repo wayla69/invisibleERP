@@ -109,4 +109,9 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'price.a_loyalty_d': { th: 'สมาชิก สะสมแต้ม คูปอง และแบบสำรวจความพึงพอใจ', en: 'Membership, points, coupons and satisfaction surveys.' },
   'price.a_ai': { th: 'ผู้ช่วย AI (พร้อมโควตา 100k token/วัน)', en: 'AI Copilot (100k tokens/day included)' },
   'price.a_ai_d': { th: 'ผู้ช่วย AI ถาม-ตอบข้อมูลธุรกิจ พร้อมโควตารายวันและคิดส่วนเกินตามจริง', en: 'Business copilot with a daily token band; overage metered at ฿12/1k.' },
+  // Grouped add-on list + included-in-tier honesty (2026-07-22 UX pass).
+  'price.addons_group_modules': { th: 'ขายยกโมดูล', en: 'Whole modules' },
+  'price.addons_group_advanced': { th: 'ส่วนเสริมขั้นสูง', en: 'Advanced extras' },
+  'price.addon_included': { th: 'รวมในแพ็กเกจนี้แล้ว', en: 'Included in this pack' },
+  'price.upsell_scale_hint': { th: 'ยอดรวมตอนนี้เท่ากับหรือเกินแพ็ก Scale (฿9,900/เดือน) ซึ่งรวมทุกโมดูลเหล่านี้อยู่แล้ว พร้อมโควตา AI ก้อนใหญ่กว่า — เลือกแพ็ก Scale จะคุ้มกว่า', en: 'Your total now meets or exceeds the Scale pack (฿9,900/mo), which already includes all of these modules plus a bigger AI band — picking Scale is the better deal.' },
 };
