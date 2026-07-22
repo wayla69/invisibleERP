@@ -71,6 +71,9 @@ const ScenarioBody = z.object({
   item_ids: z.array(z.string().min(1)).min(1).max(25),
   horizon_days: z.number().int().min(1).max(28).optional(),
   demand_multiplier: z.number().min(0.1).max(5).optional(),
+  // docs/56 A2 — an optional price what-if; the persisted own-price elasticity turns it into a
+  // demand response (advisory only, persists nothing).
+  price_multiplier: z.number().min(0.1).max(5).optional(),
   service_level: z.number().min(0.5).max(0.9999).optional(),
 });
 
@@ -144,6 +147,10 @@ export class ScmPlanningController {
   deleteHierarchyNode(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
     return this.svc.deleteHierarchyNode(id, u);
   }
+
+  // docs/56 A2 — persisted own-price elasticities (read-only; server-estimated).
+  @Get('elasticity')
+  listElasticity(@CurrentUser() u: JwtUser) { return this.svc.listElasticity(u); }
 
   // ── runs ──
   @Post('run')
