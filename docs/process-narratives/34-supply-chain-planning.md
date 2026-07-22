@@ -255,6 +255,25 @@ topology from the engine — it is validated here before any optimize call. B1 i
 (SCM-05/SCM-06 arrive with the optimizer and allocation in B2/B3) and posts no GL entries; it is topology
 definition that a later network run will consume.
 
+### 7.13 Own-price elasticity (docs/56 Track A · A2)
+
+A promotion is not only a calendar flag — it is a **price cut**, and how much demand a price move buys is
+the item's **own-price elasticity** ε. A2 estimates it and puts it to work in the advisory scenario tool.
+The signal is server-derived: `ScmPromoExtractService` now emits, per menu sku per business day, the
+**effective price** (the item's base price reduced by any governed promotion's discount that day), so a
+promotion's price cut becomes the price *variation* over history — never taken from the run request. The
+engine estimates ε as the slope of an **OLS log-log fit** of demand on price over the observed history
+(stockout-censored days excluded), gated by an **identifiability floor**: unless there are enough paired
+observations, real price movement, and a credible fit (r²), it returns **ε = null** — a spurious elasticity
+is never emitted. A credible ε (clamped to a sane band) is returned in the forecast attribution; the run
+persists it to `scm_price_elasticity` (migration 0464, tenant-scoped) via `ScmElasticityService`, keyed by
+`(tenant, item[, branch])` and readable at `GET /api/scm-planning/elasticity`. The **scenario what-if**
+gains an optional `price_multiplier`: for each menu item it applies `demand × (price_multiplier)^ε` (with no
+credible ε on file the response is 1 — unchanged), so a planner can ask "what if we raise this price 10%?"
+and see the demand — and the order — respond. This is **advisory only** (scenario persists nothing and never
+becomes an order) and introduces **no new control**; ε is a forecast-quality input governed by the same
+SCM-01/02/03 as the run. Cannibalization across sibling items is the next phase (A3).
+
 ## 8. Process flow
 
 ```mermaid
@@ -352,6 +371,7 @@ maker ≠ checker test is the operative control regardless of the permissions he
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
 | 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |
+| 0.6 | 2026-07-22 | Supply-chain / Planning | Added §7.13 — own-price elasticity (docs/56 Track A · A2): `ScmPromoExtractService` emits a governed effective price (base × (1−discount)) so a promo's price cut identifies ε; the engine estimates ε by an OLS log-log fit with an identifiability floor (ε=null when not identified), returned in attribution; the run persists it to `scm_price_elasticity` (migration 0464) via `ScmElasticityService` (`GET /api/scm-planning/elasticity`); the scenario what-if gains `price_multiplier` applying `demand × (price)^ε`. Advisory only, no new control. Harness `cutover/scm.ts` +4 A2 checks; engine pytest +7. |
 | 0.5 | 2026-07-22 | Supply-chain / Planning | Added §7.12 — multi-echelon supply-network master data (docs/57 Track B · B1): governed `supply_nodes`/`supply_lanes` (migration 0463, canonical RLS + tenant-leading index) via `POST /api/scm-network/nodes\|lanes`, and `GET /api/scm-network/topology` assembling + validating the two-echelon DAG (kind↔echelon, ≤2 stocking echelons, single-sourcing, acyclic, branch reachability). Definition only — no new control (SCM-05/06 arrive with the optimizer in B2/B3), no GL. New `modules/scm-network` bounded context. Harness `cutover/scm.ts` +8 B1 checks. |
 | 0.3 | 2026-07-22 | Supply-chain / Planning | Added §7.10 — promotion & price-effect demand (docs/56 Track A · A1): server-derived promo/discount regressors from approved `promotions` under RLS (never client input), Prophet `add_regressor` + capped Croston/bootstrap uplift, attribution persisted on `scm_demand_forecasts` (migration 0462). New control **SCM-04** (promo-forecast governance) in the control matrix. Harness `cutover/scm.ts` +3 A1 checks. |
 | 0.2 | 2026-07-22 | Supply-chain / Planning | Added §7.9 — forecast reconciliation hierarchy (docs/58 Track C · C1): declare/synthesize aggregation structures via `scm_forecast_hierarchy` (migration `0461`) and `GET/PUT/DELETE /api/scm-planning/hierarchy(/forest)`. Definition only — no new control (SCM-01/02/03 unchanged), no forecast-number change yet (reconciliation lands with C2). Harness `cutover/scm.ts` +4 C1 checks. |

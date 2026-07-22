@@ -83,12 +83,23 @@ function startEngineStub(secret: string) {
           // Flat 10/day so downstream assertions are arithmetic, not statistical.
           // A1: echo whether the API sent GOVERNED promo regressors (server-derived).
           const hasPromo = Array.isArray(ser.regressors) && ser.regressors.some((r: any) => r.promo_flag);
+          // A2: when the series carries a governed PRICE signal, echo an identified own-price ε (as the
+          // real engine's log-log estimator would after its identifiability floor). Distinct prices ⇒
+          // identifiable; a single flat price ⇒ null (the floor not met).
+          const prices = Array.isArray(ser.regressors)
+            ? Array.from(new Set(ser.regressors.map((r: any) => r.price).filter((p: any) => p != null && p > 0)))
+            : [];
+          const eps = prices.length >= 2 ? -1.2 : null;
+          const used = ['payday', ...(hasPromo ? ['promo'] : []), ...(prices.length ? ['price'] : [])];
           return {
             series_id: ser.series_id, model: 'prophet', points, sample_paths: flatPaths(),
             accuracy: { wape: 0.12, cutoffs: 1 },
             attribution: {
-              promo_uplift_pct: hasPromo ? 0.3 : null, price_elasticity: null,
-              regressors_used: hasPromo ? ['payday', 'promo'] : ['payday'],
+              promo_uplift_pct: hasPromo ? 0.3 : null,
+              price_elasticity: eps,
+              elasticity_r2: eps != null ? 0.82 : null,
+              elasticity_n_obs: prices.length ? 40 : 0,
+              regressors_used: used,
             },
           };
         });
@@ -418,6 +429,39 @@ async function main() {
   ok('C2 engine run sends a coherent reconciliation (bottom-up) and still produces menu forecasts',
     engine.state.reconRequests > 0 && engine.state.reconCoherent === true && promoFc.length > 0,
     `reconRequests=${engine.state.reconRequests} coherent=${engine.state.reconCoherent} menuFc=${promoFc.length}`);
+
+  // ── docs/56 Track A (A2) — own-price elasticity ──
+  // The promo above cut the effective price on part of the history (base 65 → 52), so the engine's
+  // regressor now carries ≥2 distinct prices → an identified ε<0. The run upserts it; the menu
+  // forecast carries the price attribution; and the scenario tool applies it.
+  const priceAttr = promoFc.some((f: any) =>
+    f.priceElasticity != null && ((f.regressorsUsed ?? []) as string[]).includes('price'));
+  ok('A2 menu forecast carries price attribution (price_elasticity + price regressor)',
+    priceAttr, `sample=${JSON.stringify({ eps: promoFc[0]?.priceElasticity, used: promoFc[0]?.regressorsUsed })}`);
+
+  const elast = await inj('GET', '/api/scm-planning/elasticity', tPlanner);
+  const kpElast = (elast.json.items ?? []).find((e: any) => e.itemId === 'MENU-KP');
+  ok('A2 run persists an identified own-price elasticity (ε<0) for the promoted menu item',
+    elast.status === 200 && kpElast != null && Number(kpElast.elasticity) < 0 && Number(kpElast.nObs) > 0,
+    `items=${JSON.stringify(elast.json.items)}`);
+
+  // Scenario applies ε: a price RISE shrinks demand (response <1) and a price CUT grows it (>1); with
+  // ε<0 the suggested quantity never rises with price (qty↑ ≤ qty↓). Advisory — persists nothing.
+  const scUp = await inj('POST', '/api/scm-planning/scenario', tPlanner,
+    { branch_id: branchId, item_ids: ['MENU-KP'], horizon_days: 7, demand_multiplier: 3, price_multiplier: 1.5 });
+  const scDown = await inj('POST', '/api/scm-planning/scenario', tPlanner,
+    { branch_id: branchId, item_ids: ['MENU-KP'], horizon_days: 7, demand_multiplier: 3, price_multiplier: 0.5 });
+  const qtyOf = (r: any) => (r.json.lines ?? []).reduce((a: number, l: any) => a + Number(l.qty), 0);
+  const respOf = (r: any) => Number((r.json.price_attribution ?? []).find((p: any) => p.item_id === 'MENU-KP')?.demand_response);
+  ok('A2 scenario applies elasticity — a price rise shrinks demand and a price cut grows it (advisory, persists nothing)',
+    scUp.status === 201 && scDown.status === 201
+      && respOf(scUp) < 1 && respOf(scDown) > 1 && qtyOf(scUp) <= qtyOf(scDown),
+    `respUp=${respOf(scUp)} respDown=${respOf(scDown)} qtyUp=${qtyOf(scUp)} qtyDown=${qtyOf(scDown)}`);
+
+  // Cross-tenant: HQ's elasticities never appear for T2 (RLS).
+  const elastB = await inj('GET', '/api/scm-planning/elasticity', tPlannerB);
+  ok('A2 elasticity is tenant-isolated (T2 sees 0 of HQ elasticities)',
+    (elastB.json.items?.length ?? 0) === 0, `t2=${elastB.json.items?.length}`);
 
   // 7 — plans exist with actionable lines
   const plans = await inj('GET', '/api/scm-planning/plans', tPlanner);

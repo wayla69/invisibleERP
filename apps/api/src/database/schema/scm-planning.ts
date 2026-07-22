@@ -211,7 +211,26 @@ export const scmForecastHierarchy = pgTable('scm_forecast_hierarchy', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_forecast_hierarchy_tenant').on(t.tenantId, t.axis) }));
 
+// docs/56 Track A (A2) — persisted own-price elasticity per (tenant, series/item). The engine
+// estimates ε (log-log slope) with an identifiability floor; a run upserts the latest identified
+// value here so the advisory scenario tool can apply a price response without re-fitting. NULL ε (not
+// identified) is NOT stored — only credible estimates land, so the scenario tool falls back to a unit
+// response when nothing is on file. Migration 0464 applies the canonical 0232-form RLS loop + the
+// leading (tenant_id, …) index.
+export const scmPriceElasticity = pgTable('scm_price_elasticity', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemId: text('item_id').notNull(),            // the menu/series key ε was estimated for
+  branchId: bigint('branch_id', { mode: 'number' }), // null = tenant-wide (series aggregated over branches)
+  elasticity: numeric('elasticity', { precision: 10, scale: 4 }).notNull(), // ε (log-log slope), typically < 0
+  r2: numeric('r2', { precision: 6, scale: 4 }),        // fit quality that cleared the identifiability floor
+  nObs: integer('n_obs').notNull().default(0),  // paired (log price, log demand) observations used
+  estimatedAt: timestamp('estimated_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: index('idx_scm_price_elasticity_tenant').on(t.tenantId, t.itemId) }));
+
 export type ScmSettingsRow = typeof scmSettings.$inferSelect;
+export type ScmPriceElasticityRow = typeof scmPriceElasticity.$inferSelect;
 export type ScmItemPolicy = typeof scmItemPolicies.$inferSelect;
 export type ScmPlanRun = typeof scmPlanRuns.$inferSelect;
 export type ScmDemandForecast = typeof scmDemandForecasts.$inferSelect;
