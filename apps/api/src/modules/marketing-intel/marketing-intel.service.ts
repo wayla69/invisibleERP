@@ -1,10 +1,13 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { miAnalyticsSnapshots, customerProfiles, posMembers } from '../../database/schema';
+import { miAnalyticsSnapshots, miBudgetPlans, customerProfiles, posMembers } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { assertMakerChecker } from '../../common/control-profile';
 import { CampaignsService } from '../campaigns/campaigns.service';
+import { MiGovernanceService } from './mi-governance.service';
+import { curvesFromMmm, predictSales, optimizeAllocation, type ResponseCurve } from './mmm-optimizer';
 
 // Marketing Intelligence push-back store (docs/48 phase 3). The standalone Python platform computes
 // advanced MMM / Sentiment-Weighted RFM / TOWS in its own warehouse and PUSHES the results into the ERP
@@ -15,23 +18,48 @@ export const MI_SNAPSHOT_KINDS = ['mmm', 'rfm', 'tows'] as const;
 export type MiSnapshotKind = (typeof MI_SNAPSHOT_KINDS)[number];
 
 // An rfm snapshot MAY carry per-customer assignments (customer_no ⇒ segment) so the ERP can act on them
-// (campaign targeting). Bounded so a runaway push can't balloon the request.
-const RfmMember = z.object({ customer_no: z.string().min(1).max(120), segment: z.string().min(1).max(80) });
+// (campaign targeting). Bounded so a runaway push can't balloon the request. docs/60 Phase 2 adds the
+// optional per-customer Customer-Intelligence scores (CLV / churn probability / next-best-action code) the
+// platform computes — landed on customer_profiles.mi_clv / mi_churn_risk / mi_nba (advisory, SEPARATE from
+// the ERP's own explainable scores). A Phase-1-style push (segment only) leaves existing scores untouched.
+const NBA_CODES = ['WINBACK', 'UPSELL', 'VIP_CARE', 'REACTIVATE', 'RETAIN', 'NURTURE', 'CROSS_SELL'] as const;
+const RfmMember = z.object({
+  customer_no: z.string().min(1).max(120),
+  segment: z.string().min(1).max(80),
+  clv: z.number().nonnegative().max(1e12).optional(),
+  churn_risk: z.number().min(0).max(1).optional(),
+  nba: z.string().min(1).max(40).optional(),
+});
 export const PushSnapshotsBody = z.object({
   snapshots: z.array(z.object({
     kind: z.enum(MI_SNAPSHOT_KINDS),
     payload: z.record(z.any()),
     model_run_ref: z.string().max(120).optional(),
     members: z.array(RfmMember).max(100_000).optional(), // rfm only — ignored for mmm/tows
+    model_card: z.record(z.any()).optional(),            // docs/60 Phase 4 — { model_version, training_window, features, metrics }
   })).min(1).max(MI_SNAPSHOT_KINDS.length),
 });
 export type PushSnapshotsDto = z.infer<typeof PushSnapshotsBody>;
+
+// Budget Optimizer (docs/60 Phase 1) request bodies.
+export const SimulateBody = z.object({ allocation: z.record(z.number().nonnegative()).refine((a) => Object.keys(a).length > 0, 'allocation required') });
+export const OptimizeBody = z.object({
+  budget: z.number().positive().max(1e12),
+  caps: z.record(z.number().nonnegative()).optional(),
+});
+export const StageBudgetPlanBody = z.object({
+  total_budget: z.number().positive().max(1e12),
+  allocation: z.record(z.number().nonnegative()).refine((a) => Object.keys(a).length > 0, 'allocation required'),
+  note: z.string().max(500).optional(),
+});
+export const ApproveBudgetPlanBody = z.object({ plan_no: z.string().min(1).max(60), self_approval_reason: z.string().max(500).optional() });
 
 @Injectable()
 export class MarketingIntelService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly campaigns: CampaignsService,
+    private readonly governance: MiGovernanceService,
   ) {}
 
   // WRITE (public API, scope analytics:write). APPEND-only snapshot + (for rfm) the per-customer segment
@@ -44,19 +72,31 @@ export class MarketingIntelService {
     const principal = user.apiKeyPrefix ?? user.username ?? 'apikey';
     const written: string[] = [];
     let membersApplied = 0;
+    let scoresApplied = 0;
     for (const s of body.snapshots) {
+      // docs/60 Phase 4 — governance decides the run's initial status + computes drift/quality vs the prior
+      // approved run. Ungoverned tenant ⇒ status 'Approved' (back-compat).
+      const { status, quality } = await this.governance.evaluatePush(tenantId, s.kind, s.payload);
       await this.db.insert(miAnalyticsSnapshots)
-        .values({ tenantId, kind: s.kind, payload: s.payload, modelRunRef: s.model_run_ref ?? null, source: 'mi-platform', pushedBy: principal });
-      if (s.kind === 'rfm' && s.members?.length) membersApplied += await this.applyRfmMembers(tenantId, s.members);
+        .values({ tenantId, kind: s.kind, payload: s.payload, modelRunRef: s.model_run_ref ?? null, source: 'mi-platform', pushedBy: principal, status, quality, modelCard: s.model_card ?? null });
+      if (s.kind === 'rfm' && s.members?.length) {
+        const r = await this.applyRfmMembers(tenantId, s.members);
+        membersApplied += r.segments;
+        scoresApplied += r.scores;
+      }
       written.push(s.kind);
     }
-    return { pushed: written.length, kinds: written, members_applied: membersApplied };
+    return { pushed: written.length, kinds: written, members_applied: membersApplied, scores_applied: scoresApplied };
   }
 
   // Map the pushed customer_no (== pos_members.member_code) to member_id and stamp mi_rfm_segment on the
   // profile. Reset the tenant's assignments first so a customer dropped from a segment is cleared, then
-  // set the current membership one UPDATE per segment.
-  private async applyRfmMembers(tenantId: number, members: { customer_no: string; segment: string }[]): Promise<number> {
+  // set the current membership one UPDATE per segment. docs/60 Phase 2: also stamp the per-customer
+  // Customer-Intelligence scores when the push carries them (else leave existing scores untouched).
+  private async applyRfmMembers(
+    tenantId: number,
+    members: z.infer<typeof RfmMember>[],
+  ): Promise<{ segments: number; scores: number }> {
     const codes = [...new Set(members.map((m) => m.customer_no))];
     const rows = await this.db.select({ id: posMembers.id, code: posMembers.memberCode })
       .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.memberCode, codes)));
@@ -70,14 +110,40 @@ export class MarketingIntelService {
       if (id == null) continue;
       (idsBySegment.get(m.segment) ?? idsBySegment.set(m.segment, []).get(m.segment)!).push(id);
     }
-    let applied = 0;
+    let segments = 0;
     for (const [segment, ids] of idsBySegment) {
       if (!ids.length) continue;
       await this.db.update(customerProfiles).set({ miRfmSegment: segment })
         .where(and(eq(customerProfiles.tenantId, tenantId), inArray(customerProfiles.memberId, ids)));
-      applied += ids.length;
+      segments += ids.length;
     }
-    return applied;
+    const scores = await this.applyMemberScores(tenantId, members, idByCode);
+    return { segments, scores };
+  }
+
+  // Stamp the per-customer CLV / churn / NBA scores (docs/60 Phase 2). Only runs when the push carries at
+  // least one score field — a segment-only push leaves existing scores untouched. Scores differ per member,
+  // so a single set-based UPDATE ... FROM json_to_recordset applies them in one round-trip (bounded input).
+  private async applyMemberScores(
+    tenantId: number,
+    members: z.infer<typeof RfmMember>[],
+    idByCode: Map<string, number>,
+  ): Promise<number> {
+    if (!members.some((m) => m.clv != null || m.churn_risk != null || m.nba != null)) return 0;
+    const scored = members
+      .map((m) => ({ id: idByCode.get(m.customer_no), clv: m.clv ?? null, churn: m.churn_risk ?? null, nba: m.nba ?? null }))
+      .filter((s): s is { id: number; clv: number | null; churn: number | null; nba: string | null } => s.id != null);
+    // Reset first so a customer dropped from the scored set is cleared (mirrors the segment reset).
+    await this.db.update(customerProfiles).set({ miClv: null, miChurnRisk: null, miNba: null }).where(eq(customerProfiles.tenantId, tenantId));
+    if (!scored.length) return 0;
+    const json = JSON.stringify(scored);
+    await this.db.execute(sql`
+      UPDATE customer_profiles cp
+      SET mi_clv = v.clv, mi_churn_risk = v.churn, mi_nba = v.nba
+      FROM json_to_recordset(${json}::json) AS v(id bigint, clv numeric, churn numeric, nba text)
+      WHERE cp.tenant_id = ${tenantId} AND cp.member_id = v.id
+    `);
+    return scored.length;
   }
 
   // READ (internal, /marketing-intel page). RLS scopes to the caller's tenant; returns the latest snapshot
@@ -144,6 +210,56 @@ export class MarketingIntelService {
     return { segments: [...counts.entries()].map(([segment, members]) => ({ segment, members })).sort((a, b) => b.members - a.members) };
   }
 
+  // READ — Customer Intelligence drill-down (docs/60 Phase 2, control MKT-18). Given a pushed RFM segment,
+  // return its members with the platform's per-customer CLV / churn / next-best-action, plus a little ERP
+  // context (own churn/LTV, spend, recency) so each row IS the intelligence card. Scores are ADVISORY —
+  // any contact still goes through the consent-gated campaign draft (activateSegment), never auto-sent.
+  // pos_members is read in a SEPARATE query and stitched in JS (no cross-domain SQL join — arch rule 3).
+  async segmentDrilldown(user: JwtUser, opts: { segment: string; sort?: 'clv' | 'churn'; limit?: number }) {
+    const tenantId = user.tenantId;
+    const seg = (opts.segment ?? '').trim();
+    if (tenantId == null || !seg) return { segment: seg, sort: opts.sort ?? 'clv', count: 0, customers: [] };
+    const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+    const profiles = await this.db.select({
+      memberId: customerProfiles.memberId,
+      miClv: customerProfiles.miClv,
+      miChurnRisk: customerProfiles.miChurnRisk,
+      miNba: customerProfiles.miNba,
+      ownChurn: customerProfiles.churnRisk,
+      ownLtv: customerProfiles.predictedLtv,
+      totalSpend: customerProfiles.totalSpend,
+      lastOrderAt: customerProfiles.lastOrderAt,
+    }).from(customerProfiles)
+      .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.miRfmSegment, seg)));
+
+    const ids = profiles.map((p) => Number(p.memberId)).filter((n) => Number.isFinite(n));
+    const memberRows = ids.length
+      ? await this.db.select({ id: posMembers.id, code: posMembers.memberCode, name: posMembers.name })
+          .from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids)))
+      : [];
+    const memberById = new Map(memberRows.map((r) => [Number(r.id), r]));
+
+    const customers = profiles.map((p) => {
+      const m = memberById.get(Number(p.memberId));
+      return {
+        customer_no: m?.code ?? null,
+        name: m?.name ?? null,
+        clv: p.miClv == null ? null : Number(p.miClv),
+        churn_risk: p.miChurnRisk == null ? null : Number(p.miChurnRisk),
+        nba: p.miNba ?? null,
+        own_churn_risk: p.ownChurn == null ? null : Number(p.ownChurn),
+        own_predicted_ltv: p.ownLtv == null ? null : Number(p.ownLtv),
+        total_spend: p.totalSpend == null ? null : Number(p.totalSpend),
+        last_order_at: p.lastOrderAt,
+      };
+    });
+    const sort = opts.sort === 'churn' ? 'churn' : 'clv';
+    customers.sort((a, b) => sort === 'churn'
+      ? (b.churn_risk ?? -1) - (a.churn_risk ?? -1)
+      : (b.clv ?? -1) - (a.clv ?? -1));
+    return { segment: seg, sort, count: customers.length, customers: customers.slice(0, limit) };
+  }
+
   // ACTION LOOP — turn a pushed RFM segment into a DRAFT ERP campaign (audience=mi_segment). It reuses the
   // existing consent-gated campaign delivery; a human edits the body + sends (never auto-blasts).
   async activateSegment(dto: { segment: string; channel?: 'sms' | 'email' | 'line'; body?: string }, user: JwtUser) {
@@ -154,6 +270,13 @@ export class MarketingIntelService {
     const present = await this.db.select({ id: customerProfiles.memberId }).from(customerProfiles)
       .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.miRfmSegment, seg))).limit(1);
     if (!present.length) throw new BadRequestException({ code: 'EMPTY_SEGMENT', message: `no members in segment "${seg}" — push RFM first`, messageTh: 'ไม่มีสมาชิกในกลุ่มนี้ (ยังไม่ push RFM)' });
+    // docs/60 Phase 4 — a governed tenant can only act on an APPROVED rfm run (maker-checker on
+    // contact-driving analytics). If the LATEST pushed rfm run is still pending, a campaign can't run off it.
+    if (await this.governance.approvedOnly(tenantId)) {
+      const [latest] = await this.db.select({ status: miAnalyticsSnapshots.status }).from(miAnalyticsSnapshots)
+        .where(eq(miAnalyticsSnapshots.kind, 'rfm')).orderBy(desc(miAnalyticsSnapshots.pushedAt)).limit(1);
+      if (!latest || latest.status !== 'Approved') throw new BadRequestException({ code: 'ANALYTICS_NOT_APPROVED', message: 'the latest RFM analytics run has not been approved — a second person must approve it first', messageTh: 'ผล RFM ล่าสุดยังไม่ได้รับการอนุมัติ (ต้องให้อีกคนอนุมัติก่อน)' });
+    }
     return this.campaigns.upsertCampaign(user, {
       name: `MI · ${seg}`,
       channel: dto.channel ?? 'sms',
@@ -161,5 +284,102 @@ export class MarketingIntelService {
       segment: seg,
       body: dto.body ?? `ข้อความถึงกลุ่ม ${seg} (แก้ไขก่อนส่ง)`,
     });
+  }
+
+  // ─── Budget Optimizer (docs/60 Phase 1, control MKT-17) ──────────────────────────────────────────────
+  // Load the latest MMM snapshot's per-channel response curves (pushed saturation params, or a derived
+  // fallback from spend/roi so the planner works before the platform pushes precise params).
+  private async loadCurves(tenantId?: number | null): Promise<{ curves: ResponseCurve[]; basis: string; anyDerived: boolean; hasData: boolean }> {
+    // docs/60 Phase 4 — a governed tenant may only consume an APPROVED mmm run (maker-checker on
+    // spend-driving analytics). Ungoverned ⇒ latest run, as before.
+    const conds = [eq(miAnalyticsSnapshots.kind, 'mmm')];
+    if (await this.governance.approvedOnly(tenantId ?? null)) conds.push(eq(miAnalyticsSnapshots.status, 'Approved'));
+    const [row] = await this.db.select({ payload: miAnalyticsSnapshots.payload, modelRunRef: miAnalyticsSnapshots.modelRunRef })
+      .from(miAnalyticsSnapshots).where(and(...conds))
+      .orderBy(desc(miAnalyticsSnapshots.pushedAt)).limit(1);
+    if (!row) return { curves: [], basis: 'none', anyDerived: false, hasData: false };
+    const { curves, anyDerived } = curvesFromMmm(row.payload);
+    return { curves, basis: anyDerived ? 'derived' : (row.modelRunRef ?? 'mmm'), anyDerived, hasData: curves.length > 0 };
+  }
+
+  // READ — the response curves + each channel's current spend/predicted, for the planner's charts.
+  async responseCurves(user: JwtUser) {
+    const { curves, basis, anyDerived, hasData } = await this.loadCurves(user.tenantId);
+    const current = predictSales(Object.fromEntries(curves.map((c) => [c.channel, c.currentSpend])), curves);
+    return {
+      has_data: hasData,
+      basis,
+      derived: anyDerived,
+      current_spend: curves.reduce((s, c) => s + c.currentSpend, 0),
+      current_predicted_sales: current.total,
+      channels: curves.map((c) => ({ channel: c.channel, current_spend: c.currentSpend, roi: c.roi, beta: c.beta, kappa: c.kappa, slope: c.slope, derived: c.derived })),
+    };
+  }
+
+  // What-if: predicted incremental sales for a proposed allocation (deterministic, no external call).
+  async simulate(user: JwtUser, body: z.infer<typeof SimulateBody>) {
+    const { curves, basis, hasData } = await this.loadCurves(user.tenantId);
+    if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot to simulate against — push an MMM run first', messageTh: 'ยังไม่มีผล MMM ให้จำลอง (ต้อง push MMM ก่อน)' });
+    const pred = predictSales(body.allocation, curves);
+    return { basis, total_budget: Object.values(body.allocation).reduce((s, v) => s + v, 0), predicted_sales: pred.total, per_channel: pred.perChannel };
+  }
+
+  // Optimise: the allocation of `budget` that maximises predicted incremental sales (greedy water-filling).
+  async optimize(user: JwtUser, body: z.infer<typeof OptimizeBody>) {
+    const { curves, basis, hasData } = await this.loadCurves(user.tenantId);
+    if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot to optimise against — push an MMM run first', messageTh: 'ยังไม่มีผล MMM ให้ค้นหางบที่เหมาะสม (ต้อง push MMM ก่อน)' });
+    const res = optimizeAllocation(body.budget, curves, { caps: body.caps });
+    return { basis, ...res };
+  }
+
+  // STAGE a budget plan for approval (advisory — never posts spend). Maker-checker: a DIFFERENT user must
+  // approve (approveBudgetPlan). Gated to the planning duties in the controller.
+  async stageBudgetPlan(user: JwtUser, body: z.infer<typeof StageBudgetPlanBody>) {
+    const tenantId = user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'no tenant', messageTh: 'ไม่มีผู้เช่า' });
+    const { curves, basis, hasData } = await this.loadCurves(tenantId);
+    if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot — push an MMM run first', messageTh: 'ยังไม่มีผล MMM (ต้อง push ก่อน)' });
+    const predicted = predictSales(body.allocation, curves).total;
+    const todayCount = (await this.db.select({ id: miBudgetPlans.id }).from(miBudgetPlans).where(eq(miBudgetPlans.tenantId, tenantId))).length;
+    const d = new Date();
+    const planNo = `BP-${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}-${String(todayCount + 1).padStart(3, '0')}`;
+    await this.db.insert(miBudgetPlans).values({
+      tenantId, planNo, totalBudget: String(body.total_budget), allocation: body.allocation,
+      predictedSales: String(predicted), basis, status: 'Pending', note: body.note ?? null,
+      requestedBy: user.username ?? 'user',
+    });
+    return { plan_no: planNo, status: 'Pending', predicted_sales: predicted, basis };
+  }
+
+  async listBudgetPlans(user: JwtUser, limit = 20) {
+    const tenantId = user.tenantId;
+    if (tenantId == null) return { plans: [] };
+    const rows = await this.db.select().from(miBudgetPlans)
+      .where(eq(miBudgetPlans.tenantId, tenantId)).orderBy(desc(miBudgetPlans.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+    return {
+      plans: rows.map((r) => ({
+        plan_no: r.planNo, status: r.status, total_budget: Number(r.totalBudget), predicted_sales: r.predictedSales == null ? null : Number(r.predictedSales),
+        allocation: r.allocation, basis: r.basis, note: r.note, requested_by: r.requestedBy, approved_by: r.approvedBy, created_at: r.createdAt, decided_at: r.decidedAt,
+      })),
+    };
+  }
+
+  // APPROVE a staged plan. Maker-checker (MKT-17): the approver must differ from the requester.
+  async approveBudgetPlan(user: JwtUser, body: z.infer<typeof ApproveBudgetPlanBody>) {
+    const tenantId = user.tenantId;
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'no tenant', messageTh: 'ไม่มีผู้เช่า' });
+    const [plan] = await this.db.select().from(miBudgetPlans)
+      .where(and(eq(miBudgetPlans.tenantId, tenantId), eq(miBudgetPlans.planNo, body.plan_no))).limit(1);
+    if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: `budget plan ${body.plan_no} not found`, messageTh: `ไม่พบแผนงบ ${body.plan_no}` });
+    if (plan.status !== 'Pending') throw new BadRequestException({ code: 'PLAN_NOT_PENDING', message: `plan is ${plan.status}`, messageTh: `แผนนี้สถานะ ${plan.status} แล้ว` });
+    await assertMakerChecker(this.db, {
+      user, maker: plan.requestedBy ?? '', event: 'marketing.budget_plan.approve', ref: plan.planNo,
+      reason: body.self_approval_reason, code: 'SOD_SELF_APPROVAL',
+      message: 'Maker-checker: a budget plan must be approved by a different user than the requester',
+      messageTh: 'แบ่งแยกหน้าที่: แผนงบต้องอนุมัติโดยผู้ใช้ที่ต่างจากผู้ขอ', httpStatus: 400,
+    });
+    await this.db.update(miBudgetPlans).set({ status: 'Approved', approvedBy: user.username ?? 'user', decidedAt: new Date() })
+      .where(and(eq(miBudgetPlans.tenantId, tenantId), eq(miBudgetPlans.planNo, body.plan_no)));
+    return { plan_no: plan.planNo, status: 'Approved', approved_by: user.username ?? 'user' };
   }
 }

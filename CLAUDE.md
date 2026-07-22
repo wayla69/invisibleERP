@@ -504,7 +504,7 @@ When writing tests for new features, you must include a "Cross-Tenant Boundary T
   AUDIT ROW's tenant (the operator's own) while a god acting-as another company runs bypass-OFF with
   `app.tenant_id` pinned to the TARGET — a scoped `WITH CHECK` REJECTS that bump and the failing statement
   ABORTS the whole tx (25P02), 500-ing **every god act-as POST/PATCH/DELETE** (bit `cutover:sme`'s god
-  sign-off — the first migration whose generic loop ran *after* 0465, A3's `0466`, re-scoped it and broke it).
+  sign-off — the first migration whose generic loop ran *after* 0465, A3's `0470`, re-scoped it and broke it).
   So the generic loop's `SELECT … WHERE column_name='tenant_id'` **MUST exclude `audit_expectations`**
   (`AND table_name <> 'audit_expectations'`) — 0465 chose permissive over a savepoint on purpose; the loop
   must not silently undo it. Any new migration copying the loop keeps this exclusion.

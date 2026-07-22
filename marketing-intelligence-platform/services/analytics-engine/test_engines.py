@@ -11,7 +11,7 @@ from mmm_model import (
     hill_saturation,
     log_saturation,
 )
-from rfm_model import compute_rfm, rfm_from_facts, sentiment_weighted_rfm
+from rfm_model import compute_rfm, rfm_from_facts, sentiment_weighted_rfm, customer_intelligence
 
 
 # ── transformations ────────────────────────────────────────────────────────────────────────────────
@@ -81,6 +81,26 @@ def test_mmm_summary_is_json_ready():
     assert z.loc[0, "roi"] is None
 
 
+def test_hill_saturation_emits_erp_optimizer_contract():
+    """Hill runs push raw-spend {beta, kappa, slope} for the ERP Budget Optimizer (docs/60)."""
+    df = _synthetic_mmm_frame(60)
+    model = MarketingMixModel(
+        [ChannelSpec("A", "a_spend"), ChannelSpec("B", "b_spend")], "revenue",
+        saturation="hill", hill_alpha=1.5, hill_gamma=0.5,
+    ).fit(df)
+    for ch in model.summary_dict()["channels"]:
+        sat = ch["saturation"]
+        assert sat["type"] == "hill"
+        assert set(sat) >= {"beta", "kappa", "slope"}
+        assert sat["slope"] == round(model.hill_alpha, 4)                 # slope = Hill exponent α
+        assert sat["kappa"] == round(model.hill_gamma * sat["ref_scale"], 2)  # kappa = γ · ref_scale (raw spend)
+        assert sat["kappa"] > 0 and sat["slope"] > 0
+    # log saturation has no matching raw-spend Hill form → the ERP fields are omitted (ERP falls back).
+    log_ch = MarketingMixModel([ChannelSpec("A", "a_spend")], "revenue", saturation="log").fit(df).summary_dict()["channels"][0]
+    assert log_ch["saturation"]["type"] == "log"
+    assert "kappa" not in log_ch["saturation"] and "slope" not in log_ch["saturation"]
+
+
 def test_mmm_simulate_scales_with_spend():
     df = _synthetic_mmm_frame(80)
     model = MarketingMixModel([ChannelSpec("A", "a_spend"), ChannelSpec("B", "b_spend")], "revenue").fit(df)
@@ -140,3 +160,32 @@ def test_rfm_handles_low_cardinality_without_crashing():
     base = pd.DataFrame({"customer_no": ["A", "B"], "recency_days": [1, 100], "frequency": [10, 1], "monetary": [500, 10]})
     out = sentiment_weighted_rfm(base, pd.DataFrame(columns=["customer_no", "sentiment_score"]))
     assert len(out) == 2 and "segment" in out.columns
+
+
+# ── Customer Intelligence (docs/60 Phase 2) ──────────────────────────────────────────────────────────
+def test_customer_intelligence_scores_and_actions():
+    base = pd.DataFrame({
+        "customer_no": [f"C{i}" for i in range(10)],
+        "recency_days": [1, 3, 5, 10, 20, 40, 60, 90, 120, 200],
+        "frequency": [20, 18, 15, 10, 8, 6, 4, 3, 2, 1],
+        "monetary": [9000, 8000, 7000, 5000, 4000, 3000, 2000, 1200, 800, 300],
+    })
+    scored = sentiment_weighted_rfm(base, pd.DataFrame({"customer_no": ["C0", "C9"], "sentiment_score": [0.8, -0.6]}))
+    intel = customer_intelligence(scored).set_index("customer_no")
+
+    assert set(intel.columns) == {"predicted_clv", "churn_probability", "next_best_action"}
+    # every probability is a valid [0,1]; CLV non-negative.
+    assert (intel["churn_probability"].between(0.0, 1.0)).all()
+    assert (intel["predicted_clv"] >= 0).all()
+    # the engaged top customer churns far less than the lapsed bottom one.
+    assert intel.loc["C0", "churn_probability"] < intel.loc["C9", "churn_probability"]
+    # the best customer is worth more than the worst.
+    assert intel.loc["C0", "predicted_clv"] > intel.loc["C9", "predicted_clv"]
+    # NBA codes are all from the ERP allow-list.
+    allow = {"WINBACK", "UPSELL", "VIP_CARE", "REACTIVATE", "RETAIN", "NURTURE", "CROSS_SELL"}
+    assert set(intel["next_best_action"]).issubset(allow)
+
+
+def test_customer_intelligence_empty_frame():
+    out = customer_intelligence(pd.DataFrame(columns=["customer_no", "r_score", "f_score", "m_score", "sentiment_score", "segment", "frequency", "monetary"]))
+    assert list(out.columns) == ["customer_no", "predicted_clv", "churn_probability", "next_best_action"] and out.empty

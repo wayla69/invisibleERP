@@ -3079,7 +3079,35 @@
       "idx": 440,
       "version": "7",
       "when": 2023820000405,
-      "tag": "0466_scm_cross_elasticity",
+      "tag": "0466_mi_budget_plans",
+      "breakpoints": true
+    },
+    {
+      "idx": 441,
+      "version": "7",
+      "when": 2023820000406,
+      "tag": "0467_mi_customer_intel",
+      "breakpoints": true
+    },
+    {
+      "idx": 442,
+      "version": "7",
+      "when": 2023820000407,
+      "tag": "0468_mi_campaign_experiments",
+      "breakpoints": true
+    },
+    {
+      "idx": 443,
+      "version": "7",
+      "when": 2023820000408,
+      "tag": "0469_mi_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 444,
+      "version": "7",
+      "when": 2023820000409,
+      "tag": "0470_scm_cross_elasticity",
       "breakpoints": true
     }
   ]

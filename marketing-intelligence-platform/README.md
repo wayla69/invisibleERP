@@ -46,6 +46,10 @@ is designed for but out of scope.)
 - **`mmm_model.py`** — Geometric Adstock (carry-over) → Hill/Log Saturation (diminishing returns) → **Ridge
   Regression** (handles multicollinearity among social variables) → per-channel Contribution % and ROI.
   Optional `scipy` adstock optimization (`MMM_OPTIMIZE=1`). `simulate()` powers the budget experiment page.
+  Each channel's `saturation` also carries the **ERP Budget-Optimizer response-curve contract** (Hill runs
+  only): `beta`/`kappa`/`slope` in raw-spend units (`slope = α`, `kappa = γ · ref_scale`, `beta = spend_beta`),
+  so the ERP's `/marketing-intel` Budget Planner reconstructs the exact fitted curve without re-fitting
+  (docs/60 Phase 1). `log` saturation omits them and the ERP falls back to a derived curve.
 - **`rfm_model.py`** — Recency/Frequency/Monetary via `pandas.qcut`, a **sentiment multiplier
   `1 + 0.5·sentiment`**, and actionable segments (Loyal Promoters / At Risk VIPs / Churn Risk / …).
 - **`tows_analyzer.py`** — maps internal (MMM/RFM) × external (sentiment) into SO/ST/WO/WT recommendations.

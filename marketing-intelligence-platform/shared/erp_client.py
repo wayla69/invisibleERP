@@ -115,8 +115,9 @@ class ErpClient:
         """POST /api/v1/analytics/snapshots — push computed MMM/RFM/TOWS back into the ERP.
 
         The key must hold the `analytics:write` scope (distinct from the read scope). Each snapshot is
-        `{ "kind": "mmm"|"rfm"|"tows", "payload": {...}, "model_run_ref": "..."? }`. Idempotent server-side
-        (upsert per tenant+kind), so a re-push simply refreshes the latest.
+        `{ "kind": "mmm"|"rfm"|"tows", "payload": {...}, "model_run_ref": "..."?, "model_card": {...}? }`
+        — the `model_card` (docs/60 Phase 4) carries the run's version / training window / features / metrics
+        for the ERP's governance surface. Append-only server-side (history preserved).
         """
         return self._post("/api/v1/analytics/snapshots", {"snapshots": snapshots})
 
@@ -152,6 +153,17 @@ class ErpClient:
         """GET /api/v1/invoices — AR invoices (auto-paginated)."""
         params = {"status": status} if status else {}
         return list(self._paginate("/api/v1/invoices", params))
+
+    def fetch_experiment_outcomes(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """GET /api/v1/marketing/experiment-outcomes — measured campaign LIFT (docs/60 Phase 3 pull-back).
+
+        The ERP splits an activated segment into a treatment arm and a randomised holdout control, then
+        measures the incremental revenue the campaign caused. Pulling these realised outcomes lets the next
+        MMM fit use campaign lift as a regressor — the loop's feedback edge. Returns a list of
+        ``{experiment_no, segment, incremental_revenue, lift_pct, treatment_count, control_count,
+        window_days, measured_at}``.
+        """
+        return self._get("/api/v1/marketing/experiment-outcomes", {"limit": limit}).get("outcomes", [])
 
     def close(self) -> None:
         self._session.close()

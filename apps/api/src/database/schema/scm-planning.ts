@@ -233,7 +233,7 @@ export const scmPriceElasticity = pgTable('scm_price_elasticity', {
 // slope of item_a's log-demand on item_b's log-price, estimated only for sibling pairs sharing an
 // item_categories category (never the full cross-product), with the same identifiability floor as A2.
 // A credible γ means a promotion on item_b moves its sibling item_a's demand: γ>0 substitutes
-// (cannibalization), γ<0 complements (halo). Migration 0466 applies the canonical 0232-form RLS loop +
+// (cannibalization), γ<0 complements (halo). Migration 0470 applies the canonical 0232-form RLS loop +
 // the leading (tenant_id, item_a) index.
 export const scmCrossElasticity = pgTable('scm_cross_elasticity', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
