@@ -577,17 +577,18 @@ function ProjectCostSlide() {
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Project Cost" title="The seed buys a platform that already exists" />
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat value="฿60M+" label="Replacement cost to date (est.)" tone="blue" />
-        <Stat value="~12" label="Person-years of senior engineering" tone="violet" />
+        <Stat value="฿67M+" label="Replacement cost to date (est.)" tone="blue" />
+        <Stat value="~14" label="Person-years of senior engineering" tone="violet" />
         <Stat value="307" label="Documented controls shipped" tone="emerald" />
       </div>
       <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
         <div className="mb-3 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">
-          Where the ฿60M of build value sits (replacement-cost estimate)
+          Where the ฿67M of build value sits (replacement-cost estimate)
         </div>
-        <CostBar tone="blue" label="Engineering — core platform & 10 domain modules" sub="POS → GL, WMS, MRP, projects, CRM, BI" pct={72} amount="฿43M" />
-        <CostBar tone="emerald" label="Compliance & audit readiness" sub="RCM, process narratives, control-test harnesses" pct={13} amount="฿8M" />
-        <CostBar tone="amber" label="Integrations & Thai localization" sub="e-Tax, 3 payment gateways, 3 delivery channels" pct={10} amount="฿6M" />
+        <CostBar tone="blue" label="Engineering — core platform & 10 domain modules" sub="POS → GL, WMS, MRP, projects, CRM, BI" pct={64} amount="฿43M" />
+        <CostBar tone="violet" label="AI/ML & data science" sub="demand-forecast engine (ML + optimization), marketing intelligence platform" pct={9} amount="฿6M" />
+        <CostBar tone="emerald" label="Compliance & audit readiness" sub="RCM, process narratives, control-test harnesses" pct={12} amount="฿8M" />
+        <CostBar tone="amber" label="Integrations & Thai localization" sub="e-Tax, payment rails incl. PromptPay slip-verify, delivery channels" pct={10} amount="฿7M" />
         <CostBar tone="rose" label="Security" sub="third-party reviews, pentests, remediation" pct={5} amount="฿3M" />
       </div>
       <p className="mt-4 text-center text-xs text-slate-400">
@@ -627,9 +628,9 @@ function TheAskSlide() {
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <div className="grid grid-cols-2 gap-3">
-            <Stat value="฿70M" label="Raise (~US$2.0M)" tone="violet" />
-            <Stat value="฿280M" label="Pre-money (~US$8M)" tone="blue" />
-            <Stat value="~20%" label="Equity, post-money" tone="emerald" />
+            <Stat value="฿70M" label="Raise (~US$2.1M)" tone="violet" />
+            <Stat value="฿320M" label="Pre-money (~US$9.5M)" tone="blue" />
+            <Stat value="~18%" label="Equity, post-money" tone="emerald" />
             <Stat value="18–20" label="Months of runway" tone="amber" />
           </div>
           <p className="mt-3 text-xs text-slate-400">Priced equity or SAFE; terms illustrative, for discussion.</p>
@@ -639,7 +640,7 @@ function TheAskSlide() {
             Milestones this round unlocks — the Series A story
           </div>
           <Milestone title="30+ paying companies live" sub="mid-market F&B chains on the full stack" />
-          <Milestone title="฿35M ARR run-rate (~US$1M)" sub="subscription + AI usage revenue" />
+          <Milestone title="฿40M ARR run-rate (~US$1.2M)" sub="subscription, premium AI suites + usage revenue" />
           <Milestone title="First external SOX-ICFR audit passed" sub="controls evidence produced by the platform itself" />
           <Milestone title="2 SEA markets localized" sub="tax, language, and payment rails beyond Thailand" />
         </div>
@@ -650,25 +651,27 @@ function TheAskSlide() {
 
 function ValuationSlide() {
   const rows = [
-    ["฿20M (bear)", 120, 160, 200],
-    ["฿35M (base)", 210, 280, 350],
-    ["฿50M (bull)", 300, 400, 500],
+    ["฿25M (bear)", 150, 200, 250],
+    ["฿40M (base)", 240, 320, 400],
+    ["฿55M (bull)", 330, 440, 550],
   ];
   return (
     <div className="flex h-full flex-col justify-center">
       <SlideHeading kicker="Valuation Model" title="Triangulated, not hand-waved" tone="amber" />
       <div className="grid gap-4 md:grid-cols-3">
         <Card icon={Layers} tone="blue" title="Replacement-cost floor">
-          ฿60M+ to rebuild the platform — before the compliance moat: 307 controls, harnesses,
-          and audit artifacts a copycat must also rebuild.
+          ฿67M+ to rebuild the platform — including the ML forecasting and marketing-intelligence
+          stack — before the compliance moat: 307 controls, harnesses, and audit artifacts a
+          copycat must also rebuild.
         </Card>
         <Card icon={Scale} tone="emerald" title="Comparable seed rounds">
           SEA B2B-SaaS seeds with live product and early revenue price at roughly US$6–12M
           pre-money — we sit mid-range with audit-grade differentiation.
         </Card>
         <Card icon={TrendingUp} tone="violet" title="Forward-multiple method">
-          Series A target of ฿35M forward ARR at an 8× multiple implies ฿280M — the pre-money
-          we are asking for today.
+          Series A target of ฿40M forward ARR at an 8× multiple implies ฿320M — the pre-money
+          we are asking for today. AI planning and marketing intelligence lift the base case:
+          both are premium-tier suites that pull customers up the pricing ladder.
         </Card>
       </div>
       <div className="mt-5">
@@ -690,7 +693,7 @@ function ValuationSlide() {
                 <tr key={label} className="border-t border-slate-200">
                   <td className="px-4 py-2 font-bold text-slate-900">{label}</td>
                   <td className="px-4 py-2 text-center text-slate-600">{a}</td>
-                  <td className={`px-4 py-2 text-center ${b === 280 ? "bg-emerald-100 font-extrabold text-emerald-700" : "text-slate-600"}`}>{b}</td>
+                  <td className={`px-4 py-2 text-center ${b === 320 ? "bg-emerald-100 font-extrabold text-emerald-700" : "text-slate-600"}`}>{b}</td>
                   <td className="px-4 py-2 text-center text-slate-600">{c}</td>
                 </tr>
               ))}
