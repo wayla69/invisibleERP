@@ -569,6 +569,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       // docs/54 — the supply-chain planning workspace lives on this page as extra tabs, so the
       // planning duties reach it here rather than through a second nav entry.
       { label: 'nav.demand', href: '/demand', icon: LineChart, perms: ['exec', 'planner', 'warehouse', 'scm_plan', 'scm_approve'] },
+      // docs/57 Track B (B1) — multi-echelon supply-network topology master data.
+      { label: 'nav.network', href: '/network', icon: Network, perms: ['exec', 'planner', 'scm_plan'] },
       { label: 'nav.profitability', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'nav.mmm', href: '/mmm', icon: BarChart3, perms: ['marketing', 'exec'] },
       { label: 'nav.marketing_intel', href: '/marketing-intel', icon: Sparkles, perms: ['marketing', 'exec'] },

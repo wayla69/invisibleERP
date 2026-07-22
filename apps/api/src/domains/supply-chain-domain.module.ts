@@ -20,6 +20,7 @@ import { MfgDepthModule } from '../modules/mfg-depth/mfg-depth.module';
 import { QualityModule } from '../modules/quality/quality.module';
 import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
 import { ScmPlanningModule } from '../modules/scm-planning/scm-planning.module';
+import { ScmNetworkModule } from '../modules/scm-network/scm-network.module';
 
 // docs/46 Phase 5 — procure-to-pay & make-to-stock (inventory · procurement · sourcing · costing · WMS · lots · manufacturing · quality · master data) aggregate.
 // Pure WIRING: no providers/controllers of its own — it only groups the domain's feature modules so
@@ -50,6 +51,7 @@ import { ScmPlanningModule } from '../modules/scm-planning/scm-planning.module';
     QualityModule,
     QualityCapaModule,
     ScmPlanningModule,
+    ScmNetworkModule,
   ],
   // Re-export every member so providers the feature modules export stay visible to AppModule's own
   // injector context (the APP_GUARD/APP_INTERCEPTOR providers resolve there — e.g. JwtAuthGuard's
@@ -76,6 +78,7 @@ import { ScmPlanningModule } from '../modules/scm-planning/scm-planning.module';
     QualityModule,
     QualityCapaModule,
     ScmPlanningModule,
+    ScmNetworkModule,
   ],
 })
 export class SupplyChainDomainModule {}
