@@ -1,0 +1,131 @@
+{
+  "_note": "Reviewed inventory of the platform-owner (\"god\") API surface — every @PlatformAdmin route (tools/ci/check-platform-surface.mjs). These routes run under a server-set FULL cross-tenant RLS bypass (PlatformAdminGuard -> req.__platformBypass -> TenantTxInterceptor), so ONE credential reads or writes EVERY company's data; GET /api/admin/tenants/:id/export alone streams every row of every tenant-scoped table for a chosen company. The surface grew 26 -> 38 unwatched, which is why this gate exists: a route missing from this file FAILS the build, and an entry whose route no longer exists FAILS too (the inventory must stay honest). `destructive` is auto-derived review signal (purge/delete/factory-reset/force-*). Regenerate with --update and add a `reason` to any NEW entry in the same PR. Before adding one, prefer a tenant-scoped route with an ordinary @Permissions duty — god authority is for cross-COMPANY operations, not for reading platform config. Related controls: ITGC-AC-16 (the surface is audited on reads as well as writes), ITGC-AC-18 (tenancy model), ITGC-AC-06 (PLATFORM_REQUIRE_MFA). See docs/ops/tenancy-model.md 2bis.",
+  "routes": {
+    "GET /api/admin/ai-usage": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/emails": {
+      "file": "apps/api/src/modules/mailer/mailer.controller.ts"
+    },
+    "GET /api/admin/entitlement-observations": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/item-maintenance/unused-items": {
+      "file": "apps/api/src/modules/item-setup/item-maintenance.controller.ts"
+    },
+    "GET /api/admin/payment-claims": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/receipts/:receiptNo/pdf": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/saas-lifecycle/events": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/signup-invites": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/signup-requests": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/sme-defaults": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/tenants": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/tenants/:id": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "GET /api/admin/tenants/:id/export": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts",
+      "reason": "Full tenant data export (offboarding / PDPA portability): the tenant row plus every row of every tenant-scoped table as one JSON document. Not destructive, but the single largest data-egress route on the surface — audited on read since 2026-07-22 (meta.platform_read + meta.rls_bypass, ITGC-AC-16)."
+    },
+    "POST /api/admin/emails/deliver-pending": {
+      "file": "apps/api/src/modules/mailer/mailer.controller.ts"
+    },
+    "POST /api/admin/item-maintenance/force-preview": {
+      "file": "apps/api/src/modules/item-setup/item-maintenance.controller.ts",
+      "reason": "Read-only blast-radius report for force-purge (which companies lose how many referencing rows). Not destructive despite the `force-` prefix, and now LOAD-BEARING: its total_ref_rows must be echoed back to force-purge, so the destructive call cannot run without having seen its own damage."
+    },
+    "POST /api/admin/item-maintenance/force-purge": {
+      "file": "apps/api/src/modules/item-setup/item-maintenance.controller.ts",
+      "destructive": true,
+      "reason": "Deletes shared `items` EVEN WHERE A COMPANY STILL USES THEM, wiping the referencing rows cross-tenant; an omitted `item_ids` targets the WHOLE catalogue. The widest-blast-radius route in the system. Maker-checker is deliberately not used (the platform-owner list is often a single human, so a two-person rule would make it unusable rather than safer); instead it is fail-closed behind the ops kill switch ALLOW_ITEM_FORCE_PURGE (403 FORCE_PURGE_DISABLED when unset — inert on a normal deploy) and requires expected_ref_rows echoed from force-preview and re-checked against the live count (409 BLAST_RADIUS_MISMATCH), which makes the blast-radius preview load-bearing and closes the preview→purge TOCTOU. Plus the strong FORCE-PURGE-ITEMS confirm phrase. See PN-08 rev 3.5."
+    },
+    "POST /api/admin/item-maintenance/purge-unused-items": {
+      "file": "apps/api/src/modules/item-setup/item-maintenance.controller.ts",
+      "destructive": true,
+      "reason": "Garbage-collects shared `items` master rows that NO tenant references any more. Needs the full cross-tenant bypass precisely so 'unreferenced' is computed across EVERY company — a per-company view would delete another company's in-use items. Typed confirm phrase required."
+    },
+    "POST /api/admin/payment-claims/:id/approve": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/payment-claims/:id/reject": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/saas-lifecycle/run": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/signup-invites": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/signup-requests/:id/approve": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/signup-requests/:id/reject": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/sme-defaults": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/addons": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/control-profile": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/delete": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts",
+      "destructive": true,
+      "reason": "Reversible soft-delete (sets deleted_at, blocks every login with TENANT_DELETED); paired with .../restore. Suspended-only. Kept god-only so a company Admin can never delete its own company's access."
+    },
+    "POST /api/admin/tenants/:id/extend-trial": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/factory-reset": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts",
+      "destructive": true,
+      "reason": "Clears a company's transactional data in place (keeps the tenant + its users). Two-key in practice: gated on ALLOW_TENANT_FACTORY_RESET and the company must be suspended first. Cross-tenant by nature — the platform operates on a customer's data, so it cannot be a tenant-scoped duty."
+    },
+    "POST /api/admin/tenants/:id/plan": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/purge": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts",
+      "destructive": true,
+      "reason": "IRREVERSIBLE — wipes every tenant-scoped table for an already-deleted company. Never erases audit_log (ITGC-AC-16), which is why the tenants row survives as the chain's anchor. Highest-blast-radius route on the surface."
+    },
+    "POST /api/admin/tenants/:id/reactivate": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/receipts": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/restore": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/sme-prefs": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/suspend": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    },
+    "POST /api/admin/tenants/:id/tags": {
+      "file": "apps/api/src/modules/billing/billing.controller.ts"
+    }
+  }
+}

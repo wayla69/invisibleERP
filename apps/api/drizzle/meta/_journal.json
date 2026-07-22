@@ -3025,6 +3025,55 @@
       "when": 2023820000397,
       "tag": "0458_saas_payment_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 433,
+      "version": "7",
+      "when": 2023820000398,
+      "tag": "0459_scm_planning",
+      "breakpoints": true
+    },
+    {
+      "idx": 434,
+      "version": "7",
+      "when": 2023820000399,
+      "tag": "0460_marketing_intel_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 435,
+      "version": "7",
+      "when": 2023820000400,
+      "tag": "0461_scm_forecast_hierarchy",
+      "breakpoints": true
+    },
+    {
+      "idx": 436,
+      "version": "7",
+      "when": 2023820000401,
+      "tag": "0462_scm_forecast_attribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 437,
+      "version": "7",
+      "when": 2023820000402,
+      "tag": "0463_scm_network",
+      "breakpoints": true
+    },
+    {
+      "idx": 438,
+      "version": "7",
+      "when": 2023820000403,
+      "tag": "0464_scm_price_elasticity",
+      "breakpoints": true
+    },
+    {
+      "idx": 439,
+      "version": "7",
+      "when": 2023820000404,
+      "tag": "0465_audit_completeness",
+      "breakpoints": true
     }
   ]
 }

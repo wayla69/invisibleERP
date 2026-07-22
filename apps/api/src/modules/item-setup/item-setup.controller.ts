@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Res, BadRequestException } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ItemSetupService, type CategoryDto, type TaxCodeDto, type ItemProfileDto, type WarehouseAccountsDto } from './item-setup.service';
 import { MasterDataService } from '../masterdata/masterdata.service';
@@ -85,6 +85,7 @@ export class ItemSetupController {
     return { entities: this.md.entities().entities.filter((e) => IO_ENTITIES.has(e.key)) };
   }
 
+  @AuditRead('item_setup_export')
   @Get('io/:entity/export')
   async ioExport(@Param('entity') entity: string, @Query('format') format: string | undefined, @Res() reply: FastifyReply) {
     this.ioEntityOrThrow(entity);

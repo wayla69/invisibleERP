@@ -192,6 +192,14 @@ export function buildOpenApi() {
           responses: listResponse({ $ref: '#/components/schemas/CustomerPurchaseFacts' }),
         },
       },
+      '/analytics/snapshots': {
+        post: {
+          summary: 'Push computed analytics results into the ERP (MMM / RFM / TOWS)',
+          description: 'Append a computed analytics snapshot per kind for the caller\'s tenant (history preserved). The Marketing Intelligence Platform posts its results here; the ERP stores them tenant-scoped and renders /marketing-intel. An `rfm` snapshot MAY include `members: [{ customer_no, segment }]` — the per-customer assignments land on customer_profiles.mi_rfm_segment so campaigns can target them (audience=mi_segment). Body: `{ snapshots: [{ kind: "mmm"|"rfm"|"tows", payload: {…}, model_run_ref?: string, members?: [...] }] }`.',
+          security: [{ apiKey: ['analytics:write'] }],
+          responses: { '200': { description: 'pushed count + kinds' }, '400': { description: 'INVALID_SNAPSHOT_KIND / TENANT_REQUIRED' }, '403': { description: 'INSUFFICIENT_SCOPE (needs analytics:write)' } },
+        },
+      },
       '/loyalty/member': {
         get: {
           summary: 'Read a loyalty member (by code / phone / card)', security: [{ apiKey: ['loyalty:read'] }],

@@ -28,6 +28,9 @@ export const items = pgTable('items', {
   orderMultiple: numeric('order_multiple', { precision: 14, scale: 3 }).default('0'),
   orderCost: numeric('order_cost', { precision: 14, scale: 2 }).default('0'),   // S: per-PO cost
   holdingCost: numeric('holding_cost', { precision: 14, scale: 4 }).default('0'), // H: per unit/yr
+  // docs/54 (0459): sellable days from receipt — a PHYSICAL property, so it lives on the shared master.
+  // A tenant that disagrees overrides it per (branch,item) in scm_item_policies.shelf_life_days.
+  shelfLifeDays: integer('shelf_life_days'),
   imageKey: text('image_key'),
   // Capital goods (FA-10): items flagged as fixed assets are routed to the asset register on receipt
   // (Dr 1500) rather than capitalised into inventory (Dr 1200). default_asset_category_id seeds the

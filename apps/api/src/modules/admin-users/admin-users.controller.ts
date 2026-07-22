@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { SelfApprovalBody, type SelfApprovalDto } from '../../common/control-profile';
 import { AdminUsersService } from './admin-users.service';
@@ -29,6 +29,7 @@ export class AdminUsersController {
   // ── ITGC-AC-08: User Access Review ──
   @Get('access-review') accessReview() { return this.svc.accessReview(); }
   @Get('access-review/certifications') reviewCertifications() { return this.svc.listReviews(); }
+  @AuditRead('access_review_csv')
   @Get('access-review/export') async exportReview(@Res() reply: FastifyReply) {
     const csv = await this.svc.exportReviewCsv();
     reply.header('Content-Type', 'text/csv; charset=utf-8').header('Content-Disposition', 'attachment; filename="access-review.csv"').send(csv);

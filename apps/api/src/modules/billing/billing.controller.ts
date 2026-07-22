@@ -238,7 +238,9 @@ export class BillingController {
   }
 
   // D2 — full tenant data export (offboarding / PDPA portability): the tenant row + every row in every
-  // tenant-scoped table, as one downloadable JSON document. God-only; the download is the audit-logged act.
+  // tenant-scoped table, as one downloadable JSON document. God-only; the download IS the audited act —
+  // AuditInterceptor records every method on a @PlatformAdmin route, so this read leaves a hash-chained
+  // audit_log row (meta.platform_read + meta.rls_bypass) naming the operator and the company.
   @Get('admin/tenants/:id/export') @PlatformAdmin()
   async exportTenant(@Param('id') id: string, @Res() reply: FastifyReply) {
     const doc = await this.tenantExport.exportTenant(Number(id));

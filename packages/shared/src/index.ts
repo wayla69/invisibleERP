@@ -5,4 +5,5 @@ export * from './qr.js';
 export * from './i18n.js';
 export * from './schemas.js';
 export * from './nav-profiles.js';
+export * from './scm-engine.js';
 export * from './slip-qr.js';

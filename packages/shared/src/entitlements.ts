@@ -73,7 +73,9 @@ export const SUITES: Record<SuiteKey, Permission[]> = {
   masterdata: ['masterdata', 'bom_master'],
   // Supply-chain planning / forecasting (split 2026-07-21: `marketing` moved to its own sellable suite —
   // every plan that carried the combined suite lists BOTH, so bundle breadth is unchanged/grandfathered).
-  planning: ['planner'],
+  // docs/54 demand planning (`scm_plan`) belongs here — same buyer as `planner`; its checker duty
+  // (scm_approve) is a sub-permission, not gated.
+  planning: ['planner', 'scm_plan'],
   // Marketing & campaigns (own suite so it can be sold per-module as an add-on).
   marketing: ['marketing'],
   // CRM loyalty / surveys (loyalty back-office single-duties are granted directly, not suite-gated).

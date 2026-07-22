@@ -1,0 +1,130 @@
+{
+  "contract_version": "2",
+  "request_id": "fixture-optimize-1",
+  "start_ds": "2026-07-01",
+  "horizon_days": 7,
+  "time_budget_ms": 20000,
+  "joint": {
+    "budget": 25000
+  },
+  "items": [
+    {
+      "item_code": "ING-CHICKEN",
+      "demand_scenarios": [
+        [
+          18.0,
+          19.5,
+          24.0,
+          31.0,
+          33.0,
+          0.0,
+          17.5
+        ],
+        [
+          21.0,
+          17.0,
+          26.5,
+          28.0,
+          36.0,
+          0.0,
+          19.0
+        ],
+        [
+          16.5,
+          22.0,
+          22.5,
+          34.0,
+          30.5,
+          0.0,
+          16.0
+        ]
+      ],
+      "current_inventory": [
+        {
+          "remaining_days": 1,
+          "qty": 6.0
+        },
+        {
+          "remaining_days": 2,
+          "qty": 12.5
+        }
+      ],
+      "in_transit": [
+        {
+          "arrival_ds": "2026-07-02",
+          "qty": 40.0
+        }
+      ],
+      "lead_time": {
+        "mean_days": 2,
+        "std_days": 0.75
+      },
+      "shelf_life_days": 3,
+      "review_period_days": 1,
+      "unit_cost": 82.5,
+      "unit_price": 145.0,
+      "salvage_value": 0.0,
+      "disposal_cost": 4.0,
+      "goodwill_cost": 25.0,
+      "holding_cost_per_day": 0.6,
+      "moq": 10.0,
+      "pack_size": 5.0,
+      "fixed_order_cost": 150.0,
+      "waste_rate_prior": 0.035
+    },
+    {
+      "item_code": "ING-RICE",
+      "demand_scenarios": [
+        [
+          40.0,
+          42.0,
+          48.0,
+          60.0,
+          64.0,
+          0.0,
+          39.0
+        ],
+        [
+          44.0,
+          39.5,
+          51.0,
+          57.5,
+          68.0,
+          0.0,
+          41.5
+        ],
+        [
+          38.0,
+          45.0,
+          46.5,
+          63.0,
+          61.0,
+          0.0,
+          37.0
+        ]
+      ],
+      "current_inventory": [
+        {
+          "remaining_days": 120,
+          "qty": 150.0
+        }
+      ],
+      "in_transit": [],
+      "lead_time": {
+        "mean_days": 4,
+        "std_days": 1.5
+      },
+      "shelf_life_days": 180,
+      "review_period_days": 3,
+      "unit_cost": 26.0,
+      "unit_price": 38.0,
+      "salvage_value": 5.0,
+      "disposal_cost": 0.0,
+      "goodwill_cost": 6.0,
+      "holding_cost_per_day": 0.05,
+      "moq": 0.0,
+      "pack_size": 1.0,
+      "fixed_order_cost": 0.0
+    }
+  ]
+}

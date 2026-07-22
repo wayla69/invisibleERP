@@ -19,6 +19,7 @@ import { ServiceCasesModule } from '../modules/service-cases/service-cases.modul
 import { ServiceKbModule } from '../modules/service-kb/service-kb.module';
 import { ReputationModule } from '../modules/reputation/reputation.module';
 import { MmmModule } from '../modules/mmm/mmm.module';
+import { MarketingIntelModule } from '../modules/marketing-intel/marketing-intel.module';
 
 // docs/46 Phase 5 — customer & revenue front office (customers · CRM · loyalty · marketing · CPQ/pricing · service desk) aggregate.
 // Pure WIRING: no providers/controllers of its own — it only groups the domain's feature modules so
@@ -48,6 +49,7 @@ import { MmmModule } from '../modules/mmm/mmm.module';
     ServiceKbModule,
     ReputationModule,
     MmmModule,
+    MarketingIntelModule,
   ],
   // Re-export every member so providers the feature modules export stay visible to AppModule's own
   // injector context (the APP_GUARD/APP_INTERCEPTOR providers resolve there — e.g. JwtAuthGuard's
@@ -73,6 +75,7 @@ import { MmmModule } from '../modules/mmm/mmm.module';
     ServiceKbModule,
     ReputationModule,
     MmmModule,
+    MarketingIntelModule,
   ],
 })
 export class SalesCrmDomainModule {}

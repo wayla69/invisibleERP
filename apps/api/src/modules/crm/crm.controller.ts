@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, ParseIntPipe, HttpCode } fro
 import { z } from 'zod';
 import { CrmService } from './crm.service';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
-import { CurrentUser, Permissions } from '../../common/decorators';
+import { AuditRead, CurrentUser, Permissions } from '../../common/decorators';
 import type { JwtUser } from '../../common/decorators';
 import { RequiresSuite } from '../billing/requires-suite.decorator';
 
@@ -80,6 +80,7 @@ export class CrmController {
 
   // GET /api/crm/export — bulk customer-data export for an external CDP (identity + RFM + consent). Paginated,
   // tenant-scoped (HQ/Admin pass ?tenant_id). Read-only; ships consent flags so the CDP honours opt-outs.
+  @AuditRead('crm_cdp_export')
   @Get('export')
   @RequiresSuite('cdp')
   @Permissions('marketing', 'exec')

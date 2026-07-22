@@ -10,7 +10,7 @@ import { EtaxEmailService, ETAX_TIMESTAMP_EMAIL } from '../src/modules/tax/docum
 import { hmacSha256Hex, verifyWebhookSignature, verifyWebhookWithTimestamp } from '../src/common/crypto';
 import { hitRateLimit } from '../src/common/rate-limit-store';
 import { verifyInboundWebhook } from '../src/common/webhook-auth';
-import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
+import { resolvePermissions, expandPermissions, detectSodConflicts, DEFAULT_ROLE_PERMISSIONS, SOD_RULES } from '@ierp/shared';
 import { assertMakerChecker, isControlProfile, SelfApprovalBody, assertSmeAllowsDistinctApprovers, isSmeProfile } from '../src/common/control-profile';
 import type { JwtUser } from '../src/common/decorators';
 
@@ -269,8 +269,10 @@ describe('Segregation of Duties — conflict detection (ITGC-AC-09)', () => {
     expect(c('Customer')).toBe(0);
     expect(c('Sales') + c('Procurement') + c('Planner') + c('Warehouse') + c('Customer')).toBe(8);
   });
-  it('Admin is the inherent superuser (violates all 23 rules)', () => {
-    expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(23);
+  // Asserted against SOD_RULES.length rather than a literal: the invariant is "Admin violates EVERY
+  // rule", so adding a rule should not require editing a number here (it did, each time, until now).
+  it('Admin is the inherent superuser (violates every SoD rule)', () => {
+    expect(detectSodConflicts(resolvePermissions('Admin')).length).toBe(SOD_RULES.length);
   });
   it('shipped single-duty role DEFAULTS are SoD-clean (the redesign in action)', () => {
     const NEW = ['Cashier', 'PosSupervisor', 'ArClerk', 'ApClerk', 'Buyer', 'WarehouseOperator',

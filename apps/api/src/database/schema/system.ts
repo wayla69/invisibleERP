@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, integer, timestamp, boolean, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, smallint, text, integer, timestamp, boolean, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 import { roleEnum } from './enums';
 
@@ -77,6 +77,22 @@ export const docCountersTenant = pgTable(
 );
 
 // Append-only audit log (move #4) — tamper-evident trail of mutations (who/what/when/tenant/trace)
+// ITGC-AC-16 completeness half (migration 0465). The hash chain evidences that no past row was ALTERED;
+// this evidences that none was OMITTED. TenantTxInterceptor bumps `expected` inside the BUSINESS
+// transaction, so it is durable exactly when the mutation committed, giving the one-directional invariant
+// `written >= expected` — a shortfall is provable audit loss. Sharded because a single row per tenant would
+// hold a row lock for the whole business transaction and serialise that tenant's writes.
+export const auditExpectations = pgTable(
+  'audit_expectations',
+  {
+    tenantId: bigint('tenant_id', { mode: 'number' }).notNull(),
+    shard: smallint('shard').notNull(),
+    expected: bigint('expected', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.shard] }) }),
+);
+
 export const auditLog = pgTable(
   'audit_log',
   {

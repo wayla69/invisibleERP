@@ -9,7 +9,8 @@ import {
 
 describe('planning/marketing suite split', () => {
   it('planner and marketing live in separate suites; the invariant still holds', () => {
-    expect(SUITES.planning).toEqual(['planner']);
+    // planning also carries docs/54's scm_plan module (same buyer as planner) since the main merge.
+    expect(SUITES.planning).toEqual(['planner', 'scm_plan']);
     expect(SUITES.marketing).toEqual(['marketing']);
     expect(() => validateEntitlements()).not.toThrow();
   });

@@ -12,6 +12,7 @@ import { CATALOG as CAT_PROJECTS } from './i18n-catalog/projects';
 import { CATALOG as CAT_FINANCEX } from './i18n-catalog/financex';
 import { CATALOG as CAT_INVOPS } from './i18n-catalog/invops';
 import { CATALOG as CAT_MFG } from './i18n-catalog/mfg';
+import { CATALOG as CAT_SCM } from './i18n-catalog/scm';
 import { CATALOG as CAT_PLANBI } from './i18n-catalog/planbi';
 import { CATALOG as CAT_SETTINGS } from './i18n-catalog/settings';
 import { CATALOG as CAT_HRX } from './i18n-catalog/hrx';
@@ -332,6 +333,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.planning': { th: 'งบประมาณ & แผน', en: 'Budgets & Plans' },
   'nav.budget': { th: 'งบประมาณเทียบจริง (Budget vs Actual)', en: 'Budget vs Actual' },
   'nav.demand': { th: 'พยากรณ์ความต้องการ (สถิติ + backtest)', en: 'Demand Forecast (statistical)' }, // docs/27 R4-5: classical models honestly labeled — not ML
+  'nav.network': { th: 'เครือข่ายซัพพลาย', en: 'Supply network' }, // docs/57 Track B (B1) — multi-echelon topology master data
   'nav.projects': { th: 'โครงการ (Projects)', en: 'Projects' },
   'nav.pm_portfolio': { th: 'พอร์ตโครงการ', en: 'Portfolio' },
   'nav.pm_action_center': { th: 'ศูนย์งานที่ต้องทำ', en: 'Action Center' },
@@ -1893,5 +1895,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM, CAT_PORTAL, CAT_AUTH, CAT_PUBLIC, CAT_PRICING,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM, CAT_PORTAL, CAT_AUTH, CAT_PUBLIC, CAT_PRICING, CAT_SCM,
 );

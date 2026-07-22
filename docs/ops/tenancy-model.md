@@ -294,8 +294,43 @@ role you can log in as that sees *everything*. When you still need one operator 
   visibility** (fail-open). Gating god on an **ops-controlled env var** the in-app user-management cannot
   touch closes that escalation path. It also means god membership is changed by a deploy/redeploy, and is
   the same knob (`PLATFORM_ADMIN_USERNAMES`) that authorises company provisioning/suspension.
-- Every cross-tenant read/write a god makes still runs with `req.__rlsBypass=true`, which the audit
-  interceptor records — so god actions are attributable in `audit_log`.
+- Every cross-tenant read/write a god makes runs with `req.__rlsBypass=true`, which the audit interceptor
+  records as `meta.rls_bypass` — so god actions are attributable in `audit_log`.
+  **Two corrections landed 2026-07-22 (this claim was previously overstated — see §2bis-audit below):** the
+  marker itself was never actually written, and god **reads** were not audited at all.
+
+#### 2bis-audit. What the trail really covers on the god surface
+
+- `AuditInterceptor` audits every **mutation** on any route, and — additionally — **every method** on a
+  `@PlatformAdmin` route (`auditRequired(method, isPlatformRoute)`, resolved from the route's
+  `PLATFORM_ADMIN_KEY` metadata). Rationale: a platform route carries a full cross-tenant RLS bypass, so its
+  *reads* are cross-tenant data accesses — `GET /api/admin/tenants/:id/export` alone streams every row of
+  every tenant-scoped table for one company. Auditing mutations only left **13 of the 38 god routes** (every
+  god read) with no row at all. Non-mutating platform rows are stamped `meta.platform_read`.
+- Ordinary tenant reads stay **unaudited by design** — they are RLS-confined, and logging them would bury the
+  real evidence in the chain.
+- **Refusals are audited too.** `PlatformAdminGuard.deny()` records every rejection on this surface
+  (`meta.platform_denied` + the code: `PLATFORM_ADMIN_REQUIRED` / `PLATFORM_IP_BLOCKED` /
+  `PLATFORM_MFA_REQUIRED`, plus `api_key_prefix` when a machine principal attempted it) before throwing.
+  It needs its own write path because Nest runs **guards before interceptors** — a guard rejection never
+  reaches `AuditInterceptor`, so denied fleet access used to leave no trace. Both writers share
+  `common/audit-writer.ts` so the rows are structurally identical. Query `meta->>'platform_denied'` to see
+  who has been probing the platform surface.
+- The scope markers `meta.rls_bypass` / `meta.rls_org_scope` / `meta.god_act_as_tenant` are read at
+  **response time**. They must not be read eagerly: `AuditInterceptor` is registered first in `app.module.ts`
+  and is therefore the **outermost** interceptor — Nest's `InterceptorsConsumer` calls `interceptors[0]
+  .intercept()` before `interceptors[1]`'s, and `next.handle()` only *defers* the rest of the chain — so an
+  eager read happens before `TenantTxInterceptor` has set them. That was the bug: the markers were silently
+  absent from every row, and no harness asserted them. `cutover/onboarding.ts` now does.
+- The god credential should also carry **mandatory TOTP** in production (`PLATFORM_REQUIRE_MFA`, §2quinquies
+  / `.env.example`) — 38 cross-tenant routes behind one password is not proportionate.
+- **The surface itself is now fenced by CI.** `tools/ci/check-platform-surface.mjs` holds a reviewed
+  inventory of every `@PlatformAdmin` route (`platform-surface-baseline.json`; today **38 — 13 read,
+  25 write, 5 destructive**). A route missing from the inventory fails the `build` job, a stale entry fails
+  too, and `@PlatformAdmin` + `@Public` on one handler fails outright. It does not cap the count — a SaaS
+  fleet surface legitimately grows — it refuses growth nobody reviewed. **Before adding a god route, ask
+  whether it can be a tenant-scoped route with an ordinary `@Permissions` duty:** god authority is for
+  cross-COMPANY operations, not for reading the platform's own config.
 
 ### 2ter. God company-switcher (act-as-one-company)
 A god's whole point is the global bypass — so out of the box it sees **every company's rows combined**, with
@@ -316,7 +351,12 @@ switcher** (only for a god — gated on `is_platform_owner` from `GET /api/auth/
 - **It only ever REDUCES a god's visibility** (a god already sees everything), so trusting a client header
   here is not a privilege-escalation path — a non-god sending it is ignored (`pg-core` asserts this). God
   actions while acting-as are still attributable: the audit interceptor records `god_act_as_tenant` on the
-  mutation's `audit_log` meta.
+  `audit_log` meta (on reads too, since 2026-07-22 — see §2bis-audit).
+- **The read-only rail covers the PLATFORM surface too** (since 2026-07-22). It is keyed on the caller being
+  a god, NOT on act-as scoping having applied — a `@PlatformAdmin` route deliberately suppresses act-as (so
+  the switcher's own directory still lists every company), which had left the rail not covering exactly the
+  routes that can suspend/factory-reset/delete/purge a company. It is an operator SAFETY rail (a god can
+  simply omit the header), not a boundary against an attacker.
 - **Read-only act-as (safe inspection).** Adding **`X-Act-As-Read-Only: 1`** alongside the act-as header makes
   the interceptor **reject any mutating request** (POST/PUT/PATCH/DELETE → `403 READONLY_IMPERSONATION`) while
   GETs still work — a god can enter a company to look/support with zero risk of writing. The web scope banner
@@ -468,6 +508,10 @@ sees its own.
 ## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
+| 1.34 | 2026-07-22 | Platform / Security | **§2ter — the read-only company view now covers the platform surface (no migration, no new control).** `X-Act-As-Read-Only` was honoured only when act-as scoping applied, and `@PlatformAdmin` routes suppress act-as by design — so a god inspecting a customer in look-only mode could still fire `suspend`/`factory-reset`/`delete`/`purge`/`force-purge`. Now keyed on `isGod`, covering both surfaces (strictly more restrictive; the web only sends the header with a company selected, so no flow changes). **Verified NOT a defect and left alone:** `__platformBypass` being all-or-nothing — `isGod` already grants the global bypass on every route, so it is redundant in the bypass expression and its only live effect is that act-as suppression. Related: `ALLOW_ITEM_FORCE_PURGE` + `expected_ref_rows` now gate the forced shared-catalogue purge (PN-08 rev 3.5). ToE `pg-core` 15→17, `onboarding` 224→227. |
+| 1.33 | 2026-07-22 | Platform / Security | **§2bis-audit — refused god attempts are audited (no migration, no new control).** Guards run BEFORE interceptors in Nest, so a `PlatformAdminGuard` rejection never reached `AuditInterceptor`: all three refusal paths (`PLATFORM_ADMIN_REQUIRED`, `PLATFORM_IP_BLOCKED`, `PLATFORM_MFA_REQUIRED`) left no trace. `deny()` now writes the refusal (`status=fail`, `meta.platform_denied` + code + `api_key_prefix` for a key) through the shared `common/audit-writer.ts`, extracted verbatim from the interceptor so denial and success rows share one hash chain / IP derivation / request id. Scoped to this guard only — auditing every 401/403 would flood the per-tenant chain's `FOR UPDATE` append. ToE `onboarding` 216→224. |
+| 1.32 | 2026-07-22 | Platform / Security | **§2bis-audit — the god surface is fenced by a CI ratchet (no migration, no new control; strengthens ITGC-SD-03/AC-18).** The `@PlatformAdmin` surface had grown **26 → 38 routes (+46%)** unwatched — no existing ratchet measured cross-tenant privilege. New `tools/ci/check-platform-surface.mjs` + `platform-surface-baseline.json` make it a reviewed inventory: an un-inventoried god route fails the `build` job, a stale entry fails (the inventory must stay honest), and `@PlatformAdmin` + `@Public` on one handler fails outright. Destructive routes (5) are flagged and carry written justifications — including `force-purge`, which deletes shared `items` even where a company still uses them. Runs inside the existing `build` job, so no branch-protection change. |
+| 1.31 | 2026-07-22 | Platform / Security | **§2bis — new §2bis-audit: the god surface is audited on READS, and the cross-tenant scope marker now actually lands (no migration, no new control; strengthens ITGC-AC-16/AC-18).** Two defects behind the old "god actions are attributable" claim. (a) `AuditInterceptor` audited only POST/PATCH/PUT/DELETE, so **13 of the 38 `@PlatformAdmin` routes — every god READ — left no audit row**, including `GET /api/admin/tenants/:id/export` (every row of every tenant-scoped table for one company; its own code comment asserted it was audited, and `TenantExportService` writes no row either). It now audits every method on a platform route via the `PLATFORM_ADMIN_KEY` metadata, stamping `meta.platform_read`; ordinary tenant reads stay unaudited by design. (b) `meta.rls_bypass`/`rls_org_scope`/`god_act_as_tenant` were read EAGERLY, before `TenantTxInterceptor` set them — audit is the OUTERMOST interceptor (`InterceptorsConsumer` runs `interceptors[0]` first; `next.handle()` merely defers the rest) — so they were **never written on any row**, and no harness asserted them. Now read at tap-time. Also: `PLATFORM_REQUIRE_MFA` documented as the recommended prod posture with an explicit enrol-first rollout order, and added to the API service's `railway-env-manifest.json` `expected` list (the half-hourly ops probe stays red until TOTP is mandatory on the god login); `PLATFORM_IP_ALLOWLIST` left optional/unlisted (a dynamic egress IP would lock the console out). ToE: `cutover/onboarding.ts` 216→221 (god read audited + marker present + tenant read still unaudited), vitest `platform-admin.test.ts` 5→12. PN-08 rev 3.2; UAT-SEC-073; manual `11-administration.md` §11.1 + §14.3. |
 | 1.30 | 2026-07-17 | Platform / Security | **§1ter — `STRICT_TENANT_PROXY` is now ENFORCE-READY (SOX-ICFR audit #2 follow-up; default still OFF).** Added the `warn` mode (audit-only: log the base-pool call site + short stack, then fall through) and used a full-suite `warn` sweep to enumerate every un-wrapped base-pool read. Closed them with two seams: (1) `TenantTxInterceptor` runs every `@NoTx` HTTP handler inside `globalDbALS` (one choke point — `@NoTx` ≡ the `runGlobalDb` contract), covering all current/future public webhooks + cron sweeps; (2) the direct-call entry points wrap their own bodies (member-auth, `service-cases.handleInbound`, `nps.submit`/`getSurvey`, `campaigns.sendCampaign`/`runDueAll`, `journeys.runDueAll`, `billing.seedPlans`/`applyStripeEvent`, `ledger.seedChartOfAccounts`, and the pre-tx guard reads `module-config.loadConfig` + `plan.guard`) so the harnesses (which call services directly, bypassing the interceptor) pass too. The **entire cutover + parity harness suite passes with `STRICT_TENANT_PROXY=1`**. Rollout unchanged: `warn` → `1` in staging → `1` in prod. No new RCM control. |
 | 1.29 | 2026-07-17 | Platform / Security | **§1ter — `STRICT_TENANT_PROXY` app-layer fail-closed proxy (SOX-ICFR audit #2, staged, default OFF).** Belt-and-braces above the §1bis H-3 base-role backstop: when ON, `tenantAwareProxy` throws `503 TENANT_CONTEXT_MISSING` for a direct `select/insert/update/delete/execute/query` issued with no `tenantALS` tx and no `runGlobalDb()` context, instead of silently falling through to the base pool. `transaction` is never guarded (it opens the scoping tx). New `runGlobalDb('reason', …)` escape hatch for genuinely-global base-pool reads. Staged: default-on is gated on wrapping every `@NoTx`/base-pool read (the flag surfaces them, e.g. member-auth verify-otp). No new RCM control. ToE `apps/api/test/tenant-proxy.test.ts` (5). |
 | 1.28 | 2026-07-13 | Platform / SRE | **§2 factory-reset: wipe TENANTLESS FK-child tables too (INVISIBLE reset outage).** The INVISIBLE factory-reset was permanently `FACTORY_RESET_BLOCKED`: `cust_pos_items` (2,417 rows) and `survey_answers` (74) have **no `tenant_id` column**, so the wipe loop never deleted them and they FK-blocked their parents (`cust_pos_sales`, `survey_responses`) forever. `tenant-wipe.ts` now walks the FK graph at runtime (`pg_constraint`, transitively) and deletes tenantless-child rows whose ancestor chain terminates in a wiped tenant row — ownership derived via FK, never guessed; other tenants'/shared rows untouched. Covers factory-reset AND purge (shared engine). Also documents the ordering gotcha: legacy cross-tenant vendor references (Amber POs → INVISIBLE vendors) mean the referencing tenant must be reset FIRST. ToE: `cutover/onboarding.ts` seeds a tenantless `cust_pos_items` child and asserts the reset clears it. |

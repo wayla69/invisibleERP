@@ -11,6 +11,7 @@
 // The pure analyzer is exported so the ToE (cutover/migration-tooling) can assert its invariants.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const DRIZZLE_DIR = 'apps/api/drizzle';
 // Pre-existing historical duplicates, grandfathered by the migrations-journaled gate (CLAUDE.md).
@@ -70,8 +71,9 @@ function createMigration(dir, slug) {
   console.log(`✓ created ${sqlPath}\n✓ journaled idx=${n.nextIdx} when=${n.nextWhen} tag=${tag}`);
 }
 
-// CLI
-if (import.meta.url === `file://${process.argv[1]}`) {
+// CLI — pathToFileURL, not `file://${argv[1]}`: on Windows argv[1] is 'C:\dir\x.mjs' while import.meta.url
+// is 'file:///C:/dir/x.mjs', so the hand-built comparison never matched and the tool exited 0 doing NOTHING.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const createFlag = process.argv.indexOf('--create');
   if (createFlag !== -1) {
     createMigration(DRIZZLE_DIR, process.argv[createFlag + 1] ?? '');
