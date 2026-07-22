@@ -18,6 +18,7 @@ import { ProcurementService } from '../procurement/procurement.service';
 import { ScmEngineClientService } from './scm-engine-client.service';
 import { ScmExtractService } from './scm-extract.service';
 import { ScmHierarchyService, type HierAxis, type HierDeclareDto } from './scm-hierarchy.service';
+import { ScmElasticityService } from './scm-elasticity.service';
 import { ScmLiveService, type ScmLiveEvent } from './scm-live.service';
 import { ScmFallbackPlanner } from './scm-planner';
 import { ScmRunService } from './scm-run.service';
@@ -32,6 +33,7 @@ export class ScmPlanningService {
   private readonly log = new Logger(ScmPlanningService.name);
   readonly extract: ScmExtractService;
   readonly hierarchy: ScmHierarchyService;
+  readonly elasticity: ScmElasticityService;
   private readonly fallback: ScmFallbackPlanner;
   private readonly runner: ScmRunService;
 
@@ -46,10 +48,12 @@ export class ScmPlanningService {
   ) {
     this.extract = new ScmExtractService(db);
     this.hierarchy = new ScmHierarchyService(db);
+    this.elasticity = new ScmElasticityService(db);
     this.fallback = new ScmFallbackPlanner(demandMl);
     this.runner = new ScmRunService(
       db, this.extract, engine, this.fallback, docNo, statusLog,
       (tenantId, type, extra) => this.emit(tenantId, type, extra),
+      this.elasticity,
     );
   }
 
@@ -144,6 +148,12 @@ export class ScmPlanningService {
 
   deleteHierarchyNode(id: number, user: JwtUser) {
     return this.hierarchy.remove(user.tenantId ?? null, id);
+  }
+
+  // docs/56 A2 — the persisted own-price elasticities a reviewer/planner can inspect (read-only;
+  // estimated server-side by the engine, upserted on each run).
+  async listElasticity(user: JwtUser) {
+    return { items: await this.elasticity.list(user.tenantId ?? null) };
   }
 
   suggestShelfLife(user: JwtUser) {
@@ -389,7 +399,10 @@ export class ScmPlanningService {
   // ── scenario (synchronous what-if; persists nothing) ────────────────────────
 
   async scenario(
-    dto: { branch_id?: number | null; item_ids: string[]; horizon_days?: number; demand_multiplier?: number; service_level?: number },
+    dto: {
+      branch_id?: number | null; item_ids: string[]; horizon_days?: number;
+      demand_multiplier?: number; price_multiplier?: number; service_level?: number;
+    },
     user: JwtUser,
   ) {
     const tenantId = user.tenantId ?? null;
@@ -397,6 +410,21 @@ export class ScmPlanningService {
     const data = await this.extract.extractAll(tenantId, { branchIds: [branchId], itemIds: dto.item_ids });
     const horizon = Math.min(Math.max(1, dto.horizon_days ?? data.settings.horizon_days), 28);
     const multiplier = Math.min(Math.max(dto.demand_multiplier ?? 1, 0.1), 5);
+    // docs/56 A2 — an optional price what-if applies the persisted own-price elasticity per menu item:
+    // demand × (price_multiplier)^ε. With no ε on file the response is 1 (unchanged) — the honest
+    // default. Advisory only: scenario persists nothing and never becomes an order.
+    const priceMultiplier = dto.price_multiplier != null ? Math.min(Math.max(dto.price_multiplier, 0.1), 5) : 1;
+    const elasticities = priceMultiplier !== 1 ? await this.elasticity.list(tenantId) : [];
+    const epsFor = (itemId: string): number | null => {
+      const forItem = elasticities.filter((e) => e.itemId === itemId);
+      if (!forItem.length) return null;
+      if (branchId != null) {
+        const exact = forItem.find((e) => e.branchId === branchId);
+        if (exact) return exact.elasticity;
+      }
+      return forItem.find((e) => e.branchId == null)?.elasticity ?? forItem[0]!.elasticity;
+    };
+    const priceAttribution: { item_id: string; elasticity: number | null; demand_response: number }[] = [];
 
     const scenarioData: ExtractedTenantData = {
       ...data,
@@ -405,7 +433,12 @@ export class ScmPlanningService {
         horizon_days: horizon,
         service_level: dto.service_level ?? data.settings.service_level,
       },
-      series: data.series.map((s) => ({ ...s, values: s.values.map((v) => v * multiplier) })),
+      series: data.series.map((s) => {
+        const eps = priceMultiplier !== 1 ? epsFor(s.itemId) : null;
+        const priceResp = this.elasticity.demandResponse(eps, priceMultiplier);
+        if (priceMultiplier !== 1) priceAttribution.push({ item_id: s.itemId, elasticity: eps, demand_response: Number(priceResp.toFixed(4)) });
+        return { ...s, values: s.values.map((v) => v * multiplier * priceResp) };
+      }),
     };
     // A what-if must be fast and side-effect free, so it always uses the in-process planner.
     const res = await this.fallback.plan(tenantId, scenarioData, [branchId]);
@@ -414,6 +447,8 @@ export class ScmPlanningService {
       branch_id: branchId,
       horizon_days: horizon,
       demand_multiplier: multiplier,
+      price_multiplier: priceMultiplier,
+      price_attribution: priceAttribution,
       service_level: scenarioData.settings.service_level,
       method: res.method,
       lines: (draft?.lines ?? []).map((l) => ({

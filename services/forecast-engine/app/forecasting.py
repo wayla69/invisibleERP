@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 import threading
 from dataclasses import dataclass
 
@@ -44,6 +45,15 @@ DEFAULT_HOLIDAY_PRIOR = 10.0
 BETA_PROMO = 0.35  # shrunken promo-lift prior; the learned Prophet coefficient supersedes it there
 U_MAX = 3.0  # hard per-day lift cap so a fat-fingered discount cannot plant an absurd path
 
+# docs/56 A2 — own-price elasticity identifiability floor. Estimate a log-log slope only when the
+# history actually identifies one; otherwise report ε=None so a spurious elasticity is never emitted
+# (and the scenario tool falls back to a unit price response). A too-flat price, too few paired
+# observations, or a poor fit are all "not identified".
+ELASTICITY_MIN_OBS = 8  # paired (log price, log demand) observations required
+ELASTICITY_MIN_LOGPRICE_VAR = 1e-4  # var(log price) floor (~1% price movement) — below = no signal
+ELASTICITY_MIN_R2 = 0.05  # linear-fit r² floor — below = the price↔demand link is not credible
+ELASTICITY_CLAMP = 5.0  # |ε| cap so a noisy fit cannot plant an absurd scenario response
+
 _SAMPLE_LOCK = threading.Lock()
 
 
@@ -64,8 +74,6 @@ class RegCtx:
         return [1.0 if (self.by_ds.get(d.isoformat()) and self.by_ds[d.isoformat()].promo_flag) else 0.0 for d in dates]
 
     def pricelog_col(self, dates: list[dt.date]) -> list[float]:
-        import math
-
         out = []
         for d in dates:
             r = self.by_ds.get(d.isoformat())
@@ -335,7 +343,44 @@ def _uplift_vector(fut: list[dt.date], reg: RegCtx) -> np.ndarray:
     return np.clip(1.0 + BETA_PROMO * promo, 0.0, U_MAX)
 
 
-def _attribution(points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool) -> Attribution:
+def estimate_elasticity(series: SeriesInput, reg: RegCtx) -> tuple[float | None, float | None, int]:
+    """docs/56 A2 — own-price elasticity ε as the slope of an OLS log-log fit of demand on price over
+    the observed history. Returns (ε, r², n_obs). ε is None (not identified) unless the identifiability
+    floor holds: enough paired observations, real price variation, and a credible fit. Only historical
+    days with an observed price, positive sold quantity and not stockout-censored contribute — a
+    stockout day is right-censored demand, not a genuine price response."""
+    if not reg.price_on:
+        return None, None, 0
+    xs: list[float] = []  # log price
+    ys: list[float] = []  # log demand
+    for pt in series.history:
+        if pt.stockout or pt.y <= 0:
+            continue
+        r = reg.by_ds.get(pt.ds)
+        price = r.price if (r and r.price and r.price > 0) else None
+        if price is None:
+            continue
+        xs.append(math.log(price))
+        ys.append(math.log(pt.y))
+    n = len(xs)
+    if n < ELASTICITY_MIN_OBS:
+        return None, None, n
+    x = np.asarray(xs, dtype=float)
+    y = np.asarray(ys, dtype=float)
+    var_x = float(np.var(x))
+    if var_x < ELASTICITY_MIN_LOGPRICE_VAR:
+        return None, None, n  # price barely moved — slope is not identified
+    cov_xy = float(np.mean((x - x.mean()) * (y - y.mean())))
+    beta = cov_xy / var_x
+    var_y = float(np.var(y))
+    r2 = (cov_xy * cov_xy) / (var_x * var_y) if var_y > 0 else 0.0
+    if r2 < ELASTICITY_MIN_R2:
+        return None, round(r2, 4), n  # fit too weak to trust
+    eps = float(np.clip(beta, -ELASTICITY_CLAMP, ELASTICITY_CLAMP))
+    return round(eps, 4), round(r2, 4), n
+
+
+def _attribution(series: SeriesInput, points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool) -> Attribution:
     used: list[str] = (["payday"] if payday else []) + (["promo"] if reg.promo_on else []) + (["price"] if reg.price_on else [])
     uplift_pct = None
     if reg.promo_on:
@@ -345,7 +390,14 @@ def _attribution(points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, p
         base = float(np.mean(off)) if off else 0.0
         if on and base > 0:
             uplift_pct = round(float(np.mean(on)) / base - 1.0, 4)
-    return Attribution(promo_uplift_pct=uplift_pct, price_elasticity=None, regressors_used=used)
+    eps, r2, n_obs = estimate_elasticity(series, reg)
+    return Attribution(
+        promo_uplift_pct=uplift_pct,
+        price_elasticity=eps,
+        elasticity_r2=r2,
+        elasticity_n_obs=n_obs,
+        regressors_used=used,
+    )
 
 
 def forecast_series(
@@ -410,5 +462,5 @@ def forecast_series(
         points=points,
         sample_paths=[[float(v) for v in row] for row in paths],
         accuracy=acc,
-        attribution=_attribution(points, fut, reg, payday_regressor),
+        attribution=_attribution(series, points, fut, reg, payday_regressor),
     )

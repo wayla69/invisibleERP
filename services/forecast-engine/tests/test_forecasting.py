@@ -17,6 +17,7 @@ from app.forecasting import (
     build_frame,
     croston_sba_paths,
     dow_bootstrap_paths,
+    estimate_elasticity,
     forecast_series,
     is_payday,
 )
@@ -235,3 +236,78 @@ def test_no_regressors_is_byte_identical_to_baseline():
     without = _run(s, promo=False, price=False, seed=3)
     assert with_flags.sample_paths == without.sample_paths
     assert (with_flags.attribution.regressors_used if with_flags.attribution else []) == ["payday"]
+
+
+# ── docs/56 A2: own-price elasticity estimation ──────────────────────────────
+
+def _elastic_series(eps_true, n=48, prices=(50.0, 60.0, 72.0), base=200.0, jitter=0.0, series_id="E1"):
+    """History where log demand follows a known log-price slope: y = base·(price/60)^eps_true.
+    Cycling through `prices` guarantees real price variation; `jitter` perturbs demand to weaken r²."""
+    hist = daily_history(n, base)
+    regs = []
+    for i, p in enumerate(hist):
+        price = prices[i % len(prices)]
+        y = base * (price / 60.0) ** eps_true
+        if jitter:
+            y *= 1.0 + jitter * (((i * 7919) % 11) - 5) / 5.0  # deterministic ±jitter
+        p["y"] = round(max(y, 0.1), 4)
+        regs.append(SeriesRegressor(ds=p["ds"], promo_flag=False, price=price))
+    return SeriesInput(series_id=series_id, class_hint="auto", history=hist, regressors=regs)
+
+
+def test_elasticity_recovers_known_slope():
+    s = _elastic_series(eps_true=-1.5)
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    eps, r2, n = estimate_elasticity(s, reg)
+    assert eps is not None and eps == pytest.approx(-1.5, abs=0.1)
+    assert r2 is not None and r2 > 0.9
+    assert n >= 8
+
+
+def test_elasticity_is_reported_in_attribution():
+    s = _elastic_series(eps_true=-1.2)
+    res = _run(s, price=True, seed=5)
+    a = res.attribution
+    assert a is not None and "price" in a.regressors_used
+    assert a.price_elasticity is not None and a.price_elasticity < 0
+    assert a.elasticity_n_obs is not None and a.elasticity_n_obs >= 8
+
+
+def test_flat_price_is_not_identifiable():
+    # A single constant price gives no price variation → ε must be None, never a spurious number.
+    s = _elastic_series(eps_true=-2.0, prices=(60.0,))
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    eps, r2, n = estimate_elasticity(s, reg)
+    assert eps is None
+
+
+def test_too_few_observations_not_identifiable():
+    s = _elastic_series(eps_true=-1.5, n=6)
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    eps, r2, n = estimate_elasticity(s, reg)
+    assert eps is None and n < 8
+
+
+def test_weak_fit_is_suppressed():
+    # Heavy demand noise around a tiny true slope → r² below floor → ε suppressed to None.
+    s = _elastic_series(eps_true=-0.05, jitter=0.9)
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    eps, r2, n = estimate_elasticity(s, reg)
+    assert eps is None
+
+
+def test_elasticity_is_clamped():
+    from app.forecasting import ELASTICITY_CLAMP
+    s = _elastic_series(eps_true=-9.0)  # absurdly steep → clamp
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    eps, r2, n = estimate_elasticity(s, reg)
+    assert eps is not None and abs(eps) <= ELASTICITY_CLAMP + 1e-9
+
+
+def test_stockout_days_excluded_from_elasticity():
+    # A stockout day is right-censored demand; it must not enter the price-response fit.
+    s = _elastic_series(eps_true=-1.5)
+    s.history[0].stockout = True
+    reg = build_regctx(s, promo_regressor=True, price_regressor=True)
+    eps, r2, n = estimate_elasticity(s, reg)
+    assert n == len(s.history) - 1

@@ -5,4 +5,4 @@ RLS and sends self-contained JSON payloads (see app/contracts.py, mirroring the 
 in packages/shared/src/scm-engine.ts).
 """
 
-ENGINE_VERSION = "1.1.0"  # docs/56 A1 — contract v2: promo/price regressors + attribution
+ENGINE_VERSION = "1.2.0"  # docs/56 A2 — own-price elasticity estimation (log-log, identifiability floor)
