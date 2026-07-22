@@ -34,7 +34,7 @@ export const customerProfiles = pgTable('customer_profiles', {
   // Advanced RFM segment pushed by the external Marketing Intelligence platform (migration 0460). A SEPARATE
   // column from rfmSegment so the two engines never clobber each other; campaigns target it via `mi_segment`.
   miRfmSegment: text('mi_rfm_segment'),
-  // Customer Intelligence (docs/60 Phase 2, migration 0464) — per-customer scores the external platform
+  // Customer Intelligence (docs/60 Phase 2, migration 0465) — per-customer scores the external platform
   // computes (CLV / churn / next-best-action) and PUSHES in. SEPARATE from the ERP's own explainable
   // churnRisk / predictedLtv below, mirroring how miRfmSegment stays distinct from rfmSegment. Advisory.
   miClv: numeric('mi_clv', { precision: 14, scale: 2 }),      // platform predicted 12-month CLV (฿)

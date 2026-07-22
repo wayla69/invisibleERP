@@ -18,7 +18,7 @@ export const miAnalyticsSnapshots = pgTable('mi_analytics_snapshots', {
   source: text('source').notNull().default('mi-platform'),
   pushedBy: text('pushed_by'),
   pushedAt: timestamp('pushed_at', { withTimezone: true }).defaultNow(),
-  // Model Governance (docs/60 Phase 4, migration 0466). Back-compat: status DEFAULTS to 'Approved' so a
+  // Model Governance (docs/60 Phase 4, migration 0467). Back-compat: status DEFAULTS to 'Approved' so a
   // tenant without governance is unchanged; enabling mi_governance_settings.require_approval makes new
   // pushes land 'Pending' and gates activate/budget-plan on an Approved run.
   status: text('status').notNull().default('Approved'), // Pending | Approved | Rejected
@@ -41,10 +41,10 @@ export const miGovernanceSettings = pgTable('mi_governance_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: uniqueIndex('ux_mi_governance_tenant').on(t.tenantId) }));
 
-// Budget Optimizer plans (migration 0463, docs/60 Phase 1). A prescriptive MMM allocation the planner
+// Budget Optimizer plans (migration 0464, docs/60 Phase 1). A prescriptive MMM allocation the planner
 // STAGES for approval — advisory only, never posts spend. Maker-checker: the approver (approved_by) must
 // differ from the requester (requested_by), enforced in the service via assertMakerChecker (control MKT-17).
-// Tenant-scoped: 0463 applies the canonical 0232-form org RLS loop + a leading (tenant_id, …) index.
+// Tenant-scoped: 0464 applies the canonical 0232-form org RLS loop + a leading (tenant_id, …) index.
 export const miBudgetPlans = pgTable('mi_budget_plans', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
@@ -61,7 +61,7 @@ export const miBudgetPlans = pgTable('mi_budget_plans', {
   decidedAt: timestamp('decided_at', { withTimezone: true }),
 }, (t) => ({ byTenant: index('idx_mi_budget_plans_tenant').on(t.tenantId, t.status, t.createdAt) }));
 
-// Closed-loop measurement (docs/60 Phase 3, migration 0465). Activating a pushed mi_segment splits the
+// Closed-loop measurement (docs/60 Phase 3, migration 0466). Activating a pushed mi_segment splits the
 // eligible members ONCE into a treatment arm (contacted) and a randomised holdout control arm (NOT
 // contacted), fixed at send time; after a window the lift on real POS revenue proves incrementality.
 // Read/measurement model — no GL posting. Control MKT-19 (holdout integrity + read-only outcome).

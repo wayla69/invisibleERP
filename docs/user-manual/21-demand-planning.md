@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.4**
+**Status: DRAFT v0.5**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -97,6 +97,27 @@ forecast number on its own — it prepares the coherent multi-level view that re
 > of the branches it is built from — a regional or company total no longer disagrees with the branch plans
 > underneath it. With the default (bottom-up) reconciliation your per-branch order quantities are unchanged;
 > only the roll-up view becomes coherent.
+
+### To declare your supply network (optional)
+
+**Screen:** `/network` (found under **Planning & analytics** in the sidebar) — **required permission:** `scm_plan`.
+
+If your chain stocks its branches through a **central kitchen** or **distribution centre** rather than
+ordering each branch straight from suppliers, you can describe that shape so future network planning can
+pool the safety stock one tier up (less total inventory for the same service level). This is **definition
+only** today — describing the network changes no order quantity on its own.
+
+1. On the **โหนด (Nodes)** tab, add each place stock sits or flows through: a **supplier**, your
+   **central kitchen / DC**, and each **branch** (a branch node links to the branch it represents). The
+   system tags each with its *tier*: supplier, then DC/kitchen, then branch.
+2. On the **เลน (Lanes)** tab, connect them: draw a lane **supplier → DC** and a lane **DC → branch** for
+   each branch, and record that lane's typical **lead time**, minimum order quantity and pack size.
+3. The banner at the top tells you whether the network is **valid**. It must be a simple two-tier flow —
+   supplier to DC to branch — with every branch fed from a DC. It flags problems plainly: a lane that skips
+   a tier, a branch left unconnected, or a loop. Fix those and the banner turns green.
+
+> You do **not** have to describe a network. If you skip it, planning works exactly as before, per branch.
+> A node that still has lanes attached cannot be deleted — remove its lanes first.
 
 ---
 
@@ -241,6 +262,7 @@ design; ask your administrator.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.5 | 2026-07-22 | Added §2 "To declare your supply network (optional)" — docs/57 Track B · B1: describe the supplier→DC→branch topology on `/network` (nodes + lanes as governed master data, with a live validity banner). Definition only; changes no order quantity (the two-echelon optimizer arrives in B2). |
 | 0.1 | 2026-07-21 | New chapter — docs/54 supply-chain planning: demand forecasting, order plans with maker-checker approval, purchase-requisition hand-off, scenario planning and demand-spike alerts. |
 | 0.4 | 2026-07-22 | Added §2 note — branch forecasts now reconcile so chain/region totals equal the sum of their branches (docs/58 Track C · C2); default bottom-up leaves per-branch quantities unchanged. |
 | 0.3 | 2026-07-22 | Added §1 note — promotions now lift the forecast automatically (docs/56 Track A · A1); server-derived from approved promotions only (a fabricated promo cannot inflate an order), with promo attribution shown per line. |

@@ -616,6 +616,83 @@ async function main() {
     (listB.json.nodes?.length ?? 0) === 0 && !bSeesHq,
     `T2 declared=${listB.json.nodes?.length} seesHqBranch=${bSeesHq}`);
 
+  // ── B1: multi-echelon supply-network master data (docs/57 Track B) ──
+  // Declare a supplier → DC → branch topology, wire the two lanes, and validate it.
+  const nSup = await inj('POST', '/api/scm-network/nodes', tPlanner, {
+    node_code: 'SUP-1', name: 'ผู้ผลิตไก่', kind: 'supplier', holding_cost_per_day: 0.02,
+  });
+  const nDc = await inj('POST', '/api/scm-network/nodes', tPlanner, {
+    node_code: 'DC-1', name: 'ครัวกลาง', kind: 'central_kitchen', holding_cost_per_day: 0.05,
+  });
+  const nBr = await inj('POST', '/api/scm-network/nodes', tPlanner, {
+    node_code: 'BR-1', name: 'สาขาสีลม', kind: 'branch', branch_id: branchId, holding_cost_per_day: 0.08,
+  });
+  ok('B1 nodes created with kind→echelon mapping (supplier 0, kitchen 1, branch 2)',
+    nSup.status === 201 && nSup.json.echelon === 0 && nDc.json.echelon === 1 && nBr.json.echelon === 2,
+    `status=${nSup.status} echelons=${nSup.json.echelon}/${nDc.json.echelon}/${nBr.json.echelon}`);
+
+  // A branch node requires a branch_id (fail-closed).
+  const badBranch = await inj('POST', '/api/scm-network/nodes', tPlanner, {
+    node_code: 'BR-X', name: 'สาขาไร้ที่อ้าง', kind: 'branch',
+  });
+  ok('B1 branch node without branch_id rejected (BRANCH_NODE_NEEDS_BRANCH)',
+    badBranch.status === 400 && badBranch.json.error?.code === 'BRANCH_NODE_NEEDS_BRANCH',
+    `status=${badBranch.status} code=${badBranch.json.error?.code}`);
+
+  const lSupDc = await inj('POST', '/api/scm-network/lanes', tPlanner, {
+    from_node_id: nSup.json.id, to_node_id: nDc.json.id, lead_time_mean_days: 3, lead_time_std_days: 1, moq: 20, pack_size: 5,
+  });
+  const lDcBr = await inj('POST', '/api/scm-network/lanes', tPlanner, {
+    from_node_id: nDc.json.id, to_node_id: nBr.json.id, lead_time_mean_days: 1, lead_time_std_days: 0.5, pack_size: 1,
+  });
+  ok('B1 lanes created (supplier→DC, DC→branch)',
+    lSupDc.status === 201 && lDcBr.status === 201,
+    `status=${lSupDc.status}/${lDcBr.status}`);
+
+  const topo = await inj('GET', '/api/scm-network/topology', tPlanner);
+  ok('B1 topology validates as a legal two-echelon DAG (branch reachable from supplier via DC)',
+    topo.status === 200 && topo.json.validation?.ok === true
+      && (topo.json.validation?.reachableBranches ?? []).includes('BR-1'),
+    `ok=${topo.json.validation?.ok} reachable=${JSON.stringify(topo.json.validation?.reachableBranches)}`);
+
+  // A lane that skips an echelon (supplier→branch, echelon 0→2) is rejected by the validator.
+  const lSkip = await inj('POST', '/api/scm-network/lanes', tPlanner, {
+    from_node_id: nSup.json.id, to_node_id: nBr.json.id,
+  });
+  const topoBad = await inj('GET', '/api/scm-network/topology', tPlanner);
+  const badCodes = (topoBad.json.validation?.issues ?? []).map((i: any) => i.code);
+  ok('B1 an echelon-skipping lane makes the topology invalid (LANE_ENDPOINTS_INVALID)',
+    lSkip.status === 201 && topoBad.json.validation?.ok === false && badCodes.includes('LANE_ENDPOINTS_INVALID'),
+    `ok=${topoBad.json.validation?.ok} codes=${JSON.stringify(badCodes)}`);
+  // Clean the bad lane so later assertions see a valid graph again.
+  await inj('DELETE', `/api/scm-network/lanes/${lSkip.json.id}`, tPlanner);
+
+  // A branch with no inbound lane is flagged unreachable.
+  const nBr2 = await inj('POST', '/api/scm-network/nodes', tPlanner, {
+    node_code: 'BR-2', name: 'สาขาลอย', kind: 'branch', branch_id: branchId,
+  });
+  const topoOrphan = await inj('GET', '/api/scm-network/topology', tPlanner);
+  const orphanCodes = (topoOrphan.json.validation?.issues ?? []).map((i: any) => i.code);
+  ok('B1 an unwired branch is flagged UNREACHABLE_BRANCH',
+    nBr2.status === 201 && orphanCodes.includes('UNREACHABLE_BRANCH'),
+    `codes=${JSON.stringify(orphanCodes)}`);
+  await inj('DELETE', `/api/scm-network/nodes/${nBr2.json.id}`, tPlanner);
+
+  // A node that still has lanes cannot be deleted (referential guard).
+  const delWired = await inj('DELETE', `/api/scm-network/nodes/${nDc.json.id}`, tPlanner);
+  ok('B1 a node with lanes cannot be deleted (NODE_HAS_LANES)',
+    delWired.status === 409 && delWired.json.error?.code === 'NODE_HAS_LANES',
+    `status=${delWired.status} code=${delWired.json.error?.code}`);
+
+  // Cross-tenant boundary (mandatory): T2 sees 0 HQ nodes and cannot wire a lane onto HQ node ids.
+  const nodesB = await inj('GET', '/api/scm-network/nodes', tPlannerB);
+  const laneCross = await inj('POST', '/api/scm-network/lanes', tPlannerB, {
+    from_node_id: nSup.json.id, to_node_id: nDc.json.id,
+  });
+  ok('B1 cross-tenant isolation (T2 sees 0 HQ nodes; a lane onto HQ nodes is rejected)',
+    (nodesB.json?.length ?? 0) === 0 && laneCross.status === 400 && laneCross.json.error?.code === 'LANE_ENDPOINTS_INVALID',
+    `T2nodes=${nodesB.json?.length} crossStatus=${laneCross.status} code=${laneCross.json.error?.code}`);
+
   await app.close();
   await engine.close();
 

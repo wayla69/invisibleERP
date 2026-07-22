@@ -1,4 +1,4 @@
--- 0465_mi_campaign_experiments
+-- 0466_mi_campaign_experiments
 -- docs/60 Phase 3 — Closed-loop Measurement (campaign incrementality). When a pushed mi_segment is
 -- activated, the eligible members are split ONCE into a TREATMENT arm (contacted) and a randomised
 -- HOLDOUT CONTROL arm (deliberately NOT contacted), fixed at send time and immutable. After a

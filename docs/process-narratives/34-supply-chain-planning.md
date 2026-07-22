@@ -234,6 +234,27 @@ falls back to the base forecast rather than persisting an incoherent one. This i
 property, not a new authority — it introduces **no new control** (SCM-01/02/03 still govern the run and its
 approval) and changes no GL posting. Top-down and the optimal MinT reconciliation are later phases (C3/C4).
 
+### 7.12 Multi-echelon supply-network master data (docs/57 Track B · B1)
+
+The docs/54 planner sizes each `(branch, ingredient)` in isolation. A chain that stocks through a central
+kitchen or distribution centre (DC) can do better — pooling the safety buffer one tier up meets the same
+branch service level with materially less system inventory. Track B models that topology explicitly; **B1
+lands the governed master data it needs**, definition only (the two-echelon optimizer is B2). A planner
+declares the supply network as a directed graph of **nodes** (`supply_nodes`: a `supplier` (echelon 0),
+`central_kitchen`/`dc` (echelon 1), or `branch` (echelon 2, linked to the intra-tenant `branches` row) with
+its holding cost and service-time commitment) and **lanes** (`supply_lanes`: a directed edge carrying that
+lane's lead-time mean/σ, unit cost, MOQ, pack size and fixed order cost) through `POST /api/scm-network/
+nodes|lanes`. Both tables are tenant-scoped (migration 0463, canonical 0232-form RLS loop + leading
+`(tenant_id, …)` index); every mutation carries a combined `(id, tenant)` guard so an id is never assumed to
+belong to the caller, and a lane's endpoints must both be the caller's own nodes. `GET
+/api/scm-network/topology` assembles the active nodes + lanes and **validates** them: `kind`↔`echelon`
+consistency, at most two stocking echelons (a third tier is rejected `ECHELON_DEPTH_EXCEEDED`), each lane
+steps down exactly one echelon and no node is multi-sourced, the graph is acyclic (`NETWORK_NOT_DAG`), and
+every branch is reachable from a supplier through a DC (else `UNREACHABLE_BRANCH`). The API never trusts a
+topology from the engine — it is validated here before any optimize call. B1 introduces **no new control**
+(SCM-05/SCM-06 arrive with the optimizer and allocation in B2/B3) and posts no GL entries; it is topology
+definition that a later network run will consume.
+
 ## 8. Process flow
 
 ```mermaid
@@ -331,5 +352,6 @@ maker ≠ checker test is the operative control regardless of the permissions he
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
 | 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |
+| 0.5 | 2026-07-22 | Supply-chain / Planning | Added §7.12 — multi-echelon supply-network master data (docs/57 Track B · B1): governed `supply_nodes`/`supply_lanes` (migration 0463, canonical RLS + tenant-leading index) via `POST /api/scm-network/nodes\|lanes`, and `GET /api/scm-network/topology` assembling + validating the two-echelon DAG (kind↔echelon, ≤2 stocking echelons, single-sourcing, acyclic, branch reachability). Definition only — no new control (SCM-05/06 arrive with the optimizer in B2/B3), no GL. New `modules/scm-network` bounded context. Harness `cutover/scm.ts` +8 B1 checks. |
 | 0.3 | 2026-07-22 | Supply-chain / Planning | Added §7.10 — promotion & price-effect demand (docs/56 Track A · A1): server-derived promo/discount regressors from approved `promotions` under RLS (never client input), Prophet `add_regressor` + capped Croston/bootstrap uplift, attribution persisted on `scm_demand_forecasts` (migration 0462). New control **SCM-04** (promo-forecast governance) in the control matrix. Harness `cutover/scm.ts` +3 A1 checks. |
 | 0.2 | 2026-07-22 | Supply-chain / Planning | Added §7.9 — forecast reconciliation hierarchy (docs/58 Track C · C1): declare/synthesize aggregation structures via `scm_forecast_hierarchy` (migration `0461`) and `GET/PUT/DELETE /api/scm-planning/hierarchy(/forest)`. Definition only — no new control (SCM-01/02/03 unchanged), no forecast-number change yet (reconciliation lands with C2). Harness `cutover/scm.ts` +4 C1 checks. |
