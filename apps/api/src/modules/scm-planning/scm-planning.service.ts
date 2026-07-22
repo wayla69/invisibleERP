@@ -17,6 +17,7 @@ import { DemandForecastService } from '../demand-ml/demand-forecast.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { ScmEngineClientService } from './scm-engine-client.service';
 import { ScmExtractService } from './scm-extract.service';
+import { ScmHierarchyService, type HierAxis, type HierDeclareDto } from './scm-hierarchy.service';
 import { ScmLiveService, type ScmLiveEvent } from './scm-live.service';
 import { ScmFallbackPlanner } from './scm-planner';
 import { ScmRunService } from './scm-run.service';
@@ -30,6 +31,7 @@ import { PLAN_STATUS, SYSTEM_ACTOR, type ExtractedTenantData, type PlanRunResult
 export class ScmPlanningService {
   private readonly log = new Logger(ScmPlanningService.name);
   readonly extract: ScmExtractService;
+  readonly hierarchy: ScmHierarchyService;
   private readonly fallback: ScmFallbackPlanner;
   private readonly runner: ScmRunService;
 
@@ -43,6 +45,7 @@ export class ScmPlanningService {
     private readonly live: ScmLiveService,
   ) {
     this.extract = new ScmExtractService(db);
+    this.hierarchy = new ScmHierarchyService(db);
     this.fallback = new ScmFallbackPlanner(demandMl);
     this.runner = new ScmRunService(
       db, this.extract, engine, this.fallback, docNo, statusLog,
@@ -121,6 +124,26 @@ export class ScmPlanningService {
       user.tenantId != null ? eq(scmItemPolicies.tenantId, user.tenantId) : sql`true`,
     ));
     return { ok: true };
+  }
+
+  // ── forecast hierarchy (docs/58 Track C · C1) — declared aggregation structures + the assembler ──
+
+  async listHierarchy(user: JwtUser, axis?: HierAxis) {
+    return { nodes: await this.hierarchy.list(user.tenantId ?? null, axis) };
+  }
+
+  /** The assembled forest (declared, else synthesized from branches / item_categories). */
+  hierarchyForest(user: JwtUser, axis: HierAxis) {
+    return this.hierarchy.forest(user.tenantId ?? null, axis);
+  }
+
+  declareHierarchy(dto: HierDeclareDto, user: JwtUser) {
+    return this.hierarchy.declare(user.tenantId ?? null, dto, user.username)
+      .then((nodes) => ({ ok: true, axis: dto.axis, nodes }));
+  }
+
+  deleteHierarchyNode(id: number, user: JwtUser) {
+    return this.hierarchy.remove(user.tenantId ?? null, id);
   }
 
   suggestShelfLife(user: JwtUser) {

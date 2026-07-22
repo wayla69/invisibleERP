@@ -137,3 +137,4 @@ compliance/docs markdown (per the `check-rcm-census` gate).
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial roadmap: four depth tracks (promo/price, multi-echelon, hierarchical reconciliation, scale-out), phased with sequencing, new controls SCM-04..07, and per-phase doc-sync/verification obligations. Planning only — no code, contract, or control change yet. |
+| 0.2 | 2026-07-22 | Supply-chain / Planning | **Implementation started (Wave 1).** **C1 delivered** — `scm_forecast_hierarchy` (migration 0461) + `ScmHierarchyService` + `/api/scm-planning/hierarchy` declare/forest, synthesizing from `branches`/`item_categories` when undefined (docs/58 §6). Engine-only/low-risk; no contract or control change. A1 (promo/price regressors, contract v2, SCM-04) and C2 (bottom-up/top-down reconciliation on the v2 contract) follow in the same wave. |
