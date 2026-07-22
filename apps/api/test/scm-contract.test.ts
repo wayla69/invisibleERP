@@ -65,7 +65,7 @@ describe('scm-engine contract — shared fixtures parse with the zod schemas', (
 describe('scm-engine contract — guardrails the API relies on', () => {
   it('applies the documented defaults so a minimal request is still complete', () => {
     const req = zForecastRequest.parse({
-      contract_version: '1',
+      contract_version: '2',
       request_id: 'r1',
       horizon_days: 7,
       holidays: [],
@@ -75,11 +75,14 @@ describe('scm-engine contract — guardrails the API relies on', () => {
     expect(req.quantiles).toEqual([0.1, 0.5, 0.9]);
     expect(req.closures).toEqual([]);
     expect(req.payday_regressor).toBe(true);
+    expect(req.promo_regressor).toBe(true);
+    expect(req.price_regressor).toBe(true);
+    expect(req.scenario).toBe(false);
     expect(req.series[0]!.class_hint).toBe('auto');
   });
 
   it('rejects a foreign contract version', () => {
-    expect(() => zForecastRequest.parse({ ...fixture('forecast_request.json'), contract_version: '2' })).toThrow();
+    expect(() => zForecastRequest.parse({ ...fixture('forecast_request.json'), contract_version: '1' })).toThrow();
   });
 
   it('rejects malformed business days and negative demand', () => {

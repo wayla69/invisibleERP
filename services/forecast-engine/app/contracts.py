@@ -12,7 +12,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CONTRACT_VERSION = "1"
+CONTRACT_VERSION = "2"  # v2 (docs/56 A1): per-series promo/price regressors + attribution output
 
 DS_PATTERN = r"^\d{4}-\d{2}-\d{2}$"  # Asia/Bangkok business day (bizYmd)
 
@@ -35,14 +35,27 @@ class HolidayEvent(BaseModel):
     prior_scale: Optional[float] = Field(default=None, gt=0)
 
 
+class SeriesRegressor(BaseModel):
+    """docs/56 A1 — a governed promo/price signal for one (series, business day). Dense over
+    history∪horizon; the API derives these from approved promotions/price_rules/price_books, never
+    from client input. On future days they are the operator's planned calendar/price."""
+
+    ds: str = Field(pattern=DS_PATTERN)
+    promo_flag: bool = False  # a governed promo is active on this (series, day)
+    discount_pct: Optional[float] = Field(default=None, ge=0, le=1)
+    price: Optional[float] = Field(default=None, ge=0)  # effective/planned unit price that day
+
+
 class SeriesInput(BaseModel):
     series_id: str = Field(min_length=1)
     history: list[DemandPoint] = Field(min_length=1)
     class_hint: Literal["auto", "smooth", "intermittent", "lumpy", "short"] = "auto"
+    regressors: Optional[list[SeriesRegressor]] = None  # A1: dense over history∪horizon
+    analog_of: Optional[list[str]] = None  # A4 (reserved): donor series_ids for a zero-history sku
 
 
 class ForecastRequest(BaseModel):
-    contract_version: Literal["1"]
+    contract_version: Literal["2"]
     request_id: str = Field(min_length=1)  # idempotency + deterministic RNG seed
     horizon_days: int = Field(ge=1, le=56)
     scenario_count: int = Field(default=50, ge=10, le=100)
@@ -50,6 +63,9 @@ class ForecastRequest(BaseModel):
     holidays: list[HolidayEvent]
     closures: list[str] = Field(default_factory=list)
     payday_regressor: bool = True
+    promo_regressor: bool = True  # A1: fit/apply the promo regressor where series carry it
+    price_regressor: bool = True  # A1: fit the (log) price regressor where series carry it
+    scenario: bool = False  # A1: advisory what-if — never feeds an auto-convert plan (SCM-04)
     series: list[SeriesInput] = Field(min_length=1, max_length=200)
 
 
@@ -64,6 +80,17 @@ class Accuracy(BaseModel):
     cutoffs: int
 
 
+class Attribution(BaseModel):
+    """docs/56 A1 — what shaped this forecast, so the plan can surface promo attribution and a
+    reviewer can tie a moved quantity back to a governed input (SCM-04)."""
+
+    promo_uplift_pct: Optional[float] = None  # fitted/applied lift on promo days vs baseline
+    price_elasticity: Optional[float] = None  # ε used this run (A2; null/0 in A1)
+    elasticity_r2: Optional[float] = None
+    elasticity_n_obs: Optional[int] = None
+    regressors_used: list[str] = Field(default_factory=list)  # subset of promo|price|payday|analog|cross
+
+
 class ForecastSeriesResult(BaseModel):
     # `model` is contract vocabulary, not a pydantic-reserved word — silence the namespace warning.
     model_config = ConfigDict(protected_namespaces=())
@@ -75,6 +102,7 @@ class ForecastSeriesResult(BaseModel):
     # (quantiles are not additive) and the sums feed /v1/optimize as demand_scenarios.
     sample_paths: list[list[float]]
     accuracy: Accuracy
+    attribution: Optional[Attribution] = None  # A1
 
 
 class EngineItemError(BaseModel):
@@ -84,7 +112,7 @@ class EngineItemError(BaseModel):
 
 
 class ForecastResponse(BaseModel):
-    contract_version: Literal["1"]
+    contract_version: Literal["2"]
     request_id: str
     results: list[ForecastSeriesResult]
     errors: list[EngineItemError] = Field(default_factory=list)
@@ -136,7 +164,7 @@ class JointConstraints(BaseModel):
 
 
 class OptimizeRequest(BaseModel):
-    contract_version: Literal["1"]
+    contract_version: Literal["2"]
     request_id: str = Field(min_length=1)
     start_ds: str = Field(pattern=DS_PATTERN)  # plan day 0 — anchors in_transit dates ↔ day offsets
     horizon_days: int = Field(ge=1, le=56)
@@ -179,7 +207,7 @@ class OptimizeItemPlan(BaseModel):
 
 
 class OptimizeResponse(BaseModel):
-    contract_version: Literal["1"]
+    contract_version: Literal["2"]
     request_id: str
     plans: list[OptimizeItemPlan]
     errors: list[EngineItemError] = Field(default_factory=list)

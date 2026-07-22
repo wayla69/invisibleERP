@@ -27,6 +27,7 @@ import numpy as np
 from .classify import classify, route
 from .contracts import (
     Accuracy,
+    Attribution,
     ForecastPoint,
     ForecastSeriesResult,
     HolidayEvent,
@@ -39,7 +40,48 @@ BACKTEST_MIN_DAYS = 120  # holdout backtest only when history affords it (costs 
 BACKTEST_HOLDOUT = 14
 DEFAULT_HOLIDAY_PRIOR = 10.0
 
+# docs/56 A1 — the NON-Prophet uplift term (Croston/bootstrap/baseline have no regressor mechanism).
+BETA_PROMO = 0.35  # shrunken promo-lift prior; the learned Prophet coefficient supersedes it there
+U_MAX = 3.0  # hard per-day lift cap so a fat-fingered discount cannot plant an absurd path
+
 _SAMPLE_LOCK = threading.Lock()
+
+
+@dataclass
+class RegCtx:
+    """docs/56 A1 — resolved promo/price regressor signal for a series, keyed by business day.
+
+    `promo_on`/`price_on` are True only when the request enabled the regressor AND the series
+    actually carries the signal — so a series without governed promo/price is byte-identical to v1.
+    """
+
+    by_ds: dict  # ds(str) -> SeriesRegressor
+    promo_on: bool
+    price_on: bool
+    ref_price: float  # reference (median observed) price for the Δlog-price regressor
+
+    def promo_col(self, dates: list[dt.date]) -> list[float]:
+        return [1.0 if (self.by_ds.get(d.isoformat()) and self.by_ds[d.isoformat()].promo_flag) else 0.0 for d in dates]
+
+    def pricelog_col(self, dates: list[dt.date]) -> list[float]:
+        import math
+
+        out = []
+        for d in dates:
+            r = self.by_ds.get(d.isoformat())
+            p = r.price if (r and r.price) else self.ref_price
+            out.append(math.log(p / self.ref_price) if (self.ref_price > 0 and p and p > 0) else 0.0)
+        return out
+
+
+def build_regctx(series: SeriesInput, promo_regressor: bool, price_regressor: bool) -> RegCtx:
+    regs = series.regressors or []
+    by_ds = {r.ds: r for r in regs}
+    prices = [r.price for r in regs if r.price is not None and r.price > 0]
+    ref_price = float(np.median(prices)) if prices else 0.0
+    promo_on = promo_regressor and any(r.promo_flag for r in regs)
+    price_on = price_regressor and len(prices) >= 2 and ref_price > 0
+    return RegCtx(by_ds=by_ds, promo_on=promo_on, price_on=price_on, ref_price=ref_price)
 
 
 class SeriesTooShort(Exception):
@@ -104,7 +146,7 @@ def _holidays_df(holidays: list[HolidayEvent]):
     return df
 
 
-def _fit_prophet(df, holidays_df, payday_regressor: bool):
+def _fit_prophet(df, holidays_df, reg_names: list[str]):
     from prophet import Prophet
 
     logging.getLogger("prophet").setLevel(logging.WARNING)
@@ -119,25 +161,38 @@ def _fit_prophet(df, holidays_df, payday_regressor: bool):
         interval_width=0.9,
         uncertainty_samples=300,
     )
-    if payday_regressor:
-        m.add_regressor("is_payday")
+    for name in reg_names:  # is_payday (generalized in A1) + promo + price_log
+        m.add_regressor(name)
     m.fit(df)
     return m
 
 
-def _prophet_frame(frame: SeriesFrame, payday_regressor: bool):
+def _regressor_names(payday_regressor: bool, reg: RegCtx) -> list[str]:
+    names = ["is_payday"] if payday_regressor else []
+    if reg.promo_on:
+        names.append("promo")
+    if reg.price_on:
+        names.append("price_log")
+    return names
+
+
+def _add_reg_cols(df, dates: list[dt.date], payday_regressor: bool, reg: RegCtx) -> None:
+    if payday_regressor:
+        df["is_payday"] = [is_payday(d) for d in dates]
+    if reg.promo_on:
+        df["promo"] = reg.promo_col(dates)
+    if reg.price_on:
+        df["price_log"] = reg.pricelog_col(dates)
+
+
+def _prophet_frame(frame: SeriesFrame, payday_regressor: bool, reg: RegCtx):
     import pandas as pd
 
     keep = ~frame.drop
-    df = pd.DataFrame(
-        {
-            "ds": pd.to_datetime([d.isoformat() for d, k in zip(frame.dates, keep) if k]),
-            "y": frame.values[keep],
-        }
-    )
-    if payday_regressor:
-        df["is_payday"] = [is_payday(d.date()) for d in df["ds"]]
-    return df
+    kept_dates = [d for d, k in zip(frame.dates, keep) if k]
+    df = pd.DataFrame({"ds": pd.to_datetime([d.isoformat() for d in kept_dates]), "y": frame.values[keep]})
+    _add_reg_cols(df, kept_dates, payday_regressor, reg)
+    return df, kept_dates
 
 
 def prophet_paths(
@@ -146,21 +201,22 @@ def prophet_paths(
     horizon: int,
     k: int,
     payday_regressor: bool,
+    reg: RegCtx,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, Accuracy]:
     import pandas as pd
 
-    df = _prophet_frame(frame, payday_regressor)
+    df, kept_dates = _prophet_frame(frame, payday_regressor, reg)
     if len(df) < MIN_PROPHET_DAYS:
         raise SeriesTooShort()
+    reg_names = _regressor_names(payday_regressor, reg)
     holidays_df = _holidays_df(holidays)
-    m = _fit_prophet(df, holidays_df, payday_regressor)
+    m = _fit_prophet(df, holidays_df, reg_names)
 
     last = frame.dates[-1]
     fut_dates = future_days(last, horizon)
     future = pd.DataFrame({"ds": pd.to_datetime([d.isoformat() for d in fut_dates])})
-    if payday_regressor:
-        future["is_payday"] = [is_payday(d) for d in fut_dates]
+    _add_reg_cols(future, fut_dates, payday_regressor, reg)
 
     # predictive_samples draws through numpy's GLOBAL RNG — serialize + seed for determinism.
     with _SAMPLE_LOCK:
@@ -177,8 +233,8 @@ def prophet_paths(
     if len(df) >= BACKTEST_MIN_DAYS:
         try:
             train, test = df.iloc[:-BACKTEST_HOLDOUT], df.iloc[-BACKTEST_HOLDOUT:]
-            mb = _fit_prophet(train, holidays_df, payday_regressor)
-            pred = mb.predict(test[["ds", "is_payday"]] if payday_regressor else test[["ds"]])
+            mb = _fit_prophet(train, holidays_df, reg_names)
+            pred = mb.predict(test[["ds", *reg_names]] if reg_names else test[["ds"]])
             w = wape(test["y"].to_numpy(), np.clip(pred["yhat"].to_numpy(), 0.0, None))
             acc = Accuracy(wape=w, cutoffs=1)
         except Exception:  # noqa: BLE001 — backtest is best-effort reporting, never fails the series
@@ -269,6 +325,29 @@ def dow_bootstrap_paths(
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
 
+def _uplift_vector(fut: list[dt.date], reg: RegCtx) -> np.ndarray:
+    """Multiplicative promo lift per future day for models WITHOUT a regressor mechanism
+    (Croston/bootstrap/baseline). uplift = clamp(1 + β·promo_flag, 0, U_MAX); applied post-sampling
+    so intermittency structure is preserved. The price term (ε) is A2 — 0 here."""
+    if not reg.promo_on:
+        return np.ones(len(fut), dtype=float)
+    promo = np.asarray(reg.promo_col(fut), dtype=float)
+    return np.clip(1.0 + BETA_PROMO * promo, 0.0, U_MAX)
+
+
+def _attribution(points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool) -> Attribution:
+    used: list[str] = (["payday"] if payday else []) + (["promo"] if reg.promo_on else []) + (["price"] if reg.price_on else [])
+    uplift_pct = None
+    if reg.promo_on:
+        promo = reg.promo_col(fut)
+        on = [p.yhat for p, f in zip(points, promo) if f > 0]
+        off = [p.yhat for p, f in zip(points, promo) if f <= 0]
+        base = float(np.mean(off)) if off else 0.0
+        if on and base > 0:
+            uplift_pct = round(float(np.mean(on)) / base - 1.0, 4)
+    return Attribution(promo_uplift_pct=uplift_pct, price_elasticity=None, regressors_used=used)
+
+
 def forecast_series(
     series: SeriesInput,
     holidays: list[HolidayEvent],
@@ -278,15 +357,19 @@ def forecast_series(
     quantiles: list[float],
     payday_regressor: bool,
     rng: np.random.Generator,
+    promo_regressor: bool = True,
+    price_regressor: bool = True,
 ) -> ForecastSeriesResult:
     frame = build_frame(series, closures)
+    reg = build_regctx(series, promo_regressor, price_regressor)
     cls = series.class_hint if series.class_hint != "auto" else classify(list(frame.values[~frame.drop]))
     model = route(cls)
 
     acc = Accuracy(wape=None, cutoffs=0)
+    applied_uplift = False  # Prophet learns the promo effect via add_regressor; others get the term
     if model == "prophet":
         try:
-            paths, acc = prophet_paths(frame, holidays, horizon, k, payday_regressor, rng)
+            paths, acc = prophet_paths(frame, holidays, horizon, k, payday_regressor, reg, rng)
         except Exception:  # noqa: BLE001 — missing wheel, fit failure, too short: degrade, don't fail
             model = "baseline_dow"
             paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
@@ -301,8 +384,13 @@ def forecast_series(
 
     last = frame.dates[-1]
     fut = future_days(last, horizon)
-    closure_mask = np.asarray([fd.isoformat() in closures for fd in fut], dtype=bool)
     paths = np.clip(np.asarray(paths, dtype=float), 0.0, None)
+    if model != "prophet":  # apply the capped promo uplift term to the regressor-less models
+        uplift = _uplift_vector(fut, reg)
+        if not np.allclose(uplift, 1.0):
+            paths = paths * uplift[np.newaxis, :]
+            applied_uplift = True
+    closure_mask = np.asarray([fd.isoformat() in closures for fd in fut], dtype=bool)
     paths[:, closure_mask] = 0.0
 
     points = []
@@ -315,10 +403,12 @@ def forecast_series(
                 q={str(q): float(np.quantile(col, q)) for q in quantiles},
             )
         )
+    _ = applied_uplift  # (kept for readability; attribution derives uplift% from the points below)
     return ForecastSeriesResult(
         series_id=series.series_id,
         model=model,  # type: ignore[arg-type] — narrowed to the contract literals above
         points=points,
         sample_paths=[[float(v) for v in row] for row in paths],
         accuracy=acc,
+        attribution=_attribution(points, fut, reg, payday_regressor),
     )

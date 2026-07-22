@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 302,
+    "total": 303,
     "by_status": {
-      "Implemented": 299,
+      "Implemented": 300,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 24,
+      "Inventory & COGS": 25,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -5773,6 +5773,25 @@
       "tod": "Inspect the channel partition in the demand extractor, the per-scenario BoM explosion, and the rationale recorded on each plan line (expected waste/fill, clamps).",
       "toe": "Re-perform: seed a day with BOTH a retail sale and a dine-in order whose lines were copied into the POS tables -> the extracted demand counts the dish once (a naive union double-counts); disable the engine and re-run -> plans are still produced and the chicken order is capped at shelf_life x mean daily demand with detail.clamped recording 'shelf_life' - re-performed by the scm harness.",
       "evidence": "Demand forecasts per run with accuracy + order-plan lines carrying their full rationale",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SCM-04",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Supply chain planning; Promotion & price demand modelling",
+      "risk": "A demand forecast — and therefore an order quantity and committed spend — is inflated by a FABRICATED or ungoverned promo/price signal: a planner claims a big promotion that was never approved, or feeds a hypothetical rock-bottom price into the model, and the engine dutifully forecasts a spike that becomes a large Draft order a hurried approver rubber-stamps.",
+      "assertion": "Accuracy/Validity",
+      "description": "Promo/price forecast inputs are auditable and governed; a forecast cannot be silently inflated by a fabricated promo. The promo_flag/discount regressors on a PRODUCTION run are SERVER-DERIVED by ScmPromoExtractService from the tenant's APPROVED, active, date-ranged promotions (category-scoped) under tenant RLS — never accepted from the run request body, so a run cannot assert a promo that does not exist in the governed data. Advisory what-ifs are quarantined (a scenario run is flagged and structurally barred from the auto-convert path). Each forecast persists its attribution (promo uplift %, elasticity, regressors_used) and the run's request digest records the exact regressor payload, so a reviewer can re-derive why a quantity moved and tie every promo input back to an approved source. A per-day uplift cap (U_MAX) plus the existing order-quantity clamp bound any residual lift.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per planning run",
+      "owner": "Planner / Controller",
+      "coso": "P11",
+      "code_reference": "scm-planning/scm-promo-extract.service.ts (server-derived promo/price regressors from governed promotions under RLS); scm-run.service.ts (threads regressors, scenario=false on production runs, persists attribution); services/forecast-engine/app/forecasting.py (Prophet add_regressor + capped Croston/bootstrap uplift term, attribution); packages/shared/src/scm-engine.ts contract v2; schema/scm-planning.ts scm_demand_forecasts (promo_uplift_pct/price_elasticity/regressors_used, migration 0462); cutover/scm.ts (ToE)",
+      "tod": "Inspect that the promo regressors are assembled from the approved promotions table (not the request body), that a production run sets scenario=false, and that each forecast persists its attribution.",
+      "toe": "Re-perform: run a plan with NO governed promotion -> the menu forecast carries no promo attribution; seed an APPROVED promotion covering the horizon and re-run -> the forecast now carries regressors_used including 'promo' and a promo_uplift_pct; a promo is tenant-scoped (another tenant's promotion never enters the signal) - re-performed by the scm harness.",
+      "evidence": "Demand forecasts per run carrying promo/price attribution tied to approved promotions",
       "status": "Implemented"
     }
   ]

@@ -156,10 +156,16 @@ export class ScmRunService {
           holidays: data.holidays.map((h) => ({ ...h, lower_window: 0, upper_window: 0 })),
           closures: [...new Set([...closures, ...chunk.flatMap((s) => s.closedDays)])],
           payday_regressor: true,
+          // docs/56 A1 — governed promo/price regressors (server-derived; SCM-04). scenario=false:
+          // a production run is never an advisory what-if and can never be auto-conversion-barred.
+          promo_regressor: true,
+          price_regressor: true,
+          scenario: false,
           series: chunk.map((s) => ({
             series_id: s.itemId,
             class_hint: 'auto' as const,
             history: s.values.map((y, i) => ({ ds: addDaysYmd(s.startDate, i), y })),
+            ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
           })),
         };
         digestParts.push(createHash('sha256').update(JSON.stringify(req)).digest('hex'));
@@ -309,9 +315,17 @@ export class ScmRunService {
   private async saveForecast(
     tenantId: number | null, runId: number, branchId: number | null, itemId: string,
     level: 'menu' | 'ingredient',
-    r: { model: string; points: { q: Record<string, number> }[]; accuracy: { wape: number | null } },
+    r: {
+      model: string; points: { q: Record<string, number> }[]; accuracy: { wape: number | null };
+      attribution?: {
+        promo_uplift_pct: number | null; price_elasticity: number | null; regressors_used: string[];
+      } | null;
+    },
     today: string, horizon: number,
   ) {
+    // docs/56 A1 — persist attribution so the plan can surface promo reasons and a reviewer can tie
+    // a moved quantity back to a governed input (SCM-04).
+    const a = r.attribution ?? null;
     await this.db.insert(scmDemandForecasts).values({
       tenantId: tenantId ?? null, runId, branchId, itemId, level, method: r.model,
       horizon, startDate: addDaysYmd(today, 1),
@@ -320,6 +334,9 @@ export class ScmRunService {
       p50: r.points.map((p) => p.q['0.5'] ?? null),
       p90: r.points.map((p) => p.q['0.9'] ?? null),
       wape: r.accuracy.wape != null ? String(r.accuracy.wape) : null,
+      promoUpliftPct: a?.promo_uplift_pct != null ? String(a.promo_uplift_pct) : null,
+      priceElasticity: a?.price_elasticity != null ? String(a.price_elasticity) : null,
+      regressorsUsed: a?.regressors_used ?? [],
     });
   }
 
