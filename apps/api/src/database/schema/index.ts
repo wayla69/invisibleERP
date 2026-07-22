@@ -184,3 +184,4 @@ export * from './audience-exports';
 export * from './webhook-idempotency';
 export * from './qr-settings';
 export * from './scm-planning';
+export * from './marketing-intel';

@@ -5,6 +5,7 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { PublicApiGuard, Scopes } from './public-api.guard';
 import { PublicApiService } from './public-api.service';
 import { PublicLoyaltyService } from './public-loyalty.service';
+import { MarketingIntelService, PushSnapshotsBody } from '../marketing-intel/marketing-intel.service';
 import { buildOpenApi } from './openapi';
 import { renderApiReferenceHtml } from './api-reference';
 
@@ -24,6 +25,7 @@ export class PublicApiController {
   constructor(
     private readonly svc: PublicApiService,
     private readonly loyalty: PublicLoyaltyService,
+    private readonly mi: MarketingIntelService,
   ) {}
 
   // ── Discovery (open) ────────────────────────────────────────────────
@@ -36,7 +38,7 @@ export class PublicApiController {
       version: 'v1',
       documentation: '/api/v1/openapi.json',
       authentication: 'Bearer ierp_… (API key)',
-      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/sales/daily', '/api/v1/customers/transactions', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
+      endpoints: ['/api/v1/me', '/api/v1/items', '/api/v1/inventory', '/api/v1/orders', '/api/v1/invoices', '/api/v1/sales/daily', '/api/v1/customers/transactions', '/api/v1/analytics/snapshots', '/api/v1/loyalty/member', '/api/v1/loyalty/enroll', '/api/v1/loyalty/earn', '/api/v1/loyalty/redeem'],
     };
   }
 
@@ -125,4 +127,11 @@ export class PublicApiController {
   @Scopes('loyalty:write')
   @HttpCode(200)
   loyaltyRedeem(@Body(new ZodValidationPipe(RedeemBody)) b: any, @CurrentUser() u: JwtUser) { return this.loyalty.redeem(b, u); }
+
+  // ── Analytics push-back (docs/48 phase 3) — the Marketing Intelligence Platform posts its computed
+  // MMM / RFM / TOWS results here; the ERP stores them tenant-scoped and renders /marketing-intel. ──
+  @Post('analytics/snapshots')
+  @Scopes('analytics:write')
+  @HttpCode(200)
+  pushAnalytics(@Body(new ZodValidationPipe(PushSnapshotsBody)) b: any, @CurrentUser() u: JwtUser) { return this.mi.pushSnapshots(b, u); }
 }

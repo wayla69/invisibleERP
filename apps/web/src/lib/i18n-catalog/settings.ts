@@ -449,6 +449,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.set.scope_invoices': { th: 'ใบแจ้งหนี้ (invoices:read)', en: 'Invoices (invoices:read)' },
   'st.set.scope_orders': { th: 'ออเดอร์ (orders:read)', en: 'Orders (orders:read)' },
   'st.set.scope_read': { th: 'อ่านทั้งหมด (read)', en: 'Read all (read)' },
+  'st.set.scope_analytics_read': { th: 'ฟีดวิเคราะห์ (analytics:read)', en: 'Analytics feeds (analytics:read)' },
+  'st.set.scope_analytics_write': { th: 'ส่งผลวิเคราะห์กลับ ERP (analytics:write)', en: 'Push analytics back to ERP (analytics:write)' },
   'st.set.search_placeholder': { th: 'ค้นหาเมนู…', en: 'Search menus…' },
   'st.set.secret_set_hint': { th: '(ตั้งไว้แล้ว — เว้นว่างเพื่อคงเดิม)', en: '(already set — leave blank to keep it)' },
   'st.set.show': { th: 'แสดง', en: 'Show' },
