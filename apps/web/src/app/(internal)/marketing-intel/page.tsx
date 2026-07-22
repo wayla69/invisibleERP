@@ -10,7 +10,7 @@ import type { CSSProperties } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   BarChart3, Wallet, TrendingUp, TrendingDown, Layers, Users, Sparkles, Megaphone, History,
-  Crown, ArrowUpRight, Compass,
+  Crown, ArrowUpRight, Compass, PieChart,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, baht } from '@/lib/format';
@@ -35,6 +35,8 @@ const tintBg = (h: string, pctMix = 12): CSSProperties => ({
   borderColor: `color-mix(in oklch, ${h} 22%, var(--border))`,
 });
 const softText = (h: string): CSSProperties => ({ color: `color-mix(in oklch, ${h} 72%, var(--foreground))` });
+const compactBaht = (v: number): string =>
+  v >= 1e6 ? `฿${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `฿${Math.round(v / 1e3)}K` : `฿${Math.round(v)}`;
 
 // Named segments get a stable, meaningful hue; anything else cycles the palette.
 const SEGMENT_HUE: Record<string, string> = {
@@ -66,6 +68,7 @@ export default function MarketingIntelPage() {
   const towsItems: any[] = Array.isArray(tows?.items) ? tows.items : [];
   const topChannel = channels.length ? [...channels].sort((a, b) => (Number(b?.roi) || 0) - (Number(a?.roi) || 0))[0] : null;
   const maxRoi = channels.reduce((m, c) => Math.max(m, Number(c?.roi) || 0), 0) || 1;
+  const totalSpend = channels.reduce((s, c) => s + (Number(c?.spend) || 0), 0);
   const totalCustomers = segments.reduce((s, r) => s + (Number(r?.customers) || 0), 0);
 
   return (
@@ -125,8 +128,34 @@ export default function MarketingIntelPage() {
                     value={topChannel ? String(topChannel.channel) : '—'} />
                 </div>
 
-                {/* Channel ROI meter list */}
-                <div className="grid grid-cols-1 gap-3">
+                {/* Spend allocation donut  +  channel ROI meter list */}
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_1fr]">
+                  {/* Donut — where the ad budget went */}
+                  <div className="flex flex-col rounded-2xl border p-5" style={tintBg('var(--chart-2)', 10)}>
+                    <div className="mb-1 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                      <PieChart className="size-4" /> {t('mi.kpi_spend')}
+                    </div>
+                    <Donut
+                      segments={channels.map((c, i) => ({ label: String(c.channel), value: Number(c?.spend) || 0, hue: HUES[i % HUES.length] }))}
+                      center={compactBaht(totalSpend)}
+                    />
+                    <div className="mt-4 space-y-1.5">
+                      {channels.map((c, i) => {
+                        const hue = HUES[i % HUES.length];
+                        const share = totalSpend ? (Number(c?.spend) || 0) / totalSpend * 100 : 0;
+                        return (
+                          <div key={String(c.channel)} className="flex items-center gap-2 text-xs">
+                            <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: hue }} />
+                            <span className="flex-1 truncate">{String(c.channel)}</span>
+                            <span className="tabular-nums text-muted-foreground">{num(share, 1)}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Channel ROI meter list */}
+                  <div className="grid grid-cols-1 gap-3 content-start">
                   {channels.map((c, i) => {
                     const hue = HUES[i % HUES.length];
                     const roi = Number(c?.roi) || 0;
@@ -159,6 +188,7 @@ export default function MarketingIntelPage() {
                       </div>
                     );
                   })}
+                  </div>
                 </div>
 
                 {/* Run history — period comparison strip */}
@@ -294,6 +324,29 @@ function KpiCard({ hue, icon: Icon, label, value }: { hue: string; icon: typeof 
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-background/70 shadow-sm" style={softText(hue)}>
           <Icon className="size-5" />
         </span>
+      </div>
+    </div>
+  );
+}
+
+// Pure-CSS conic-gradient donut (no chart lib → deterministic render, theme-agnostic). Segments size by
+// value; the centre punches out to the card surface via an inset circle.
+function Donut({ segments, center }: { segments: { label: string; value: number; hue: string }[]; center: string }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  let acc = 0;
+  const stops = segments
+    .map((s) => {
+      const start = (acc / total) * 100;
+      acc += s.value;
+      const end = (acc / total) * 100;
+      return `${s.hue} ${start}% ${end}%`;
+    })
+    .join(', ');
+  return (
+    <div className="relative mx-auto aspect-square w-44">
+      <div className="size-full rounded-full" style={{ background: `conic-gradient(${stops || 'var(--muted)'})` }} />
+      <div className="absolute inset-[22%] flex flex-col items-center justify-center rounded-full bg-card shadow-inner">
+        <span className="text-xl font-semibold tracking-tight tabular-nums">{center}</span>
       </div>
     </div>
   );
