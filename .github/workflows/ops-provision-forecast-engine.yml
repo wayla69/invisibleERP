@@ -62,7 +62,10 @@ jobs:
 
           # 3) Set the secret on the engine, then build+deploy it and WAIT for the /healthz healthcheck
           #    (railway.json healthcheckPath). --ci blocks until the deployment is healthy or fails.
-          rw variables --set "SCM_ENGINE_SECRET=$SECRET" --service forecast-engine --skip-deploys
+          #    PORT=8000 is set explicitly: this private-only service gets no PORT from Railway, and the
+          #    engine binds a FIXED 8000 (its internal address is forecast-engine.railway.internal:8000,
+          #    hard-wired in the API's SCM_ENGINE_URL). Setting it makes Railway's healthcheck target 8000.
+          rw variables --set "SCM_ENGINE_SECRET=$SECRET" --set "PORT=8000" --service forecast-engine --skip-deploys
           echo "Building + deploying forecast-engine (blocks on the /healthz healthcheck)…"
           rw up --service forecast-engine --ci
 
