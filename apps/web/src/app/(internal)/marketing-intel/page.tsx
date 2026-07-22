@@ -38,6 +38,10 @@ const tintBg = (h: string, pctMix = 9): CSSProperties => ({
 });
 const softText = (h: string): CSSProperties => ({ color: `color-mix(in oklch, ${h} 66%, var(--foreground))` });
 const fill = (h: string): string => `color-mix(in oklch, ${h} 78%, var(--card))`; // muted accent for bars/donut/dots
+
+// One-shot staggered entrance (tw-animate-css). fill-mode-both keeps items hidden until their delay.
+const ENTER = 'animate-in fade-in-0 slide-in-from-bottom-3 duration-500 fill-mode-both';
+const stagger = (i: number): CSSProperties => ({ animationDelay: `${i * 55}ms` });
 const compactBaht = (v: number): string =>
   v >= 1e6 ? `฿${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `฿${Math.round(v / 1e3)}K` : `฿${Math.round(v)}`;
 
@@ -75,10 +79,10 @@ export default function MarketingIntelPage() {
   const totalCustomers = segments.reduce((s, r) => s + (Number(r?.customers) || 0), 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* ── Hero ─────────────────────────────────────────────────────── */}
       <div
-        className="relative overflow-hidden rounded-2xl border p-6 sm:p-7"
+        className="relative overflow-hidden rounded-2xl border p-6 duration-500 animate-in fade-in-0 slide-in-from-top-2 sm:p-7"
         style={{
           background:
             'linear-gradient(135deg, color-mix(in oklch, var(--chart-1) 11%, var(--card)), color-mix(in oklch, var(--chart-5) 11%, var(--card)) 48%, color-mix(in oklch, var(--chart-2) 11%, var(--card)))',
@@ -116,10 +120,10 @@ export default function MarketingIntelPage() {
             <p className="mx-auto mt-1.5 max-w-xl text-sm text-muted-foreground">{t('mi.empty_desc')}</p>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-10">
             {/* ── MMM ─────────────────────────────────────────────────── */}
             {mmm && (
-              <section className="space-y-4">
+              <section className={`space-y-4 ${ENTER}`} style={stagger(1)}>
                 <SectionTitle icon={BarChart3} hue="var(--chart-2)">{t('mi.mmm_heading')}</SectionTitle>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -231,7 +235,7 @@ export default function MarketingIntelPage() {
 
             {/* ── RFM (with the activate → campaign action loop) ────────── */}
             {rfm && (
-              <section className="space-y-4">
+              <section className={`space-y-4 ${ENTER}`} style={stagger(2)}>
                 <SectionTitle icon={Users} hue="var(--chart-3)">{t('mi.rfm_heading')}</SectionTitle>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {segments.map((s, i) => {
@@ -277,7 +281,7 @@ export default function MarketingIntelPage() {
 
             {/* ── TOWS ──────────────────────────────────────────────────── */}
             {tows && (
-              <section className="space-y-4">
+              <section className={`space-y-4 ${ENTER}`} style={stagger(3)}>
                 <SectionTitle icon={Compass} hue="var(--chart-5)">{t('mi.tows_heading')}</SectionTitle>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {towsItems.map((it, i) => {
