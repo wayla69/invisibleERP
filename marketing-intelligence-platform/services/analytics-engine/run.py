@@ -141,15 +141,26 @@ def _push_to_erp() -> None:
 
     snapshots: List[Dict] = []
 
-    run = fetch_df("SELECT run_id, r2, total_spend FROM analytics.mmm_runs ORDER BY run_id DESC LIMIT 1")
+    run = fetch_df("SELECT run_id, r2, total_spend, ridge_alpha, window_from, window_to, created_at FROM analytics.mmm_runs ORDER BY run_id DESC LIMIT 1")
     if not run.empty:
         rid = int(run.iloc[0]["run_id"])
         channels = fetch_df(
             "SELECT channel, spend, attributed_revenue, contribution_pct, roi FROM analytics.mmm_results "
             "WHERE run_id = :rid ORDER BY contribution_pct DESC", {"rid": rid}
         )
-        snapshots.append({"kind": "mmm", "model_run_ref": str(rid), "payload": {
-            "r2": float(run.iloc[0]["r2"]) if run.iloc[0]["r2"] is not None else None,
+        r2 = float(run.iloc[0]["r2"]) if run.iloc[0]["r2"] is not None else None
+        # docs/60 Phase 4 — a MODEL CARD accompanies the run so the ERP's governance surface has the
+        # auditable "what produced this recommendation" (version / training window / features / metrics).
+        model_card = {
+            "model_version": f"mmm-ridge-r{rid}",
+            "model_type": "GeometricAdstock→Hill→Ridge",
+            "training_window": f"{run.iloc[0]['window_from']}..{run.iloc[0]['window_to']}",
+            "features": [str(c) for c in channels["channel"].tolist()],
+            "metrics": {"r2": r2, "ridge_alpha": float(run.iloc[0]["ridge_alpha"]) if run.iloc[0]["ridge_alpha"] is not None else None},
+            "trained_at": str(run.iloc[0]["created_at"]),
+        }
+        snapshots.append({"kind": "mmm", "model_run_ref": str(rid), "model_card": model_card, "payload": {
+            "r2": r2,
             "total_spend": float(run.iloc[0]["total_spend"] or 0),
             "channels": channels.to_dict(orient="records"),
         }})

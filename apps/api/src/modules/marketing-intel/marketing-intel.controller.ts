@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Param } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Query, Param } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
@@ -7,6 +7,7 @@ import {
   SimulateBody, OptimizeBody, StageBudgetPlanBody, ApproveBudgetPlanBody,
 } from './marketing-intel.service';
 import { MiExperimentsService, StartExperimentBody, MeasureExperimentBody } from './mi-experiments.service';
+import { MiGovernanceService, GovernanceSettingsBody, ApproveRunBody } from './mi-governance.service';
 
 const ActivateBody = z.object({
   segment: z.string().min(1).max(80),
@@ -22,6 +23,7 @@ export class MarketingIntelController {
   constructor(
     private readonly svc: MarketingIntelService,
     private readonly experiments: MiExperimentsService,
+    private readonly governance: MiGovernanceService,
   ) {}
 
   @Get('summary')
@@ -120,5 +122,39 @@ export class MarketingIntelController {
   @Permissions('marketing', 'exec')
   measureExperiment(@Body(new ZodValidationPipe(MeasureExperimentBody)) b: z.infer<typeof MeasureExperimentBody>, @CurrentUser() u: JwtUser) {
     return this.experiments.measureExperiment(u, b);
+  }
+
+  // ─── Model Governance (docs/60 Phase 4, control MKT-20) ──────────────────────────────────────────────
+  @Get('governance/settings')
+  @Permissions('marketing', 'exec')
+  governanceSettings(@CurrentUser() u: JwtUser) {
+    return this.governance.getSettings(u);
+  }
+
+  @Put('governance/settings')
+  @Permissions('exec', 'approvals')
+  updateGovernanceSettings(@Body(new ZodValidationPipe(GovernanceSettingsBody)) b: z.infer<typeof GovernanceSettingsBody>, @CurrentUser() u: JwtUser) {
+    return this.governance.updateSettings(u, b);
+  }
+
+  // Model cards + drift + status per pushed run.
+  @Get('governance/runs')
+  @Permissions('marketing', 'exec')
+  governanceRuns(@CurrentUser() u: JwtUser) {
+    return this.governance.listRuns(u);
+  }
+
+  // APPROVE a pushed run — maker-checker (approver ≠ pusher); a drifted run needs a reason.
+  @Post('governance/runs/approve')
+  @Permissions('exec', 'approvals')
+  approveRun(@Body(new ZodValidationPipe(ApproveRunBody)) b: z.infer<typeof ApproveRunBody>, @CurrentUser() u: JwtUser) {
+    return this.governance.approveRun(u, b);
+  }
+
+  // The ICFR evidence chain: recommendation (run) → action (budget plan) → outcome (experiment lift).
+  @Get('governance/audit-trail')
+  @Permissions('marketing', 'exec')
+  auditTrail(@CurrentUser() u: JwtUser) {
+    return this.governance.auditTrail(u);
   }
 }

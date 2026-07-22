@@ -115,8 +115,9 @@ class ErpClient:
         """POST /api/v1/analytics/snapshots — push computed MMM/RFM/TOWS back into the ERP.
 
         The key must hold the `analytics:write` scope (distinct from the read scope). Each snapshot is
-        `{ "kind": "mmm"|"rfm"|"tows", "payload": {...}, "model_run_ref": "..."? }`. Idempotent server-side
-        (upsert per tenant+kind), so a re-push simply refreshes the latest.
+        `{ "kind": "mmm"|"rfm"|"tows", "payload": {...}, "model_run_ref": "..."?, "model_card": {...}? }`
+        — the `model_card` (docs/60 Phase 4) carries the run's version / training window / features / metrics
+        for the ERP's governance surface. Append-only server-side (history preserved).
         """
         return self._post("/api/v1/analytics/snapshots", {"snapshots": snapshots})
 

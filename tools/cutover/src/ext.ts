@@ -1049,6 +1049,48 @@ async function main() {
   const expAll = await db.select().from(s.miCampaignExperiments);
   ok('CloseLoop: experiments stored tenant-scoped (cf2 only, none for HQ)', expAll.length >= 2 && expAll.every((r: any) => Number(r.tenantId) === cf2.id), `n=${expAll.length} tenants=${[...new Set(expAll.map((r: any) => Number(r.tenantId)))].join(',')}`);
 
+  // ── Model Governance (docs/60 Phase 4, MKT-20) — a governed tenant must have a pushed analytics run
+  //    APPROVED by a second person (≠ the pusher) before it can drive spend/contact; runs carry model cards;
+  //    a drifted run is flagged into GOV-01 + blocks until approved-with-reason; the audit chain links all. ──
+  const govOff = await inj('GET', '/api/marketing-intel/governance/settings', cf2admin);
+  ok('Governance: default settings are off (require_approval=false, back-compat)', govOff.status === 200 && govOff.json.require_approval === false, `${govOff.status} ${JSON.stringify(govOff.json)}`);
+  const govOn = await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: true });
+  ok('Governance: enabling require_approval persists', govOn.status === 200 && govOn.json.require_approval === true, `${govOn.status} ${JSON.stringify(govOn.json)}`);
+
+  // A new mmm push with a materially lower R² than the prior approved run (0.55) drifts + lands Pending.
+  const govDrift = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'mmm', payload: { ...mmmPayload, r2: 0.20 }, model_run_ref: 'MMM-GOV-DRIFT', model_card: { model_version: 'v3', training_window: '2026-05..07', features: ['spend', 'impressions'], metrics: { r2: 0.20 } } }] });
+  ok('Governance: a governed push is accepted (lands Pending, not auto-consumable)', govDrift.status === 200, `${govDrift.status}`);
+  const govRuns = await inj('GET', '/api/marketing-intel/governance/runs', cf2admin);
+  const driftRun = (govRuns.json.runs ?? []).find((r: any) => r.model_run_ref === 'MMM-GOV-DRIFT');
+  ok('Governance: the pushed run is Pending, carries its model card + a drift flag', !!driftRun && driftRun.status === 'Pending' && driftRun.model_card?.model_version === 'v3' && driftRun.quality?.drift === true && driftRun.quality?.blocked === true, `status=${driftRun?.status} card=${driftRun?.model_card?.model_version} drift=${driftRun?.quality?.drift}`);
+
+  const gov01 = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Governance: the pending analytics run surfaces in the GOV-01 center (MKT-20)', gov01.status === 200 && (gov01.json.items ?? []).some((i: any) => i.type === 'mi_analytics_run' && i.control === 'MKT-20'), `${gov01.status} types=${[...new Set((gov01.json.items ?? []).map((i: any) => i.type))].join(',')}`);
+
+  const apprNoReason = await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: driftRun?.id });
+  ok('Governance: approving a DRIFTED run without a reason → 400 DRIFT_REASON_REQUIRED', apprNoReason.status === 400 && apprNoReason.json.error?.code === 'DRIFT_REASON_REQUIRED', `${apprNoReason.status} ${apprNoReason.json.error?.code}`);
+  const apprOk = await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: driftRun?.id, reason: 'reviewed — seasonal dip, retained' });
+  ok('Governance: a different user approves the run with a reason → Approved (maker-checker; pusher = the api key)', (apprOk.status === 200 || apprOk.status === 201) && apprOk.json.status === 'Approved', `${apprOk.status} ${apprOk.json.status}`);
+
+  // Consumption gate: a fresh rfm push (Pending) means the latest RFM is unapproved → activation is blocked.
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'GovSeg', customers: 1 }] }, members: [{ customer_no: 'M-CF2A', segment: 'GovSeg' }] }] });
+  const blockedAct = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'GovSeg' });
+  ok('Governance: activating off an UNAPPROVED latest RFM run → 400 ANALYTICS_NOT_APPROVED', blockedAct.status === 400 && blockedAct.json.error?.code === 'ANALYTICS_NOT_APPROVED', `${blockedAct.status} ${blockedAct.json.error?.code}`);
+  const govRuns2 = await inj('GET', '/api/marketing-intel/governance/runs', cf2admin);
+  const rfmRun = (govRuns2.json.runs ?? []).find((r: any) => r.kind === 'rfm' && r.status === 'Pending');
+  await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: rfmRun?.id });
+  const okAct = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'GovSeg' });
+  ok('Governance: after the RFM run is approved, activation succeeds (draft campaign)', (okAct.status === 200 || okAct.status === 201) && okAct.json.status === 'draft', `${okAct.status} ${okAct.json.status}`);
+
+  const miAudit = await inj('GET', '/api/marketing-intel/governance/audit-trail', cf2admin);
+  ok('Governance: the audit trail links runs → budget plans → experiment outcomes (ICFR chain)', miAudit.status === 200 && Array.isArray(miAudit.json.runs) && Array.isArray(miAudit.json.plans) && Array.isArray(miAudit.json.experiments) && miAudit.json.runs.length > 0 && miAudit.json.experiments.length > 0, `${miAudit.status} runs=${(miAudit.json.runs ?? []).length} plans=${(miAudit.json.plans ?? []).length} exp=${(miAudit.json.experiments ?? []).length}`);
+
+  const govRows = await db.select().from(s.miGovernanceSettings);
+  ok('Governance: settings stored tenant-scoped (cf2 only)', govRows.length >= 1 && govRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${govRows.length} tenants=${[...new Set(govRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // Reset governance OFF so it can't affect any later checks.
+  await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: false });
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

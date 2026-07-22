@@ -136,7 +136,13 @@ must exist as an API/event first.
 
 ---
 
-## Phase 4 — Model Governance (SOX / ICFR-fit)
+## Phase 4 — Model Governance (SOX / ICFR-fit) — **DELIVERED**
+
+> **Status: DELIVERED** — opt-in per-tenant governance (migration 0465): a pushed run lands Pending and
+> needs approval by a second person (≠ the pusher; `assertMakerChecker`), consumers gated (Approved-only
+> curves; `ANALYTICS_NOT_APPROVED` activate); model cards on each run; drift vs the prior approved R²
+> flagged into GOV-01 + the BiLive SSE bus and blocked without a reason; a run → plan → experiment audit
+> trail; web Governance tab; control MKT-20.
 
 **Goal.** Because these models now **drive spend and customer contact**, put ITGC-grade governance around
 them — the natural fit for the NASDAQ/ICFR posture.
@@ -188,3 +194,4 @@ earlier data (response curves, per-customer scores, campaign outcomes).
 | v0.2 | 2026-07-22 | Phase 1 DELIVERED — platform emits Hill response-curve contract (`saturation.{beta,kappa,slope}`, raw-spend); ERP optimiser/simulate/staged budget plans + web Budget Planner tab + MKT-17. |
 | v0.3 | 2026-07-22 | Phase 2 DELIVERED — platform pushes per-customer CLV / churn / next-best-action; ERP lands them on separate `customer_profiles.mi_*` (migration 0463) + read-only segment drill-down + web Customer Intelligence tab; advisory, consent-gated; MKT-18. |
 | v0.4 | 2026-07-22 | Phase 3 DELIVERED — holdout A/B experiments (immutable treatment/control arms, migration 0464; treatment-only `audience:'members'` campaign) + real-revenue lift via `CrmService.revenueByMembers` + outcomes pull-back (`GET /api/v1/marketing/experiment-outcomes`) + web Incrementality tab; MKT-19. |
+| v0.5 | 2026-07-22 | **Phase 4 DELIVERED — ALL FOUR PHASES COMPLETE.** Opt-in per-tenant model governance (migration 0465): maker-checker approval (approver ≠ pusher) on spend/contact-driving runs + gated consumers, model cards, drift → GOV-01 + SSE + block-without-reason, and a run → plan → experiment audit trail; web Governance tab; MKT-20. |

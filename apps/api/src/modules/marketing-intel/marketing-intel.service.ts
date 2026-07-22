@@ -6,6 +6,7 @@ import { miAnalyticsSnapshots, miBudgetPlans, customerProfiles, posMembers } fro
 import type { JwtUser } from '../../common/decorators';
 import { assertMakerChecker } from '../../common/control-profile';
 import { CampaignsService } from '../campaigns/campaigns.service';
+import { MiGovernanceService } from './mi-governance.service';
 import { curvesFromMmm, predictSales, optimizeAllocation, type ResponseCurve } from './mmm-optimizer';
 
 // Marketing Intelligence push-back store (docs/48 phase 3). The standalone Python platform computes
@@ -35,6 +36,7 @@ export const PushSnapshotsBody = z.object({
     payload: z.record(z.any()),
     model_run_ref: z.string().max(120).optional(),
     members: z.array(RfmMember).max(100_000).optional(), // rfm only — ignored for mmm/tows
+    model_card: z.record(z.any()).optional(),            // docs/60 Phase 4 — { model_version, training_window, features, metrics }
   })).min(1).max(MI_SNAPSHOT_KINDS.length),
 });
 export type PushSnapshotsDto = z.infer<typeof PushSnapshotsBody>;
@@ -57,6 +59,7 @@ export class MarketingIntelService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly campaigns: CampaignsService,
+    private readonly governance: MiGovernanceService,
   ) {}
 
   // WRITE (public API, scope analytics:write). APPEND-only snapshot + (for rfm) the per-customer segment
@@ -71,8 +74,11 @@ export class MarketingIntelService {
     let membersApplied = 0;
     let scoresApplied = 0;
     for (const s of body.snapshots) {
+      // docs/60 Phase 4 — governance decides the run's initial status + computes drift/quality vs the prior
+      // approved run. Ungoverned tenant ⇒ status 'Approved' (back-compat).
+      const { status, quality } = await this.governance.evaluatePush(tenantId, s.kind, s.payload);
       await this.db.insert(miAnalyticsSnapshots)
-        .values({ tenantId, kind: s.kind, payload: s.payload, modelRunRef: s.model_run_ref ?? null, source: 'mi-platform', pushedBy: principal });
+        .values({ tenantId, kind: s.kind, payload: s.payload, modelRunRef: s.model_run_ref ?? null, source: 'mi-platform', pushedBy: principal, status, quality, modelCard: s.model_card ?? null });
       if (s.kind === 'rfm' && s.members?.length) {
         const r = await this.applyRfmMembers(tenantId, s.members);
         membersApplied += r.segments;
@@ -264,6 +270,13 @@ export class MarketingIntelService {
     const present = await this.db.select({ id: customerProfiles.memberId }).from(customerProfiles)
       .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.miRfmSegment, seg))).limit(1);
     if (!present.length) throw new BadRequestException({ code: 'EMPTY_SEGMENT', message: `no members in segment "${seg}" — push RFM first`, messageTh: 'ไม่มีสมาชิกในกลุ่มนี้ (ยังไม่ push RFM)' });
+    // docs/60 Phase 4 — a governed tenant can only act on an APPROVED rfm run (maker-checker on
+    // contact-driving analytics). If the LATEST pushed rfm run is still pending, a campaign can't run off it.
+    if (await this.governance.approvedOnly(tenantId)) {
+      const [latest] = await this.db.select({ status: miAnalyticsSnapshots.status }).from(miAnalyticsSnapshots)
+        .where(eq(miAnalyticsSnapshots.kind, 'rfm')).orderBy(desc(miAnalyticsSnapshots.pushedAt)).limit(1);
+      if (!latest || latest.status !== 'Approved') throw new BadRequestException({ code: 'ANALYTICS_NOT_APPROVED', message: 'the latest RFM analytics run has not been approved — a second person must approve it first', messageTh: 'ผล RFM ล่าสุดยังไม่ได้รับการอนุมัติ (ต้องให้อีกคนอนุมัติก่อน)' });
+    }
     return this.campaigns.upsertCampaign(user, {
       name: `MI · ${seg}`,
       channel: dto.channel ?? 'sms',
@@ -276,9 +289,13 @@ export class MarketingIntelService {
   // ─── Budget Optimizer (docs/60 Phase 1, control MKT-17) ──────────────────────────────────────────────
   // Load the latest MMM snapshot's per-channel response curves (pushed saturation params, or a derived
   // fallback from spend/roi so the planner works before the platform pushes precise params).
-  private async loadCurves(): Promise<{ curves: ResponseCurve[]; basis: string; anyDerived: boolean; hasData: boolean }> {
+  private async loadCurves(tenantId?: number | null): Promise<{ curves: ResponseCurve[]; basis: string; anyDerived: boolean; hasData: boolean }> {
+    // docs/60 Phase 4 — a governed tenant may only consume an APPROVED mmm run (maker-checker on
+    // spend-driving analytics). Ungoverned ⇒ latest run, as before.
+    const conds = [eq(miAnalyticsSnapshots.kind, 'mmm')];
+    if (await this.governance.approvedOnly(tenantId ?? null)) conds.push(eq(miAnalyticsSnapshots.status, 'Approved'));
     const [row] = await this.db.select({ payload: miAnalyticsSnapshots.payload, modelRunRef: miAnalyticsSnapshots.modelRunRef })
-      .from(miAnalyticsSnapshots).where(eq(miAnalyticsSnapshots.kind, 'mmm'))
+      .from(miAnalyticsSnapshots).where(and(...conds))
       .orderBy(desc(miAnalyticsSnapshots.pushedAt)).limit(1);
     if (!row) return { curves: [], basis: 'none', anyDerived: false, hasData: false };
     const { curves, anyDerived } = curvesFromMmm(row.payload);
@@ -286,8 +303,8 @@ export class MarketingIntelService {
   }
 
   // READ — the response curves + each channel's current spend/predicted, for the planner's charts.
-  async responseCurves(_user: JwtUser) {
-    const { curves, basis, anyDerived, hasData } = await this.loadCurves();
+  async responseCurves(user: JwtUser) {
+    const { curves, basis, anyDerived, hasData } = await this.loadCurves(user.tenantId);
     const current = predictSales(Object.fromEntries(curves.map((c) => [c.channel, c.currentSpend])), curves);
     return {
       has_data: hasData,
@@ -300,16 +317,16 @@ export class MarketingIntelService {
   }
 
   // What-if: predicted incremental sales for a proposed allocation (deterministic, no external call).
-  async simulate(_user: JwtUser, body: z.infer<typeof SimulateBody>) {
-    const { curves, basis, hasData } = await this.loadCurves();
+  async simulate(user: JwtUser, body: z.infer<typeof SimulateBody>) {
+    const { curves, basis, hasData } = await this.loadCurves(user.tenantId);
     if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot to simulate against — push an MMM run first', messageTh: 'ยังไม่มีผล MMM ให้จำลอง (ต้อง push MMM ก่อน)' });
     const pred = predictSales(body.allocation, curves);
     return { basis, total_budget: Object.values(body.allocation).reduce((s, v) => s + v, 0), predicted_sales: pred.total, per_channel: pred.perChannel };
   }
 
   // Optimise: the allocation of `budget` that maximises predicted incremental sales (greedy water-filling).
-  async optimize(_user: JwtUser, body: z.infer<typeof OptimizeBody>) {
-    const { curves, basis, hasData } = await this.loadCurves();
+  async optimize(user: JwtUser, body: z.infer<typeof OptimizeBody>) {
+    const { curves, basis, hasData } = await this.loadCurves(user.tenantId);
     if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot to optimise against — push an MMM run first', messageTh: 'ยังไม่มีผล MMM ให้ค้นหางบที่เหมาะสม (ต้อง push MMM ก่อน)' });
     const res = optimizeAllocation(body.budget, curves, { caps: body.caps });
     return { basis, ...res };
@@ -320,7 +337,7 @@ export class MarketingIntelService {
   async stageBudgetPlan(user: JwtUser, body: z.infer<typeof StageBudgetPlanBody>) {
     const tenantId = user.tenantId;
     if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'no tenant', messageTh: 'ไม่มีผู้เช่า' });
-    const { curves, basis, hasData } = await this.loadCurves();
+    const { curves, basis, hasData } = await this.loadCurves(tenantId);
     if (!hasData) throw new BadRequestException({ code: 'NO_MMM_DATA', message: 'no MMM snapshot — push an MMM run first', messageTh: 'ยังไม่มีผล MMM (ต้อง push ก่อน)' });
     const predicted = predictSales(body.allocation, curves).total;
     const todayCount = (await this.db.select({ id: miBudgetPlans.id }).from(miBudgetPlans).where(eq(miBudgetPlans.tenantId, tenantId))).length;

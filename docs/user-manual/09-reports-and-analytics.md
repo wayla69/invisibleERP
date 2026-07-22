@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.12** _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.13** _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -525,6 +525,36 @@ difference is the real **lift**.
 > before the window ends, and a test can't be re-measured (the result is locked). Each company sees
 > only its own tests. These measured results also flow back to the analytics platform so future
 > recommendations learn from what actually worked.
+
+---
+
+## 5f. Model governance (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Governance**. **Who:** `marketing` or
+`exec` to view; `exec` / `approvals` to change the setting and approve runs.
+
+Because these analytics now drive real spend and customer contact, you can require them to be **checked by
+a second person** before anyone acts on them — the same control posture as the rest of the finance system.
+
+**To turn on governance:**
+
+1. Open **Governance** and switch **Require approval** on. From now on, each result the platform pushes in
+   arrives **Pending** and can't drive a budget plan or a campaign until someone approves it.
+
+**To review and approve a run:**
+
+2. Each run shows its **model card** (which model version, over what training window, key metrics like R²)
+   — the record of *what produced this recommendation*.
+3. If a run's quality dropped sharply from the last approved one, it's flagged **drift** and appears in the
+   company-wide **pending-approvals center**. Approving a drifted run **requires a reason**.
+4. Press **อนุมัติ (Approve)**. You **cannot approve a run you pushed** — a different person must, so a
+   recommendation always has a second pair of eyes.
+
+The **audit trail** at the bottom links the whole chain — the recommendation (run) → the action it drove
+(budget plan) → the measured outcome (campaign lift) — the evidence auditors ask for.
+
+> Governance is **off by default**, so nothing changes until you switch it on. Each company has its own
+> setting and sees only its own runs.
 
 ---
 

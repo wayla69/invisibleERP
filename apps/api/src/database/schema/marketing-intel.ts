@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, jsonb, timestamp, numeric, integer, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, text, jsonb, timestamp, numeric, integer, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Marketing Intelligence push-back store (migration 0460, docs/48 phase 3).
@@ -18,7 +18,28 @@ export const miAnalyticsSnapshots = pgTable('mi_analytics_snapshots', {
   source: text('source').notNull().default('mi-platform'),
   pushedBy: text('pushed_by'),
   pushedAt: timestamp('pushed_at', { withTimezone: true }).defaultNow(),
-}, (t) => ({ byTenantKind: index('idx_mi_snapshots_tenant').on(t.tenantId, t.kind) }));
+  // Model Governance (docs/60 Phase 4, migration 0465). Back-compat: status DEFAULTS to 'Approved' so a
+  // tenant without governance is unchanged; enabling mi_governance_settings.require_approval makes new
+  // pushes land 'Pending' and gates activate/budget-plan on an Approved run.
+  status: text('status').notNull().default('Approved'), // Pending | Approved | Rejected
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  modelCard: jsonb('model_card'),  // { model_version, training_window, features, metrics, … }
+  quality: jsonb('quality'),        // { r2, prev_r2, r2_drop, drift, blocked, … } computed at push
+}, (t) => ({
+  byTenantKind: index('idx_mi_snapshots_tenant').on(t.tenantId, t.kind),
+  byStatus: index('idx_mi_snapshots_status').on(t.tenantId, t.status, t.pushedAt),
+}));
+
+// Per-tenant governance toggle (docs/60 Phase 4). Absent ⇒ governance OFF (back-compat).
+export const miGovernanceSettings = pgTable('mi_governance_settings', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  requireApproval: boolean('require_approval').notNull().default(false),
+  driftR2Drop: numeric('drift_r2_drop').notNull().default('0.15'),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: uniqueIndex('ux_mi_governance_tenant').on(t.tenantId) }));
 
 // Budget Optimizer plans (migration 0462, docs/60 Phase 1). A prescriptive MMM allocation the planner
 // STAGES for approval — advisory only, never posts spend. Maker-checker: the approver (approved_by) must

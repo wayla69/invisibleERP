@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 305,
+    "total": 306,
     "by_status": {
-      "Implemented": 302,
+      "Implemented": 303,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 28,
+      "CRM — Loyalty": 29,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2524,6 +2524,25 @@
       "tod": "Inspect the immutable arm split (unique index, no re-randomise), the treatment-only campaign that excludes controls, the read-API lift math (no cross-domain join), and the tenant_id filter/RLS.",
       "toe": "Re-perform (ext harness, 9 MKT-19 checks): start splits treatment/control (both non-empty, arms immutable + partition the segment); the treatment-only campaign excludes every control member; measure computes positive lift (seeded ฿1000 vs ฿100/head → ~900%) and is idempotent (ALREADY_MEASURED); measuring before the window → WINDOW_NOT_ELAPSED; empty segment → EMPTY_SEGMENT; outcomes are pullable via the public API (analytics:read), tenant-scoped.",
       "evidence": "mi_campaign_experiments/mi_experiment_arms fixed arms + measured lift; the treatment-only campaign recipient list; the read-only outcome read",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-20",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "Externally-computed analytics that DRIVE spend and customer contact are consumed with no independent review — the same party that pushes a run also acts on it; or a materially DRIFTED / degraded model silently drives a budget or a blast; or there is no auditable record of what model produced a recommendation and what it led to (broken ICFR evidence chain).",
+      "assertion": "Authorization/Accuracy",
+      "description": "Model Governance (docs/60 Phase 4, MKT-20): ITGC-grade governance around the pushed analytics that now drive spend/contact. Opt-in per tenant (mi_governance_settings.require_approval; default OFF = back-compat). When governed: (1) MAKER-CHECKER — a pushed run lands status 'Pending' and must be APPROVED by a different user than the pusher (POST /governance/runs/approve → assertMakerChecker, approver != pushed_by -> SOD_SELF_APPROVAL); the consumers are GATED — loadCurves (optimize/simulate/stageBudgetPlan) uses only an Approved mmm run, and activateSegment is blocked (ANALYTICS_NOT_APPROVED) if the latest rfm run is unapproved. (2) MODEL CARDS — each run carries {model_version, training_window, features, metrics} surfaced in-ERP. (3) DRIFT/QUALITY — a new run's R2 is compared to the prior approved run; a material drop beyond the tenant threshold is FLAGGED (into the GOV-01 center via the mi_analytics_run approval queue + the BiLive SSE attention bus) and BLOCKS approval unless a reason is given (DRIFT_REASON_REQUIRED). (4) AUDIT TRAIL — recommendation (run) -> action (budget plan / campaign) -> outcome (Phase-3 experiment lift) linked + queryable (GET /governance/audit-trail). mi_analytics_snapshots + mi_governance_settings tenant-scoped (canonical org-clause RLS). A governance/read model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per run / per approval",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-intel/mi-governance.service.ts (evaluatePush status+drift; approveRun maker-checker + DRIFT_REASON_REQUIRED; getSettings/updateSettings; auditTrail; approvedOnly gate); marketing-intel.service.ts loadCurves Approved-only + activateSegment ANALYTICS_NOT_APPROVED gate; marketing-intel-approval-queues.ts (GOV-01 mi_analytics_run queue); schema/marketing-intel.ts mi_analytics_snapshots.status/model_card/quality + mi_governance_settings + migration 0465; the external platform run.py model_card; cutover/ext.ts (MKT-20 ToE, 11 checks)",
+      "tod": "Inspect the per-tenant governance toggle, the Pending-until-approved status + the approver!=pusher maker-checker, the drift flag + block-without-reason, the consumption gates (Approved-only curves, ANALYTICS_NOT_APPROVED activate), the GOV-01 queue, and the audit chain.",
+      "toe": "Re-perform (ext harness, 11 MKT-20 checks): governance defaults OFF (back-compat); enabling it makes a push land Pending with its model card + a drift flag; the pending run surfaces in GOV-01; a drifted run can't be approved without a reason; a different user approves it; activating off an unapproved latest RFM run -> ANALYTICS_NOT_APPROVED, and after approval it succeeds; the audit trail links runs->plans->experiments; settings are tenant-scoped.",
+      "evidence": "mi_analytics_snapshots status/model_card/quality + approvals; mi_governance_settings; the GOV-01 pending queue; the audit chain",
       "status": "Implemented"
     },
     {
