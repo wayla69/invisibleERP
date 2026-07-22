@@ -18,8 +18,15 @@ overrides:
   # Step 7 (fastify-5 / Nest-11): clear the remaining transitive runtime advisories the major bump alone
   # doesn't — a stale fast-uri@2.x copy lingers, and @nestjs/platform-fastify still pulls @fastify/middie@8.
   # middie 9 peers fastify 5 (now satisfied) and we use Nest guards (not middie middleware), so forcing it is safe.
-  "fast-uri@<3.1.2": ">=3.1.2"
+  # 2026-07-22 (GHSA-4c8g-83qw-93j6, GHSA-v2hh-gcrm-f6hx): two new fast-uri host-confusion advisories over the
+  # <3.1.4 range — bump the override floor 3.1.2 → 3.1.4 (the patched release clears both). Bounded <4 so the
+  # resolver stays on the 3.x line ajv expects (unbounded ">=" jumped it to 4.1.1 — see the caret-bound NB above).
+  "fast-uri@<3.1.4": ">=3.1.4 <4"
   "@fastify/middie@<9.3.2": ">=9.3.2"
+  # 2026-07-22 (GHSA-f88m-g3jw-g9cj): sharp <0.35.0 inherits libvips CVEs (CVE-2026-33327/33328/35590/35591);
+  # transitive via next's image optimizer. 0.35.0 ships patched libvips binaries — force it (allowBuilds: sharp).
+  # Bounded <0.36 (0.x minor = breaking) so it stays on the patched 0.35 line next is validated against.
+  "sharp@<0.35.0": ">=0.35.0 <0.36"
   # 2026-07-20 (GHSA-3jxr-9vmj-r5cp, GHSA-52cp-r559-cp3m): brace-expansion exponential-expansion DoS across
   # all three major lines (transitive via exceljs→archiver/unzipper→glob, @nestjs/cli, @vitest/coverage-v8)
   # and js-yaml 4.x merge-key quadratic CPU (via @nestjs/swagger — runtime — and @nestjs/cli). Patch-level
@@ -30,6 +37,10 @@ overrides:
   "brace-expansion@>=2.0.0 <2.1.2": "^2.1.2"
   "brace-expansion@5": "^5.0.7"
   "js-yaml@>=4.0.0 <4.3.0": "^4.3.0"
+  # 2026-07-22 (GHSA-45rx-2jwx-cxfr): @opentelemetry/propagator-jaeger <2.9.0 DoS via a malformed Jaeger
+  # trace header. Transitive via @opentelemetry/sdk-node→sdk-trace-node; an in-major (2.x) patch bump the
+  # SDK's caret range already accepts. Bounded <3 to stay in the OTel 2.x line the SDK is locked to.
+  "@opentelemetry/propagator-jaeger@<2.9.0": ">=2.9.0 <3"
 
 # Known, triaged advisories accepted under documented remediation (see compliance/vulnerability-triage.md).
 # Each is either a dev/build-only dependency or gated behind a major upgrade (fastify-5 / Nest-11 / drizzle-0.45).
