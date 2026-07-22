@@ -63,6 +63,24 @@ export const zSeriesInput = z.object({
 });
 export type ScmSeriesInput = z.infer<typeof zSeriesInput>;
 
+// docs/58 C2 — hierarchical reconciliation. The API declares an aggregation forest (leaves carry a
+// series_id; aggregates have children); the engine makes the forecasts sum coherently up it. Additive
+// and optional — absent ⇒ the engine is byte-identical to the pre-C2 (v2) behaviour.
+export const zHierarchyNode = z.object({
+  node_id: z.string().min(1), // opaque; the API maps it back to (level, ref)
+  parent_id: z.string().nullable(), // null = a root (the total)
+  series_id: z.string().optional(), // set ⇔ this node is a LEAF; must match a series[].series_id
+});
+export type ScmHierarchyNode = z.infer<typeof zHierarchyNode>;
+
+export const zReconciliation = z.object({
+  method: z.enum(['none', 'bottom_up', 'top_down_hist', 'mint']).default('none'),
+  covariance: z.enum(['ols', 'wls_struct', 'wls_var', 'shrink']).default('wls_struct'), // MinT only (C3)
+  nodes: z.array(zHierarchyNode).min(1),
+  reconcile_paths: z.boolean().default(true), // reconcile the sample PATHS, not just the point forecast
+});
+export type ScmReconciliation = z.infer<typeof zReconciliation>;
+
 export const zForecastRequest = z.object({
   contract_version: z.literal(SCM_ENGINE_CONTRACT_VERSION),
   request_id: z.string().min(1), // idempotency + deterministic RNG seed (same request ⇒ same paths)
@@ -75,6 +93,7 @@ export const zForecastRequest = z.object({
   promo_regressor: z.boolean().default(true), // A1: fit/apply the promo regressor where series carry it
   price_regressor: z.boolean().default(true), // A1: fit the (log) price regressor where series carry it
   scenario: z.boolean().default(false), // A1: advisory what-if — never feeds an auto-convert plan (SCM-04)
+  reconciliation: zReconciliation.optional(), // C2: make forecasts sum coherently up the hierarchy
   series: z.array(zSeriesInput).min(1).max(200), // SCM_ENGINE_MAX_SERIES chunking bound
 });
 export type ScmForecastRequest = z.infer<typeof zForecastRequest>;
@@ -116,10 +135,23 @@ export const zEngineItemError = z.object({
 });
 export type ScmEngineItemError = z.infer<typeof zEngineItemError>;
 
+// docs/58 C2 — one reconciled result per hierarchy node (leaves AND aggregates), same shape as a
+// series result but keyed by node_id (no per-node model). Leaf `sample_paths` are what the API
+// explodes; aggregate nodes give the planner a coherent multi-level view.
+export const zReconciledNodeResult = zForecastSeriesResult
+  .omit({ series_id: true, model: true })
+  .extend({
+    node_id: z.string(),
+    level: z.number().int().min(0), // 0 = leaf, increasing toward the root
+    method: z.enum(['bottom_up', 'top_down_hist', 'mint']),
+  });
+export type ScmReconciledNodeResult = z.infer<typeof zReconciledNodeResult>;
+
 export const zForecastResponse = z.object({
   contract_version: z.literal(SCM_ENGINE_CONTRACT_VERSION),
   request_id: z.string(),
   results: z.array(zForecastSeriesResult),
+  reconciled: z.array(zReconciledNodeResult).default([]), // C2: empty unless reconciliation was requested
   errors: z.array(zEngineItemError).default([]), // per-series failures never fail the whole batch
 });
 export type ScmForecastResponse = z.infer<typeof zForecastResponse>;

@@ -54,6 +54,19 @@ class SeriesInput(BaseModel):
     analog_of: Optional[list[str]] = None  # A4 (reserved): donor series_ids for a zero-history sku
 
 
+class HierarchyNode(BaseModel):
+    node_id: str = Field(min_length=1)
+    parent_id: Optional[str] = None  # null = a root (the total)
+    series_id: Optional[str] = None  # set ⇔ a LEAF; must match a series[].series_id
+
+
+class Reconciliation(BaseModel):
+    method: Literal["none", "bottom_up", "top_down_hist", "mint"] = "none"
+    covariance: Literal["ols", "wls_struct", "wls_var", "shrink"] = "wls_struct"  # MinT only (C3)
+    nodes: list[HierarchyNode] = Field(min_length=1)
+    reconcile_paths: bool = True
+
+
 class ForecastRequest(BaseModel):
     contract_version: Literal["2"]
     request_id: str = Field(min_length=1)  # idempotency + deterministic RNG seed
@@ -66,6 +79,7 @@ class ForecastRequest(BaseModel):
     promo_regressor: bool = True  # A1: fit/apply the promo regressor where series carry it
     price_regressor: bool = True  # A1: fit the (log) price regressor where series carry it
     scenario: bool = False  # A1: advisory what-if — never feeds an auto-convert plan (SCM-04)
+    reconciliation: Optional[Reconciliation] = None  # C2: coherent hierarchical reconciliation
     series: list[SeriesInput] = Field(min_length=1, max_length=200)
 
 
@@ -111,10 +125,23 @@ class EngineItemError(BaseModel):
     message: str
 
 
+class ReconciledNodeResult(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    node_id: str
+    level: int = Field(ge=0)  # 0 = leaf, increasing toward the root
+    method: Literal["bottom_up", "top_down_hist", "mint"]
+    points: list[ForecastPoint]
+    sample_paths: list[list[float]]
+    accuracy: Accuracy
+    attribution: Optional[Attribution] = None
+
+
 class ForecastResponse(BaseModel):
     contract_version: Literal["2"]
     request_id: str
     results: list[ForecastSeriesResult]
+    reconciled: list[ReconciledNodeResult] = Field(default_factory=list)  # C2
     errors: list[EngineItemError] = Field(default_factory=list)
 
 

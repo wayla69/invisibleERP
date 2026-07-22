@@ -161,6 +161,18 @@ export class ScmRunService {
           promo_regressor: true,
           price_regressor: true,
           scenario: false,
+          // docs/58 C2 — reconcile the branch's menu series up to a coherent TOTAL (bottom_up: leaves
+          // unchanged, the aggregate is their exact sum). Absent history/axis depth ⇒ a flat 2-level
+          // forest; C3/C4 deepen it (categories, MinT). Explosion consumes the RECONCILED leaf paths.
+          reconciliation: {
+            method: 'bottom_up' as const,
+            covariance: 'wls_struct' as const,
+            reconcile_paths: true,
+            nodes: [
+              { node_id: 'TOTAL', parent_id: null },
+              ...chunk.map((s) => ({ node_id: `L:${s.itemId}`, parent_id: 'TOTAL', series_id: s.itemId })),
+            ],
+          },
           series: chunk.map((s) => ({
             series_id: s.itemId,
             class_hint: 'auto' as const,
@@ -170,8 +182,24 @@ export class ScmRunService {
         };
         digestParts.push(createHash('sha256').update(JSON.stringify(req)).digest('hex'));
         const res = await this.engine.forecast(req);
+
+        // C2 trust boundary: use the reconciled (coherent) leaf paths only when the returned aggregate
+        // really equals their sum within tolerance; else degrade to the base forecast. A malformed
+        // hierarchy makes the engine return an error + empty `reconciled`, so we fall back safely.
+        const reconLeaf = new Map<string, number[][]>();
+        const totalNode = res.reconciled.find((node) => node.node_id === 'TOTAL');
+        for (const node of res.reconciled) {
+          if (node.node_id.startsWith('L:')) reconLeaf.set(node.node_id.slice(2), node.sample_paths);
+        }
+        let coherent = reconLeaf.size > 0 && !!totalNode;
+        if (coherent && totalNode) {
+          const leafMeanSum = [...reconLeaf.values()].reduce((a, pg) => a + planHelpers.meanOfPaths(pg), 0);
+          const totalMean = planHelpers.meanOfPaths(totalNode.sample_paths);
+          coherent = Math.abs(leafMeanSum - totalMean) <= 1e-6 * Math.max(1, Math.abs(totalMean));
+        }
         for (const r of res.results) {
-          menuPaths.set(r.series_id, r.sample_paths);
+          const paths = coherent ? (reconLeaf.get(r.series_id) ?? r.sample_paths) : r.sample_paths;
+          menuPaths.set(r.series_id, paths);
           await this.saveForecast(tenantId, runId, branchId, r.series_id, 'menu', r, today, horizon);
         }
         for (const err of res.errors) engineErrors.push(`${err.ref}: ${err.code}`);
