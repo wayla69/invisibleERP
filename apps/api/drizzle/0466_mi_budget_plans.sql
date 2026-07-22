@@ -28,10 +28,14 @@ CREATE INDEX IF NOT EXISTS idx_mi_budget_plans_tenant ON mi_budget_plans (tenant
 --> statement-breakpoint
 
 -- app_user grants + re-apply the CANONICAL org-scoped tenant_isolation policy (0232 form). Idempotent.
+-- EXCLUDE audit_expectations: migration 0465 deliberately gives it a PERMISSIVE tenant_isolation policy
+-- (USING/CHECK true) so the in-business-tx audit-expectation bump never violates RLS and aborts the tx
+-- (a god acting-as a company bumps under the TARGET app.tenant_id) — re-applying the scoped 0232 body
+-- here would reintroduce a 500 on god sign-off (cf. the 0218 org-clause clobber gotcha). Leave it untouched.
 DO $$ DECLARE r record; BEGIN
   EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user';
   EXECUTE 'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_user';
-  FOR r IN SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id' LOOP
+  FOR r IN SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='tenant_id' AND table_name <> 'audit_expectations' LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.table_name);
     EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', r.table_name);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON public.%I', r.table_name);
