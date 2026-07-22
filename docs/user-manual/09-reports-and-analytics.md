@@ -441,6 +441,40 @@ The workspace has four tabs:
 sees only its own signals and runs. The v1 model is a transparent lift-share heuristic (a
 statistical regression can replace it later without changing this screen).
 
+## 5c. Budget Planner — Marketing Intelligence (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Budget Planner**. **Who:** `marketing`
+or `exec` to plan; `exec` / `approvals` to approve a plan.
+
+Once an MMM run has been pushed in, the Budget Planner answers the forward question — *"if I have
+฿X to spend, how should I split it across channels for the most sales?"*
+
+**To find the best split for a budget:**
+
+1. Open **Budget Planner**. Each channel shows its **response curve** (spend → extra sales): the
+   curve flattens as a channel saturates, so the first baht returns more than the last.
+2. Enter a **total budget** and press **หาสัดส่วนที่ดีที่สุด (Optimise)** — the planner fills the
+   allocation that maximises predicted sales (it keeps feeding each next baht to whichever channel
+   is still returning the most).
+3. Or drag the **per-channel sliders** yourself; the **predicted sales** figure updates live as you
+   move them (a "what-if"). Optimise and the sliders use the same math, so a re-check always gives
+   the same number.
+
+> If the platform hasn't pushed precise response curves yet, the planner derives a serviceable
+> curve from each channel's current spend and ROI (shown as *ประมาณการ / derived*) so you can still
+> plan; the numbers sharpen once real curves arrive.
+
+**To turn a plan into an approved budget (two people):**
+
+4. Press **เสนอแผนงบ (Stage plan)** — this records the allocation as a **draft plan** (status
+   *Pending*). **It does not spend or move any money** — it is a proposal.
+5. A **different** person (with `exec` / `approvals`) opens the plan and presses **อนุมัติ (Approve)**.
+   You **cannot approve your own plan** — the system refuses it (*ต้องให้คนอื่นอนุมัติ*), so a budget
+   shift always has a second pair of eyes.
+
+**Good to know:** the Budget Planner never posts to the general ledger — a plan is advice until a
+person acts on it in your normal budgeting/PR process. Each company sees only its own plans.
+
 ---
 
 ## 6. AI assistant (chat)
