@@ -937,6 +937,160 @@ async function main() {
   const emptyActivate = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'Nonexistent Segment' });
   ok('Push-back: activating an empty segment → 400 EMPTY_SEGMENT (no members)', emptyActivate.status === 400 && emptyActivate.json.error?.code === 'EMPTY_SEGMENT', `${emptyActivate.status} ${emptyActivate.json.error?.code}`);
 
+  // ── Customer Intelligence (docs/60 Phase 2, MKT-18) — a push MAY carry per-customer CLV / churn / NBA
+  //    scores, landed on customer_profiles.mi_clv / mi_churn_risk / mi_nba (SEPARATE from the ERP's own
+  //    explainable churn_risk / predicted_ltv). Advisory: contact still goes through the consent-gated draft. ──
+  const ciPush = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs', clv: 8400.5, churn_risk: 0.72, nba: 'WINBACK' }] }] });
+  ok('CustIntel: an rfm push with per-customer scores stamps them (scores_applied ≥ 1)', ciPush.status === 200 && ciPush.json.scores_applied >= 1, `${ciPush.status} scores=${ciPush.json.scores_applied}`);
+  const ciProf = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('CustIntel: mi_clv / mi_churn_risk / mi_nba set WITHOUT clobbering the ERP own churn_risk/predicted_ltv', Number(ciProf?.miClv) === 8400.5 && Math.abs(Number(ciProf?.miChurnRisk) - 0.72) < 1e-6 && ciProf?.miNba === 'WINBACK' && ciProf?.churnRisk == null && ciProf?.predictedLtv == null, `mi_clv=${ciProf?.miClv} mi_churn=${ciProf?.miChurnRisk} mi_nba=${ciProf?.miNba} own_churn=${ciProf?.churnRisk ?? null}`);
+
+  const ciDrill = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers`, cf2admin);
+  ok('CustIntel: GET segment drill-down returns the member with CLV/churn/NBA (sort=clv default)', ciDrill.status === 200 && ciDrill.json.count >= 1 && ciDrill.json.sort === 'clv' && ciDrill.json.customers.some((c: any) => c.customer_no === 'M-CF2A' && c.clv === 8400.5 && Math.abs(c.churn_risk - 0.72) < 1e-6 && c.nba === 'WINBACK'), `${ciDrill.status} count=${ciDrill.json.count} ${JSON.stringify(ciDrill.json.customers?.[0] ?? {})}`);
+  const ciDrillChurn = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers?sort=churn`, cf2admin);
+  ok('CustIntel: drill-down accepts sort=churn (highest churn first)', ciDrillChurn.status === 200 && ciDrillChurn.json.sort === 'churn', `${ciDrillChurn.status} sort=${ciDrillChurn.json.sort}`);
+  const ciDrillHq = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers`, cf2admin);
+  ok('CustIntel: drill-down is tenant-scoped — no HQ member (M-HQA) leaks into cf2 results', !ciDrillHq.json.customers?.some((c: any) => c.customer_no === 'M-HQA'), `${(ciDrillHq.json.customers ?? []).map((c: any) => c.customer_no).join(',')}`);
+
+  // A Phase-1-style push (segment only, no scores) must LEAVE the existing scores untouched (back-compat).
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs' }] }] });
+  const ciProf2 = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('CustIntel: a segment-only push leaves the previously-pushed scores intact (back-compat)', Number(ciProf2?.miClv) === 8400.5 && ciProf2?.miNba === 'WINBACK', `mi_clv=${ciProf2?.miClv} mi_nba=${ciProf2?.miNba}`);
+
+  // ── Budget Optimizer (docs/60 Phase 1, MKT-17) — prescriptive MMM: response curves + what-if + optimise,
+  //    then a STAGED budget plan under maker-checker (advisory, never posts spend). MMM was pushed above so
+  //    the curves derive a fallback from spend/roi (no saturation params pushed → derived=true). ──
+  const curvesRes = await inj('GET', '/api/marketing-intel/response-curves', cf2admin);
+  ok('BudgetOpt: GET response-curves returns per-channel curves (derived fallback, has_data)', curvesRes.status === 200 && curvesRes.json.has_data === true && (curvesRes.json.channels ?? []).length >= 2 && curvesRes.json.channels.every((c: any) => c.beta > 0 && c.kappa > 0), `${curvesRes.status} n=${(curvesRes.json.channels ?? []).length} derived=${curvesRes.json.derived}`);
+
+  const optRes = await inj('POST', '/api/marketing-intel/optimize', cf2admin, { budget: 100000 });
+  const optSpent = Object.values(optRes.json.allocation ?? {}).reduce((s: number, v: any) => s + Number(v), 0);
+  ok('BudgetOpt: POST optimize spends ~the whole budget with predicted sales > 0', (optRes.status === 200 || optRes.status === 201) && Math.abs(optSpent - 100000) < 1000 && Number(optRes.json.predictedSales) > 0, `${optRes.status} spent=${Math.round(optSpent)} pred=${Math.round(Number(optRes.json.predictedSales || 0))}`);
+
+  const simRes = await inj('POST', '/api/marketing-intel/simulate', cf2admin, { allocation: optRes.json.allocation });
+  ok('BudgetOpt: POST simulate on the optimal allocation reproduces the predicted sales (deterministic)', (simRes.status === 200 || simRes.status === 201) && Math.abs(Number(simRes.json.predicted_sales) - Number(optRes.json.predictedSales)) < 1, `sim=${Math.round(Number(simRes.json.predicted_sales || 0))} opt=${Math.round(Number(optRes.json.predictedSales || 0))}`);
+
+  const simBad = await inj('POST', '/api/marketing-intel/simulate', cf2admin, { allocation: {} });
+  ok('BudgetOpt: simulate with an empty allocation → 400 (validation)', simBad.status === 400, `${simBad.status}`);
+
+  // STAGE a plan as the Planner (cf2ex holds pr_raise). Advisory → Pending, never posts spend.
+  const stageRes = await inj('POST', '/api/marketing-intel/budget-plan', cf2ex, { total_budget: 100000, allocation: optRes.json.allocation, note: 'Q3 reallocation' });
+  const planNo = stageRes.json.plan_no;
+  ok('BudgetOpt: stage a budget plan → Pending (advisory) with a BP- id', (stageRes.status === 200 || stageRes.status === 201) && stageRes.json.status === 'Pending' && /^BP-/.test(planNo ?? ''), `${stageRes.status} ${JSON.stringify({ p: planNo, s: stageRes.json.status })}`);
+
+  // Maker-checker (MKT-17): a DIFFERENT user (cf2admin, exec/approvals) approves the Planner's plan → Approved.
+  const approveOk = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: planNo });
+  ok('BudgetOpt: a different user approves the staged plan → Approved (maker-checker)', (approveOk.status === 200 || approveOk.status === 201) && approveOk.json.status === 'Approved' && approveOk.json.approved_by === 'cf2admin', `${approveOk.status} ${JSON.stringify({ s: approveOk.json.status, by: approveOk.json.approved_by })}`);
+
+  // Self-approval is blocked: the SAME user (cf2admin) that stages a plan cannot approve it.
+  const selfStage = await inj('POST', '/api/marketing-intel/budget-plan', cf2admin, { total_budget: 50000, allocation: optRes.json.allocation });
+  const selfApprove = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: selfStage.json.plan_no });
+  ok('BudgetOpt: the requester cannot approve their OWN plan → SOD_SELF_APPROVAL', selfApprove.status === 400 && selfApprove.json.error?.code === 'SOD_SELF_APPROVAL', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+
+  // Approving a non-existent plan → 404.
+  const approveMissing = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: 'BP-nope-999' });
+  ok('BudgetOpt: approving a non-existent plan → 404 PLAN_NOT_FOUND', approveMissing.status === 404 && approveMissing.json.error?.code === 'PLAN_NOT_FOUND', `${approveMissing.status} ${approveMissing.json.error?.code}`);
+
+  // Storage is tenant-scoped: every staged plan belongs to cf2 (none leaked to HQ).
+  const planRows = await db.select().from(s.miBudgetPlans);
+  ok('BudgetOpt: budget plans stored tenant-scoped (cf2 only, none for HQ)', planRows.length >= 2 && planRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${planRows.length} tenants=${[...new Set(planRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // ── Closed-loop Measurement (docs/60 Phase 3, MKT-19) — an activated segment is split into a treatment arm
+  //    (contacted) and a randomised HOLDOUT control (never contacted); after the window, lift = treatment vs
+  //    control per-head on real POS revenue proves incrementality. Seed several cf2 members in a fresh segment. ──
+  const liftIds: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const [m] = await db.insert(s.posMembers).values({ tenantId: cf2.id, memberCode: `M-LIFT${i}`, name: `Lift ${i}`, active: true }).returning({ id: s.posMembers.id });
+    await db.insert(s.customerProfiles).values({ tenantId: cf2.id, memberId: m.id, miRfmSegment: 'LiftTest', totalOrders: 1, totalSpend: '100' });
+    liftIds.push(Number(m.id));
+  }
+  // Start an experiment: 50% holdout, measurable immediately (window 0), and send the treatment-only campaign.
+  const startExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'LiftTest', control_pct: 0.5, window_days: 0, activate: true });
+  const expNo = startExp.json.experiment_no;
+  ok('CloseLoop: start experiment splits treatment/control arms (sum = members, both non-empty)', (startExp.status === 200 || startExp.status === 201) && startExp.json.treatment_count + startExp.json.control_count === 8 && startExp.json.treatment_count > 0 && startExp.json.control_count > 0, `${startExp.status} t=${startExp.json.treatment_count} c=${startExp.json.control_count}`);
+
+  // Learn the arm assignment (fixed at creation) to seed revenue per arm.
+  const expRow = (await db.select().from(s.miCampaignExperiments)).find((r: any) => r.experimentNo === expNo && Number(r.tenantId) === cf2.id);
+  const armRows = (await db.select().from(s.miExperimentArms)).filter((a: any) => Number(a.experimentId) === Number(expRow?.id));
+  const treatIds = armRows.filter((a: any) => a.arm === 'treatment').map((a: any) => Number(a.memberId));
+  const ctrlIds = armRows.filter((a: any) => a.arm === 'control').map((a: any) => Number(a.memberId));
+  ok('CloseLoop: arms are immutable + partition the segment (no member in both arms; all 8 assigned)', armRows.length === 8 && treatIds.length + ctrlIds.length === 8 && treatIds.every((id: number) => !ctrlIds.includes(id)), `arms=${armRows.length} t=${treatIds.length} c=${ctrlIds.length}`);
+
+  // The treatment-only campaign never lists a control member (holdout integrity).
+  const liftCamp = (await db.select().from(s.loyaltyCampaigns)).find((c: any) => Number(c.id) === Number(startExp.json.campaign_id));
+  ok('CloseLoop: treatment-only campaign excludes every control member (never contacted)', !!liftCamp && liftCamp.audience === 'members' && Array.isArray(liftCamp.memberIds) && ctrlIds.every((id: number) => !liftCamp.memberIds.includes(id)) && treatIds.every((id: number) => liftCamp.memberIds.includes(id)), `aud=${liftCamp?.audience} ids=${(liftCamp?.memberIds ?? []).length}`);
+
+  // Seed post-send revenue: treatment ฿1000/head, control ฿100/head (in the measurement window).
+  let ordSeq = 0;
+  for (const mid of treatIds) await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-LIFT-${ordSeq++}`, memberId: mid, total: '1000', saleNo: `S-LIFT-${ordSeq}`, openedAt: new Date() });
+  for (const mid of ctrlIds) await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-LIFT-${ordSeq++}`, memberId: mid, total: '100', saleNo: `S-LIFT-${ordSeq}`, openedAt: new Date() });
+
+  const measure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
+  ok('CloseLoop: measure computes positive lift (฿1000/head treatment vs ฿100/head control → ~900%)', (measure.status === 200 || measure.status === 201) && measure.json.status === 'Measured' && Number(measure.json.lift_pct) > 500 && Number(measure.json.incremental_revenue) > 0, `${measure.status} lift=${measure.json.lift_pct}% inc=${measure.json.incremental_revenue}`);
+
+  // A measured experiment is not re-measured (idempotent guard).
+  const remeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
+  ok('CloseLoop: re-measuring a Measured experiment → 400 ALREADY_MEASURED', remeasure.status === 400 && remeasure.json.error?.code === 'ALREADY_MEASURED', `${remeasure.status} ${remeasure.json.error?.code}`);
+
+  // A still-open window can't be measured early.
+  const openExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'LiftTest', control_pct: 0.5, window_days: 30 });
+  const openMeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: openExp.json.experiment_no });
+  ok('CloseLoop: measuring before the window elapses → 400 WINDOW_NOT_ELAPSED', openMeasure.status === 400 && openMeasure.json.error?.code === 'WINDOW_NOT_ELAPSED', `${openMeasure.status} ${openMeasure.json.error?.code}`);
+
+  // Starting on an empty segment is rejected.
+  const emptyExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'NoSuchSegment', control_pct: 0.5 });
+  ok('CloseLoop: starting an experiment on an empty segment → 400 EMPTY_SEGMENT', emptyExp.status === 400 && emptyExp.json.error?.code === 'EMPTY_SEGMENT', `${emptyExp.status} ${emptyExp.json.error?.code}`);
+
+  // Measured outcomes are exposed for the platform pull-back (analytics:read), tenant-scoped.
+  const outcomes = await inj('GET', '/api/v1/marketing/experiment-outcomes', anKeyCf2, undefined);
+  ok('CloseLoop: measured outcomes are pullable via the public API (analytics:read), tenant-scoped', outcomes.status === 200 && Array.isArray(outcomes.json.outcomes) && outcomes.json.outcomes.some((o: any) => o.experiment_no === expNo && Number(o.lift_pct) > 500), `${outcomes.status} n=${(outcomes.json.outcomes ?? []).length}`);
+
+  // Storage is tenant-scoped: every experiment belongs to cf2.
+  const expAll = await db.select().from(s.miCampaignExperiments);
+  ok('CloseLoop: experiments stored tenant-scoped (cf2 only, none for HQ)', expAll.length >= 2 && expAll.every((r: any) => Number(r.tenantId) === cf2.id), `n=${expAll.length} tenants=${[...new Set(expAll.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // ── Model Governance (docs/60 Phase 4, MKT-20) — a governed tenant must have a pushed analytics run
+  //    APPROVED by a second person (≠ the pusher) before it can drive spend/contact; runs carry model cards;
+  //    a drifted run is flagged into GOV-01 + blocks until approved-with-reason; the audit chain links all. ──
+  const govOff = await inj('GET', '/api/marketing-intel/governance/settings', cf2admin);
+  ok('Governance: default settings are off (require_approval=false, back-compat)', govOff.status === 200 && govOff.json.require_approval === false, `${govOff.status} ${JSON.stringify(govOff.json)}`);
+  const govOn = await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: true });
+  ok('Governance: enabling require_approval persists', govOn.status === 200 && govOn.json.require_approval === true, `${govOn.status} ${JSON.stringify(govOn.json)}`);
+
+  // A new mmm push with a materially lower R² than the prior approved run (0.55) drifts + lands Pending.
+  const govDrift = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'mmm', payload: { ...mmmPayload, r2: 0.20 }, model_run_ref: 'MMM-GOV-DRIFT', model_card: { model_version: 'v3', training_window: '2026-05..07', features: ['spend', 'impressions'], metrics: { r2: 0.20 } } }] });
+  ok('Governance: a governed push is accepted (lands Pending, not auto-consumable)', govDrift.status === 200, `${govDrift.status}`);
+  const govRuns = await inj('GET', '/api/marketing-intel/governance/runs', cf2admin);
+  const driftRun = (govRuns.json.runs ?? []).find((r: any) => r.model_run_ref === 'MMM-GOV-DRIFT');
+  ok('Governance: the pushed run is Pending, carries its model card + a drift flag', !!driftRun && driftRun.status === 'Pending' && driftRun.model_card?.model_version === 'v3' && driftRun.quality?.drift === true && driftRun.quality?.blocked === true, `status=${driftRun?.status} card=${driftRun?.model_card?.model_version} drift=${driftRun?.quality?.drift}`);
+
+  const gov01 = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Governance: the pending analytics run surfaces in the GOV-01 center (MKT-20)', gov01.status === 200 && (gov01.json.items ?? []).some((i: any) => i.type === 'mi_analytics_run' && i.control === 'MKT-20'), `${gov01.status} types=${[...new Set((gov01.json.items ?? []).map((i: any) => i.type))].join(',')}`);
+
+  const apprNoReason = await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: driftRun?.id });
+  ok('Governance: approving a DRIFTED run without a reason → 400 DRIFT_REASON_REQUIRED', apprNoReason.status === 400 && apprNoReason.json.error?.code === 'DRIFT_REASON_REQUIRED', `${apprNoReason.status} ${apprNoReason.json.error?.code}`);
+  const apprOk = await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: driftRun?.id, reason: 'reviewed — seasonal dip, retained' });
+  ok('Governance: a different user approves the run with a reason → Approved (maker-checker; pusher = the api key)', (apprOk.status === 200 || apprOk.status === 201) && apprOk.json.status === 'Approved', `${apprOk.status} ${apprOk.json.status}`);
+
+  // Consumption gate: a fresh rfm push (Pending) means the latest RFM is unapproved → activation is blocked.
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'GovSeg', customers: 1 }] }, members: [{ customer_no: 'M-CF2A', segment: 'GovSeg' }] }] });
+  const blockedAct = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'GovSeg' });
+  ok('Governance: activating off an UNAPPROVED latest RFM run → 400 ANALYTICS_NOT_APPROVED', blockedAct.status === 400 && blockedAct.json.error?.code === 'ANALYTICS_NOT_APPROVED', `${blockedAct.status} ${blockedAct.json.error?.code}`);
+  const govRuns2 = await inj('GET', '/api/marketing-intel/governance/runs', cf2admin);
+  const rfmRun = (govRuns2.json.runs ?? []).find((r: any) => r.kind === 'rfm' && r.status === 'Pending');
+  await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: rfmRun?.id });
+  const okAct = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'GovSeg' });
+  ok('Governance: after the RFM run is approved, activation succeeds (draft campaign)', (okAct.status === 200 || okAct.status === 201) && okAct.json.status === 'draft', `${okAct.status} ${okAct.json.status}`);
+
+  const miAudit = await inj('GET', '/api/marketing-intel/governance/audit-trail', cf2admin);
+  ok('Governance: the audit trail links runs → budget plans → experiment outcomes (ICFR chain)', miAudit.status === 200 && Array.isArray(miAudit.json.runs) && Array.isArray(miAudit.json.plans) && Array.isArray(miAudit.json.experiments) && miAudit.json.runs.length > 0 && miAudit.json.experiments.length > 0, `${miAudit.status} runs=${(miAudit.json.runs ?? []).length} plans=${(miAudit.json.plans ?? []).length} exp=${(miAudit.json.experiments ?? []).length}`);
+
+  const govRows = await db.select().from(s.miGovernanceSettings);
+  ok('Governance: settings stored tenant-scoped (cf2 only)', govRows.length >= 1 && govRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${govRows.length} tenants=${[...new Set(govRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // Reset governance OFF so it can't affect any later checks.
+  await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: false });
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

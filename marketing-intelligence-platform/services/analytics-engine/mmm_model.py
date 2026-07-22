@@ -239,6 +239,21 @@ class MarketingMixModel:
             spend_beta = spend_t.beta if spend_t else 0.0
             spend_theta = spend_t.theta if spend_t else self.default_theta
             spend_ref = spend_t.ref_scale if spend_t else 1.0
+            # ref_scale lets a downstream simulator reconstruct the fitted response curve for this channel.
+            saturation: Dict[str, Any] = {
+                "type": self.saturation, "alpha": self.hill_alpha, "gamma": self.hill_gamma,
+                "ref_scale": round(spend_ref, 4),
+            }
+            # ERP Budget-Optimizer contract (raw-spend units) — see docs/60. The platform's Hill on the
+            # ref-scaled adstocked series, response(x) = spend_beta · scaled^α / (scaled^α + γ^α) with
+            # scaled = x / ref_scale, is algebraically identical to the ERP's raw-spend Hill,
+            # response(x) = beta · x^slope / (kappa^slope + x^slope), under: slope = α, kappa = γ · ref_scale,
+            # beta = spend_beta. Only emitted for Hill (log saturation has no matching raw-spend form; the
+            # ERP then falls back to its own derived curve).
+            if self.saturation == "hill":
+                saturation["beta"] = round(spend_beta, 6)
+                saturation["kappa"] = round(self.hill_gamma * spend_ref, 2)
+                saturation["slope"] = round(self.hill_alpha, 4)
             rows.append({
                 "channel": ch.name,
                 "beta": round(spend_beta, 6),
@@ -247,8 +262,7 @@ class MarketingMixModel:
                 "contribution_pct": round(100.0 * attributed / total_pred, 2) if total_pred else 0.0,
                 "roi": round(attributed / spend, 4) if spend > 0 else None,
                 "adstock_theta": round(spend_theta, 4),
-                # ref_scale lets a downstream simulator reconstruct the fitted response curve for this channel.
-                "saturation": {"type": self.saturation, "alpha": self.hill_alpha, "gamma": self.hill_gamma, "ref_scale": round(spend_ref, 4)},
+                "saturation": saturation,
             })
         return pd.DataFrame(rows)
 

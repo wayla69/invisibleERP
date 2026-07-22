@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.10** _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.13** _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -440,6 +440,121 @@ The workspace has four tabs:
 **Good to know:** MMM is analysis only — it posts nothing to the general ledger. Each company
 sees only its own signals and runs. The v1 model is a transparent lift-share heuristic (a
 statistical regression can replace it later without changing this screen).
+
+## 5c. Budget Planner — Marketing Intelligence (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Budget Planner**. **Who:** `marketing`
+or `exec` to plan; `exec` / `approvals` to approve a plan.
+
+Once an MMM run has been pushed in, the Budget Planner answers the forward question — *"if I have
+฿X to spend, how should I split it across channels for the most sales?"*
+
+**To find the best split for a budget:**
+
+1. Open **Budget Planner**. Each channel shows its **response curve** (spend → extra sales): the
+   curve flattens as a channel saturates, so the first baht returns more than the last.
+2. Enter a **total budget** and press **หาสัดส่วนที่ดีที่สุด (Optimise)** — the planner fills the
+   allocation that maximises predicted sales (it keeps feeding each next baht to whichever channel
+   is still returning the most).
+3. Or drag the **per-channel sliders** yourself; the **predicted sales** figure updates live as you
+   move them (a "what-if"). Optimise and the sliders use the same math, so a re-check always gives
+   the same number.
+
+> If the platform hasn't pushed precise response curves yet, the planner derives a serviceable
+> curve from each channel's current spend and ROI (shown as *ประมาณการ / derived*) so you can still
+> plan; the numbers sharpen once real curves arrive.
+
+**To turn a plan into an approved budget (two people):**
+
+4. Press **เสนอแผนงบ (Stage plan)** — this records the allocation as a **draft plan** (status
+   *Pending*). **It does not spend or move any money** — it is a proposal.
+5. A **different** person (with `exec` / `approvals`) opens the plan and presses **อนุมัติ (Approve)**.
+   You **cannot approve your own plan** — the system refuses it (*ต้องให้คนอื่นอนุมัติ*), so a budget
+   shift always has a second pair of eyes.
+
+**Good to know:** the Budget Planner never posts to the general ledger — a plan is advice until a
+person acts on it in your normal budgeting/PR process. Each company sees only its own plans.
+
+---
+
+## 5d. Customer Intelligence — drill-down (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Customer Intelligence**. **Who:**
+`marketing` or `exec` (read-only).
+
+Once the platform has pushed the advanced RFM, each segment can be opened to see **who** is in it and
+**what to do** with each customer. For every member the platform estimates a **12-month value (CLV)**,
+a **churn risk** (how likely they are to stop buying), and a **next-best-action** (e.g. *ดึงกลับ /
+WINBACK*, *ขายเพิ่ม / UPSELL*, *ดูแลลูกค้า VIP / VIP_CARE*, *กระตุ้นให้กลับมา / REACTIVATE*).
+
+**To review a segment's customers:**
+
+1. Open **Customer Intelligence** and pick a **segment** (e.g. *At Risk VIPs*). The members appear as a
+   sortable list.
+2. Sort by **มูลค่า (CLV)** to see your most valuable customers first, or by **ความเสี่ยงเลิกใช้
+   (churn)** to see who is most likely to leave. Each row shows the recommended **next action**.
+3. To act, press **สร้างแคมเปญ (Create campaign)** — this opens a **draft** campaign aimed at that
+   segment, which you **edit and send** through the normal messaging screen.
+
+> These scores are **advice**, kept separate from the company's own churn/value figures — they never
+> overwrite them. Nothing is sent automatically: a customer is only contacted through a campaign a
+> person reviews and sends, and only if they have consented. Each company sees only its own customers.
+
+---
+
+## 5e. Incrementality — did the campaign actually work? (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Incrementality**. **Who:** `marketing`
+or `exec`.
+
+A jump in sales after a campaign isn't proof the campaign *caused* it — sales can rise for many
+reasons. The honest way to know is an **A/B holdout test**: contact most of a segment (the **treatment**
+group) but deliberately hold back a small random slice (the **control** group), then compare. The
+difference is the real **lift**.
+
+**To run a holdout test:**
+
+1. Open **Incrementality**, pick a **segment**, set the **holdout %** (e.g. 20% held back) and a
+   **measurement window** (e.g. 14 days), and press **เริ่มการทดลอง (Start test)**. The system splits
+   the members and sends the campaign to the **treatment** group only — the **control** group is fixed
+   at that moment and **never contacted**.
+2. After the window has passed, press **วัดผล (Measure)**. The system compares the average sales per
+   person in each group and reports the **lift %** and the **incremental revenue** the campaign caused.
+
+> The control group is chosen once and never contacted, so the comparison is fair. You can't measure
+> before the window ends, and a test can't be re-measured (the result is locked). Each company sees
+> only its own tests. These measured results also flow back to the analytics platform so future
+> recommendations learn from what actually worked.
+
+---
+
+## 5f. Model governance (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Governance**. **Who:** `marketing` or
+`exec` to view; `exec` / `approvals` to change the setting and approve runs.
+
+Because these analytics now drive real spend and customer contact, you can require them to be **checked by
+a second person** before anyone acts on them — the same control posture as the rest of the finance system.
+
+**To turn on governance:**
+
+1. Open **Governance** and switch **Require approval** on. From now on, each result the platform pushes in
+   arrives **Pending** and can't drive a budget plan or a campaign until someone approves it.
+
+**To review and approve a run:**
+
+2. Each run shows its **model card** (which model version, over what training window, key metrics like R²)
+   — the record of *what produced this recommendation*.
+3. If a run's quality dropped sharply from the last approved one, it's flagged **drift** and appears in the
+   company-wide **pending-approvals center**. Approving a drifted run **requires a reason**.
+4. Press **อนุมัติ (Approve)**. You **cannot approve a run you pushed** — a different person must, so a
+   recommendation always has a second pair of eyes.
+
+The **audit trail** at the bottom links the whole chain — the recommendation (run) → the action it drove
+(budget plan) → the measured outcome (campaign lift) — the evidence auditors ask for.
+
+> Governance is **off by default**, so nothing changes until you switch it on. Each company has its own
+> setting and sees only its own runs.
 
 ---
 

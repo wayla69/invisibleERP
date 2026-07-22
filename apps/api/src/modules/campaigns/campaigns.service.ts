@@ -44,8 +44,13 @@ export class CampaignsService {
       // Fail fast on an unknown/foreign segment at create time (send would 404 anyway).
       await this.savedSegments.membersForSend(db, tenantId, Number(dto.saved_segment_id));
     }
+    // 'members' → an explicit tenant-scoped member-id list (docs/60 Phase 3 treatment arm). Bounded + deduped.
+    const memberIds = dto.audience === 'members'
+      ? [...new Set((Array.isArray(dto.member_ids) ? dto.member_ids : []).map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)))].slice(0, 100_000)
+      : null;
+    if (dto.audience === 'members' && !memberIds!.length) throw new BadRequestException({ code: 'NO_MEMBERS', message: 'member_ids required for a members campaign', messageTh: 'ต้องระบุรายชื่อสมาชิก' });
     const scheduleAt = dto.schedule_at ? new Date(dto.schedule_at) : null;
-    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, body: dto.body, variantBBody: dto.variant_b_body ?? null, splitBPct: dto.variant_b_body ? Math.min(90, Math.max(0, Number(dto.split_b_pct ?? 0))) : 0, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
+    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, memberIds, body: dto.body, variantBBody: dto.variant_b_body ?? null, splitBPct: dto.variant_b_body ? Math.min(90, Math.max(0, Number(dto.split_b_pct ?? 0))) : 0, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
     if (dto.id) {
       // Only an un-sent campaign may be edited.
       const [cur] = await db.select({ status: loyaltyCampaigns.status }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.id, dto.id), eq(loyaltyCampaigns.tenantId, tenantId))).limit(1);
@@ -145,6 +150,12 @@ export class CampaignsService {
       const segCol = c.audience === 'mi_segment' ? customerProfiles.miRfmSegment : customerProfiles.rfmSegment;
       const profs = await tx.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), eq(segCol, c.segment)));
       const ids = profs.map((p: any) => Number(p.memberId)).filter(Boolean);
+      return ids.length ? await tx.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids), eq(posMembers.active, true))) : [];
+    }
+    if (c.audience === 'members') {
+      // Explicit member-id list (docs/60 Phase 3 treatment arm) — tenant-scoped + active only, so the
+      // holdout control arm (never in this list) is structurally never contacted.
+      const ids = (Array.isArray(c.memberIds) ? c.memberIds : []).map((n: any) => Number(n)).filter(Boolean);
       return ids.length ? await tx.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids), eq(posMembers.active, true))) : [];
     }
     if (c.audience === 'tier') {
