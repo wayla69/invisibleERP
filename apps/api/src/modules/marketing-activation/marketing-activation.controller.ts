@@ -6,6 +6,7 @@ import { SegmentChannelRoiService } from './segment-channel-roi.service';
 import { NbaOrchestratorService, type JourneyOpts } from './nba-orchestrator.service';
 import { CampaignStudioService } from './campaign-studio.service';
 import { SaveAutopilotService, type PolicyInput } from './save-autopilot.service';
+import { MarketingActivationActionCenterService } from './marketing-activation-action-center.service';
 
 const qintOpt = (v?: string): number | undefined => {
   if (v == null || v === '') return undefined;
@@ -25,7 +26,15 @@ export class MarketingActivationController {
     private readonly nba: NbaOrchestratorService,
     private readonly studio: CampaignStudioService,
     private readonly save: SaveAutopilotService,
+    private readonly center: MarketingActivationActionCenterService,
   ) {}
+
+  // docs/62 Phase 1 — the marketing "what needs me now" worklist (read-only aggregator).
+  @Get('action-center')
+  @Permissions('marketing', 'exec')
+  actionCenter(@CurrentUser() u: JwtUser) {
+    return this.center.actionCenter(u);
+  }
 
   @Get('facts/customer/:code')
   @Permissions('marketing', 'exec')
