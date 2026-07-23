@@ -17,6 +17,7 @@ import { ScmCrossElasticityService } from './scm-cross-elasticity.service';
 import { ScmModelCacheService } from './scm-model-cache.service';
 import { explodePaths, planHelpers, ScmFallbackPlanner } from './scm-planner';
 import { analogDonors } from './scm-analog';
+import { loadFreshMenuPaths } from './scm-forecast-source';
 import {
   PLAN_STATUS, SYSTEM_ACTOR, type BranchPlanDraft, type ExtractedTenantData, type PlanRunResult,
   type SuggestedLine,
@@ -102,17 +103,19 @@ export class ScmRunService {
 
   async executePlanRun(
     tenantId: number | null,
-    scope: 'nightly' | 'manual' | 'replan',
+    scope: 'nightly' | 'manual' | 'replan' | 'retrain',
     opts: { actor: string; branchIds?: (number | null)[]; itemIds?: string[]; triggerRef?: string } = { actor: SYSTEM_ACTOR },
   ): Promise<PlanRunResult> {
     const runDate = ymd();
 
-    if (scope === 'nightly') {
+    // docs/59 D1 — both scheduled scopes are per-(tenant, run_date) idempotent (partial unique indexes,
+    // 0459 for nightly + 0476 for retrain), so a duplicate scheduler tick is a no-op.
+    if (scope === 'nightly' || scope === 'retrain') {
       const [existing] = await this.db.select({ id: scmPlanRuns.id, runNo: scmPlanRuns.runNo })
         .from(scmPlanRuns).where(and(
           tenantId != null ? eq(scmPlanRuns.tenantId, tenantId) : sql`true`,
           eq(scmPlanRuns.runDate, runDate),
-          eq(scmPlanRuns.scope, 'nightly'),
+          eq(scmPlanRuns.scope, scope),
           sql`${scmPlanRuns.status} <> 'Failed'`,
         )).limit(1);
       if (existing) {
@@ -135,8 +138,10 @@ export class ScmRunService {
         branchIds: opts.branchIds, itemIds: opts.itemIds,
       });
       const useEngine = this.engine.enabled() && data.settings.engine_enabled;
+      // docs/59 D1 — a nightly plan PREFERS a recent batch-retrain's persisted forecasts (engine only on
+      // a miss); a retrain run (or any other scope) always forecasts fresh (it is the producer).
       const result = useEngine
-        ? await this.runWithEngine(tenantId, runId, data, opts)
+        ? await this.runWithEngine(tenantId, runId, data, { ...opts, preferPersisted: scope === 'nightly' })
         : await this.runWithFallback(tenantId, runId, data, opts);
 
       const plans = await this.persistPlans(tenantId, runId, data, result.drafts, opts.actor);
@@ -211,7 +216,7 @@ export class ScmRunService {
     tenantId: number | null,
     runId: number,
     data: ExtractedTenantData,
-    opts: { actor: string },
+    opts: { actor: string; preferPersisted?: boolean },
   ) {
     const horizon = data.settings.horizon_days;
     const drafts: BranchPlanDraft[] = [];
@@ -224,18 +229,33 @@ export class ScmRunService {
       const branchSeries = data.series.filter((s) => s.branchId === branchId);
       if (!branchSeries.length) continue;
 
-      // One branch at a time, chunked — bounded memory and a payload the engine will accept.
       const menuPaths = new Map<string, number[][]>();
+
+      // docs/59 D1 — forecast source: a nightly plan reuses a recent batch-retrain's persisted forecasts
+      // for the WHOLE branch (all-or-nothing — the persisted sample paths are already reconciled, so
+      // there is no partial engine/cache mix and no re-reconciliation), skipping the engine entirely.
+      // A miss (no retrain, or not every series fresh) falls through to a full fresh forecast (unchanged).
+      let fromPersisted = false;
+      if (opts.preferPersisted) {
+        const persisted = await loadFreshMenuPaths(this.db, tenantId, branchId, branchSeries.map((s) => s.itemId));
+        if (persisted.size === branchSeries.length) {
+          fromPersisted = true;
+          for (const s of branchSeries) menuPaths.set(s.itemId, persisted.get(s.itemId)!);
+          digestParts.push(`persisted:${branchId ?? 'null'}:${persisted.size}`);
+        }
+      }
+
+      // One branch at a time, chunked — bounded memory and a payload the engine will accept.
       const closures = this.extract.futureClosures(data.settings, branchId, horizon);
       // docs/59 D2 — cached Prophet fits still inside the refit cadence; the engine reuses one only when
       // its fit_hash still matches this run's training window (else refits + returns fresh state).
-      const warmByItem = await this.modelCache.loadWarmStarts(
+      const warmByItem = fromPersisted ? new Map() : await this.modelCache.loadWarmStarts(
         tenantId, branchId, branchSeries.map((s) => s.itemId), data.settings.refit_cadence_days,
       );
       const windowByItem = new Map(branchSeries.map((s) => [s.itemId, s]));
       // docs/56 A4 — a too-new series borrows the pooled shape of established same-branch siblings.
-      const donorsByItem = analogDonors(branchSeries);
-      for (const chunk of this.engine.chunk(branchSeries)) {
+      const donorsByItem = fromPersisted ? new Map<string, string[]>() : analogDonors(branchSeries);
+      for (const chunk of (fromPersisted ? [] : this.engine.chunk(branchSeries))) {
         const req: ScmForecastRequest = {
           contract_version: this.engine.contractVersion(),
           request_id: `${runId}:${branchId ?? 'null'}:${digestParts.length}`,
@@ -299,7 +319,8 @@ export class ScmRunService {
           // D2: on a warm-start HIT the engine skips the backtest (accuracy.wape null), so carry the
           // cached fit_wape forward to keep the forecast's WAPE meaningful across reuse runs.
           const warm = warmByItem.get(r.series_id);
-          await this.saveForecast(tenantId, runId, branchId, r.series_id, 'menu', r, today, horizon, warm?.fit_wape ?? null);
+          // D1: persist the reconciled sample paths so a later nightly plan can consume them without refit.
+          await this.saveForecast(tenantId, runId, branchId, r.series_id, 'menu', r, today, horizon, warm?.fit_wape ?? null, paths);
           // D2: a (re)fit ships fitted_state — persist it so the next stable run can warm-start.
           if (r.fitted_state) {
             const sw = windowByItem.get(r.series_id);
@@ -462,6 +483,8 @@ export class ScmRunService {
     // docs/59 D2 — WAPE to record when the engine reported none (a warm-start hit skips the backtest):
     // the cached fit's baseline WAPE, so reuse runs don't blank the accuracy column.
     cachedWape: number | null = null,
+    // docs/59 D1 — the reconciled K×H sample paths, persisted so a later nightly plan can consume them.
+    samplePaths: number[][] | null = null,
   ) {
     // docs/56 A1 — persist attribution so the plan can surface promo reasons and a reviewer can tie
     // a moved quantity back to a governed input (SCM-04).
@@ -478,6 +501,7 @@ export class ScmRunService {
       promoUpliftPct: a?.promo_uplift_pct != null ? String(a.promo_uplift_pct) : null,
       priceElasticity: a?.price_elasticity != null ? String(a.price_elasticity) : null,
       regressorsUsed: a?.regressors_used ?? [],
+      samplePaths: samplePaths ?? null,
     });
     // docs/56 A2 — persist a CREDIBLE menu-level elasticity so the advisory scenario tool can apply a
     // price response without re-fitting. The engine returns null when its identifiability floor is not
@@ -489,6 +513,7 @@ export class ScmRunService {
       );
     }
   }
+
 
   /** Persist one Draft plan per branch that has at least one suggested line. */
   private async persistPlans(

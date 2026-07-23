@@ -866,6 +866,39 @@ async function main() {
     t2Cache.length === 0 && cacheRows.length > 0,
     `t2=${t2Cache.length} hq=${cacheRows.length}`);
 
+  // ════════════════════════ docs/59 D1 — scheduled batch retrain + forecast-source seam ════════════════════════
+  // A retrain run forecasts + PERSISTS the reconciled sample paths (producer); a nightly run within the
+  // staleness window REUSES them and does not call the engine (consumer); the retrain scope is per-day
+  // idempotent. Drive the scoped runs through the service (no HTTP endpoint for scheduled scopes).
+  process.env.SCM_ENGINE_URL = engine.url; // ensure the engine is on (fallback §19 cleared it)
+  process.env.SCM_ENGINE_SECRET = ENGINE_SECRET;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const planningSvc = app.get(require('../../../apps/api/dist/modules/scm-planning/scm-planning.service').ScmPlanningService, { strict: false });
+
+  const retrain = await planningSvc.executePlanRun(hq, 'retrain', { actor: 'system:test' });
+  const rtFc = await db.select().from(s.scmDemandForecasts).where(and(
+    eq(s.scmDemandForecasts.runId, Number(retrain.run_id)), eq(s.scmDemandForecasts.level, 'menu')));
+  ok('D1 batch-retrain persists reconciled sample_paths on menu forecasts (the producer)',
+    retrain.status === 'Completed' && rtFc.length > 0
+      && rtFc.every((f: any) => Array.isArray(f.samplePaths) && f.samplePaths.length > 0),
+    `run=${retrain.status} menuFc=${rtFc.length}`);
+
+  // The earlier § job-idempotency test already ran a nightly for HQ today; mark it Failed (the run guard
+  // ignores Failed runs) so THIS fresh nightly actually executes the forecast-source seam. An UPDATE (not
+  // a DELETE) avoids touching its child order-plan rows.
+  await db.update(s.scmPlanRuns).set({ status: 'Failed' })
+    .where(and(eq(s.scmPlanRuns.tenantId, hq), eq(s.scmPlanRuns.scope, 'nightly')));
+
+  const fcBefore = engine.state.forecasts;
+  const nightlyRun = await planningSvc.executePlanRun(hq, 'nightly', { actor: 'system:test' });
+  ok('D1 nightly reuses the batch-retrain forecast within the staleness window — engine NOT re-called',
+    nightlyRun.status === 'Completed' && engine.state.forecasts === fcBefore,
+    `nightly=${nightlyRun.status} forecasts ${fcBefore}→${engine.state.forecasts}`);
+
+  const retrain2 = await planningSvc.executePlanRun(hq, 'retrain', { actor: 'system:test' });
+  ok('D1 duplicate retrain the same day is a no-op (per-tenant run guard, migration 0476)',
+    retrain2.status === 'Skipped', `status=${retrain2.status}`);
+
   await app.close();
   await engine.close();
 

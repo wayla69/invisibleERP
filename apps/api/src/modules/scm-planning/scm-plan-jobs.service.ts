@@ -5,7 +5,7 @@ import { scmSpikeEvents } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
 import { ScmPlanningService } from './scm-planning.service';
-import { SCM_NIGHTLY_JOB, SCM_REPLAN_JOB, SYSTEM_ACTOR } from './scm-planning.types';
+import { SCM_BATCH_RETRAIN_JOB, SCM_NIGHTLY_JOB, SCM_REPLAN_JOB, SYSTEM_ACTOR } from './scm-planning.types';
 
 // docs/54 §5 — background execution. Both job types ride the EXISTING background_jobs queue
 // (FOR UPDATE SKIP LOCKED claim, exponential backoff, dead-letter + captureOpsAlert), so job
@@ -25,6 +25,25 @@ export class ScmPlanJobsService implements OnModuleInit {
   onModuleInit(): void {
     this.worker?.register(SCM_NIGHTLY_JOB, (payload, ctx) => this.runNightly(payload, ctx));
     this.worker?.register(SCM_REPLAN_JOB, (payload, ctx) => this.runReplan(payload, ctx));
+    this.worker?.register(SCM_BATCH_RETRAIN_JOB, (payload, ctx) => this.runRetrain(payload, ctx));
+  }
+
+  /**
+   * docs/59 D1 — scheduled batch retrain. Moves the expensive forecast (cmdstan refit) OFF the request
+   * path onto a cadence: it forecasts every planning-enabled series and PERSISTS the reconciled sample
+   * paths (scm_demand_forecasts.sample_paths), which a later nightly plan then consumes without
+   * re-forecasting. Same idempotency as nightly — a per-(tenant, run_date) partial unique index (0476)
+   * + the executePlanRun guard make a duplicate scheduler tick a no-op.
+   */
+  private async runRetrain(payload: { run_date?: string }, ctx: JobContext) {
+    const result = await this.planning.executePlanRun(ctx.tenantId, 'retrain', {
+      actor: ctx.actor ?? SYSTEM_ACTOR,
+    });
+    if (result.skipped) {
+      this.log.log(`batch retrain already done for tenant=${ctx.tenantId} ${payload.run_date ?? ymd()}`);
+      return { skipped: true, run_no: result.run_no };
+    }
+    return { run_no: result.run_no, series: result.series };
   }
 
   /**
