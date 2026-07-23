@@ -229,6 +229,125 @@ export const zOptimizeResponse = z.object({
 });
 export type ScmOptimizeResponse = z.infer<typeof zOptimizeResponse>;
 
+// ── /v1/optimize-network (docs/57 Track B · B2) ─────────────────────────────────────────────────
+// Two-echelon (supplier → DC/central-kitchen → branch) guaranteed-service MEIO base-stock with risk
+// pooling at the DC. ADDITIVE to the v2 contract — a NEW route; /v1/forecast and /v1/optimize are
+// unchanged and back-compatible, so no version bump. One item at a time across the whole network
+// (as /v1/optimize is chunked per item): the payload is a topology + per-branch demand paths + this
+// item's cost params. Carries NO tenant identifiers and NO PII — node/lane codes + quantities only;
+// the API validates topology (NETWORK_NOT_DAG etc.) and extracts demand under RLS before calling.
+
+export const zNetworkNode = z.object({
+  node_id: z.string().min(1), // opaque; the API maps it back to a supply_nodes row
+  kind: z.enum(['supplier', 'central_kitchen', 'dc', 'branch']),
+  echelon: z.number().int().min(0).max(2), // 0 supplier · 1 DC · 2 branch (leaf)
+  service_time_out_days: z.number().min(0).optional(), // branch (end customer) = 0; DC = decision
+  holding_cost_per_day: z.number().min(0).default(0), // per-unit holding at this node
+  current_inventory: z
+    .array(z.object({ remaining_days: z.number().int().min(0), qty: z.number().min(0) }))
+    .default([]),
+  in_transit: z.array(z.object({ arrival_ds: zBizDay, qty: z.number().min(0) })).default([]),
+});
+export type ScmNetworkNode = z.infer<typeof zNetworkNode>;
+
+export const zNetworkLane = z.object({
+  from_node: z.string().min(1),
+  to_node: z.string().min(1),
+  lead_time: z.object({ mean_days: z.number().min(0), std_days: z.number().min(0) }),
+  unit_cost: z.number().min(0).default(0),
+  moq: z.number().min(0).default(0),
+  pack_size: z.number().positive().default(1),
+  fixed_order_cost: z.number().min(0).default(0),
+});
+export type ScmNetworkLane = z.infer<typeof zNetworkLane>;
+
+export const zDemandPath = z.object({
+  node_id: z.string().min(1), // a leaf/branch node — must match a nodes[].node_id with echelon 2
+  demand_scenarios: z.array(z.array(z.number())), // K × H post-BoM-explosion paths (scenario-consistent)
+});
+export type ScmDemandPath = z.infer<typeof zDemandPath>;
+
+export const zNetworkAllocationPolicy = z.object({
+  method: z.enum(['proportional', 'fair_share', 'priority']).default('proportional'),
+  priorities: z.record(z.string(), z.number()).optional(), // node_id → priority (higher served first)
+});
+export type ScmNetworkAllocationPolicy = z.infer<typeof zNetworkAllocationPolicy>;
+
+export const zOptimizeNetworkRequest = z.object({
+  contract_version: z.literal(SCM_ENGINE_CONTRACT_VERSION),
+  request_id: z.string().min(1),
+  start_ds: zBizDay,
+  horizon_days: z.number().int().min(1).max(56),
+  item_code: z.string().min(1),
+  shelf_life_days: z.number().int().min(1).max(365),
+  review_period_days: z.number().int().min(1).default(1),
+  unit_price: z.number().min(0), // stockout-value proxy for ingredients
+  unit_cost: z.number().min(0).default(0),
+  salvage_value: z.number().min(0).default(0),
+  disposal_cost: z.number().min(0).default(0),
+  goodwill_cost: z.number().min(0).default(0),
+  service_level: z.number().min(0.5).max(0.999).default(0.95), // end-customer target
+  nodes: z.array(zNetworkNode).min(1),
+  lanes: z.array(zNetworkLane).min(1),
+  demand_paths: z.array(zDemandPath).min(1),
+  allocation: zNetworkAllocationPolicy.default({ method: 'proportional' }),
+  time_budget_ms: z.number().int().default(20_000),
+});
+export type ScmOptimizeNetworkRequest = z.infer<typeof zOptimizeNetworkRequest>;
+
+export const zNetworkNodePlan = z.object({
+  node_id: z.string(),
+  echelon: z.number().int(),
+  service_time_out_days: z.number(), // the GSM decision at this node
+  base_stock: z.array(z.number()), // per horizon day — ECHELON base-stock (own + all downstream)
+  installation_base_stock: z.array(z.number()), // per horizon day — installation (own) base-stock
+  safety_stock: z.array(z.number()), // per horizon day
+  orders: z.array(
+    z.object({
+      order_ds: zBizDay,
+      arrival_ds: zBizDay,
+      from_node: z.string(),
+      qty: z.number().min(0),
+      packs: z.number().min(0),
+    }),
+  ),
+  expected: z.object({
+    fill_rate: z.number().min(0).max(1),
+    lost_sales_units: z.number().min(0),
+    waste_units: z.number().min(0),
+    waste_cost: z.number(),
+    profit: z.number(),
+  }),
+});
+export type ScmNetworkNodePlan = z.infer<typeof zNetworkNodePlan>;
+
+export const zNetworkAllocationLine = z.object({
+  ds: zBizDay,
+  from_node: z.string(),
+  to_node: z.string(),
+  requested: z.number().min(0),
+  allocated: z.number().min(0),
+  shortfall: z.number().min(0),
+});
+export type ScmNetworkAllocationLine = z.infer<typeof zNetworkAllocationLine>;
+
+export const zOptimizeNetworkResponse = z.object({
+  contract_version: z.literal(SCM_ENGINE_CONTRACT_VERSION),
+  request_id: z.string(),
+  node_plans: z.array(zNetworkNodePlan),
+  allocations: z.array(zNetworkAllocationLine).default([]), // emitted only on projected DC shortage
+  pooling: z.object({
+    independent_safety_units: z.number().min(0), // Σ_i z·σ_i·√P (each branch buffers alone)
+    pooled_safety_units: z.number().min(0), // z·σ_DC·√P (buffer pooled at the DC)
+    pooling_benefit_pct: z.number(), // (independent − pooled)/independent · 100; ≥ 0, 0 only at ρ≡1
+  }),
+  errors: z.array(zEngineItemError).default([]),
+});
+export type ScmOptimizeNetworkResponse = z.infer<typeof zOptimizeNetworkResponse>;
+
+// New engine item/error codes (B2): NETWORK_NOT_DAG, ECHELON_DEPTH_EXCEEDED, LANE_ENDPOINTS_INVALID,
+// UNREACHABLE_BRANCH, NEGATIVE_NET_LEAD_TIME — the API rejects malformed topology before calling out.
+
 // Non-200 engine responses use the ERP error envelope. Codes: BAD_SIGNATURE (401),
 // ENGINE_NOT_CONFIGURED (503), VALIDATION_ERROR / CONTRACT_VERSION_MISMATCH (422).
 export const zEngineErrorEnvelope = z.object({

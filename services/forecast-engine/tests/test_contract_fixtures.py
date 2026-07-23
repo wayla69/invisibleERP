@@ -15,6 +15,8 @@ from app.contracts import (
     CONTRACT_VERSION,
     ForecastRequest,
     ForecastResponse,
+    OptimizeNetworkRequest,
+    OptimizeNetworkResponse,
     OptimizeRequest,
     OptimizeResponse,
 )
@@ -24,6 +26,8 @@ FIXTURE_MODELS = [
     ("forecast_response.json", ForecastResponse),
     ("optimize_request.json", OptimizeRequest),
     ("optimize_response.json", OptimizeResponse),
+    ("optimize_network_request.json", OptimizeNetworkRequest),
+    ("optimize_network_response.json", OptimizeNetworkResponse),
 ]
 
 
@@ -77,6 +81,23 @@ def test_optimize_fixture_runs_end_to_end(client):
         for o in p.orders
     )
     assert spend <= req["joint"]["budget"] + 1e-6  # joint budget respected end-to-end
+
+
+def test_optimize_network_fixture_runs_end_to_end(client):
+    req = load_fixture("optimize_network_request.json")
+    r = post_signed(client, "/v1/optimize-network", req)
+    assert r.status_code == 200
+    body = OptimizeNetworkResponse.model_validate(r.json())
+    assert not body.errors
+    # a plan for each stocking echelon (DC + branches), none for the supplier
+    got = {p.node_id for p in body.node_plans}
+    assert got == {"CK", "BR-SILOM", "BR-ASOKE"}
+    for p in body.node_plans:
+        assert len(p.base_stock) == req["horizon_days"]
+        assert 0.0 <= p.expected.fill_rate <= 1.0
+    # pooling harvested a benefit, and the pooled buffer never exceeds the independent one
+    assert body.pooling.pooled_safety_units <= body.pooling.independent_safety_units + 1e-6
+    assert body.pooling.pooling_benefit_pct > 0.0
 
 
 def test_perishable_item_uses_the_milp_tier(client):
