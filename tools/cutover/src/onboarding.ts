@@ -777,6 +777,18 @@ async function main() {
   ok('Slip pre-fill: an image without an AI key is honestly EMPTY (source none — never a guess)',
     (slipEmpty.status === 201 || slipEmpty.status === 200) && slipEmpty.json.source === 'none' && slipEmpty.json.fields?.amount === null,
     JSON.stringify(slipEmpty.json));
+
+  // ── 3g-nonies. Per-MODULE add-ons (2026-07-21): the ai add-on carries its own token band — the
+  //               /billing usage card reads the overlaid limits, not the plan's zeros (business plan
+  //               has ai_tokens_daily 0; the add-on confers 100k/200k @ ฿12/1k). ──
+  const aiBuy = await inj('POST', '/api/billing/addons', lcLogin.json.token, { addons: ['ai'] });
+  const aiUse = await inj('GET', '/api/billing/ai-usage', lcLogin.json.token);
+  ok('Module add-ons: purchased ai add-on → usage card shows the add-on band (100k included / 200k max / ฿12 per 1k)',
+    aiBuy.status === 200 && aiUse.status === 200
+    && Number(aiUse.json.daily_limit) === 100_000 && Number(aiUse.json.daily_max) === 200_000
+    && Number(aiUse.json.overage_rate_thb_per_1k) === 12,
+    JSON.stringify({ buy: aiBuy.status, limit: aiUse.json.daily_limit, max: aiUse.json.daily_max, rate: aiUse.json.overage_rate_thb_per_1k }));
+  await inj('POST', '/api/billing/addons', lcLogin.json.token, { addons: [] }); // restore the fixture
   process.env.PLATFORM_ADMIN_USERNAMES = ''; // restore
 
   // ── 3g. Tenant lifecycle (ITGC-AC-18 #5): a platform owner suspends a company → its users are blocked
