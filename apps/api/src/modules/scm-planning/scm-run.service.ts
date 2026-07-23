@@ -39,6 +39,59 @@ export class ScmRunService {
     private readonly cross: ScmCrossElasticityService,
   ) {}
 
+  /**
+   * docs/57 Track B (B2b) — per-branch demand SAMPLE PATHS for a set of items: the loose-coupling
+   * seam `ScmNetworkExtractService` consumes (it never touches scm-planning's tables). Reuses the same
+   * extract → engine.forecast → explodePaths pipeline a planning run uses, but returns the raw K×H
+   * ingredient paths per (branch, item) instead of persisting an order plan. Engine-only: with the
+   * engine disabled it returns empty and the caller runs its in-process network fallback (no paths
+   * needed). Returns branchId → (itemId → number[][]); a `null` branch = the untagged unit.
+   */
+  async demandPathsFor(
+    tenantId: number | null,
+    itemIds: string[],
+    branchIds?: (number | null)[],
+  ): Promise<Map<number | null, Map<string, number[][]>>> {
+    const out = new Map<number | null, Map<string, number[][]>>();
+    if (!this.engine.enabled() || !itemIds.length) return out;
+    const wanted = new Set(itemIds);
+    const data = await this.extract.extractAll(tenantId, { branchIds, itemIds });
+    const horizon = data.settings.horizon_days;
+    let reqSeq = 0;
+    for (const branchId of data.branchIds) {
+      const branchSeries = data.series.filter((s) => s.branchId === branchId);
+      if (!branchSeries.length) continue;
+      const menuPaths = new Map<string, number[][]>();
+      const closures = this.extract.futureClosures(data.settings, branchId, horizon);
+      for (const chunk of this.engine.chunk(branchSeries)) {
+        const req: ScmForecastRequest = {
+          contract_version: this.engine.contractVersion(),
+          request_id: `net:${tenantId ?? 'null'}:${branchId ?? 'null'}:${reqSeq++}`,
+          horizon_days: horizon,
+          scenario_count: data.settings.sample_paths,
+          quantiles: [0.1, 0.5, 0.9],
+          holidays: data.holidays.map((h) => ({ ...h, lower_window: 0, upper_window: 0 })),
+          closures: [...new Set([...closures, ...chunk.flatMap((s) => s.closedDays)])],
+          payday_regressor: true,
+          promo_regressor: true,
+          price_regressor: true,
+          scenario: false,
+          series: chunk.map((s) => ({
+            series_id: s.itemId,
+            class_hint: 'auto' as const,
+            history: s.values.map((y, i) => ({ ds: addDaysYmd(s.startDate, i), y })),
+            ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
+          })),
+        };
+        const res = await this.engine.forecast(req);
+        for (const r of res.results) menuPaths.set(r.series_id, r.sample_paths);
+      }
+      const ingredientPaths = explodePaths(menuPaths, data.recipes, wanted);
+      if (ingredientPaths.size) out.set(branchId, ingredientPaths);
+    }
+    return out;
+  }
+
   async executePlanRun(
     tenantId: number | null,
     scope: 'nightly' | 'manual' | 'replan',

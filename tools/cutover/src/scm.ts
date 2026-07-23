@@ -771,6 +771,57 @@ async function main() {
     (nodesB.json?.length ?? 0) === 0 && laneCross.status === 400 && laneCross.json.error?.code === 'LANE_ENDPOINTS_INVALID',
     `T2nodes=${nodesB.json?.length} crossStatus=${laneCross.status} code=${laneCross.json.error?.code}`);
 
+  // ── B2b: two-echelon network plan run + maker-checker (docs/57 Track B, control SCM-05) ──
+  // Reuses the valid SUP-1 → DC-1 → BR-1 topology from B1 (BR-1 links the branch that has MENU-KP
+  // demand, so ING-CHK gets μ/σ via the recipe). Engine is unconfigured in CI ⇒ the in-process fallback.
+  const netRun = await inj('POST', '/api/scm-network/plans/run', tPlanner, { item_code: 'ING-CHK' });
+  ok('B2 network run persists a Draft plan across both stocking echelons (DC + branch)',
+    (netRun.status === 200 || netRun.status === 201) && netRun.json.status === 'Draft'
+      && netRun.json.nodes >= 2 && netRun.json.engine === 'fallback' && typeof netRun.json.pooling_benefit_pct === 'number',
+    JSON.stringify({ st: netRun.status, s: netRun.json.status, nodes: netRun.json.nodes, eng: netRun.json.engine }));
+  const netPlanId = netRun.json.id;
+  const netPlan = await inj('GET', `/api/scm-network/plans/${netPlanId}`, tPlanner);
+  const dcLine = (netPlan.json.lines ?? []).find((l: any) => l.echelon === 1);
+  const brLine = (netPlan.json.lines ?? []).find((l: any) => l.echelon === 2);
+  ok('B2 the plan carries per-node base-stock lines; DC echelon base-stock ≥ branch installation (coherence)',
+    netPlan.status === 200 && !!dcLine && !!brLine
+      && Number((dcLine.baseStock ?? [0])[0]) >= Number((brLine.installationBaseStock ?? [0])[0]) - 1e-6,
+    `lines=${netPlan.json.lines?.length}`);
+
+  const netSubmit = await inj('POST', `/api/scm-network/plans/${netPlanId}/submit`, tPlanner);
+  ok('B2 submit → PendingApproval', (netSubmit.status === 200 || netSubmit.status === 201) && netSubmit.json.status === 'PendingApproval', `${netSubmit.status} ${netSubmit.json.status}`);
+
+  // control SCM-05: the submitter (plannerA) cannot approve their own network plan even HOLDING
+  // scm_approve — tPlannerSelf is plannerA's post-grant token, so this reaches the maker-checker, not
+  // the guard. (The submittedBy is plannerA regardless of which plannerA token submitted it.)
+  const netSelf = await inj('POST', `/api/scm-network/plans/${netPlanId}/approve`, tPlannerSelf, {});
+  ok('SCM-05: the submitter cannot approve their own network plan (403 SOD_SELF_APPROVAL)',
+    netSelf.status === 403 && netSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${netSelf.status} ${netSelf.json.error?.code}`);
+  // a caller without scm_approve on this tenant is refused at the guard (never reaches the service).
+  const netGuard = await inj('POST', `/api/scm-network/plans/${netPlanId}/approve`, tPlannerB, {});
+  ok('SCM-05: approve is gated by scm_approve + tenant (a foreign/unauthorised caller is refused)',
+    netGuard.status === 403 || netGuard.status === 404, `${netGuard.status}`);
+
+  const netApprove = await inj('POST', `/api/scm-network/plans/${netPlanId}/approve`, tApprover, {});
+  ok('SCM-05: an independent scm_approve holder (≠ submitter) approves → Approved',
+    (netApprove.status === 200 || netApprove.status === 201) && netApprove.json.status === 'Approved', `${netApprove.status} ${netApprove.json.status}`);
+
+  const netConvert = await inj('POST', `/api/scm-network/plans/${netPlanId}/convert`, tPlanner);
+  ok('B2 an Approved plan rolls the DC supplier-facing order up to a PR (procurement seam, no direct PR write)',
+    (netConvert.status === 200 || netConvert.status === 201) && !!netConvert.json.pr_no && netConvert.json.status === 'Converted',
+    JSON.stringify({ st: netConvert.status, pr: netConvert.json.pr_no, s: netConvert.json.status }));
+  const netReconvert = await inj('POST', `/api/scm-network/plans/${netPlanId}/convert`, tPlanner);
+  ok('B2 re-convert is idempotent — the same pr_no, no second PR',
+    netReconvert.json.pr_no === netConvert.json.pr_no && netReconvert.json.idempotent === true,
+    JSON.stringify({ pr: netReconvert.json.pr_no, idem: netReconvert.json.idempotent }));
+
+  // Cross-tenant boundary (mandatory): T2 cannot read the HQ plan and sees none in its own list.
+  const netCross = await inj('GET', `/api/scm-network/plans/${netPlanId}`, tPlannerB);
+  const netListB = await inj('GET', '/api/scm-network/plans', tPlannerB);
+  ok('B2 cross-tenant: T2 cannot read HQ network plan (404) + sees 0 in its list',
+    netCross.status === 404 && (netListB.json?.length ?? 0) === 0,
+    `crossStatus=${netCross.status} t2plans=${netListB.json?.length}`);
+
   await app.close();
   await engine.close();
 
