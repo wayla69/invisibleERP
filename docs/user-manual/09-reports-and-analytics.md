@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.13** _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.14** _(2026-07-23: **docs/61 web** — new §5g **Marketing Activation workspace** (`/marketing-activation`): one Marketing-Studio home for the five activation tools — ③ cross-sell lookup, ⑤ segment×channel budget ranking (staged via the MKT-17 maker-checker plan), ② NBA journeys (maker-checker activation, suppression reasons shown), ① AI campaign drafts with the model-card evidence, ④ churn-save policy/preview/runs with the capped-offer chips and retention P&L. Amounts show as "THB" (no ฿ sign). UAT-UI-MA-01.)_ _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -555,6 +555,57 @@ The **audit trail** at the bottom links the whole chain — the recommendation (
 
 > Governance is **off by default**, so nothing changes until you switch it on. Each company has its own
 > setting and sees only its own runs.
+
+---
+
+## 5g. Marketing Activation workspace (`/marketing-activation`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Activation**. **Who:** `marketing` or `exec`.
+
+One friendly "Marketing Studio" home for the five activation tools (docs/61, controls MKT-21…25). Every
+tool is **advisory**: nothing here sends a message or spends money by itself — contact always goes through
+a consent-gated campaign **draft**, spend/contact needs a **second approver**, and holdout groups keep every
+action measurable. Amounts on this workspace display as **"48,000 THB"** (no ฿ sign, by design).
+
+**ภาพรวม (Overview).** Live counters (journeys, AI drafts, the latest save-run net benefit, segments ready)
+plus one card per tool — click a card to jump to its tab. The **ทำงานอย่างปลอดภัย** card summarises the
+guardrails.
+
+**To find what to offer a customer (③ Cross-sell):**
+1. Open the **สินค้าที่ควรเสนอ** tab and enter a customer code (e.g. `M-1042`), then **ค้นหา**.
+2. Read the ranked offers — each one says *why* (**เพราะซื้อ "…"**), with the confidence, **lift** and margin
+   behind it, and shows whether the customer has consented to marketing.
+3. The right-hand panel answers the reverse question: enter an item id to see the **best audiences** for it.
+
+**To decide where the next budget goes (⑤ Segment × Channel):**
+1. Open **ROI กลุ่ม × ช่องทาง**, set the budget and press **จัดอันดับ**.
+2. Cells are ranked by incremental ROI × segment value; a **lift จริง** chip means a real measured
+   experiment (MKT-19) backs that cell, not just the model.
+3. **จัดเป็นแผนงบ** stages the split as a Pending budget plan — a *different* user approves it on
+   **Marketing Intelligence → Budget Planner** (the MKT-17 maker-checker path).
+
+**To run a prioritised journey (② Next-best action):**
+1. Open **ลำดับการกระทำ**, pick a segment — the preview ranks members by expected value and shows who was
+   auto-suppressed (no consent / recent purchase / no action), each with the reason recorded.
+2. **จัดเป็น journey** stages it; a *different* user presses **เปิดใช้งาน** (self-activation is refused —
+   แบ่งแยกหน้าที่) and only then a consent-gated draft is created for the treatment arm.
+
+**To draft a campaign with AI (① Studio):**
+1. Open **สตูดิโอ AI**, pick a segment — the studio drafts bilingual copy from the segment's *facts*
+   (size, CLV, dominant action, best channel, send-hour). Expand **ดูพรอมป์ + model card** to see the
+   grounding evidence.
+2. **สร้างดราฟต์แคมเปญ** logs the model card and creates a *draft* — you edit and send it from the normal
+   campaign flow; nothing auto-sends.
+
+**To save at-risk customers (④ Churn-save):**
+1. Open **รักษาลูกค้า** and stage a policy (risk threshold, minimum CLV, offer rate and the **hard offer
+   cap** — the control that stops runaway discounts). A *different* user approves it.
+2. The preview sweeps at-risk, consented customers, shows every **capped** offer and the retention P&L
+   (expected saved − offer cost, ROI). **เริ่มรอบรักษาลูกค้า** records the run and creates the draft for
+   the treatment arm only — the control group is never contacted, so the saved revenue is provable.
+
+> **Good to know:** a brand-new company sees friendly zeros here. The tools light up as Marketing
+> Intelligence pushes results in and campaigns start running.
 
 ---
 

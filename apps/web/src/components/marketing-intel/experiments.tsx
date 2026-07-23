@@ -6,7 +6,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Play, Ruler, TrendingUp, Users, Shield } from 'lucide-react';
 import { api } from '@/lib/api';
-import { num, baht } from '@/lib/format';
+import { num, thb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { StateView } from '@/components/state-view';
@@ -124,7 +124,7 @@ export function Experiments() {
                             <div className={`inline-flex items-center gap-1 text-lg font-semibold tabular-nums ${positive ? 'text-success' : 'text-destructive'}`}>
                               <TrendingUp className="size-4" /> {e.lift_pct == null ? '—' : `${positive ? '+' : ''}${num(e.lift_pct, 1)}%`}
                             </div>
-                            <div className="text-xs text-muted-foreground tabular-nums">{t('mi.ex_incremental')}: {baht(e.incremental_revenue ?? 0)}</div>
+                            <div className="text-xs text-muted-foreground tabular-nums">{t('mi.ex_incremental')}: {thb(e.incremental_revenue ?? 0)}</div>
                           </div>
                         ) : (
                           <Button size="sm" variant="outline" className="bg-background/60" disabled={measure.isPending} onClick={() => measure.mutate(e.experiment_no)}>
@@ -136,11 +136,11 @@ export function Experiments() {
                         <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
                           <div className="rounded-lg bg-background/60 p-2.5">
                             <div className="text-muted-foreground">{t('mi.ex_treatment')} / {t('mi.ex_perhead')}</div>
-                            <div className="font-semibold tabular-nums" style={softText('var(--chart-3)')}>{baht(e.treatment_per_head ?? 0)}</div>
+                            <div className="font-semibold tabular-nums" style={softText('var(--chart-3)')}>{thb(e.treatment_per_head ?? 0)}</div>
                           </div>
                           <div className="rounded-lg bg-background/60 p-2.5">
                             <div className="text-muted-foreground">{t('mi.ex_control')} / {t('mi.ex_perhead')}</div>
-                            <div className="font-semibold tabular-nums">{baht(e.control_per_head ?? 0)}</div>
+                            <div className="font-semibold tabular-nums">{thb(e.control_per_head ?? 0)}</div>
                           </div>
                         </div>
                       )}
