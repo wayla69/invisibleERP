@@ -372,6 +372,50 @@ the `training_from`/`training_to` window and `fitted_at`. It follows the `scm_se
 `scm_settings.refit_cadence_days` column. Like the rest of Track D, D2 posts **no journal entries** and
 touches no golden-master money path.
 
+### 7.17 Cold-start / analog forecasting for new items (docs/56 Track A · A4)
+
+A brand-new SKU has almost no sales history, so it cannot be fitted the ordinary way — but it is rarely
+*unlike everything already on the menu*. A4 lets such an item borrow the demand **shape** of established
+similar items until it has built enough of its own history, and it is explicit about the borrowing so a
+reviewer is never misled into treating a borrowed forecast as an observed one.
+
+The donor selection is server-side and by construction. When the run assembles the per-series requests
+(`scm-analog.ts analogDonors`, wired into `ScmRunService.runWithEngine`), a **too-new** series — one whose
+dense history is shorter than the Prophet floor (56 days) — is matched to **established same-branch
+siblings** (items at the same branch with ≥ 90 days of history), capped at **5 donors**. The branch is the
+signal that matters most here: it drives the weekly rhythm, the payday bump and the holiday pattern the new
+item will share. (Category/attribute-nearest refinement — pairing on price band, unit and item attributes —
+is a noted future enhancement; A4 ships the branch heuristic.) The donor series ids ride the existing,
+already-reserved `analog_of` field on the per-series forecast input — **no contract change** and **no
+version bump** (the engine contract stays `'2'`).
+
+In the engine, the analog branch (`forecasting.py _analog_paths`) fires only when **all** hold: `analog_of`
+is set, the item's own fitted history is below the 56-day Prophet floor, **and** at least one donor is
+present; otherwise the series routes normally. The whole run is a **two-phase fan-out** — non-analog donor
+series are forecast first, then the analog series are forecast with a map of their donors' results, a pure
+pre-pass — so a request with no `analog_of` anywhere is byte-identical to the pre-A4 behaviour. When it
+fires, the engine pools the donors' **normalized** sample-path shapes (each donor de-levelled to its own
+mean) and rescales the pooled shape to the new item's **own observed baseline** where it has one, else to
+the donors' mean level. The result is flagged **`analog`** in `attribution.regressors_used`, which persists
+through `saveForecast` onto `scm_demand_forecasts.regressorsUsed`, so the planner and any reviewer can see
+at a glance that the line is a *borrowed* forecast rather than an observed one, and drop back to their own
+judgement accordingly. A4 introduces **no new control** (it is a forecast-quality path governed by the same
+SCM-01/02/03 as any other run), no migration and no GL posting; `analog` was already an allowed
+`regressors_used` member, so nothing on the wire moved.
+
+### 7.18 Shared engine result cache across replicas (docs/59 Track D · D3)
+
+The forecast engine is stateless by design and scales horizontally to N replicas, but its per-request
+idempotency **result cache** (`service.py` `ResultCache`) was in-process, so a retry that landed on a
+*different* replica recomputed the solve. D3 makes that cache optionally **shared via Redis**, reusing the
+`common/rate-limit-store.ts` fail-open shape: with `SCM_ENGINE_REDIS_URL` (or the existing
+`REALTIME_REDIS_URL`) set, `ResultCache` reads Redis first then the in-process store and write-throughs to
+both under the idempotency key already carried on every request (TTL `SCM_ENGINE_CACHE_TTL_S`, default 900s);
+unset **or Redis unreachable** falls straight back to the current per-process TTL/LRU path, so CI,
+single-node and PGlite runs need no Redis. This is **infrastructure only** — it changes no forecast number,
+no wire contract, no plan lifecycle and adds **no control**, no migration and no GL. It is an operational
+scale-out lever recorded here for completeness (ops/deployment notes carry the replica wiring).
+
 ## 8. Process flow
 
 ```mermaid
@@ -469,6 +513,7 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.10 | 2026-07-23 | Supply-chain / Planning | Added §7.17 — cold-start / analog forecasting for new items (docs/56 Track A · A4): a too-new series (dense history < the 56-day Prophet floor) borrows the pooled, normalized demand shape of **established same-branch siblings** (≥ 90 days, capped at 5 donors — `scm-analog.ts analogDonors`, wired into `ScmRunService.runWithEngine`) via the already-reserved `analog_of` per-series input, and the engine (`forecasting.py _analog_paths`) rescales the pooled shape to the new item's own baseline seed (else the donors' mean level). The run is a two-phase fan-out (donors first, then analog series) so a request with no `analog_of` is byte-identical to before; the forecast is flagged **`analog`** in `attribution.regressors_used` and persists to `scm_demand_forecasts.regressorsUsed` so a reviewer sees it is borrowed, not observed. **Contract unchanged, no version bump** (stays `'2'`; `analog_of` and the `analog` flag were already reserved); category/attribute-nearest donor refinement is a future enhancement. Added §7.18 — shared engine result cache across replicas (docs/59 Track D · D3): the engine's in-process `ResultCache` becomes optionally Redis-shared via `SCM_ENGINE_REDIS_URL` (or `REALTIME_REDIS_URL`) + `SCM_ENGINE_CACHE_TTL_S` (default 900), reusing `rate-limit-store.ts`'s fail-open shape (unset or Redis down ⇒ per-process path). Both are forecast-quality / infrastructure paths — **no new control**, no migration, no GL, no golden-master path. A4: engine pytest (borrow+flag / no-donor fallback / ignored-when-history-sufficient / two-phase) + `scm` harness; D3: engine pytest (cross-replica share / fail-open without or with a Redis error). |
 | 0.9 | 2026-07-23 | Supply-chain / Planning | Added §7.16 — warm-start / model registry (docs/59 Track D · D2): a planning run ships each series' cached Prophet fit as an optional `warm_start:{params, fit_hash}` on `/v1/forecast`; the engine computes a `fit_hash` over the training window and, on a match, reuses the serialized fit (skipping BOTH the primary fit and the backtest refit) else refits, returning `fitted_state:{params, fit_hash, fit_wape}` the API upserts to `scm_model_cache` (migration `0475`, canonical 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique). Two fail-safe staleness guards — `fit_hash` mismatch (window changed) and `refit_cadence_days` age (default 14, additive `scm_settings` column) — force a refit; a warm hit carries the cached `fit_wape` forward. Determinism preserved (warm reuse ≡ cold fit byte-for-byte); a corrupt cache entry fails closed to a refit. Compute-only — **no new control** (SCM-07 is D4), no GL, no golden-master path. Harness `cutover/scm.ts` +4 D2 checks (57/57, `scm-mfg` shard); engine pytest warm-start reproducibility / refit-on-window-change / corrupt-cache fallback. |
 | 0.8 | 2026-07-23 | Supply-chain / Planning | Added §7.15 — two-echelon network replenishment plans (docs/57 Track B · B2): `POST /api/scm-network/plans/run {item_code}` builds a Draft plan pooling the safety buffer at the DC — via scm-planning's public `demandPathsFor` seam and the B2a `/v1/optimize-network` route (GSM base-stock + risk pooling), or an in-process fallback (`B=μ·(L+R)+z·σ·√(L+R)`, DC = Σ, no pooling); every engine quantity zod-validated + clamped; persisted to `scm_network_plans`/`scm_network_plan_lines` (migration 0474, canonical RLS + tenant-leading index) as Draft. New control **SCM-05** (network-plan maker-checker): submit → approve by a DIFFERENT `scm_approve` holder (self-approval `SOD_SELF_APPROVAL`, maker bound to submitter; SoD **R24** reused, no new rule) → convert rolls the DC order up to a PR via the existing `ProcurementService.createPr` seam (reason `SCM-NET`, idempotent by `pr_no`). No GL, no golden-master money path. Harness `cutover/scm.ts` +8 B2 checks (`scm-mfg` shard). |
 | 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |

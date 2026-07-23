@@ -1,6 +1,6 @@
 # 59 · SCM Track D — Scale-out retraining & accuracy operations
 
-**Status: DRAFT v0.2 · 2026-07-23** · Owner: Supply-chain / Planning · Depends on **docs/54**
+**Status: DRAFT v0.3 · 2026-07-23** · *v0.3: **D3 delivered (code half)** — the engine's in-process `ResultCache` becomes optionally **shared across N replicas via Redis**, reusing `common/rate-limit-store.ts`'s fail-open shape: `SCM_ENGINE_REDIS_URL` (or `REALTIME_REDIS_URL`) + `SCM_ENGINE_CACHE_TTL_S` (default 900) set ⇒ `ResultCache.get` reads Redis-first then in-process and `put` write-throughs to both under the idempotency key on every request; unset **or** Redis unreachable ⇒ the current per-process TTL/LRU path (CI/single-node/PGlite need no Redis). `service.py` lazy `_engine_redis()` (fail-open — no package/bad URL/down ⇒ None), every Redis op wrapped fail-open; `pyproject.toml` gains `redis>=5`. **No API/wire/behavior change, no migration, no control.** The multi-replica/work-queue topology + load testing remain **ops** (§8 — not a CI gate). pytest: cross-replica share / fail-open-without-redis / fail-open-when-redis-errors. D1/D4 remain planned.* · Owner: Supply-chain / Planning · Depends on **docs/54**
 (delivered — `services/forecast-engine` + `modules/scm-planning`) · Implements **docs/55 §6** (Track D,
 phases D1–D4) and its cross-cutting rules (§2) · Related: docs/46 (module/report-registry boundaries),
 `common/rate-limit-store.ts` (L-8/L-12 shared-backend pattern)
@@ -107,18 +107,23 @@ migration **0475**; contract change is **additive, no version bump** (see §3).
   pytest asserts warm-start ≡ cold-fit-then-reuse. A **corrupt cache entry fails closed to a refit**. This
   is a hard test gate.
 
-### D3 — Horizontal scale (Size L, planned)
+### D3 — Horizontal scale (Size L, code half **DELIVERED** 2026-07-23; topology + load testing remain ops)
 
-*Run the engine as N stateless replicas behind a shared result cache + work queue.*
+*Run the engine as N stateless replicas behind a shared result cache + work queue.* **Shipped:** the shared
+fail-open Redis `ResultCache` (the code deliverable). **Remaining (ops, not a CI gate — §8):** the
+multi-replica / work-queue topology decision and the horizontal-scale load run.
 
 - **The engine is already stateless** (no DB, no tenant ids, no PII — README + `main.py`), so N replicas
   are correct by construction; only the **in-process `ResultCache` and idempotency** are node-local today.
-- **Shared result cache via Redis, reusing `common/rate-limit-store.ts`'s exact shape** — a lazily-built
-  single connection, **fail-open**: `SCM_ENGINE_REDIS_URL` (or the existing `REALTIME_REDIS_URL`) set ⇒
-  the `ResultCache.get/put` in `service.py` read/write Redis under the `X-Engine-Idempotency` key (TTL 15
-  min, unchanged); unset **or Redis unreachable** ⇒ the current per-process TTL/LRU path (CI, single-node,
-  and PGlite need no Redis). The idempotency key **already exists** on every request, so a retry that lands
-  on a *different* replica now still returns the original solve instead of recomputing.
+- **Shared result cache via Redis, reusing `common/rate-limit-store.ts`'s exact shape (shipped)** — a
+  lazily-built single connection (`service.py` `_engine_redis()`), **fail-open**: `SCM_ENGINE_REDIS_URL` (or
+  the existing `REALTIME_REDIS_URL`) set ⇒ `ResultCache.get` reads Redis-first then in-process and `put`
+  write-throughs to both under the `X-Engine-Idempotency` key (TTL `SCM_ENGINE_CACHE_TTL_S`, default 900s);
+  unset **or Redis unreachable** ⇒ the current per-process TTL/LRU path (CI, single-node, and PGlite need no
+  Redis). Every Redis op is wrapped fail-open (a missing `redis` package, a bad URL, or a down server ⇒ the
+  connection resolves to `None` and the in-process path serves). `pyproject.toml` gains `redis>=5`. The
+  idempotency key **already exists** on every request, so a retry that lands on a *different* replica now
+  still returns the original solve instead of recomputing.
 - **Work distribution.** Two viable topologies, decided in D3's PR:
   - **Stateless replicas behind Railway's load balancer** (simplest): the API's chunked-at-200 fan-out
     already parallelizes across replicas naturally; the shared cache dedupes retries. `UVICORN_WORKERS` ×
@@ -253,12 +258,13 @@ already exists (0459).
 |---|---|---|---|
 | **D1** | **Scheduled batch retrain.** `scm_batch_retrain` job + action report on the BI scheduler; persist forecasts; nightly *plan* reads fresh persisted forecasts (engine only on miss); per-tenant fairness (queue) + backpressure (run guard). No wire change. | — | M |
 | **D2** ✅ | **Warm-start / model registry — DELIVERED (2026-07-23).** `scm_model_cache` table (**migration 0475**, 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique) + additive `scm_settings.refit_cadence_days`; **optional** `warm_start` input + `fitted_state` output on `/v1/forecast` — **additive, NO version bump** (stays `'2'`); refit only on cadence (default 14) / `fit_hash`-change; determinism preserved, corrupt cache fails closed to refit. `scm` harness 57/57 (+4 D2). | — | M |
-| **D3** | **Horizontal scale.** Shared `ResultCache` via `SCM_ENGINE_REDIS_URL` reusing `rate-limit-store.ts`'s fail-open shape; idempotency now cross-replica; N stateless replicas; README/.env env docs. No app behavior change. | — | L |
+| **D3** ✅ | **Horizontal scale — code half DELIVERED (2026-07-23).** Shared `ResultCache` via `SCM_ENGINE_REDIS_URL` (or `REALTIME_REDIS_URL`) + `SCM_ENGINE_CACHE_TTL_S` reusing `rate-limit-store.ts`'s fail-open shape; idempotency now cross-replica; `service.py` lazy `_engine_redis()` (fail-open), `pyproject.toml` `redis>=5`; README/.env env docs. **No app/wire behavior change, no migration, no control.** The multi-replica/work-queue topology + load testing remain **ops** (§8 — not a CI gate). | — | L |
 | **D4** | **Accuracy monitoring.** `scm_accuracy_history` table (a future migration at D4); WAPE/bias trend + drift alert (ops alert + SSE) + force-refit feedback into D2; champion/challenger advisory; `scm_forecast_accuracy` BI report type. | **SCM-07** (detective) | M |
 
 Sequencing (docs/55 §7, wave 5): **D2 shipped standalone** (migration 0475, additive contract — no bump);
-**D1** (batch retrain) remains planned; **D3** is independent infra; **D4** lands `scm_accuracy_history`, the
-control (SCM-07) and the report type. Each phase is ~1–3 doc-synced PRs.
+**D3's code half shipped** (the fail-open Redis `ResultCache`; topology + load testing remain ops, §8);
+**D1** (batch retrain) remains planned; **D4** lands `scm_accuracy_history`, the control (SCM-07) and the
+report type. Each phase is ~1–3 doc-synced PRs.
 
 ---
 
@@ -331,5 +337,6 @@ mirroring exact expected results/error codes:
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 0.3 | 2026-07-23 | Supply-chain / Planning | **D3 delivered (code half) — shared fail-open Redis result cache.** The engine's in-process `ResultCache` (an idempotency optimization) becomes optionally shared across N stateless replicas via Redis, reusing `common/rate-limit-store.ts`'s fail-open shape. Env: `SCM_ENGINE_REDIS_URL` (or the existing `REALTIME_REDIS_URL`) + `SCM_ENGINE_CACHE_TTL_S` (default 900). Unset **or** Redis unreachable ⇒ the current per-process TTL/LRU path (CI/single-node/PGlite need no Redis). The idempotency key already rides every request, so a retry landing on a *different* replica returns the original solve. Engine (`services/forecast-engine/app/service.py`): lazy `_engine_redis()` (fail-open — no `redis` package / bad URL / down ⇒ `None`); `ResultCache.get` reads Redis-first then in-process, `put` write-throughs to both, every Redis op wrapped fail-open; `pyproject.toml` gains `redis>=5`. **No API/wire/behavior change, no migration, no new control.** The DELIVERED scope is the fail-open Redis `ResultCache` (the code deliverable); the multi-replica/work-queue topology + load testing remain **ops** (§8 "not a CI gate"). pytest: cross-replica share / fail-open-without-redis / fail-open-when-redis-errors. Doc-sync: docs/55, PN-34 §7.18, README + `.env.example` + deployment.md env docs. **D1/D4 remain planned.** |
 | 0.2 | 2026-07-23 | Supply-chain / Planning | **D2 delivered — warm-start / model registry.** `scm_model_cache` tenant table (**migration 0475**, canonical 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique) caches each series' serialized Prophet fit; `ScmModelCacheService` loads a fit within the refit cadence and ships it as an **optional** `warm_start:{params, fit_hash}` on `/v1/forecast`, and persists the returned optional `fitted_state`. The engine's `fit_hash` over the training window governs reuse — a match reuses the serialized fit (skipping BOTH the primary fit and the backtest refit), else it cold-fits. **Contract is additive with NO version bump** (`SCM_ENGINE_CONTRACT_VERSION` stays `'2'`; both fields optional so a rolling deploy never hard-breaks — corrects the §3 planning note that said it would bump). Two fail-safe staleness guards: `fit_hash` mismatch and `refit_cadence_days` (new additive `scm_settings` column, default 14, range 1–90, validated in `ScmExtractService.upsertSettings`); a warm hit carries `fit_wape` forward. Determinism preserved (warm reuse ≡ cold fit byte-for-byte); corrupt cache fails closed to a refit. **No new control** (SCM-07 belongs to D4). `scm` harness 57/57 (+4 D2) + engine pytest (reproducibility / refit-on-window-change / corrupt-cache fallback). PN-34 §7.16, manual ch.21, UAT §15 (UAT-SCM-061..063). D1/D3/D4 remain planned. |
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial plan for **Track D — Scale-out retraining & accuracy operations** (docs/55 §6, phases D1–D4): batch retrain off the request path on the BI scheduler; warm-start / model registry (`scm_model_cache`, optional `warm_start` contract field bumping `SCM_ENGINE_CONTRACT_VERSION`); horizontal scale via a shared fail-open Redis result cache reusing `rate-limit-store.ts`; accuracy monitoring (`scm_accuracy_history`, WAPE/bias drift alerts on the SSE bus + a `scm_forecast_accuracy` BI report type) with new detective control **SCM-07** (RCM 302→303). Migration **0460** (two 0232-form RLS tenant tables + leading indexes). **Planning only** — no code, contract, schema, or control change yet. |

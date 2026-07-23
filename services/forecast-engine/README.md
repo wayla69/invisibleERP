@@ -37,6 +37,9 @@ Auth on business routes: HMAC-SHA256 over `` `${unixSeconds}.${rawBody}` `` in
 | `SCM_ENGINE_TOLERANCE_SEC` | `300` | signature freshness window |
 | `ENGINE_WORKERS` | `min(8, cpu)` | thread-pool width for per-series/per-item fan-out |
 | `PORT` / `UVICORN_WORKERS` | `8000` / `2` | served port and process count |
+| `SCM_ENGINE_REDIS_URL` | — | optional; share the idempotency `ResultCache` across N replicas (docs/59 D3). Falls back to `REALTIME_REDIS_URL` if unset. **Fail-open**: unset or Redis unreachable ⇒ the per-process TTL/LRU cache (single-node/CI need no Redis) |
+| `REALTIME_REDIS_URL` | — | optional; used for the shared `ResultCache` when `SCM_ENGINE_REDIS_URL` is unset |
+| `SCM_ENGINE_CACHE_TTL_S` | `900` | `ResultCache` entry TTL (seconds), for both the Redis and in-process paths |
 
 ## Local development
 
