@@ -106,7 +106,7 @@ export const miExperimentArms = pgTable('mi_experiment_arms', {
   byArm: index('idx_mi_arms_tenant').on(t.tenantId, t.experimentId, t.arm),
 }));
 
-// NBA Orchestrator (docs/61 Phase 3 / control MKT-22, migration 0470). Turns the advisory mi_nba into
+// NBA Orchestrator (docs/61 Phase 3 / control MKT-22, migration 0471). Turns the advisory mi_nba into
 // SEQUENCED, PRIORITISED action: a journey is STAGED (Pending) with its per-customer targets — each carrying
 // the chosen action, its expected value (CLV × action uplift), and a FIXED holdout arm (treatment/control,
 // same deterministic hash as MKT-19) — and requires MAKER-CHECKER activation by a DIFFERENT user before any
@@ -152,7 +152,7 @@ export const miJourneyTargets = pgTable('mi_journey_targets', {
   byArm: index('idx_mi_journey_targets_tenant').on(t.tenantId, t.journeyId, t.arm),
 }));
 
-// AI Campaign Studio (docs/61 Phase 4 / control MKT-21, migration 0471). Records every fact-grounded
+// AI Campaign Studio (docs/61 Phase 4 / control MKT-21, migration 0472). Records every fact-grounded
 // campaign GENERATION as ICFR/model-card evidence: the segment fact sheet it was grounded in, the prompt,
 // the model used, and the produced draft — so an auditor can see exactly what facts + model produced a
 // campaign and that the output was DRAFT-only (never auto-sent). The produced artifact is a consent-gated
@@ -176,7 +176,7 @@ export const miCampaignGenerations = pgTable('mi_campaign_generations', {
   byNo: uniqueIndex('ux_mi_gen_no').on(t.tenantId, t.genNo),
 }));
 
-// Churn-Save Autopilot (docs/61 Phase 5 / control MKT-24, migration 0472). Protect the base + PROVE the
+// Churn-Save Autopilot (docs/61 Phase 5 / control MKT-24, migration 0473). Protect the base + PROVE the
 // saved revenue. The save-offer POLICY (churn threshold, min CLV to justify a save, offer rate, and a hard
 // OFFER CAP) is MAKER-CHECKER approved (a Pending policy must be approved by a DIFFERENT user before it is
 // Active). A sweep applies the Active policy to at-risk customers, computes a CAPPED win-back offer, assigns

@@ -923,6 +923,11 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.bill.addons_saved': { th: '✅ บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: '✅ Add-ons saved — entitlements apply immediately' },
   'st.bill.addons_saved_billed': { th: '✅ บันทึกแล้ว — ปรับรายการเรียกเก็บในรอบบิลให้อัตโนมัติ (+{added}/−{removed})', en: '✅ Saved — subscription line items reconciled (+{added}/−{removed})' },
   'st.bill.per_month_short': { th: '/เดือน', en: '/mo' },
+  'st.bill.addons_group_modules': { th: 'ขายยกโมดูล', en: 'Whole modules' },
+  'st.bill.addons_group_advanced': { th: 'ส่วนเสริมขั้นสูง', en: 'Advanced extras' },
+  'st.bill.addons_ai_note': { th: 'รวมโควตา 100k token/วัน (เพดาน 200k, ส่วนเกิน ฿12/1k)', en: 'Includes 100k tokens/day (200k ceiling; overage ฿12/1k)' },
+  'st.bill.addons_delta': { th: 'รวมโมดูลเสริมที่เลือก +{amount}/เดือน', en: 'Selected add-ons: +{amount}/mo' },
+  'st.bill.addons_upsell_hint': { th: 'เลือกครบ 3 โมดูลขึ้นไป — อัปเกรดเป็นแพ็ก Professional (฿9,900/เดือน) รวมทุกโมดูลนี้พร้อมโควตา AI ใหญ่กว่า อาจคุ้มกว่า', en: 'At 3+ modules, upgrading to Professional (฿9,900/mo) — which includes them all plus a bigger AI band — is likely the better deal.' },
 
   // ── A4: own-SaaS receipts on /billing ─────────────────────────────────────
   'st.bill.receipts_title': { th: 'ใบเสร็จค่าบริการ', en: 'Subscription receipts' },

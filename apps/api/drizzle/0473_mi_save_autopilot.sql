@@ -1,57 +1,54 @@
--- 0470_mi_nba_journeys
--- docs/61 Phase 3 — Next-Best-Action Orchestrator (control MKT-22). Turns the advisory mi_nba into
--- SEQUENCED, PRIORITISED action per customer. A journey is STAGED (Pending) with its per-customer targets —
--- each carrying the chosen action, its expected value (CLV × action uplift), and a FIXED holdout arm
--- (treatment/control, the same deterministic hash as MKT-19) — and requires MAKER-CHECKER activation by a
--- DIFFERENT user before any consent-gated draft is created. Suppression (consent off / recent purchase /
--- no action) is enforced at STAGE time and RECORDED on each target, so the control is auditable and nothing
--- auto-sends. Read/orchestration model — no GL posting.
+-- 0473_mi_save_autopilot
+-- docs/61 Phase 5 — Churn-Save Autopilot (control MKT-24). Protect the base + PROVE the saved revenue.
+-- The save-offer POLICY (churn threshold, min CLV to justify a save, offer rate, and a hard OFFER CAP) is
+-- MAKER-CHECKER approved — a Pending policy must be approved by a DIFFERENT user before it is Active. A sweep
+-- applies the Active policy to at-risk customers, computes a CAPPED win-back offer, assigns a randomised
+-- HOLDOUT arm (the same deterministic hash as MKT-19), and records a retention P&L (expected saved revenue
+-- vs offer cost). Consent-gated + draft-only — nothing auto-sends. Read/orchestration model — no GL posting.
 --
 -- Tenancy: both tables carry tenant_id → the canonical 0232-form org RLS policy (trailing DO block) +
 -- a LEADING (tenant_id, …) index.
 
--- Journey header: one per staged plan.
-CREATE TABLE IF NOT EXISTS mi_journeys (
+CREATE TABLE IF NOT EXISTS mi_save_policies (
   id bigserial PRIMARY KEY,
   tenant_id bigint REFERENCES tenants(id),
-  journey_no text NOT NULL,                              -- NBA-YYYYMMDD-NNN
-  segment text,                                          -- the mi_segment scoped (null = all scored members)
-  channel text NOT NULL DEFAULT 'sms',
-  status text NOT NULL DEFAULT 'Pending',                -- Pending | Active | Cancelled
-  control_pct numeric(5,4) NOT NULL DEFAULT 0.2,         -- holdout fraction [0,1)
-  target_count integer NOT NULL DEFAULT 0,               -- treatment targets (contactable)
-  control_count integer NOT NULL DEFAULT 0,              -- holdout (never contacted)
-  suppressed_count integer NOT NULL DEFAULT 0,
-  campaign_id bigint,                                    -- the consent-gated draft created at activation
+  policy_no text NOT NULL,                               -- SAVEPOL-YYYYMMDD-NNN
+  churn_threshold numeric(5,4) NOT NULL DEFAULT 0.5,     -- [0,1] — sweep customers at/above this churn risk
+  min_clv numeric(14,2) NOT NULL DEFAULT 0,              -- only save customers whose CLV justifies it
+  offer_rate numeric(6,4) NOT NULL DEFAULT 0.1,          -- offer = clv × rate, then capped
+  offer_cap numeric(14,2) NOT NULL DEFAULT 500,          -- HARD per-offer cap (the control)
+  status text NOT NULL DEFAULT 'Pending',                -- Pending | Active | Superseded
   note text,
   requested_by text,
   approved_by text,
   created_at timestamptz DEFAULT now(),
-  activated_at timestamptz
+  approved_at timestamptz
 );
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS idx_mi_journeys_tenant ON mi_journeys (tenant_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mi_save_pol_tenant ON mi_save_policies (tenant_id, status, created_at DESC);
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS ux_mi_journeys_no ON mi_journeys (tenant_id, journey_no);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mi_save_pol_no ON mi_save_policies (tenant_id, policy_no);
 --> statement-breakpoint
 
--- Target membership — one row per (journey, member), FIXED at stage, never re-randomised.
-CREATE TABLE IF NOT EXISTS mi_journey_targets (
+CREATE TABLE IF NOT EXISTS mi_save_runs (
   id bigserial PRIMARY KEY,
   tenant_id bigint REFERENCES tenants(id),
-  journey_id bigint NOT NULL REFERENCES mi_journeys(id),
-  member_id bigint NOT NULL,
-  action text,                                           -- the mi_nba chosen (null when suppressed with no action)
-  expected_value numeric(14,2),
-  arm text NOT NULL DEFAULT 'treatment',                 -- treatment | control
-  suppressed boolean NOT NULL DEFAULT false,
-  suppress_reason text,                                  -- CONSENT | RECENT_PURCHASE | NO_ACTION
+  run_no text NOT NULL,                                  -- SAVE-YYYYMMDD-NNN
+  policy_no text,                                        -- the Active policy applied
+  segment text,
+  treatment_count integer NOT NULL DEFAULT 0,
+  control_count integer NOT NULL DEFAULT 0,
+  offer_cost numeric(16,2),                              -- Σ capped offers (treatment)
+  expected_saved_revenue numeric(16,2),
+  net_benefit numeric(16,2),                             -- saved − cost
+  campaign_id bigint,
+  requested_by text,
   created_at timestamptz DEFAULT now()
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS ux_mi_journey_targets_member ON mi_journey_targets (tenant_id, journey_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_mi_save_run_tenant ON mi_save_runs (tenant_id, created_at DESC);
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS idx_mi_journey_targets_tenant ON mi_journey_targets (tenant_id, journey_id, arm);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mi_save_run_no ON mi_save_runs (tenant_id, run_no);
 --> statement-breakpoint
 
 -- app_user grants + re-apply the CANONICAL org-scoped tenant_isolation policy (0232 form). Idempotent.

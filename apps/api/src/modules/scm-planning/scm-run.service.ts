@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { ScmForecastRequest, ScmOptimizeItem, ScmOptimizeRequest } from '@ierp/shared';
 import type { DrizzleDb } from '../../database/database.module';
 import {
-  scmDemandForecasts, scmOrderPlanLines, scmOrderPlans, scmPlanRuns,
+  items, scmDemandForecasts, scmOrderPlanLines, scmOrderPlans, scmPlanRuns,
 } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import { addDaysYmd } from '../demand-ml/forecast-algorithms';
@@ -13,6 +13,7 @@ import { StatusLogService } from '../../common/status-log.service';
 import { ScmEngineClientService } from './scm-engine-client.service';
 import { ScmExtractService } from './scm-extract.service';
 import { ScmElasticityService } from './scm-elasticity.service';
+import { ScmCrossElasticityService } from './scm-cross-elasticity.service';
 import { explodePaths, planHelpers, ScmFallbackPlanner } from './scm-planner';
 import {
   PLAN_STATUS, SYSTEM_ACTOR, type BranchPlanDraft, type ExtractedTenantData, type PlanRunResult,
@@ -35,6 +36,7 @@ export class ScmRunService {
     private readonly statusLog: StatusLogService,
     private readonly emit: (tenantId: number | null, type: 'scm_run_completed' | 'scm_run_failed', extra: Record<string, unknown>) => void,
     private readonly elasticity: ScmElasticityService,
+    private readonly cross: ScmCrossElasticityService,
   ) {}
 
   async executePlanRun(
@@ -77,6 +79,22 @@ export class ScmRunService {
         : await this.runWithFallback(tenantId, runId, data, opts);
 
       const plans = await this.persistPlans(tenantId, runId, data, result.drafts, opts.actor);
+
+      // docs/56 A3 — estimate category-scoped cross-price elasticities from this run's data and persist
+      // the credible ones. Best-effort: a failure here never fails the plan (it only enriches the
+      // advisory scenario tool). item→category from the shared master (items has no tenant_id).
+      try {
+        const skus = [...new Set(data.series.map((s) => s.itemId))];
+        if (skus.length > 1) {
+          const catRows = await this.db.select({ itemId: items.itemId, category: items.category })
+            .from(items).where(inArray(items.itemId, skus));
+          const catBySku = new Map(catRows.map((r) => [r.itemId, (r.category ?? '').trim()]));
+          await this.cross.estimateAndPersist(tenantId, data.series, data.regressors, catBySku);
+        }
+      } catch (e) {
+        this.log.warn(`cross-elasticity estimation skipped: ${(e as Error).message}`);
+      }
+
       await this.db.update(scmPlanRuns).set({
         status: 'Completed',
         engine: result.engine,

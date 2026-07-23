@@ -1,4 +1,4 @@
--- 0471_mi_campaign_generations
+-- 0472_mi_campaign_generations
 -- docs/61 Phase 4 — AI Campaign Studio (control MKT-21). Generate a fact-grounded campaign — audience,
 -- channel, send-time, offer, th/en copy — from a segment FACT SHEET (size, avg CLV, dominant next-best-
 -- action, best channel by MMM ROI, modal send-hour), fed to the generator as retrieval-grounded context
