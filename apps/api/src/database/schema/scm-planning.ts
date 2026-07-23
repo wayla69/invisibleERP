@@ -34,6 +34,10 @@ export const scmSettings = pgTable('scm_settings', {
   spikeCooldownHours: integer('spike_cooldown_hours').notNull().default(48),
   autoReplan: boolean('auto_replan').notNull().default(false),
   engineEnabled: boolean('engine_enabled').notNull().default(true),
+  // docs/59 D2 — warm-start refit cadence: a cached Prophet fit older than this is force-refit even if
+  // its training window is unchanged (default 14 days). Additive column (migration 0475); default
+  // preserves prior behaviour (a stable series warm-starts within the cadence, refits after it).
+  refitCadenceDays: integer('refit_cadence_days').notNull().default(14),
   updatedBy: text('updated_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_settings_tenant').on(t.tenantId) }));
@@ -248,7 +252,29 @@ export const scmCrossElasticity = pgTable('scm_cross_elasticity', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_cross_elasticity_tenant').on(t.tenantId, t.itemA) }));
 
+// docs/59 Track D (D2) — warm-start / model registry. One serialized Prophet fit per (tenant, branch,
+// item): the API extracts it under RLS, ships it in the /v1/forecast payload as `warm_start`, and the
+// engine SKIPS the cmdstan refit when `fitHash` still matches the current training window (else refits
+// and returns fresh state the API upserts here). Fully tenant-scoped; migration 0475 applies the
+// canonical 0232-form RLS loop + a leading (tenant_id, branch_id, item_id) index + a UNIQUE on
+// coalesce(branch_id, 0) (written in the migration — drizzle-kit cannot express the expression index).
+export const scmModelCache = pgTable('scm_model_cache', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }), // null = tenant-wide (series aggregated over branches)
+  itemId: text('item_id').notNull(),
+  model: text('model').notNull(), // the fitted model family (prophet — the only warm-startable one today)
+  fitParams: jsonb('fit_params').notNull(), // opaque serialized fit (prophet.serialize.model_to_json)
+  fitHash: text('fit_hash').notNull(), // engine's fingerprint of the training window the params were fit on
+  fitWape: numeric('fit_wape', { precision: 10, scale: 4 }), // holdout WAPE at fit time (D4 baseline)
+  trainingFrom: date('training_from'), // first/last business day of the fitted window (audit/pruning)
+  trainingTo: date('training_to'),
+  fittedAt: timestamp('fitted_at', { withTimezone: true }).defaultNow(), // cadence anchor (refit_cadence_days)
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: index('idx_scm_model_cache_tenant').on(t.tenantId, t.branchId, t.itemId) }));
+
 export type ScmSettingsRow = typeof scmSettings.$inferSelect;
+export type ScmModelCacheRow = typeof scmModelCache.$inferSelect;
 export type ScmPriceElasticityRow = typeof scmPriceElasticity.$inferSelect;
 export type ScmCrossElasticityRow = typeof scmCrossElasticity.$inferSelect;
 export type ScmItemPolicy = typeof scmItemPolicies.$inferSelect;

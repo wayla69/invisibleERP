@@ -222,7 +222,11 @@
           "discount_pct": 0,
           "price": 65
         }
-      ]
+      ],
+      "warm_start": {
+        "params": "{\"__note__\":\"opaque serialized prophet fit; schema-parity fixture only\"}",
+        "fit_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
     },
     {
       "series_id": "1:MENU-SPECIAL",

@@ -46,6 +46,7 @@ const SETTINGS_DEFAULTS: ScmSettingsView = {
   closed_weekdays: [], closures: [], dine_in_branch_id: null,
   spike_ewma_alpha: 0.2, spike_z_threshold: 3, spike_cusum_k: 0.5, spike_cusum_h: 4,
   spike_min_qty: 5, spike_cooldown_hours: 48, auto_replan: false, engine_enabled: true,
+  refit_cadence_days: 14,
 };
 
 const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
@@ -77,6 +78,7 @@ export class ScmExtractService {
       spike_cusum_k: n(row.spikeCusumK), spike_cusum_h: n(row.spikeCusumH),
       spike_min_qty: n(row.spikeMinQty), spike_cooldown_hours: Number(row.spikeCooldownHours),
       auto_replan: !!row.autoReplan, engine_enabled: !!row.engineEnabled,
+      refit_cadence_days: Number(row.refitCadenceDays),
     };
   }
 
@@ -111,6 +113,7 @@ export class ScmExtractService {
       spikeCooldownHours: Math.round(num('spike_cooldown_hours', 1, 720, cur.spike_cooldown_hours)),
       autoReplan: dto.auto_replan === undefined ? cur.auto_replan : !!dto.auto_replan,
       engineEnabled: dto.engine_enabled === undefined ? cur.engine_enabled : !!dto.engine_enabled,
+      refitCadenceDays: Math.round(num('refit_cadence_days', 1, 90, cur.refit_cadence_days)),
       updatedBy: user.username, updatedAt: new Date(),
     };
     const [existing] = user.tenantId != null

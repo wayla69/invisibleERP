@@ -104,6 +104,11 @@
           "promo",
           "price"
         ]
+      },
+      "fitted_state": {
+        "params": "{\"__note__\":\"opaque serialized prophet fit; schema-parity fixture only\"}",
+        "fit_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "fit_wape": 0.14
       }
     },
     {
