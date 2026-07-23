@@ -3,6 +3,7 @@ import { FactLayerService } from './fact-layer.service';
 import { PropensityService } from './propensity.service';
 import { SegmentChannelRoiService } from './segment-channel-roi.service';
 import { NbaOrchestratorService } from './nba-orchestrator.service';
+import { CampaignStudioService } from './campaign-studio.service';
 import { MarketingActivationController } from './marketing-activation.controller';
 import { MarketingIntelModule } from '../marketing-intel/marketing-intel.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
@@ -17,11 +18,12 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
 // MMM channel ROI + the MKT-17 budget-plan maker-checker path. DRIZZLE is global. A read/scoring model —
 // no new GL, no new spend path (staging delegates to the existing MKT-17 control). Phase 3 adds ② NBA
 // Orchestrator (MKT-22) — staged per-customer journeys with maker-checker activation; CampaignsModule
-// provides the consent-gated draft path (audience:'members').
+// provides the consent-gated draft path (audience:'members'). Phase 4 adds ① AI Campaign Studio (MKT-21) —
+// fact-grounded generative campaign drafts with a logged model card; it reuses the Fact Layer + CampaignsModule.
 @Module({
   imports: [MarketingIntelModule, AnalyticsModule, MenuModule, CampaignsModule],
   controllers: [MarketingActivationController],
-  providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService],
-  exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService],
+  providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService],
+  exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService],
 })
 export class MarketingActivationModule {}

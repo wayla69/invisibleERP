@@ -1204,6 +1204,26 @@ async function main() {
   const nbaJrows = await db.select().from(s.miJourneys);
   ok('NBA ②: staged journeys are tenant-scoped (cf2 only)', nbaJrows.length >= 2 && nbaJrows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${nbaJrows.length} tenants=${[...new Set(nbaJrows.map((r: any) => Number(r.tenantId)))].join(',')}`);
 
+  // ── Marketing Activation — ① AI CAMPAIGN STUDIO (docs/61 Phase 4, control MKT-21, migration 0471). Generate
+  //    a FACT-GROUNDED campaign draft for 'NbaSeg' (5 members, dominant NBA UPSELL, best channel from MMM),
+  //    then stage it as a consent-gated DRAFT while LOGGING the model card. Nothing is sent. ──
+  const gen = await inj('GET', '/api/marketing-activation/studio/generate/NbaSeg', cf2admin);
+  ok('Studio ①: generates a fact-grounded draft (channel/send-hour/th+en copy) from the segment fact sheet', gen.status === 200 && gen.json.draft?.audience === 'mi_segment' && typeof gen.json.draft?.subject_th === 'string' && typeof gen.json.draft?.subject_en === 'string' && gen.json.draft?.channel != null && gen.json.model === 'studio-template-v1', `${gen.status} ${JSON.stringify({ ch: gen.json.draft?.channel, hour: gen.json.draft?.send_hour, model: gen.json.model })}`);
+  ok('Studio ①: the prompt is retrieval-grounded (the segment + its facts are IN the prompt, not hallucinated)', gen.status === 200 && typeof gen.json.prompt === 'string' && gen.json.prompt.includes('NbaSeg') && /ground/i.test(gen.json.prompt) && gen.json.facts?.count === 5, `${(gen.json.prompt ?? '').slice(0, 40)}… count=${gen.json.facts?.count}`);
+
+  const genStage = await inj('POST', '/api/marketing-activation/studio/stage', cf2admin, { segment: 'NbaSeg' });
+  ok('Studio ①: staging creates a consent-gated campaign DRAFT + logs the model card (never auto-sends)', (genStage.status === 200 || genStage.status === 201) && genStage.json.status === 'draft' && typeof genStage.json.gen_no === 'string' && genStage.json.campaign_id != null, `${genStage.status} ${JSON.stringify({ g: genStage.json.gen_no, camp: genStage.json.campaign_id, st: genStage.json.status })}`);
+  const genList = await inj('GET', '/api/marketing-activation/studio/generations', cf2admin);
+  ok('Studio ①: the generation (model card) is logged + listable', genList.status === 200 && (genList.json.generations ?? []).some((g: any) => g.gen_no === genStage.json.gen_no && g.model === 'studio-template-v1' && g.segment === 'NbaSeg'), `${genList.status} n=${(genList.json.generations ?? []).length}`);
+
+  const genEmpty = await inj('GET', '/api/marketing-activation/studio/generate/NoSuchSeg', cf2admin);
+  ok('Studio ①: an empty segment → 400 SEGMENT_EMPTY (no draft grounded on nothing)', genEmpty.status === 400 && genEmpty.json.error?.code === 'SEGMENT_EMPTY', `${genEmpty.status} ${genEmpty.json.error?.code}`);
+  const genForbidden = await inj('GET', '/api/marketing-activation/studio/generate/NbaSeg', token2);
+  ok('Studio ①: a non-marketing/exec principal is refused (403)', genForbidden.status === 403, `${genForbidden.status}`);
+
+  const genRows = await db.select().from(s.miCampaignGenerations);
+  ok('Studio ①: logged generations are tenant-scoped (cf2 only)', genRows.length >= 1 && genRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${genRows.length} tenants=${[...new Set(genRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

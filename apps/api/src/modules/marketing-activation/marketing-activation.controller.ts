@@ -4,6 +4,7 @@ import { FactLayerService } from './fact-layer.service';
 import { PropensityService } from './propensity.service';
 import { SegmentChannelRoiService } from './segment-channel-roi.service';
 import { NbaOrchestratorService, type JourneyOpts } from './nba-orchestrator.service';
+import { CampaignStudioService } from './campaign-studio.service';
 
 const qintOpt = (v?: string): number | undefined => {
   if (v == null || v === '') return undefined;
@@ -21,6 +22,7 @@ export class MarketingActivationController {
     private readonly propensity: PropensityService,
     private readonly segChannel: SegmentChannelRoiService,
     private readonly nba: NbaOrchestratorService,
+    private readonly studio: CampaignStudioService,
   ) {}
 
   @Get('facts/customer/:code')
@@ -113,5 +115,25 @@ export class MarketingActivationController {
   @Permissions('marketing', 'exec', 'crm_campaign')
   nbaActivate(@Body() body: { journey_no: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
     return this.nba.activateJourney(u, body ?? { journey_no: '' });
+  }
+
+  // ① AI Campaign Studio — generate a fact-grounded campaign draft for a segment (advisory, not sent).
+  @Get('studio/generate/:segment')
+  @Permissions('marketing', 'exec')
+  studioGenerate(@Param('segment') segment: string, @CurrentUser() u: JwtUser) {
+    return this.studio.generate(u, segment);
+  }
+
+  // ① AI Campaign Studio — STAGE the generated copy as a consent-gated campaign DRAFT + log the model card.
+  @Post('studio/stage')
+  @Permissions('marketing', 'exec', 'crm_campaign')
+  studioStage(@Body() body: { segment: string; channel?: string; body_th?: string; body_en?: string; name?: string }, @CurrentUser() u: JwtUser) {
+    return this.studio.stageDraft(u, body ?? { segment: '' });
+  }
+
+  @Get('studio/generations')
+  @Permissions('marketing', 'exec')
+  studioGenerations(@CurrentUser() u: JwtUser) {
+    return this.studio.listGenerations(u);
   }
 }

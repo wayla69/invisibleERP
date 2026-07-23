@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 310,
+    "total": 311,
     "by_status": {
-      "Implemented": 307,
+      "Implemented": 308,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 32,
+      "CRM — Loyalty": 33,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2600,6 +2600,25 @@
       "tod": "Inspect the pure deterministic scorer + its unit tests, the server-side suppression (consent/recent-purchase) recorded per target, the Pending-until-activated status + the approver!=requester maker-checker, the treatment-only consent-gated draft (control never contacted), and the tenant_id filter/RLS on the journeys + targets.",
       "toe": "Re-perform (ext harness, 8 MKT-22 checks): preview ranks eligible customers by expected value (a high-churn VIP first) and suppresses no-consent/no-action/recent-purchase with the reason recorded; staging persists a Pending journey (nothing contacted); a DIFFERENT user activates it -> Active + a consent-gated draft for the treatment arm only; the requester's self-activation is rejected SOD_SELF_APPROVAL; a non-marketing principal -> 403; journeys are tenant-scoped.",
       "evidence": "mi_journeys + mi_journey_targets (targets, arms, suppression reasons); the pure scorer + its unit tests; the maker-checker activation; the treatment-only consent-gated draft",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-21",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "An AI-generated marketing campaign is SENT automatically without human review; or the copy is hallucinated / not grounded in the segment's real facts; or there is no record of what facts + model produced a campaign; or a non-consented member is contacted; or one tenant's generated drafts / model cards surface for another tenant.",
+      "assertion": "Occurrence/Accuracy/Authorization",
+      "description": "AI Campaign Studio (docs/61 Phase 4, MKT-21): generate a FACT-GROUNDED campaign — audience, channel, send-time, offer, th/en copy — from a segment FACT SHEET (size, avg CLV, dominant next-best-action, best channel by MMM ROI, modal send-hour). The fact sheet is fed to the generator as RETRIEVAL-GROUNDED context (facts IN the prompt, not hallucinated); the pure deterministic generator is campaign-studio.ts (unit-tested test/campaign-studio.test.ts), and a live LLM can be swapped behind the same fact sheet + prompt without changing the control. ADVISORY / DRAFT-ONLY: GET /studio/generate/:segment returns the draft + model card and contacts NO ONE; POST /studio/stage creates a consent-gated campaign DRAFT (loyalty_campaigns.status='draft', audience mi_segment) — the actual SEND stays the existing consent-gated, maker-checker campaign flow (nothing auto-sends). Every generation LOGS the model card (fact sheet + prompt + model + produced draft) to mi_campaign_generations as ICFR evidence. Reads the Fact Layer segment roll-up + a customer_profiles aggregation (no cross-domain join). Gated to marketing/exec (generate), crm_campaign (stage); mi_campaign_generations tenant-scoped (canonical 0232 org-clause RLS + leading tenant index, migration 0471). A read/generation model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per generation",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-activation/campaign-studio.ts (pure buildPrompt/draftCampaign — unit-tested test/campaign-studio.test.ts, 8 checks); campaign-studio.service.ts (generate/stageDraft/listGenerations; fact sheet from FactLayerService + a customer_profiles modal-hour aggregation; consent-gated draft via CampaignsService; model card logged); marketing-activation.controller.ts GET studio/generate/:segment + POST studio/stage + GET studio/generations; schema/marketing-intel.ts mi_campaign_generations + migration 0471 (canonical RLS, tenant-leading index); cutover/ext.ts (MKT-21 ToE, 7 checks)",
+      "tod": "Inspect the pure deterministic generator + its unit tests, the retrieval-grounded prompt (facts in, not hallucinated), the DRAFT-only output (send stays the existing consent-gated maker-checker flow), the logged model card (fact sheet + prompt + model), and the tenant_id filter/RLS on the generations.",
+      "toe": "Re-perform (ext harness, 7 MKT-21 checks): generate produces a fact-grounded draft (channel/send-hour/th+en copy) whose prompt embeds the segment + its facts; staging creates a consent-gated campaign DRAFT (never auto-sent) + logs the model card, which is listable; an empty segment -> SEGMENT_EMPTY; a non-marketing principal -> 403; generations are tenant-scoped.",
+      "evidence": "mi_campaign_generations model cards (fact sheet + prompt + model + draft + campaign_id); the pure generator + its unit tests; the DRAFT-only consent-gated output",
       "status": "Implemented"
     },
     {

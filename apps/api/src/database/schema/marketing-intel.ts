@@ -151,3 +151,27 @@ export const miJourneyTargets = pgTable('mi_journey_targets', {
   byMember: uniqueIndex('ux_mi_journey_targets_member').on(t.tenantId, t.journeyId, t.memberId),
   byArm: index('idx_mi_journey_targets_tenant').on(t.tenantId, t.journeyId, t.arm),
 }));
+
+// AI Campaign Studio (docs/61 Phase 4 / control MKT-21, migration 0471). Records every fact-grounded
+// campaign GENERATION as ICFR/model-card evidence: the segment fact sheet it was grounded in, the prompt,
+// the model used, and the produced draft — so an auditor can see exactly what facts + model produced a
+// campaign and that the output was DRAFT-only (never auto-sent). The produced artifact is a consent-gated
+// campaign DRAFT (loyalty_campaigns.status='draft'); the actual send stays the existing consent-gated,
+// maker-checker campaign flow. Read/generation model — no GL posting.
+export const miCampaignGenerations = pgTable('mi_campaign_generations', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  genNo: text('gen_no').notNull(),                           // GEN-YYYYMMDD-NNN
+  segment: text('segment'),
+  channel: text('channel'),
+  model: text('model').notNull().default('studio-template-v1'), // the model that produced the copy
+  prompt: text('prompt'),                                    // the retrieval-grounded prompt (facts in, not hallucinated)
+  facts: jsonb('facts'),                                     // the segment fact sheet the draft was grounded in
+  draft: jsonb('draft'),                                     // the produced draft (audience, channel, hour, offer, th/en copy)
+  campaignId: bigint('campaign_id', { mode: 'number' }),     // the consent-gated campaign DRAFT created (null = preview only)
+  requestedBy: text('requested_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_mi_gen_tenant').on(t.tenantId, t.createdAt),
+  byNo: uniqueIndex('ux_mi_gen_no').on(t.tenantId, t.genNo),
+}));
