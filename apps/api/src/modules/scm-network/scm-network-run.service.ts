@@ -10,6 +10,7 @@ import type { JwtUser } from '../../common/decorators';
 import { ScmEngineClientService } from '../scm-planning/scm-engine-client.service';
 import { ScmNetworkExtractService, type NetworkExtract } from './scm-network-extract.service';
 import { ScmAllocationService, type AllocInput, type AllocLine, type AllocMethod } from './scm-allocation.service';
+import { drpRollup, daysBetweenYmd, type DrpNodeInput } from './scm-drp.service';
 
 interface AllocPolicy { method: AllocMethod; priorities: Record<string, number> }
 
@@ -80,6 +81,10 @@ export class ScmNetworkRunService {
     const { nodePlans, pooling, allocations, engineName } = useEngine
       ? await this.fromEngine(ex, policy)
       : this.fromFallback(ex, policy);
+
+    // docs/57 B4 — DRP: time-phase each node's orders (net requirements offset by lead, moq/pack lot-
+    // sized) and roll branch releases up into the DC's gross requirements → supplier-facing releases.
+    ScmNetworkRunService.applyDrp(ex, nodePlans);
 
     // Trust boundary (docs/57 §4.2): a rationing set must be non-negative and never over-issue the DC.
     if (allocations.length && ex.dcNodeCode) {
@@ -182,6 +187,51 @@ export class ScmNetworkRunService {
     }
     // No pooling in the fallback: independent == pooled, benefit 0 (honest — docs/57 §9).
     return { nodePlans, pooling: { independent: sumBranchSafety, pooled: sumBranchSafety, benefitPct: 0 }, allocations, engineName: 'fallback' };
+  }
+
+  /**
+   * docs/57 B4 — time-phase the plan's orders via DRP. Each node's gross requirement is its per-day
+   * demand (branches) or the rolled-up branch releases (the DC); netting against on-hand + in-transit,
+   * lot-sizing to the inbound lane's moq/pack, and offsetting the receipt back by the lane lead gives a
+   * time-phased release schedule. Overwrites each node plan's `orders` (and `orderQty` = Σ releases).
+   */
+  private static applyDrp(ex: NetworkExtract, nodePlans: NodePlan[]): void {
+    if (!ex.dcNodeCode) return;
+    const H = ex.request.horizon_days;
+    const start = ymd();
+    const laneByTo = new Map(ex.request.lanes.map((l) => [l.to_node, l]));
+    const nodeByCode = new Map(ex.request.nodes.map((n) => [n.node_id, n]));
+    const schedFor = (nodeCode: string): number[] => {
+      const arr = new Array(H).fill(0);
+      for (const it of nodeByCode.get(nodeCode)?.in_transit ?? []) {
+        const t = daysBetweenYmd(start, it.arrival_ds);
+        if (t >= 0 && t < H) arr[t] += it.qty;
+      }
+      return arr;
+    };
+    const nodeInput = (nodeCode: string, grossReq: number[]): DrpNodeInput => {
+      const lane = laneByTo.get(nodeCode);
+      return {
+        nodeCode, grossReq,
+        onHand: ScmNetworkRunService.onHand(nodeByCode.get(nodeCode)?.current_inventory ?? []),
+        schedReceipts: schedFor(nodeCode),
+        leadDays: ex.laneLeadByNode.get(nodeCode) ?? 0,
+        moq: ScmNetworkRunService.num(lane?.moq), pack: ScmNetworkRunService.num(lane?.pack_size) || 1,
+      };
+    };
+    const branchInputs = ex.request.nodes
+      .filter((n) => n.echelon === 2)
+      .map((n) => nodeInput(n.node_id, Array.from({ length: H }, () => ex.statsByNode.get(n.node_id)?.mu ?? 0)));
+
+    const { byNode } = drpRollup(
+      start, H, branchInputs,
+      (grossReq) => nodeInput(ex.dcNodeCode!, grossReq),
+      ex.dcNodeCode, ex.supplierNodeCode ?? 'SUP',
+    );
+    for (const np of nodePlans) {
+      const rel = byNode.get(np.nodeCode);
+      if (rel) { np.orders = rel; np.orderQty = rel.reduce((a, r) => a + r.qty, 0); }
+    }
   }
 
   private static clampQty(raw: number, mu: number, factor: number): number {
