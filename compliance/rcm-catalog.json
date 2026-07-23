@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 314,
+    "total": 315,
     "by_status": {
-      "Implemented": 311,
+      "Implemented": 312,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 34,
+      "CRM — Loyalty": 35,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2638,6 +2638,25 @@
       "tod": "Inspect the hard offer cap enforced in the pure core, the maker-checker on the policy (approver!=requester), the no-run-without-active-policy gate, the holdout arm (control gets no offer), the consent-gated draft-only run, and the tenant_id filter/RLS on policies + runs.",
       "toe": "Re-perform (ext harness, 9 MKT-24 checks): a non-positive cap -> INVALID_OFFER_CAP; no sweep without an approved policy -> NO_ACTIVE_POLICY; a staged policy is Pending; a DIFFERENT user approves it -> Active; the requester's self-approval -> SOD_SELF_APPROVAL; the preview sweeps at-risk savers and CAPS every offer (>=1 at the cap) and nets saved-cost; staging a run records the P&L + a consent-gated draft for the treatment arm; a non-marketing principal -> 403; policies + runs are tenant-scoped.",
       "evidence": "mi_save_policies (capped, maker-checker approved) + mi_save_runs (retention P&L); the pure offer cap + its unit tests; the holdout control arm; the consent-gated draft-only run",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-26",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "An APPROVED marketing budget plan is never reconciled against the actual per-channel spend and its returns — money quietly drifts from the authorised allocation (unplanned channels get spend, planned channels go unspent) and sustained misallocation goes unnoticed; or a reconciliation is claimed without an actuals source; or one tenant's backtest reads another tenant's plans or spend.",
+      "assertion": "Accuracy/Completeness",
+      "description": "Plan-vs-Actual Budget Backtest (docs/62 Phase 2, MKT-26 — DETECTIVE): every APPROVED mi_budget_plans allocation can be reconciled against the ACTUAL per-channel marketing spend — the latest MMM model run's recorded spend (mmm_channel_results, read through the owning MmmModelService.latestSummary; actuals_basis 'mmm_run') or, when no run exists, the platform-pushed MMM snapshot's channel spend (actuals_basis 'pushed'). The variance table is the PURE, deterministic plan-backtest.ts core (unit-tested test/plan-backtest.test.ts): per channel planned vs actual, variance and variance%, a FLAG when |variance| exceeds the tolerance (default 20% of planned; UNPLANNED spend — planned 0, actual > 0 — always flags), adherence% = 100 - sum|variance|/planned_total, and the channel's realized ROI for context. FAIL-HONEST: a non-Approved plan cannot be reconciled (PLAN_NOT_APPROVED) and no actuals source at all -> NO_ACTUALS — a backtest never invents a baseline. Surfaced as GET /api/marketing-intel/budget-plan/:planNo/backtest (marketing/exec) and the schedulable DETECTIVE report mkt_plan_backtest (marketing-intel-bi-reports.ts, registry-first; sweeps every Approved plan, lists the flagged ones; read-only + idempotent, ITGC-OP-04 alerting rides the scheduler). Read-only throughout — nothing moves money; re-allocation stays the MKT-17 maker-checker plan flow. Tenant-scoped (explicit tenant_id filters + canonical RLS on mi_budget_plans and the MMM tables).",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per backtest / scheduled",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-intel/plan-backtest.ts (pure computePlanBacktest — unit-tested test/plan-backtest.test.ts, 8 checks); mi-backtest.service.ts (backtestPlan Approved-only + NO_ACTUALS fail-honest; backtestAllApproved sweep; actuals via MmmModelService.latestSummary or the pushed snapshot); marketing-intel.controller.ts GET budget-plan/:planNo/backtest; marketing-intel-bi-reports.ts mkt_plan_backtest (BiReportSource); report-registry.ts mkt_plan_backtest; cutover/ext.ts + cutover/mmm.ts (MKT-26 ToE)",
+      "tod": "Inspect the pure variance/adherence/flag math + its unit tests, the Approved-only + NO_ACTUALS fail-honest guards, the two actuals bases (MMM run first, pushed snapshot fallback) with the basis recorded on the result, the read-only surfaces, and the tenant scoping.",
+      "toe": "Re-perform (ext + mmm harnesses): backtesting the approved plan returns per-channel planned/actual/variance rows with the actuals basis recorded and a deliberately-divergent channel FLAGGED; a Pending plan -> PLAN_NOT_APPROVED; adherence reflects sum|variance|; against a real MMM run the variances match the run's recorded spend exactly; a non-marketing principal -> 403.",
+      "evidence": "the pure backtest core + its unit tests; the per-plan variance tables (basis + flags); the schedulable mkt_plan_backtest report output",
       "status": "Implemented"
     },
     {

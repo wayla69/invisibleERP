@@ -176,6 +176,9 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   mkt_nba_autostage: { label: 'จัดแผน NBA อัตโนมัติ (รอเปิดใช้งาน)', labelEn: 'Auto-stage NBA journey (awaits activation)' },
   mkt_save_autostage: { label: 'จัดรอบรักษาลูกค้าอัตโนมัติ (ตามนโยบาย)', labelEn: 'Auto-stage churn-save sweep (per policy)' },
   mkt_measure_windows: { label: 'วัดผลการตลาดเมื่อครบกำหนด (lift จริง)', labelEn: 'Measure elapsed marketing windows (realized lift)' },
+  // docs/62 Phase 2 — MKT-26 (detective): reconcile every APPROVED marketing budget plan against actual
+  // per-channel spend (MMM run / pushed snapshot); flags variances. Read-only, idempotent.
+  mkt_plan_backtest: { label: 'ตรวจสอบแผนงบเทียบจ่ายจริง (MKT-26)', labelEn: 'Budget plan vs actual backtest' },
 };
 export const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 

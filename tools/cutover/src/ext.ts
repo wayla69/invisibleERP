@@ -1378,6 +1378,27 @@ async function main() {
   const autoRuns2 = (await db.select().from(s.miSaveRuns)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
   ok('Autopilot ④: a re-run stages NOTHING while the auto run is unmeasured (one-in-flight idempotency)', autoRuns2.length === 1, `auto=${autoRuns2.length}`);
 
+  // ── Marketing Activation — docs/62 Phase 2: OFFER-LEVEL ⑤ CELLS + PLAN-VS-ACTUAL BACKTEST (MKT-26). ──
+  // ⑤ cells now carry the segment's top un-bought products from ③ (the AFF-A → AFF-B 'Croissant' basis;
+  // NBA-1 owns AFF-A) and the response carries the message_log deliverability read. Offers never touch
+  // the allocation math (asserted structurally: allocation still sums to the budget — the earlier check).
+  const offerRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
+  const offerCell = (offerRoi.json.cells ?? []).find((c: any) => c.segment === 'NbaSeg');
+  ok('Offer ⑤: cells carry the segment\'s top un-bought offer from ③ (Croissant via the AFF-A driver)', offerRoi.status === 200 && offerCell?.offer === 'Croissant' && Array.isArray(offerCell?.top_offers) && offerCell.top_offers[0]?.item_id === 'AFF-B', `offer=${JSON.stringify(offerCell?.offer)} top=${JSON.stringify((offerCell?.top_offers ?? []).map((o: any) => o.item_id))}`);
+  ok('Offer ⑤: the response carries the message_log deliverability read (owning CampaignsService read)', offerRoi.json.delivery != null && Array.isArray(offerRoi.json.delivery.outcomes), `outcomes=${JSON.stringify((offerRoi.json.delivery?.outcomes ?? []).length)}`);
+
+  // MKT-26 — backtest the APPROVED ⑤ plan against the PUSHED MMM snapshot spend (facebook 30000, tiktok 0).
+  const btOk = await inj('GET', `/api/marketing-intel/budget-plan/${scStage.json.plan_no}/backtest`, cf2admin);
+  const btRows: any[] = btOk.json.rows ?? [];
+  const btFb = btRows.find((r: any) => r.channel === 'facebook');
+  const btConsistent = btRows.every((r: any) => Math.abs(Number(r.variance) - (Number(r.actual) - Number(r.planned))) < 0.01);
+  ok('MKT-26: backtesting the APPROVED plan reconciles per-channel planned vs actual (pushed-snapshot basis)', btOk.status === 200 && btOk.json.actuals_basis === 'pushed' && btRows.length >= 1 && btFb != null && Number(btFb.actual) === 30000 && btConsistent, `${btOk.status} basis=${btOk.json.actuals_basis} rows=${btRows.length} fb=${JSON.stringify({ p: btFb?.planned, a: btFb?.actual })}`);
+  ok('MKT-26: adherence + flags are internally consistent (flagged rows counted; adherence ∈ [0,100])', Number(btOk.json.flagged_count) === btRows.filter((r: any) => r.flag).length && Number(btOk.json.adherence_pct) >= 0 && Number(btOk.json.adherence_pct) <= 100, `adh=${btOk.json.adherence_pct} flagged=${btOk.json.flagged_count}`);
+  const btPending = await inj('GET', `/api/marketing-intel/budget-plan/${scStage2.json.plan_no}/backtest`, cf2admin);
+  ok('MKT-26: a Pending (unapproved) plan cannot be "reconciled" (PLAN_NOT_APPROVED — fail-honest)', btPending.status === 400 && btPending.json.error?.code === 'PLAN_NOT_APPROVED', `${btPending.status} ${btPending.json.error?.code}`);
+  const btForbidden = await inj('GET', `/api/marketing-intel/budget-plan/${scStage.json.plan_no}/backtest`, token2);
+  ok('MKT-26: a non-marketing/exec principal is refused (403)', btForbidden.status === 403, `${btForbidden.status}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

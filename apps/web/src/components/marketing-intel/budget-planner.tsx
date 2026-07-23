@@ -3,7 +3,7 @@
 // boundary (keeps the use-client ratchet flat — same pattern as pos/exchange-dialog.tsx).
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Wand2, Wallet, TrendingUp, Megaphone, Check, Sparkles, Info } from 'lucide-react';
+import { Wand2, Wallet, TrendingUp, Megaphone, Check, Sparkles, Info, Scale, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -70,6 +70,15 @@ export function BudgetPlanner() {
 
   const setChannel = (channel: string, v: number) => setAlloc((a) => ({ ...a, [channel]: v }));
   const plans: any[] = Array.isArray(plansQ.data?.plans) ? plansQ.data!.plans : [];
+
+  // docs/62 Phase 2 (MKT-26, detective) — reconcile an APPROVED plan against actual per-channel spend.
+  const [backtestPlanNo, setBacktestPlanNo] = useState<string | null>(null);
+  const backtestQ = useQuery<any>({
+    queryKey: ['marketing-intel', 'backtest', backtestPlanNo],
+    queryFn: () => api(`/api/marketing-intel/budget-plan/${encodeURIComponent(backtestPlanNo!)}/backtest`),
+    enabled: !!backtestPlanNo,
+    retry: false,
+  });
 
   return (
     <StateView q={q}>
@@ -178,13 +187,54 @@ export function BudgetPlanner() {
                         <span className="ml-2 text-xs text-muted-foreground">{t('mi.bp_by')} {p.requested_by}{approved && p.approved_by ? ` · ✓ ${p.approved_by}` : ''}</span>
                       </div>
                       {approved ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-semibold shadow-sm" style={softText('var(--chart-3)')}>
-                          <Check className="size-3.5" /> {t('mi.bp_approve')}d
+                        <span className="inline-flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-semibold shadow-sm" style={softText('var(--chart-3)')}>
+                            <Check className="size-3.5" /> {t('mi.bp_approve')}d
+                          </span>
+                          <Button size="sm" variant="outline" className="bg-background/60" onClick={() => setBacktestPlanNo(backtestPlanNo === p.plan_no ? null : p.plan_no)}>
+                            <Scale className="size-3.5" /> {t('mi.bt_open')}
+                          </Button>
                         </span>
                       ) : (
                         <Button size="sm" variant="outline" className="bg-background/60" disabled={approve.isPending} onClick={() => approve.mutate(p.plan_no)}>
                           <Check className="size-4" /> {t('mi.bp_approve')}
                         </Button>
+                      )}
+                      {/* docs/62 (MKT-26): planned vs ACTUAL per-channel spend — variances are findings, nothing moves money. */}
+                      {backtestPlanNo === p.plan_no && (
+                        <div className="w-full rounded-lg border bg-background/60 p-3">
+                          {backtestQ.isLoading ? (
+                            <p className="text-xs text-muted-foreground">…</p>
+                          ) : backtestQ.error ? (
+                            <p className="text-xs text-muted-foreground">
+                              {(backtestQ.error as any)?.body?.error?.code === 'NO_ACTUALS' ? t('mi.bt_no_actuals') : ((backtestQ.error as any)?.message ?? 'error')}
+                            </p>
+                          ) : backtestQ.data ? (
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-3 text-xs">
+                                <span className="font-semibold">{t('mi.bt_adherence')}: <span className="tabular-nums" style={softText(Number(backtestQ.data.adherence_pct) >= 80 ? 'var(--chart-3)' : 'var(--chart-1)')}>{num(backtestQ.data.adherence_pct, 1)}%</span></span>
+                                <span className="text-muted-foreground">{t('mi.bt_basis')}: {String(backtestQ.data.actuals_basis)}{backtestQ.data.actuals_ref ? ` (${backtestQ.data.actuals_ref})` : ''}</span>
+                                {Number(backtestQ.data.flagged_count) > 0 && (
+                                  <span className="inline-flex items-center gap-1 font-semibold text-destructive"><AlertTriangle className="size-3.5" /> {t('mi.bt_flagged', { n: num(backtestQ.data.flagged_count) })}</span>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                {(backtestQ.data.rows ?? []).map((r: any) => (
+                                  <div key={String(r.channel)} className={`flex flex-wrap items-center gap-2 rounded-md px-2 py-1 text-xs tabular-nums ${r.flag ? 'bg-destructive/10' : ''}`}>
+                                    <span className="w-20 font-medium">{String(r.channel)}</span>
+                                    <span className="text-muted-foreground">{t('mi.bt_planned')} {thb(r.planned)}</span>
+                                    <span className="text-muted-foreground">→ {t('mi.bt_actual')} {thb(r.actual)}</span>
+                                    <span className={`font-semibold ${Number(r.variance) === 0 ? '' : Number(r.variance) > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                                      {Number(r.variance) >= 0 ? '+' : ''}{thb(r.variance)}{r.variance_pct != null ? ` (${num(r.variance_pct, 1)}%)` : ''}
+                                    </span>
+                                    {r.flag && <AlertTriangle className="size-3 text-destructive" />}
+                                  </div>
+                                ))}
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">{t('mi.bt_note')}</p>
+                            </div>
+                          ) : null}
+                        </div>
                       )}
                     </div>
                   );

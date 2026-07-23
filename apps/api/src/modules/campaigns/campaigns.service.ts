@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, and, desc, inArray, lte } from 'drizzle-orm';
+import { eq, and, desc, inArray, lte, gte, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
@@ -25,6 +25,47 @@ export class CampaignsService {
   private tid(user: JwtUser): number {
     if (user.tenantId == null) throw new BadRequestException({ code: 'NO_TENANT', message: 'No tenant context', messageTh: 'ไม่พบบริบทร้านค้า' });
     return user.tenantId;
+  }
+
+  // docs/62 Phase 2 — the OWNING outcome read over message_log (the per-recipient send audit): delivery
+  // counts per campaign for downstream advisory surfaces (⑤'s deliverability signal). Read-only,
+  // tenant-scoped; inbound 'received' rows are not sends and are excluded. delivery_rate = the share of
+  // ATTEMPTED sends (sent+delivered+failed+undelivered) that got through — 'skipped' (consent/no-contact)
+  // is reported separately, never hidden inside the rate.
+  async outcomeSummary(user: JwtUser, q: { codes?: string[]; since_days?: number; limit?: number } = {}) {
+    const db = this.db; const tenantId = this.tid(user);
+    const sinceDays = Math.min(Math.max(Number(q.since_days ?? 90) || 90, 1), 365);
+    const since = new Date(Date.now() - sinceDays * 86400_000);
+    const conds: any[] = [eq(messageLog.tenantId, tenantId), gte(messageLog.createdAt, since), isNotNull(messageLog.campaign)];
+    if (q.codes?.length) conds.push(inArray(messageLog.campaign, q.codes));
+    const rows = await db.select({ campaign: messageLog.campaign, status: messageLog.status, n: sql<number>`count(*)::int` })
+      .from(messageLog).where(and(...conds)).groupBy(messageLog.campaign, messageLog.status);
+
+    const byCamp = new Map<string, { sent: number; delivered: number; failed: number; undelivered: number; skipped: number }>();
+    for (const r of rows) {
+      const code = String(r.campaign);
+      const st = String(r.status);
+      if (st === 'received') continue; // inbound, not a send outcome
+      let g = byCamp.get(code);
+      if (!g) { g = { sent: 0, delivered: 0, failed: 0, undelivered: 0, skipped: 0 }; byCamp.set(code, g); }
+      if (st === 'sent') g.sent += Number(r.n) || 0;
+      else if (st === 'delivered') g.delivered += Number(r.n) || 0;
+      else if (st === 'failed') g.failed += Number(r.n) || 0;
+      else if (st === 'undelivered') g.undelivered += Number(r.n) || 0;
+      else if (st === 'skipped') g.skipped += Number(r.n) || 0;
+    }
+    const limit = Math.min(Math.max(Number(q.limit ?? 50) || 50, 1), 200);
+    const outcomes = Array.from(byCamp.entries())
+      .map(([campaign, g]) => {
+        const attempted = g.sent + g.delivered + g.failed + g.undelivered;
+        return {
+          campaign, ...g, attempted,
+          delivery_rate: attempted > 0 ? Math.round(((g.sent + g.delivered) / attempted) * 10000) / 100 : null,
+        };
+      })
+      .sort((a, b) => b.attempted - a.attempted || a.campaign.localeCompare(b.campaign))
+      .slice(0, limit);
+    return { since_days: sinceDays, outcomes, note: 'Delivery outcomes from the message_log send audit (advisory). skipped = consent/no-contact, never counted against the rate.' };
   }
 
   async listCampaigns(user: JwtUser, q: { status?: string } = {}) {
