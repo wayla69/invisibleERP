@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Network, Waypoints, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Network, Waypoints, CheckCircle2, AlertTriangle, PlayCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -32,12 +32,17 @@ interface Topology {
   validation: { ok: boolean; issues: TopoIssue[]; reachableBranches: string[] };
 }
 
+interface PlanRow {
+  id: number; planNo: string; itemCode: string; status: string; engine: string;
+  poolingBenefitPct: string | null; estTotalCost: string; prNo: string | null;
+}
+
 const KINDS = ['supplier', 'central_kitchen', 'dc', 'branch'] as const;
 
 export default function NetworkPage() {
   const { t } = useLang();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'nodes' | 'lanes'>('nodes');
+  const [tab, setTab] = useState<'nodes' | 'lanes' | 'plans'>('nodes');
 
   const topo = useQuery<Topology>({
     queryKey: ['scm-network', 'topology'],
@@ -99,6 +104,24 @@ export default function NetworkPage() {
     onError: (e: any) => notifyError(e.message),
   });
 
+  // ── plans (B2b, control SCM-05) ──
+  const plans = useQuery<PlanRow[]>({
+    queryKey: ['scm-network', 'plans'],
+    queryFn: () => api('/api/scm-network/plans'),
+    enabled: tab === 'plans',
+  });
+  const [pItem, setPItem] = useState('');
+  const invalidatePlans = () => qc.invalidateQueries({ queryKey: ['scm-network', 'plans'] });
+  const onErr = (e: any) => notifyError(e.message);
+  const runPlan = useMutation({
+    mutationFn: () => api('/api/scm-network/plans/run', { method: 'POST', body: JSON.stringify({ item_code: pItem.trim() }) }),
+    onSuccess: () => { setPItem(''); invalidatePlans(); },
+    onError: onErr,
+  });
+  const submitPlan = useMutation({ mutationFn: (id: number) => api(`/api/scm-network/plans/${id}/submit`, { method: 'POST' }), onSuccess: invalidatePlans, onError: onErr });
+  const approvePlan = useMutation({ mutationFn: (id: number) => api(`/api/scm-network/plans/${id}/approve`, { method: 'POST', body: '{}' }), onSuccess: invalidatePlans, onError: onErr });
+  const convertPlan = useMutation({ mutationFn: (id: number) => api(`/api/scm-network/plans/${id}/convert`, { method: 'POST' }), onSuccess: invalidatePlans, onError: onErr });
+
   const v = topo.data?.validation;
 
   return (
@@ -121,6 +144,9 @@ export default function NetworkPage() {
         </Button>
         <Button variant={tab === 'lanes' ? 'default' : 'outline'} size="sm" onClick={() => setTab('lanes')}>
           <Waypoints className="mr-1 h-4 w-4" />{t('scm.net_tab_lanes')}
+        </Button>
+        <Button variant={tab === 'plans' ? 'default' : 'outline'} size="sm" onClick={() => setTab('plans')}>
+          <PlayCircle className="mr-1 h-4 w-4" />{t('scm.net_tab_plans')}
         </Button>
       </div>
 
@@ -195,6 +221,39 @@ export default function NetworkPage() {
                 { key: 'moq', label: 'MOQ' },
                 { key: 'packSize', label: t('scm.net_pack') },
                 { key: 'actions', label: '', render: (r: LaneRow) => <Button variant="ghost" size="sm" onClick={() => delLane.mutate(r.id)}>{t('scm.net_btn_del')}</Button> },
+              ]}
+            />
+          </StateView>
+        </div>
+      )}
+
+      {tab === 'plans' && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader><CardTitle>{t('scm.net_run_plan')}</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="sm:col-span-2"><Label>{t('scm.net_item')}</Label><Input value={pItem} onChange={(e) => setPItem(e.target.value)} /></div>
+              <div className="flex items-end"><Button onClick={() => runPlan.mutate()} disabled={!pItem.trim() || runPlan.isPending}>{t('scm.net_btn_run')}</Button></div>
+            </CardContent>
+          </Card>
+
+          <StateView q={plans}>
+            <DataTable
+              rows={plans.data ?? []}
+              columns={[
+                { key: 'planNo', label: t('scm.net_plan_no') },
+                { key: 'itemCode', label: t('scm.net_item') },
+                { key: 'status', label: t('scm.net_status'), render: (r: PlanRow) => <Badge>{r.status}</Badge> },
+                { key: 'engine', label: 'Engine', render: (r: PlanRow) => <Badge variant="outline">{r.engine}</Badge> },
+                { key: 'poolingBenefitPct', label: t('scm.net_pooling'), render: (r: PlanRow) => (r.poolingBenefitPct ?? '—') },
+                { key: 'prNo', label: 'PR', render: (r: PlanRow) => r.prNo ?? '—' },
+                { key: 'actions', label: '', render: (r: PlanRow) => (
+                  <div className="flex gap-1">
+                    {(r.status === 'Draft' || r.status === 'Rejected') && <Button variant="ghost" size="sm" onClick={() => submitPlan.mutate(r.id)}>{t('scm.net_btn_submit')}</Button>}
+                    {r.status === 'PendingApproval' && <Button variant="ghost" size="sm" onClick={() => approvePlan.mutate(r.id)}>{t('scm.net_btn_approve')}</Button>}
+                    {r.status === 'Approved' && <Button variant="ghost" size="sm" onClick={() => convertPlan.mutate(r.id)}>{t('scm.net_btn_convert')}</Button>}
+                  </div>
+                ) },
               ]}
             />
           </StateView>
