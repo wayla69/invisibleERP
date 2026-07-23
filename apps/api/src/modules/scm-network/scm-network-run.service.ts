@@ -63,7 +63,7 @@ export class ScmNetworkRunService {
     return inv.filter((l) => l.remaining_days >= 1).reduce((a, l) => a + l.qty, 0);
   }
 
-  async run(user: JwtUser, itemCode: string): Promise<{ plan_no: string; status: string; engine: string; nodes: number; pooling_benefit_pct: number }> {
+  async run(user: JwtUser, itemCode: string): Promise<{ id: number; plan_no: string; status: string; engine: string; nodes: number; pooling_benefit_pct: number }> {
     if (!itemCode || !itemCode.trim()) throw new BadRequestException({ code: 'ITEM_REQUIRED', message: 'item_code is required' });
     const ex = await this.extract.build(user, itemCode.trim());
     const useEngine = this.engine.enabled() && ex.hasEnginePaths;
@@ -169,7 +169,7 @@ export class ScmNetworkRunService {
 
   private async persist(
     user: JwtUser, ex: NetworkExtract, nodePlans: NodePlan[], pooling: PoolingReport, allocations: unknown[], engineName: string,
-  ): Promise<{ plan_no: string; status: string; engine: string; nodes: number; pooling_benefit_pct: number }> {
+  ): Promise<{ id: number; plan_no: string; status: string; engine: string; nodes: number; pooling_benefit_pct: number }> {
     const tenantId = user.tenantId ?? null;
     const planNo = await this.docNo.nextDaily('SCMN');
     const estTotal = nodePlans.reduce((a, p) => a + p.orderQty * ex.params.unitCost, 0);
@@ -200,6 +200,6 @@ export class ScmNetworkRunService {
       })));
     }
     await this.statusLog.log('SCMN', planNo, '', 'Draft', user.username);
-    return { plan_no: planNo, status: 'Draft', engine: engineName, nodes: nodePlans.length, pooling_benefit_pct: pooling.benefitPct };
+    return { id: planId, plan_no: planNo, status: 'Draft', engine: engineName, nodes: nodePlans.length, pooling_benefit_pct: pooling.benefitPct };
   }
 }
