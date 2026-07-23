@@ -1143,6 +1143,29 @@ async function main() {
   const nboHq = await inj('GET', '/api/marketing-activation/propensity/customer/M-HQA', cf2admin);
   ok('Propensity ③: tenant-scoped — cf2 cannot score HQ member M-HQA (404)', nboHq.status === 404, `${nboHq.status}`);
 
+  // ── Marketing Activation — ⑤ SEGMENT × CHANNEL ROI (docs/61 Phase 2, control MKT-25). Extends the MKT-17
+  //    Budget Optimizer from channel to segment×channel: rank cells by incremental ROI × segment value, and
+  //    STAGE the split as a maker-checker budget plan (reusing the MKT-17 mi_budget_plans + approve path).
+  //    cf2 already has a pushed MMM (channels w/ ROI) + the GovSeg segment (M-CF2A, mi_clv 8400.5). ──
+  const scRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
+  ok('SegChannelROI ⑤: ranks segment × channel cells + splits a budget toward the best channels (advisory)', scRoi.status === 200 && Array.isArray(scRoi.json.cells) && scRoi.json.cells.length >= 1 && scRoi.json.has_mmm === true && scRoi.json.channel_allocation && Object.keys(scRoi.json.channel_allocation).length >= 1 && /MKT-25/.test(scRoi.json.note ?? ''), `${scRoi.status} ${JSON.stringify({ n: (scRoi.json.cells ?? []).length, alloc: scRoi.json.channel_allocation, basis: scRoi.json.recommendation_basis })}`);
+  const scAllocSum = Object.values((scRoi.json.channel_allocation ?? {}) as Record<string, number>).reduce((a, b) => a + Number(b), 0);
+  ok('SegChannelROI ⑤: the recommended channel allocation sums to ~the budget', Math.abs(scAllocSum - 100000) < 1, `sum=${scAllocSum}`);
+
+  // Stage the recommendation → a Pending budget plan (never posts spend); a DIFFERENT user approves it (MKT-17).
+  const scStage = await inj('POST', '/api/marketing-activation/segment-channel-roi/stage', cf2admin, { total_budget: 100000 });
+  ok('SegChannelROI ⑤: staging the split creates a Pending budget plan (reuses MKT-17, no spend posted)', scStage.status === 201 || scStage.status === 200 ? (scStage.json.status === 'Pending' && typeof scStage.json.plan_no === 'string') : false, `${scStage.status} ${JSON.stringify({ plan: scStage.json.plan_no, st: scStage.json.status })}`);
+  const scApprove = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2ex, { plan_no: scStage.json.plan_no });
+  ok('SegChannelROI ⑤: a DIFFERENT user approves the staged plan (maker-checker → Approved)', scApprove.status === 200 || scApprove.status === 201 ? scApprove.json.status === 'Approved' : false, `${scApprove.status} ${scApprove.json.status ?? scApprove.json.error?.code}`);
+
+  // Self-approval of one's own staged plan is refused by the reused MKT-17 maker-checker.
+  const scStage2 = await inj('POST', '/api/marketing-activation/segment-channel-roi/stage', cf2admin, { total_budget: 50000 });
+  const scSelf = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: scStage2.json.plan_no });
+  ok('SegChannelROI ⑤: the requester cannot approve their own staged plan (SOD_SELF_APPROVAL)', scSelf.status === 400 && scSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${scSelf.status} ${scSelf.json.error?.code}`);
+
+  const scForbidden = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', token2);
+  ok('SegChannelROI ⑤: a non-marketing/exec principal is refused (403)', scForbidden.status === 403, `${scForbidden.status}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
