@@ -62,6 +62,16 @@ export class ScmPlanningService {
 
   // ── planning run (delegated to ScmRunService) ───────────────────────────────
 
+  // docs/57 Track B (B2b) — the loose-coupling seam ScmNetworkModule consumes for per-branch demand
+  // sample-paths (never a cross-module table read). Delegates to the run sub-service.
+  demandPathsFor(
+    tenantId: number | null,
+    itemIds: string[],
+    branchIds?: (number | null)[],
+  ): Promise<Map<number | null, Map<string, number[][]>>> {
+    return this.runner.demandPathsFor(tenantId, itemIds, branchIds);
+  }
+
   executePlanRun(
     tenantId: number | null,
     scope: 'nightly' | 'manual' | 'replan',

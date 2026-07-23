@@ -1637,6 +1637,10 @@ Coverage check: every in-scope requirement/control should appear in ≥1 execute
 | UAT-SCM-028 | Duplicate nightly enqueue plans exactly once (partial unique index) | SCM-02 | 18 §5, PN-34 §7.7 |
 | UAT-SCM-031 | A failed run records the full cause chain; the queue dead-letters with an ops alert | SCM-02 / ITGC-OP-04 | 18 §5, PN-34 §7.7 |
 | UAT-SCM-032 | Half-configured engine degrades to fallback and raises `scm_engine_misconfigured` | SCM-02 | 18 §5, PN-34 §7.7 |
+| UAT-SCM-057 | Two-echelon network plan runs → Draft echelon plans; DC echelon base-stock ≥ Σ branch installation | SCM-05 | 18 §14, PN-34 §7.15 |
+| UAT-SCM-058 | Submitter self-approval → 403 `SOD_SELF_APPROVAL`; a distinct `scm_approve` user approves (maker = submitter) | SCM-05, R24 | 18 §14, PN-34 §7.15 |
+| UAT-SCM-059 | Approved network plan converts to a REAL requisition via `createPr` (reason `SCM-NET`); re-converting is idempotent by `pr_no` | SCM-05 / EXP-01 | 18 §14, PN-34 §7.15 |
+| UAT-SCM-060 | Cross-tenant: a second tenant sees 0 network plans and cannot read or approve one (404) | SCM-05 / ITGC-AC-03 | 18 §14, PN-34 §7.15 |
 
 ## Coverage summary
 

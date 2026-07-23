@@ -3130,6 +3130,13 @@
       "when": 2023820000412,
       "tag": "0473_mi_save_autopilot",
       "breakpoints": true
+    },
+    {
+      "idx": 448,
+      "version": "7",
+      "when": 2023820000413,
+      "tag": "0474_scm_network_plans",
+      "breakpoints": true
     }
   ]
 }
