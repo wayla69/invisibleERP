@@ -9,6 +9,9 @@ import { StatusLogService } from '../../common/status-log.service';
 import type { JwtUser } from '../../common/decorators';
 import { ScmEngineClientService } from '../scm-planning/scm-engine-client.service';
 import { ScmNetworkExtractService, type NetworkExtract } from './scm-network-extract.service';
+import { ScmAllocationService, type AllocInput, type AllocLine, type AllocMethod } from './scm-allocation.service';
+
+interface AllocPolicy { method: AllocMethod; priorities: Record<string, number> }
 
 // docs/57 Track B (B2b) — orchestrate a two-echelon network run and PERSIST it as a Draft plan.
 //
@@ -42,6 +45,7 @@ export class ScmNetworkRunService {
     private readonly engine: ScmEngineClientService,
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
+    private readonly allocation: ScmAllocationService,
   ) {}
 
   /** Standard-normal inverse CDF (Acklam) — the safety factor z for a service level, no scipy/stdlib. */
@@ -66,23 +70,34 @@ export class ScmNetworkRunService {
   async run(user: JwtUser, itemCode: string): Promise<{ id: number; plan_no: string; status: string; engine: string; nodes: number; pooling_benefit_pct: number }> {
     if (!itemCode || !itemCode.trim()) throw new BadRequestException({ code: 'ITEM_REQUIRED', message: 'item_code is required' });
     const ex = await this.extract.build(user, itemCode.trim());
+    // docs/57 B3 — the DC's rationing method is GOVERNED data (control SCM-06): use the approved policy
+    // for this DC, else the proportional default. The engine payload carries it; the fallback applies it.
+    const policy = ex.dcNodeCode
+      ? await this.allocation.effectivePolicy(user.tenantId ?? null, ex.dcNodeCode)
+      : { method: 'proportional' as AllocMethod, priorities: {} };
+    ex.request.allocation = { method: policy.method, priorities: Object.keys(policy.priorities).length ? policy.priorities : undefined };
     const useEngine = this.engine.enabled() && ex.hasEnginePaths;
     const { nodePlans, pooling, allocations, engineName } = useEngine
-      ? await this.fromEngine(ex)
-      : this.fromFallback(ex);
+      ? await this.fromEngine(ex, policy)
+      : this.fromFallback(ex, policy);
 
+    // Trust boundary (docs/57 §4.2): a rationing set must be non-negative and never over-issue the DC.
+    if (allocations.length && ex.dcNodeCode) {
+      const dcOnHand = ScmNetworkRunService.onHand(ex.request.nodes.find((nd) => nd.node_id === ex.dcNodeCode)?.current_inventory ?? []);
+      ScmAllocationService.assertAllocationSound(allocations as AllocLine[], dcOnHand);
+    }
     return this.persist(user, ex, nodePlans, pooling, allocations, engineName);
   }
 
   // ── engine path ──
-  private async fromEngine(ex: NetworkExtract): Promise<{ nodePlans: NodePlan[]; pooling: PoolingReport; allocations: unknown[]; engineName: string }> {
+  private async fromEngine(ex: NetworkExtract, policy: AllocPolicy): Promise<{ nodePlans: NodePlan[]; pooling: PoolingReport; allocations: unknown[]; engineName: string }> {
     let resp: ScmOptimizeNetworkResponse;
     try {
       resp = await this.engine.optimizeNetwork(ex.request);
     } catch {
-      return { ...this.fromFallback(ex), engineName: 'fallback' };
+      return { ...this.fromFallback(ex, policy), engineName: 'fallback' };
     }
-    if (!resp.node_plans.length) return { ...this.fromFallback(ex), engineName: 'fallback' };
+    if (!resp.node_plans.length) return { ...this.fromFallback(ex, policy), engineName: 'fallback' };
     const nodeCap = new Map(ex.request.nodes.map((n) => [n.node_id, ScmNetworkRunService.onHand(n.current_inventory)]));
     const nodePlans: NodePlan[] = resp.node_plans.map((p) => {
       const capBase = Math.max(1, (p.base_stock[0] ?? 0)) * ex.qtyCapFactor;
@@ -108,7 +123,7 @@ export class ScmNetworkRunService {
   }
 
   // ── in-process fallback (engine off): independent per-branch base-stock, no pooling (docs/57 §9) ──
-  private fromFallback(ex: NetworkExtract): { nodePlans: NodePlan[]; pooling: PoolingReport; allocations: unknown[]; engineName: string } {
+  private fromFallback(ex: NetworkExtract, policy: AllocPolicy): { nodePlans: NodePlan[]; pooling: PoolingReport; allocations: unknown[]; engineName: string } {
     const z = ScmNetworkRunService.zScore(ex.request.service_level);
     const H = ex.request.horizon_days;
     const R = ex.request.review_period_days;
@@ -118,6 +133,7 @@ export class ScmNetworkRunService {
 
     const branchNodes = ex.request.nodes.filter((n) => n.echelon === 2);
     const nodePlans: NodePlan[] = [];
+    const branchReqs: AllocInput[] = [];  // docs/57 B3 — {r_i, μ_i, on-hand} for DC-shortage rationing
     let sumSigma = 0, sumSigmaSq = 0, sumBranchSafety = 0, sumMu = 0, sumBranchBase = 0;
 
     for (const bn of branchNodes) {
@@ -129,6 +145,7 @@ export class ScmNetworkRunService {
       const base = st.mu * protection + safety;
       const onHand = invByNode.get(bn.node_id) ?? 0;
       const orderQty = ScmNetworkRunService.clampQty(Math.max(0, base - onHand), st.mu, ex.qtyCapFactor);
+      branchReqs.push({ node: bn.node_id, requested: orderQty, mu: st.mu, onHand });
       sumSigma += st.sigma; sumSigmaSq += st.sigma * st.sigma; sumBranchSafety += safety; sumMu += st.mu; sumBranchBase += base;
       nodePlans.push({
         nodeCode: bn.node_id, echelon: 2, serviceTimeOut: 0,
@@ -156,8 +173,15 @@ export class ScmNetworkRunService {
         orderQty, expectedFillRate: null, expectedWasteCost: null, clamped: false,
       });
     }
+    // docs/57 B3 — if the DC's projected on-hand cannot cover the sum of branch replenishment orders,
+    // ration by the APPROVED policy method (proportional / fair_share / priority); no shortage ⇒ no lines.
+    let allocations: AllocLine[] = [];
+    if (ex.dcNodeCode && branchReqs.length) {
+      const dcOnHand = invByNode.get(ex.dcNodeCode) ?? 0;
+      allocations = ScmAllocationService.buildLines(ex.dcNodeCode, branchReqs, dcOnHand, policy.method, policy.priorities, start);
+    }
     // No pooling in the fallback: independent == pooled, benefit 0 (honest — docs/57 §9).
-    return { nodePlans, pooling: { independent: sumBranchSafety, pooled: sumBranchSafety, benefitPct: 0 }, allocations: [], engineName: 'fallback' };
+    return { nodePlans, pooling: { independent: sumBranchSafety, pooled: sumBranchSafety, benefitPct: 0 }, allocations, engineName: 'fallback' };
   }
 
   private static clampQty(raw: number, mu: number, factor: number): number {

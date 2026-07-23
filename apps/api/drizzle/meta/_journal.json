@@ -3158,6 +3158,13 @@
       "when": 2023820000416,
       "tag": "0477_scm_batch_retrain",
       "breakpoints": true
+    },
+    {
+      "idx": 452,
+      "version": "7",
+      "when": 2023820000417,
+      "tag": "0478_scm_allocation_policies",
+      "breakpoints": true
     }
   ]
 }
