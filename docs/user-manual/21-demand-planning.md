@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.9**
+**Status: DRAFT v0.10**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -49,6 +49,15 @@ Songkran rush rather than being surprised by it.
 > inflate an order by typing in a promotion that was never approved. Each forecast records *why* a quantity
 > moved (for example "+30% — weekend promo"), so a reviewer can see the promotion behind the number. A
 > "what-if" you try in the scenario tool is clearly marked advisory and can never turn into a real order.
+
+> **Brand-new items are forecast by "borrowing" from similar items.** A newly added item has no sales
+> history of its own, so the system cannot yet learn its pattern directly. Until it has built up enough
+> history, the forecast **borrows the demand shape of established similar items at the same branch** — the
+> weekly rhythm, the payday bump, the holiday swings they share — and scales it to the size you expect for
+> the new item. A forecast built this way is marked **`analog`** in its reasoning, so you can see it is a
+> *borrowed* estimate rather than one observed from the item's own sales, and lean on your own judgement for
+> the first weeks. Once the item has accumulated its own history the system switches to forecasting it
+> directly, automatically.
 
 ---
 
@@ -315,6 +324,7 @@ design; ask your administrator.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.10 | 2026-07-23 | Added §1 note "Brand-new items are forecast by borrowing from similar items" — docs/56 Track A · A4: a newly added item with too little history of its own is forecast by borrowing the demand shape of established similar items at the **same branch** and scaling it to the expected size, marked **`analog`** so a reviewer sees it is a borrowed estimate; the system switches to forecasting the item directly once it has built its own history. Forecast-quality only; no new control. (docs/59 Track D · D3 — a shared engine result cache across replicas — is infrastructure with no user-facing change and needs no manual update.) |
 | 0.9 | 2026-07-23 | Added §2 note "The planner now runs faster on stable catalogs" + a **Refit cadence** settings row — docs/59 Track D · D2: the planner caches each item's fitted forecast model and reuses it when demand history is unchanged, refitting automatically when the history changes or after the refit cadence (default 14 days). Compute-only; changes no order quantity, no new control. |
 | 0.8 | 2026-07-23 | Added §2 "To run and approve a multi-echelon network plan" — docs/57 Track B · B2: run a two-echelon plan (`POST /api/scm-network/plans/run`) that pools safety stock at the DC, then submit → approve (a different `scm_approve` holder; self-approval → `SOD_SELF_APPROVAL`) → convert to a purchase requisition (idempotent). New control **SCM-05**; falls back to per-branch (no pooling) when the engine is off; raises no accounting entries. |
 | 0.7 | 2026-07-22 | Added §7 note "Neighbours react too" — docs/56 Track A · A3: a price what-if across same-category items now also reflects category-scoped cannibalization/halo between the items whose price moved. Advisory only. |
