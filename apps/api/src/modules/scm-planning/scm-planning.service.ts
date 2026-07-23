@@ -74,7 +74,7 @@ export class ScmPlanningService {
 
   executePlanRun(
     tenantId: number | null,
-    scope: 'nightly' | 'manual' | 'replan',
+    scope: 'nightly' | 'manual' | 'replan' | 'retrain',
     opts: { actor: string; branchIds?: (number | null)[]; itemIds?: string[]; triggerRef?: string } = { actor: SYSTEM_ACTOR },
   ): Promise<PlanRunResult> {
     return this.runner.executePlanRun(tenantId, scope, opts);

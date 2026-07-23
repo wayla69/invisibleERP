@@ -47,6 +47,8 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // docs/54 — supply-chain planning. The nightly plan is ENQUEUED (a 33-branch run is minutes of
   // solver time); the spike scan runs inline and is watermarked, so any cadence is idempotent.
   scm_nightly_plan: { label: 'วางแผนซัพพลายเชนประจำคืน', labelEn: 'Nightly supply-chain plan' },
+  // docs/59 D1 — scheduled batch retrain: forecasts + persists sample paths off the request path.
+  scm_batch_retrain: { label: 'เทรนโมเดลซัพพลายเชนใหม่ (แบตช์)', labelEn: 'Supply-chain batch retrain' },
   scm_spike_scan: { label: 'ตรวจจับดีมานด์พุ่ง', labelEn: 'Demand-spike scan' },
   scm_plan_summary: { label: 'สรุปแผนสั่งซื้อรออนุมัติ', labelEn: 'Supply-chain plan summary' },
   // docs/50 Wave 1 A2 — release stock reservations held past their TTL (filters: { max_age_days }, default 30).

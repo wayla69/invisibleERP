@@ -5,7 +5,7 @@ import { ymd } from '../../database/queries';
 import { JobQueueService } from '../jobs/job-queue.service';
 import { ScmPlanningService } from './scm-planning.service';
 import { ScmSpikeService } from './scm-spike.service';
-import { SCM_NIGHTLY_JOB } from './scm-planning.types';
+import { SCM_BATCH_RETRAIN_JOB, SCM_NIGHTLY_JOB } from './scm-planning.types';
 
 // docs/54 §5 — cadence. These ride the BI report scheduler exactly like ar_collections_dunning:
 // a tenant subscribes at a frequency, the cross-tenant sweep (bi-schedule runDueAllAsync) enqueues
@@ -37,6 +37,24 @@ export class ScmBiReports implements BiReportSource {
             data: { job_id: jobId, run_date: ymd() },
             summary: `Nightly supply-chain plan queued (job ${jobId})`,
             summaryTh: `เข้าคิววางแผนซัพพลายเชนประจำคืนแล้ว (งาน ${jobId})`,
+          };
+        },
+      },
+      {
+        // docs/59 D1 ACTION job: enqueue the batch retrain — forecasts every series + persists the
+        // reconciled sample paths a later nightly plan reads (moves refit off the request path).
+        type: SCM_BATCH_RETRAIN_JOB,
+        generate: async (_filters: unknown, user: JwtUser) => {
+          const jobId = await this.jobs.enqueue({
+            jobType: SCM_BATCH_RETRAIN_JOB,
+            payload: { run_date: ymd() },
+            tenantId: user.tenantId ?? null,
+            actor: user.username,
+          });
+          return {
+            data: { job_id: jobId, run_date: ymd() },
+            summary: `Supply-chain batch retrain queued (job ${jobId})`,
+            summaryTh: `เข้าคิวเทรนโมเดลซัพพลายเชนใหม่แล้ว (งาน ${jobId})`,
           };
         },
       },
