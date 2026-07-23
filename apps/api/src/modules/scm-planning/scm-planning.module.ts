@@ -32,6 +32,8 @@ import { ScmSpikeService } from './scm-spike.service';
     ScmApprovalQueues,
     ScmBiReports,
   ],
-  exports: [ScmPlanningService, ScmSpikeService],
+  // ScmEngineClientService is exported so ScmNetworkModule (docs/57 B2) reuses the ONE engine client
+  // (HMAC signing, retries, contract version) rather than standing up a second one — docs/57 §4.1.
+  exports: [ScmPlanningService, ScmSpikeService, ScmEngineClientService],
 })
 export class ScmPlanningModule {}
