@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 311,
+    "total": 312,
     "by_status": {
-      "Implemented": 308,
+      "Implemented": 309,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 33,
+      "CRM — Loyalty": 34,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2619,6 +2619,25 @@
       "tod": "Inspect the pure deterministic generator + its unit tests, the retrieval-grounded prompt (facts in, not hallucinated), the DRAFT-only output (send stays the existing consent-gated maker-checker flow), the logged model card (fact sheet + prompt + model), and the tenant_id filter/RLS on the generations.",
       "toe": "Re-perform (ext harness, 7 MKT-21 checks): generate produces a fact-grounded draft (channel/send-hour/th+en copy) whose prompt embeds the segment + its facts; staging creates a consent-gated campaign DRAFT (never auto-sent) + logs the model card, which is listable; an empty segment -> SEGMENT_EMPTY; a non-marketing principal -> 403; generations are tenant-scoped.",
       "evidence": "mi_campaign_generations model cards (fact sheet + prompt + model + draft + campaign_id); the pure generator + its unit tests; the DRAFT-only consent-gated output",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-24",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A churn-save win-back offer is sent with no cap (an uncapped discount drains margin) or with no independent review of the save-offer policy (the person who sets the offer economics also approves them); or a non-consented at-risk customer is contacted; or the holdout arm is contacted (so the saved revenue can never be proven); or one tenant's save policy/run surfaces for another tenant.",
+      "assertion": "Authorization/Accuracy/Occurrence",
+      "description": "Churn-Save Autopilot (docs/61 Phase 5, MKT-24): protect the base + PROVE the saved revenue. The save-offer POLICY (churn threshold, min CLV to justify a save, offer rate, and a HARD OFFER CAP) is MAKER-CHECKER approved — a Pending policy must be approved by a DIFFERENT user (POST /save/policy/approve -> assertMakerChecker, approver != requester -> SOD_SELF_APPROVAL) before it is Active; the newly-Active policy supersedes the prior one, and no sweep runs without an Active policy (NO_ACTIVE_POLICY). A non-positive offer cap is rejected (INVALID_OFFER_CAP). A sweep applies the Active policy to at-risk customers (churn >= threshold, CLV >= min, CONSENTED), computes a CAPPED win-back offer (enforced in the pure core — no offer can exceed the cap), assigns a randomised HOLDOUT arm (the same deterministic hash as MKT-19; the control arm gets no offer + no cost, so the save is measurable), and records a retention P&L (expected saved revenue vs offer cost). Consent-gated + DRAFT-only: the run creates a consent-gated campaign DRAFT for the TREATMENT arm — nothing auto-sends. The pure offer/P&L is save-offer.ts (unit-tested test/save-offer.test.ts). Reads customer_profiles + pos_members in SEPARATE queries (no cross-domain join). Gated to marketing/exec (preview), crm_campaign (stage policy/run), exec/approvals (approve policy); mi_save_policies/mi_save_runs tenant-scoped (canonical 0232 org-clause RLS + leading tenant index, migration 0472). A read/orchestration model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per policy / per save run",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-activation/save-offer.ts (pure cappedOffer/computeSavePnl/inHoldout — unit-tested test/save-offer.test.ts, 8 checks; the OFFER CAP enforced here); save-autopilot.service.ts (stagePolicy/approvePolicy maker-checker; preview/stageRun retention P&L; consent-gated draft via CampaignsService); marketing-activation.controller.ts POST save/policy + save/policy/approve + save/run, GET save/preview + save/policies + save/runs; schema/marketing-intel.ts mi_save_policies + mi_save_runs + migration 0472 (canonical RLS, tenant-leading indexes); cutover/ext.ts (MKT-24 ToE, 9 checks)",
+      "tod": "Inspect the hard offer cap enforced in the pure core, the maker-checker on the policy (approver!=requester), the no-run-without-active-policy gate, the holdout arm (control gets no offer), the consent-gated draft-only run, and the tenant_id filter/RLS on policies + runs.",
+      "toe": "Re-perform (ext harness, 9 MKT-24 checks): a non-positive cap -> INVALID_OFFER_CAP; no sweep without an approved policy -> NO_ACTIVE_POLICY; a staged policy is Pending; a DIFFERENT user approves it -> Active; the requester's self-approval -> SOD_SELF_APPROVAL; the preview sweeps at-risk savers and CAPS every offer (>=1 at the cap) and nets saved-cost; staging a run records the P&L + a consent-gated draft for the treatment arm; a non-marketing principal -> 403; policies + runs are tenant-scoped.",
+      "evidence": "mi_save_policies (capped, maker-checker approved) + mi_save_runs (retention P&L); the pure offer cap + its unit tests; the holdout control arm; the consent-gated draft-only run",
       "status": "Implemented"
     },
     {

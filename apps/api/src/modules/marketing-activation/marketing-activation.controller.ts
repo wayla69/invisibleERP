@@ -5,6 +5,7 @@ import { PropensityService } from './propensity.service';
 import { SegmentChannelRoiService } from './segment-channel-roi.service';
 import { NbaOrchestratorService, type JourneyOpts } from './nba-orchestrator.service';
 import { CampaignStudioService } from './campaign-studio.service';
+import { SaveAutopilotService, type PolicyInput } from './save-autopilot.service';
 
 const qintOpt = (v?: string): number | undefined => {
   if (v == null || v === '') return undefined;
@@ -23,6 +24,7 @@ export class MarketingActivationController {
     private readonly segChannel: SegmentChannelRoiService,
     private readonly nba: NbaOrchestratorService,
     private readonly studio: CampaignStudioService,
+    private readonly save: SaveAutopilotService,
   ) {}
 
   @Get('facts/customer/:code')
@@ -135,5 +137,44 @@ export class MarketingActivationController {
   @Permissions('marketing', 'exec')
   studioGenerations(@CurrentUser() u: JwtUser) {
     return this.studio.listGenerations(u);
+  }
+
+  // ④ Churn-Save Autopilot — STAGE a save-offer policy (capped offer); a DIFFERENT user must approve it.
+  @Post('save/policy')
+  @Permissions('marketing', 'exec', 'crm_campaign')
+  saveStagePolicy(@Body() body: PolicyInput, @CurrentUser() u: JwtUser) {
+    return this.save.stagePolicy(u, body ?? {});
+  }
+
+  @Post('save/policy/approve')
+  @Permissions('exec', 'approvals')
+  saveApprovePolicy(@Body() body: { policy_no: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.save.approvePolicy(u, body ?? { policy_no: '' });
+  }
+
+  @Get('save/policies')
+  @Permissions('marketing', 'exec')
+  savePolicies(@CurrentUser() u: JwtUser) {
+    return this.save.listPolicies(u);
+  }
+
+  // ④ Churn-Save Autopilot — advisory retention P&L for the active (approved) policy.
+  @Get('save/preview')
+  @Permissions('marketing', 'exec')
+  savePreview(@Query('segment') segment: string | undefined, @Query('control_pct') controlPct: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.save.preview(u, { segment, control_pct: qintOpt(controlPct) });
+  }
+
+  // ④ Churn-Save Autopilot — STAGE a save run (consent-gated draft for the treatment arm + a recorded P&L).
+  @Post('save/run')
+  @Permissions('marketing', 'exec', 'crm_campaign')
+  saveStageRun(@Body() body: { segment?: string; control_pct?: number }, @CurrentUser() u: JwtUser) {
+    return this.save.stageRun(u, body ?? {});
+  }
+
+  @Get('save/runs')
+  @Permissions('marketing', 'exec')
+  saveRuns(@CurrentUser() u: JwtUser) {
+    return this.save.listRuns(u);
   }
 }

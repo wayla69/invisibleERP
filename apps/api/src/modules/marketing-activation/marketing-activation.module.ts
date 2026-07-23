@@ -4,6 +4,7 @@ import { PropensityService } from './propensity.service';
 import { SegmentChannelRoiService } from './segment-channel-roi.service';
 import { NbaOrchestratorService } from './nba-orchestrator.service';
 import { CampaignStudioService } from './campaign-studio.service';
+import { SaveAutopilotService } from './save-autopilot.service';
 import { MarketingActivationController } from './marketing-activation.controller';
 import { MarketingIntelModule } from '../marketing-intel/marketing-intel.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
@@ -20,10 +21,12 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
 // Orchestrator (MKT-22) — staged per-customer journeys with maker-checker activation; CampaignsModule
 // provides the consent-gated draft path (audience:'members'). Phase 4 adds ① AI Campaign Studio (MKT-21) —
 // fact-grounded generative campaign drafts with a logged model card; it reuses the Fact Layer + CampaignsModule.
+// Phase 5 adds ④ Churn-Save Autopilot (MKT-24) — a maker-checker save-offer policy (capped offer) + a sweep
+// that produces a consent-gated draft + a retention P&L.
 @Module({
   imports: [MarketingIntelModule, AnalyticsModule, MenuModule, CampaignsModule],
   controllers: [MarketingActivationController],
-  providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService],
-  exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService],
+  providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService],
+  exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService],
 })
 export class MarketingActivationModule {}

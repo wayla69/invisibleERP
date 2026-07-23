@@ -175,3 +175,48 @@ export const miCampaignGenerations = pgTable('mi_campaign_generations', {
   byTenant: index('idx_mi_gen_tenant').on(t.tenantId, t.createdAt),
   byNo: uniqueIndex('ux_mi_gen_no').on(t.tenantId, t.genNo),
 }));
+
+// Churn-Save Autopilot (docs/61 Phase 5 / control MKT-24, migration 0472). Protect the base + PROVE the
+// saved revenue. The save-offer POLICY (churn threshold, min CLV to justify a save, offer rate, and a hard
+// OFFER CAP) is MAKER-CHECKER approved (a Pending policy must be approved by a DIFFERENT user before it is
+// Active). A sweep applies the Active policy to at-risk customers, computes a CAPPED win-back offer, assigns
+// a randomised HOLDOUT arm (MKT-19), and records a retention P&L (expected saved revenue vs offer cost).
+// Read/orchestration model — no GL posting; the actual send stays the consent-gated, maker-checker flow.
+export const miSavePolicies = pgTable('mi_save_policies', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  policyNo: text('policy_no').notNull(),                     // SAVEPOL-YYYYMMDD-NNN
+  churnThreshold: numeric('churn_threshold', { precision: 5, scale: 4 }).notNull().default('0.5'), // [0,1]
+  minClv: numeric('min_clv', { precision: 14, scale: 2 }).notNull().default('0'),
+  offerRate: numeric('offer_rate', { precision: 6, scale: 4 }).notNull().default('0.1'),  // offer = clv × rate, capped
+  offerCap: numeric('offer_cap', { precision: 14, scale: 2 }).notNull().default('500'),   // hard per-offer cap
+  status: text('status').notNull().default('Pending'),      // Pending | Active | Superseded
+  note: text('note'),
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+}, (t) => ({
+  byTenant: index('idx_mi_save_pol_tenant').on(t.tenantId, t.status, t.createdAt),
+  byNo: uniqueIndex('ux_mi_save_pol_no').on(t.tenantId, t.policyNo),
+}));
+
+// A staged save sweep: the retention P&L + the consent-gated draft it produced (treatment arm only).
+export const miSaveRuns = pgTable('mi_save_runs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  runNo: text('run_no').notNull(),                          // SAVE-YYYYMMDD-NNN
+  policyNo: text('policy_no'),                              // the Active policy applied
+  segment: text('segment'),
+  treatmentCount: integer('treatment_count').notNull().default(0),
+  controlCount: integer('control_count').notNull().default(0),
+  offerCost: numeric('offer_cost', { precision: 16, scale: 2 }),          // Σ capped offers (treatment)
+  expectedSavedRevenue: numeric('expected_saved_revenue', { precision: 16, scale: 2 }),
+  netBenefit: numeric('net_benefit', { precision: 16, scale: 2 }),        // saved − cost
+  campaignId: bigint('campaign_id', { mode: 'number' }),
+  requestedBy: text('requested_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenant: index('idx_mi_save_run_tenant').on(t.tenantId, t.createdAt),
+  byNo: uniqueIndex('ux_mi_save_run_no').on(t.tenantId, t.runNo),
+}));

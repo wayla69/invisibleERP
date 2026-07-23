@@ -1224,6 +1224,38 @@ async function main() {
   const genRows = await db.select().from(s.miCampaignGenerations);
   ok('Studio ①: logged generations are tenant-scoped (cf2 only)', genRows.length >= 1 && genRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${genRows.length} tenants=${[...new Set(genRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
 
+  // ── Marketing Activation — ④ CHURN-SAVE AUTOPILOT (docs/61 Phase 5, control MKT-24, migration 0472). A
+  //    maker-checker save-offer POLICY (capped offer) + a sweep that produces a consent-gated draft + a
+  //    retention P&L. cf2 at-risk cohort: NBA-2 (churn 0.8, clv 2000) + M-CF2A (churn 0.72, clv 8400.5). ──
+  const savePolBad = await inj('POST', '/api/marketing-activation/save/policy', cf2admin, { churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 0 });
+  ok('SaveAutopilot ④: a non-positive offer cap is rejected (INVALID_OFFER_CAP — the control)', savePolBad.status === 400 && savePolBad.json.error?.code === 'INVALID_OFFER_CAP', `${savePolBad.status} ${savePolBad.json.error?.code}`);
+
+  const savePreBefore = await inj('GET', '/api/marketing-activation/save/preview', cf2admin);
+  ok('SaveAutopilot ④: no sweep runs without an APPROVED policy (NO_ACTIVE_POLICY)', savePreBefore.status === 400 && savePreBefore.json.error?.code === 'NO_ACTIVE_POLICY', `${savePreBefore.status} ${savePreBefore.json.error?.code}`);
+
+  const savePol = await inj('POST', '/api/marketing-activation/save/policy', cf2admin, { churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 500 });
+  ok('SaveAutopilot ④: staging a save-offer policy is Pending (not yet usable)', (savePol.status === 200 || savePol.status === 201) && savePol.json.status === 'Pending' && typeof savePol.json.policy_no === 'string', `${savePol.status} ${JSON.stringify({ p: savePol.json.policy_no, st: savePol.json.status })}`);
+  const savePolApprove = await inj('POST', '/api/marketing-activation/save/policy/approve', cf2ex, { policy_no: savePol.json.policy_no });
+  ok('SaveAutopilot ④: a DIFFERENT user approves the policy (maker-checker → Active)', (savePolApprove.status === 200 || savePolApprove.status === 201) && savePolApprove.json.status === 'Active', `${savePolApprove.status} ${savePolApprove.json.status ?? savePolApprove.json.error?.code}`);
+
+  const savePol2 = await inj('POST', '/api/marketing-activation/save/policy', cf2admin, { churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 500 });
+  const saveSelf = await inj('POST', '/api/marketing-activation/save/policy/approve', cf2admin, { policy_no: savePol2.json.policy_no });
+  ok('SaveAutopilot ④: the requester cannot approve their own policy (SOD_SELF_APPROVAL)', saveSelf.status === 400 && saveSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${saveSelf.status} ${saveSelf.json.error?.code}`);
+
+  const savePre = await inj('GET', '/api/marketing-activation/save/preview?control_pct=0', cf2admin);
+  const savePreCapped = (savePre.json.targets ?? []).every((t: any) => t.offer <= 500) && (savePre.json.targets ?? []).some((t: any) => t.offer === 500);
+  ok('SaveAutopilot ④: the retention P&L sweeps at-risk savers, CAPS every offer (≤500, one hit), nets saved−cost', savePre.status === 200 && savePre.json.eligible >= 2 && savePreCapped && typeof savePre.json.net_benefit === 'number' && savePre.json.offer_cost > 0, `${savePre.status} ${JSON.stringify({ elig: savePre.json.eligible, cost: savePre.json.offer_cost, saved: savePre.json.expected_saved_revenue, net: savePre.json.net_benefit })}`);
+
+  const saveRun = await inj('POST', '/api/marketing-activation/save/run', cf2admin, { control_pct: 0 });
+  ok('SaveAutopilot ④: staging a run records the P&L + a consent-gated draft for the treatment arm (no auto-send)', (saveRun.status === 200 || saveRun.status === 201) && typeof saveRun.json.run_no === 'string' && saveRun.json.campaign_id != null && saveRun.json.treatment_count >= 1 && typeof saveRun.json.net_benefit === 'number', `${saveRun.status} ${JSON.stringify({ r: saveRun.json.run_no, camp: saveRun.json.campaign_id, tc: saveRun.json.treatment_count, net: saveRun.json.net_benefit })}`);
+
+  const saveForbidden = await inj('GET', '/api/marketing-activation/save/preview', token2);
+  ok('SaveAutopilot ④: a non-marketing/exec principal is refused (403)', saveForbidden.status === 403, `${saveForbidden.status}`);
+
+  const savePolRows = await db.select().from(s.miSavePolicies);
+  const saveRunRows = await db.select().from(s.miSaveRuns);
+  ok('SaveAutopilot ④: policies + runs are tenant-scoped (cf2 only)', savePolRows.length >= 2 && saveRunRows.length >= 1 && savePolRows.every((r: any) => Number(r.tenantId) === cf2.id) && saveRunRows.every((r: any) => Number(r.tenantId) === cf2.id), `pol=${savePolRows.length} run=${saveRunRows.length}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
