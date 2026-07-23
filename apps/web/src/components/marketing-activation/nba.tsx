@@ -4,7 +4,7 @@
 // draft for the treatment arm. NO 'use client' (inherits the page boundary — see viz.tsx).
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Compass, Sparkles, Send, CheckCheck } from 'lucide-react';
+import { Compass, Sparkles, Send, CheckCheck, Ruler, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -44,6 +44,14 @@ export function Nba() {
     mutationFn: (journeyNo: string) => api('/api/marketing-activation/nba/activate', { method: 'POST', body: JSON.stringify({ journey_no: journeyNo }) }),
     onSuccess: () => { notifySuccess(t('ma.nba_activated')); qc.invalidateQueries({ queryKey: ['ma', 'journeys'] }); },
     onError: (e: any) => notifyError(e?.body?.error?.code === 'SOD_SELF_APPROVAL' ? t('ma.self_approve') : (e?.message ?? 'error')),
+  });
+  const measure = useMutation({
+    mutationFn: (journeyNo: string) => api('/api/marketing-activation/nba/measure', { method: 'POST', body: JSON.stringify({ journey_no: journeyNo }) }),
+    onSuccess: () => { notifySuccess(t('ma.measured_done')); qc.invalidateQueries({ queryKey: ['ma', 'journeys'] }); },
+    onError: (e: any) => {
+      const code = e?.body?.error?.code;
+      notifyError(code === 'WINDOW_NOT_ELAPSED' ? t('ma.measure_window') : code === 'NO_CONTROL' ? t('ma.measure_no_control') : (e?.message ?? 'error'));
+    },
   });
 
   const targets: any[] = Array.isArray(previewQ.data?.targets) ? previewQ.data.targets : [];
@@ -150,6 +158,19 @@ export function Nba() {
                     <Button size="sm" variant="secondary" disabled={activate.isPending} onClick={() => activate.mutate(String(j.journey_no))}>
                       {t('ma.nba_activate')}
                     </Button>
+                  )}
+                  {/* Realized measurement (MKT-19 discipline): measure once the window elapses; show the proven lift. */}
+                  {j.status === 'Active' && j.measured_at == null && (
+                    <Button size="sm" variant="outline" className="bg-background/60" disabled={measure.isPending} onClick={() => measure.mutate(String(j.journey_no))}>
+                      <Ruler className="mr-1 size-3.5" /> {t('ma.measure')}
+                    </Button>
+                  )}
+                  {j.measured_at != null && (
+                    <span className={`inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-semibold shadow-sm ${Number(j.realized_lift_pct ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                      <TrendingUp className="size-3.5" />
+                      {j.realized_lift_pct == null ? t('ma.measured_no_baseline') : `${t('ma.measured_lift')} ${Number(j.realized_lift_pct) >= 0 ? '+' : ''}${num(j.realized_lift_pct, 1)}%`}
+                      {j.incremental_revenue != null && <span className="text-muted-foreground">· {thb(j.incremental_revenue)}</span>}
+                    </span>
                   )}
                 </div>
               ))}

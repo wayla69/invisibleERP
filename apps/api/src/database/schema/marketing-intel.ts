@@ -129,6 +129,17 @@ export const miJourneys = pgTable('mi_journeys', {
   approvedBy: text('approved_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   activatedAt: timestamp('activated_at', { withTimezone: true }),
+  // Realized-outcome measurement (migration 0476, MKT-19 discipline extended to MKT-22): after the window,
+  // treatment-vs-control REAL POS revenue via the CrmService read — the journey's measured proof of lift.
+  measureAfter: timestamp('measure_after', { withTimezone: true }),   // activated_at + window_days
+  treatmentRevenue: numeric('treatment_revenue', { precision: 16, scale: 2 }),
+  controlRevenue: numeric('control_revenue', { precision: 16, scale: 2 }),
+  treatmentPerHead: numeric('treatment_per_head', { precision: 16, scale: 2 }),
+  controlPerHead: numeric('control_per_head', { precision: 16, scale: 2 }),
+  realizedLiftPct: numeric('realized_lift_pct', { precision: 10, scale: 2 }), // null = control earned 0
+  incrementalRevenue: numeric('incremental_revenue', { precision: 16, scale: 2 }),
+  measuredAt: timestamp('measured_at', { withTimezone: true }),
+  measuredBy: text('measured_by'),
 }, (t) => ({
   byTenant: index('idx_mi_journeys_tenant').on(t.tenantId, t.status, t.createdAt),
   byNo: uniqueIndex('ux_mi_journeys_no').on(t.tenantId, t.journeyNo),
@@ -216,7 +227,36 @@ export const miSaveRuns = pgTable('mi_save_runs', {
   campaignId: bigint('campaign_id', { mode: 'number' }),
   requestedBy: text('requested_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // Realized-outcome measurement (migration 0476, MKT-19 discipline extended to MKT-24): the run's
+  // EXPECTED P&L above becomes a REALIZED retention P&L once treatment-vs-control POS revenue is measured.
+  measureAfter: timestamp('measure_after', { withTimezone: true }),   // created_at + window_days
+  treatmentRevenue: numeric('treatment_revenue', { precision: 16, scale: 2 }),
+  controlRevenue: numeric('control_revenue', { precision: 16, scale: 2 }),
+  treatmentPerHead: numeric('treatment_per_head', { precision: 16, scale: 2 }),
+  controlPerHead: numeric('control_per_head', { precision: 16, scale: 2 }),
+  realizedLiftPct: numeric('realized_lift_pct', { precision: 10, scale: 2 }),
+  incrementalRevenue: numeric('incremental_revenue', { precision: 16, scale: 2 }), // realized saved revenue
+  realizedNetBenefit: numeric('realized_net_benefit', { precision: 16, scale: 2 }), // incremental − offer_cost
+  measuredAt: timestamp('measured_at', { withTimezone: true }),
+  measuredBy: text('measured_by'),
 }, (t) => ({
   byTenant: index('idx_mi_save_run_tenant').on(t.tenantId, t.createdAt),
   byNo: uniqueIndex('ux_mi_save_run_no').on(t.tenantId, t.runNo),
+}));
+
+// One row per (save run, member): the fixed holdout arm + the capped offer — persisted at stage time so a
+// PAST run's treatment/control member lists are recoverable for realized measurement (the control arm is
+// never contacted and exists nowhere else). Immutable once staged (the audit evidence of the sweep).
+export const miSaveTargets = pgTable('mi_save_targets', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  runId: bigint('run_id', { mode: 'number' }).notNull().references(() => miSaveRuns.id),
+  memberId: bigint('member_id', { mode: 'number' }).notNull(),
+  arm: text('arm').notNull().default('treatment'),            // treatment | control
+  offer: numeric('offer', { precision: 14, scale: 2 }),       // the capped offer (control: what it WOULD have been)
+  expectedSaved: numeric('expected_saved', { precision: 14, scale: 2 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byMember: uniqueIndex('ux_mi_save_targets_member').on(t.tenantId, t.runId, t.memberId),
+  byArm: index('idx_mi_save_targets_tenant').on(t.tenantId, t.runId, t.arm),
 }));

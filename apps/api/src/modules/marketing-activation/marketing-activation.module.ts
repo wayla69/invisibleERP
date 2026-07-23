@@ -10,6 +10,7 @@ import { MarketingIntelModule } from '../marketing-intel/marketing-intel.module'
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { MenuModule } from '../menu/menu.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
+import { CrmModule } from '../crm/crm.module';
 
 // Marketing Activation (docs/61) — turns the delivered CRM × Marketing-Intelligence signals into
 // sales-driving action. Phase 0 ships the shared read-only Fact Layer; the five tools (①–⑤) layer on top.
@@ -23,8 +24,11 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
 // fact-grounded generative campaign drafts with a logged model card; it reuses the Fact Layer + CampaignsModule.
 // Phase 5 adds ④ Churn-Save Autopilot (MKT-24) — a maker-checker save-offer policy (capped offer) + a sweep
 // that produces a consent-gated draft + a retention P&L.
+// Realized-outcome measurement (migration 0476) closes the loop: journeys (②) + save runs (④) measure
+// treatment-vs-control REAL POS revenue via CrmModule's CrmService.revenueByMembers (the owning read —
+// no cross-domain join; the same read MKT-19 experiments use), and ⑤ folds the measured lift back in.
 @Module({
-  imports: [MarketingIntelModule, AnalyticsModule, MenuModule, CampaignsModule],
+  imports: [MarketingIntelModule, AnalyticsModule, MenuModule, CampaignsModule, CrmModule],
   controllers: [MarketingActivationController],
   providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService],
   exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService],

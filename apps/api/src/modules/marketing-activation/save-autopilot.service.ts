@@ -1,10 +1,12 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { customerProfiles, posMembers, miSavePolicies, miSaveRuns } from '../../database/schema';
+import { customerProfiles, posMembers, miSavePolicies, miSaveRuns, miSaveTargets } from '../../database/schema';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
+import { measureLift } from '../../common/lift-math';
 import { CampaignsService } from '../campaigns/campaigns.service';
+import { CrmService } from '../crm/crm.service';
 import { computeSavePnl, type SaveCustomer, type SavePolicy } from './save-offer';
 
 // Churn-Save Autopilot (docs/61 Phase 5, control MKT-24) — protect the base + PROVE the saved revenue. The
@@ -17,11 +19,15 @@ import { computeSavePnl, type SaveCustomer, type SavePolicy } from './save-offer
 
 export interface PolicyInput { churn_threshold?: number; min_clv?: number; offer_rate?: number; offer_cap?: number; note?: string }
 
+// Measurement window (days) after a run is staged before its realized P&L may be measured. Clamped 1..90.
+const clampWindowDays = (v: unknown): number => Math.min(Math.max(Math.round(Number(v ?? 14) || 14), 1), 90);
+
 @Injectable()
 export class SaveAutopilotService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly campaigns: CampaignsService,
+    private readonly crm: CrmService,
   ) {}
 
   private assertTenant(user: JwtUser): number {
@@ -103,8 +109,10 @@ export class SaveAutopilotService {
     };
   }
 
-  // STAGE a run — apply the Active policy, create a consent-gated DRAFT for the treatment arm, record the P&L.
-  async stageRun(user: JwtUser, opts?: { segment?: string; control_pct?: number }): Promise<Record<string, unknown>> {
+  // STAGE a run — apply the Active policy, create a consent-gated DRAFT for the treatment arm, record the P&L
+  // AND persist the per-member holdout arms (mi_save_targets) so the run's realized P&L is measurable later
+  // (the control arm is never contacted and exists nowhere else).
+  async stageRun(user: JwtUser, opts?: { segment?: string; control_pct?: number; window_days?: number }): Promise<Record<string, unknown>> {
     const tenantId = this.assertTenant(user);
     const { policyNo, policy } = await this.activePolicy(tenantId);
     const customers = await this.loadCustomers(tenantId, opts?.segment);
@@ -124,12 +132,69 @@ export class SaveAutopilotService {
     const todayCount = (await this.db.select({ id: miSaveRuns.id }).from(miSaveRuns).where(eq(miSaveRuns.tenantId, tenantId))).length;
     const d = new Date();
     const runNo = `SAVE-${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}-${String(todayCount + 1).padStart(3, '0')}`;
-    await this.db.insert(miSaveRuns).values({
+    const measureAfter = new Date(d.getTime() + clampWindowDays(opts?.window_days) * 86400_000);
+    const [head] = await this.db.insert(miSaveRuns).values({
       tenantId, runNo, policyNo, segment: opts?.segment ?? null, treatmentCount: pnl.treatment_count, controlCount: pnl.control_count,
       offerCost: String(pnl.offer_cost), expectedSavedRevenue: String(pnl.expected_saved_revenue), netBenefit: String(pnl.net_benefit),
-      campaignId, requestedBy: user.username ?? 'user',
-    });
-    return { run_no: runNo, policy_no: policyNo, campaign_id: campaignId, treatment_count: pnl.treatment_count, control_count: pnl.control_count, offer_cost: pnl.offer_cost, expected_saved_revenue: pnl.expected_saved_revenue, net_benefit: pnl.net_benefit, roi: pnl.roi, note: 'A consent-gated DRAFT was created for the treatment arm — a human edits + sends; the control arm is never contacted, so the save can be measured.' };
+      campaignId, requestedBy: user.username ?? 'user', measureAfter,
+    }).returning({ id: miSaveRuns.id });
+    if (!head) throw new BadRequestException({ code: 'STAGE_FAILED', message: 'could not stage save run', messageTh: 'สร้างรอบรักษาลูกค้าไม่สำเร็จ' });
+    const runId = Number(head.id);
+
+    // Persist BOTH arms — the audit evidence of the sweep and the basis for realized measurement.
+    const targetRows = pnl.targets.map((t) => ({
+      tenantId, runId, memberId: t.member_id, arm: t.arm,
+      offer: String(t.offer), expectedSaved: String(t.expected_saved),
+    }));
+    for (let i = 0; i < targetRows.length; i += 500) await this.db.insert(miSaveTargets).values(targetRows.slice(i, i + 500));
+
+    return { run_no: runNo, policy_no: policyNo, campaign_id: campaignId, treatment_count: pnl.treatment_count, control_count: pnl.control_count, offer_cost: pnl.offer_cost, expected_saved_revenue: pnl.expected_saved_revenue, net_benefit: pnl.net_benefit, roi: pnl.roi, measure_after: measureAfter, note: 'A consent-gated DRAFT was created for the treatment arm — a human edits + sends; the control arm is never contacted, so the save can be measured.' };
+  }
+
+  // MEASURE the realized retention P&L once the window has elapsed: per-arm REAL POS revenue in
+  // [created_at, now] via the CrmService read API (no cross-domain join), the shared MKT-19 lift math, and
+  // realized_net_benefit = incremental (realized saved revenue) − offer_cost. Idempotent-guarded.
+  async measureRun(user: JwtUser, body: { run_no: string }): Promise<Record<string, unknown>> {
+    const tenantId = this.assertTenant(user);
+    const [run] = await this.db.select().from(miSaveRuns)
+      .where(and(eq(miSaveRuns.tenantId, tenantId), eq(miSaveRuns.runNo, body.run_no))).limit(1);
+    if (!run) throw new NotFoundException({ code: 'RUN_NOT_FOUND', message: `save run ${body.run_no} not found`, messageTh: `ไม่พบรอบ ${body.run_no}` });
+    if (run.measuredAt) throw new BadRequestException({ code: 'ALREADY_MEASURED', message: 'save run already measured', messageTh: 'รอบนี้วัดผลแล้ว' });
+    const now = new Date();
+    if (run.measureAfter && now < new Date(run.measureAfter)) throw new BadRequestException({ code: 'WINDOW_NOT_ELAPSED', message: 'measurement window has not elapsed yet', messageTh: 'ยังไม่ครบช่วงวัดผล' });
+    if (Number(run.controlCount) <= 0) throw new BadRequestException({ code: 'NO_CONTROL', message: 'no control arm to measure lift against', messageTh: 'ไม่มีกลุ่มควบคุมให้เทียบ' });
+
+    const armRows = await this.db.select({ memberId: miSaveTargets.memberId, arm: miSaveTargets.arm })
+      .from(miSaveTargets).where(and(eq(miSaveTargets.tenantId, tenantId), eq(miSaveTargets.runId, run.id)));
+    if (!armRows.length) throw new BadRequestException({ code: 'NO_TARGETS_RECORDED', message: 'this run has no persisted holdout arms (staged before realized measurement existed)', messageTh: 'รอบนี้ไม่มีรายชื่อกลุ่มทดลอง/ควบคุมบันทึกไว้' });
+    const treatment = armRows.filter((a) => a.arm === 'treatment').map((a) => Number(a.memberId));
+    const control = armRows.filter((a) => a.arm === 'control').map((a) => Number(a.memberId));
+
+    const from = run.createdAt ? new Date(run.createdAt) : now;
+    const rev = await this.crm.revenueByMembers(tenantId, [...treatment, ...control], from, now);
+    const sum = (ids: number[]) => ids.reduce((s, id) => s + (rev.get(id) ?? 0), 0);
+    const tRev = sum(treatment), cRev = sum(control);
+    const lift = measureLift({ treatmentRevenue: tRev, treatmentN: treatment.length, controlRevenue: cRev, controlN: control.length });
+    const realizedNet = lift.incremental_revenue - Number(run.offerCost ?? 0);
+
+    await this.db.update(miSaveRuns).set({
+      treatmentRevenue: String(round2(tRev)), controlRevenue: String(round2(cRev)),
+      treatmentPerHead: String(round2(lift.treatment_per_head)), controlPerHead: String(round2(lift.control_per_head)),
+      realizedLiftPct: lift.lift_pct == null ? null : String(round2(lift.lift_pct)),
+      incrementalRevenue: String(round2(lift.incremental_revenue)), realizedNetBenefit: String(round2(realizedNet)),
+      measuredAt: now, measuredBy: user.username ?? 'user',
+    }).where(and(eq(miSaveRuns.tenantId, tenantId), eq(miSaveRuns.id, run.id)));
+
+    return {
+      run_no: run.runNo, policy_no: run.policyNo, segment: run.segment, measured: true,
+      treatment_count: treatment.length, control_count: control.length,
+      treatment_per_head: round2(lift.treatment_per_head), control_per_head: round2(lift.control_per_head),
+      realized_lift_pct: lift.lift_pct == null ? null : round2(lift.lift_pct),
+      realized_saved_revenue: round2(lift.incremental_revenue),
+      offer_cost: run.offerCost == null ? null : Number(run.offerCost),
+      realized_net_benefit: round2(realizedNet),
+      note: 'Realized retention P&L on real POS revenue (MKT-19 discipline): saved revenue = treatment-vs-control incremental; net = saved − offer cost. Feeds the Segment×Channel ROI ranking (⑤).',
+    };
   }
 
   async listPolicies(user: JwtUser, limit = 20): Promise<Record<string, unknown>> {
@@ -141,8 +206,19 @@ export class SaveAutopilotService {
   async listRuns(user: JwtUser, limit = 20): Promise<Record<string, unknown>> {
     const tenantId = this.assertTenant(user);
     const rows = await this.db.select().from(miSaveRuns).where(eq(miSaveRuns.tenantId, tenantId)).orderBy(desc(miSaveRuns.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
-    return { runs: rows.map((r) => ({ run_no: r.runNo, policy_no: r.policyNo, segment: r.segment, treatment_count: r.treatmentCount, control_count: r.controlCount, offer_cost: r.offerCost == null ? null : Number(r.offerCost), expected_saved_revenue: r.expectedSavedRevenue == null ? null : Number(r.expectedSavedRevenue), net_benefit: r.netBenefit == null ? null : Number(r.netBenefit), campaign_id: r.campaignId, created_at: r.createdAt })) };
+    return { runs: rows.map((r) => ({
+      run_no: r.runNo, policy_no: r.policyNo, segment: r.segment, treatment_count: r.treatmentCount, control_count: r.controlCount,
+      offer_cost: r.offerCost == null ? null : Number(r.offerCost),
+      expected_saved_revenue: r.expectedSavedRevenue == null ? null : Number(r.expectedSavedRevenue),
+      net_benefit: r.netBenefit == null ? null : Number(r.netBenefit),
+      campaign_id: r.campaignId, created_at: r.createdAt,
+      measure_after: r.measureAfter, measured_at: r.measuredAt, measured_by: r.measuredBy,
+      realized_lift_pct: r.realizedLiftPct == null ? null : Number(r.realizedLiftPct),
+      realized_saved_revenue: r.incrementalRevenue == null ? null : Number(r.incrementalRevenue),
+      realized_net_benefit: r.realizedNetBenefit == null ? null : Number(r.realizedNetBenefit),
+    })) };
   }
 }
 
 const clamp01 = (v: unknown): number => Math.max(0, Math.min(1, Number(v) || 0));
+const round2 = (v: number): number => Math.round(v * 100) / 100;

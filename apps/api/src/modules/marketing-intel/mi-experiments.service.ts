@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { miCampaignExperiments, miExperimentArms, customerProfiles, posMembers } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
+import { measureLift } from '../../common/lift-math';
 import { CrmService } from '../crm/crm.service';
 import { CampaignsService } from '../campaigns/campaigns.service';
 
@@ -124,10 +125,12 @@ export class MiExperimentsService {
     const rev = await this.crm.revenueByMembers(tenantId, [...treatment, ...control], from, now);
     const sum = (ids: number[]) => ids.reduce((s, id) => s + (rev.get(id) ?? 0), 0);
     const tRev = sum(treatment), cRev = sum(control);
-    const tPerHead = treatment.length ? tRev / treatment.length : 0;
-    const cPerHead = control.length ? cRev / control.length : 0;
-    const incremental = (tPerHead - cPerHead) * treatment.length;
-    const liftPct = cPerHead > 0 ? ((tPerHead - cPerHead) / cPerHead) * 100 : null;
+    // Shared MKT-19 lift math (common/lift-math.ts) — also used by the journey/save-run measurements.
+    const lift = measureLift({ treatmentRevenue: tRev, treatmentN: treatment.length, controlRevenue: cRev, controlN: control.length });
+    const tPerHead = lift.treatment_per_head;
+    const cPerHead = lift.control_per_head;
+    const incremental = lift.incremental_revenue;
+    const liftPct = lift.lift_pct;
 
     await this.db.update(miCampaignExperiments).set({
       status: 'Measured',
