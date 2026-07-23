@@ -1027,6 +1027,10 @@ async function main() {
 
   const measure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
   ok('CloseLoop: measure computes positive lift (฿1000/head treatment vs ฿100/head control → ~900%)', (measure.status === 200 || measure.status === 201) && measure.json.status === 'Measured' && Number(measure.json.lift_pct) > 500 && Number(measure.json.incremental_revenue) > 0, `${measure.status} lift=${measure.json.lift_pct}% inc=${measure.json.incremental_revenue}`);
+  // docs/62 Phase 3 — statistical honesty: zero-variance arms (every treatment head 1000, every control head
+  // 100) collapse the 95% CI to the point estimate [900, 900], and 4 heads/arm (< 30) flags weak evidence.
+  // The flag is display/report-only — lift_pct and incremental_revenue above are UNCHANGED by it.
+  ok('CloseLoop Phase 3: measured lift carries the honest 95% CI + weak-evidence flag (CI [900,900]; n=4/arm → weak)', Number(measure.json.lift_ci_low_pct) === 900 && Number(measure.json.lift_ci_high_pct) === 900 && measure.json.weak_evidence === true, `ci=[${measure.json.lift_ci_low_pct},${measure.json.lift_ci_high_pct}] weak=${measure.json.weak_evidence}`);
 
   // A measured experiment is not re-measured (idempotent guard).
   const remeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
@@ -1216,9 +1220,24 @@ async function main() {
   ok('Studio ①: generates a fact-grounded draft (channel/send-hour/th+en copy) from the segment fact sheet', gen.status === 200 && gen.json.draft?.audience === 'mi_segment' && typeof gen.json.draft?.subject_th === 'string' && typeof gen.json.draft?.subject_en === 'string' && gen.json.draft?.channel != null && gen.json.model === 'studio-template-v1', `${gen.status} ${JSON.stringify({ ch: gen.json.draft?.channel, hour: gen.json.draft?.send_hour, model: gen.json.model })}`);
   ok('Studio ①: the prompt is retrieval-grounded (the segment + its facts are IN the prompt, not hallucinated)', gen.status === 200 && typeof gen.json.prompt === 'string' && gen.json.prompt.includes('NbaSeg') && /ground/i.test(gen.json.prompt) && gen.json.facts?.count === 5, `${(gen.json.prompt ?? '').slice(0, 40)}… count=${gen.json.facts?.count}`);
   ok('Studio ① v2: the ③→① hook — the segment\'s top un-bought product (Croissant, via the AFF-A driver) lands on the fact sheet, in the prompt and in the offer copy', gen.status === 200 && gen.json.facts?.top_offer === 'Croissant' && gen.json.prompt.includes('Croissant') && String(gen.json.draft?.offer_th ?? '').includes('Croissant'), `top_offer=${JSON.stringify(gen.json.facts?.top_offer)}`);
+  // docs/62 Phase 3 — TOWS tone: cf2's pushed TOWS is a single SO item ('scale tiktok spend'), so the
+  // dominant quadrant SO grounds the confident-growth tone on the fact sheet AND in the logged prompt.
+  ok('Studio ① Phase 3: the pushed TOWS strategy sets the copy tone (dominant SO → confident-growth, in facts + prompt)', gen.status === 200 && gen.json.facts?.tone === 'confident-growth' && gen.json.prompt.includes('confident-growth'), `tone=${JSON.stringify(gen.json.facts?.tone)}`);
+  // docs/62 Phase 3 — creative A/B: a deterministic variant B (offer-first angle) is generated beside A.
+  ok('Studio ① Phase 3: a variant-B draft (second creative angle) is generated alongside A, and differs from it', gen.status === 200 && typeof gen.json.draft_b?.body_th === 'string' && gen.json.draft_b.body_th !== gen.json.draft?.body_th && typeof gen.json.draft_b?.subject_en === 'string', `b=${JSON.stringify(gen.json.draft_b?.subject_en ?? null)}`);
 
   const genStage = await inj('POST', '/api/marketing-activation/studio/stage', cf2admin, { segment: 'NbaSeg' });
   ok('Studio ①: staging creates a consent-gated campaign DRAFT + logs the model card (never auto-sends)', (genStage.status === 200 || genStage.status === 201) && genStage.json.status === 'draft' && typeof genStage.json.gen_no === 'string' && genStage.json.campaign_id != null, `${genStage.status} ${JSON.stringify({ g: genStage.json.gen_no, camp: genStage.json.campaign_id, st: genStage.json.status })}`);
+  // docs/62 Phase 3 — the staged draft is a REAL A/B: variant B rides the campaign's deterministic
+  // per-member split (variant_b_body ≠ body, split_b_pct 50); still a DRAFT — nothing sends.
+  const abCampRow = (await db.select().from(s.loyaltyCampaigns)).find((c: any) => Number(c.id) === Number(genStage.json.campaign_id));
+  ok('Studio ① Phase 3: the staged campaign carries the A/B pair (variant_b_body set ≠ body, split_b_pct 50, still draft)', !!abCampRow && typeof abCampRow.variantBBody === 'string' && abCampRow.variantBBody !== abCampRow.body && Number(abCampRow.splitBPct) === 50 && abCampRow.status === 'draft', `split=${abCampRow?.splitBPct} st=${abCampRow?.status}`);
+  // docs/62 Phase 3 — the A/B outcome read fails honest: an UNSENT A/B has no contacted recipients yet,
+  // and a campaign without a B variant cannot claim an A/B outcome at all.
+  const abNoRec = await inj('GET', `/api/marketing-activation/studio/ab/${genStage.json.campaign_id}`, cf2admin);
+  ok('Studio ① Phase 3: A/B outcome on an unsent campaign → 400 NO_RECIPIENTS (no invented arms)', abNoRec.status === 400 && abNoRec.json.error?.code === 'NO_RECIPIENTS', `${abNoRec.status} ${abNoRec.json.error?.code}`);
+  const abNoB = await inj('GET', `/api/marketing-activation/studio/ab/${activated.json.id}`, cf2admin);
+  ok('Studio ① Phase 3: A/B outcome on a campaign with no B variant → 400 NO_VARIANT_B', abNoB.status === 400 && abNoB.json.error?.code === 'NO_VARIANT_B', `${abNoB.status} ${abNoB.json.error?.code}`);
   const genList = await inj('GET', '/api/marketing-activation/studio/generations', cf2admin);
   ok('Studio ①: the generation (model card) is logged + listable', genList.status === 200 && (genList.json.generations ?? []).some((g: any) => g.gen_no === genStage.json.gen_no && g.model === 'studio-template-v1' && g.segment === 'NbaSeg'), `${genList.status} n=${(genList.json.generations ?? []).length}`);
 
@@ -1297,6 +1316,11 @@ async function main() {
   await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mjTargets[1]!.memberId), total: '100', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
   const mjMeasure = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
   ok('Measure ②: realized journey lift on REAL POS revenue (฿1000/head vs ฿100/head → 900%)', (mjMeasure.status === 200 || mjMeasure.status === 201) && Number(mjMeasure.json.realized_lift_pct) === 900 && Number(mjMeasure.json.incremental_revenue) === 900, `${mjMeasure.status} lift=${mjMeasure.json.realized_lift_pct}% inc=${mjMeasure.json.incremental_revenue}`);
+  // docs/62 Phase 3 — statistical honesty on the journey list: 1-head arms cannot support a CI (null
+  // bounds) and are flagged weak; the realized lift itself is unchanged by the flag.
+  const mjList = await inj('GET', '/api/marketing-activation/nba/journeys', cf2admin);
+  const mjListRow = (mjList.json.journeys ?? []).find((j: any) => j.journey_no === mJourney.json.journey_no);
+  ok('Measure ② Phase 3: the journey list carries the honesty fields (1v1 arms → CI null + weak_evidence, lift unchanged)', !!mjListRow && mjListRow.weak_evidence === true && mjListRow.lift_ci_low_pct == null && Number(mjListRow.realized_lift_pct) === 900, `weak=${mjListRow?.weak_evidence} ci=${mjListRow?.lift_ci_low_pct} lift=${mjListRow?.realized_lift_pct}`);
   const mjAgain = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
   ok('Measure ②: a measured journey is not re-measured (ALREADY_MEASURED)', mjAgain.status === 400 && mjAgain.json.error?.code === 'ALREADY_MEASURED', `${mjAgain.status} ${mjAgain.json.error?.code}`);
   const mjPending = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: nbaStage2.json.journey_no });
@@ -1322,6 +1346,9 @@ async function main() {
   const mRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
   const mNbaCell = (mRoi.json.cells ?? []).find((c: any) => c.segment === 'NbaSeg');
   ok('Measure ⑤: the realized journey lift feeds back into the Segment×Channel ROI ranking (measured+mmm)', mRoi.status === 200 && mRoi.json.recommendation_basis === 'measured+mmm' && mNbaCell != null && Number(mNbaCell.lift_pct) === 900 && Number(mNbaCell.lift_multiplier) === 10, `basis=${mRoi.json.recommendation_basis} cell=${JSON.stringify({ lift: mNbaCell?.lift_pct, mult: mNbaCell?.lift_multiplier })}`);
+  // docs/62 Phase 3 — the weak flag rides into ⑤ display-only: the NbaSeg lift came from the 1v1-arm
+  // journey (weak), so the cell is flagged — while the multiplier/score math above stayed IDENTICAL.
+  ok('Measure ⑤ Phase 3: the cell carries lift_weak from the winning measurement (display-only — multiplier unchanged)', mNbaCell?.lift_weak === true && Number(mNbaCell?.lift_multiplier) === 10, `weak=${mNbaCell?.lift_weak} mult=${mNbaCell?.lift_multiplier}`);
 
   // ── Marketing Activation — docs/62 Phase 1: AUTOPILOT CADENCE + ACTION CENTER (no new control; the
   //    scheduled jobs only ever act as the MAKER — activation/approval stays human maker-checker; the

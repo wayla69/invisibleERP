@@ -170,6 +170,9 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mi.ex_days': { th: ' วัน', en: 'd' },
   'mi.ex_perhead': { th: 'ต่อคน', en: 'per head' },
   'mi.ex_incremental': { th: 'ยอดขายส่วนเพิ่ม', en: 'Incremental revenue' },
+  // Statistical honesty (docs/62 Phase 3)
+  'mi.ex_ci': { th: 'ช่วงความเชื่อมั่น 95%', en: '95% CI' },
+  'mi.ex_weak': { th: 'หลักฐานยังอ่อน — กลุ่มเล็กหรือผลยังไม่ชัด', en: 'Weak evidence — small sample or inconclusive' },
   'mi.ex_holdout_note': { th: 'กลุ่มควบคุมถูกกำหนดตอนเริ่มและไม่มีการติดต่อเด็ดขาด — เพื่อให้เทียบผลได้อย่างซื่อตรง', en: 'The control group is fixed at start and never contacted — so the comparison is honest.' },
   'mi.ex_no_control': { th: 'ไม่มีกลุ่มควบคุมให้เทียบ (ลดสัดส่วนกลุ่มควบคุม)', en: 'No control arm to measure against' },
   'mi.ex_not_elapsed': { th: 'ยังไม่ครบช่วงวัดผล — รอให้ครบก่อน', en: 'The measurement window has not elapsed yet' },

@@ -30,7 +30,7 @@ export class SegmentChannelRoiService {
   ) {}
 
   // Load the three inputs the pure scorer needs, tenant-scoped: segment value, channel ROI, measured lift.
-  private async loadInputs(user: JwtUser): Promise<{ segments: SegmentValue[]; channels: ChannelRoi[]; liftBySegment: Map<string, number | null>; basis: string | null }> {
+  private async loadInputs(user: JwtUser): Promise<{ segments: SegmentValue[]; channels: ChannelRoi[]; liftBySegment: Map<string, number | null>; weakBySegment: Map<string, boolean>; basis: string | null }> {
     const tenantId = this.assertTenant(user);
 
     // Per-segment size + average platform CLV (a single-table aggregation — no join).
@@ -53,25 +53,32 @@ export class SegmentChannelRoiService {
     // MKT-19 experiments, ② NBA journeys and ④ save runs (migration 0476) all feed the same map; the most
     // recently measured lift per segment wins. This is the "realised lift feeds back into ⑤" loop closer.
     const liftBySegment = new Map<string, number | null>();
+    // docs/62 Phase 3: the winning measurement's weak-evidence flag rides along (display-only honesty —
+    // the multiplier/score math never reads it).
+    const weakBySegment = new Map<string, boolean>();
     const seenAt = new Map<string, number>();
-    const fold = (rows: Array<{ segment: unknown; liftPct: unknown; measuredAt: unknown }>): void => {
+    const fold = (rows: Array<{ segment: unknown; liftPct: unknown; measuredAt: unknown; weak?: unknown }>): void => {
       for (const r of rows) {
         if (r.segment == null || r.liftPct == null) continue;
         const seg = String(r.segment);
         const at = r.measuredAt ? new Date(r.measuredAt as string | Date).getTime() : 0;
-        if (!seenAt.has(seg) || at >= (seenAt.get(seg) ?? 0)) { seenAt.set(seg, at); liftBySegment.set(seg, Number(r.liftPct)); }
+        if (!seenAt.has(seg) || at >= (seenAt.get(seg) ?? 0)) {
+          seenAt.set(seg, at);
+          liftBySegment.set(seg, Number(r.liftPct));
+          weakBySegment.set(seg, r.weak === true);
+        }
       }
     };
-    fold(await this.db.select({ segment: miCampaignExperiments.segment, liftPct: miCampaignExperiments.liftPct, measuredAt: miCampaignExperiments.measuredAt })
+    fold(await this.db.select({ segment: miCampaignExperiments.segment, liftPct: miCampaignExperiments.liftPct, measuredAt: miCampaignExperiments.measuredAt, weak: miCampaignExperiments.weakEvidence })
       .from(miCampaignExperiments)
       .where(and(eq(miCampaignExperiments.tenantId, tenantId), eq(miCampaignExperiments.status, 'Measured'))));
-    fold(await this.db.select({ segment: miJourneys.segment, liftPct: miJourneys.realizedLiftPct, measuredAt: miJourneys.measuredAt })
+    fold(await this.db.select({ segment: miJourneys.segment, liftPct: miJourneys.realizedLiftPct, measuredAt: miJourneys.measuredAt, weak: miJourneys.weakEvidence })
       .from(miJourneys)
       .where(and(eq(miJourneys.tenantId, tenantId), sql`${miJourneys.measuredAt} is not null`)));
-    fold(await this.db.select({ segment: miSaveRuns.segment, liftPct: miSaveRuns.realizedLiftPct, measuredAt: miSaveRuns.measuredAt })
+    fold(await this.db.select({ segment: miSaveRuns.segment, liftPct: miSaveRuns.realizedLiftPct, measuredAt: miSaveRuns.measuredAt, weak: miSaveRuns.weakEvidence })
       .from(miSaveRuns)
       .where(and(eq(miSaveRuns.tenantId, tenantId), sql`${miSaveRuns.measuredAt} is not null`)));
-    return { segments, channels, liftBySegment, basis };
+    return { segments, channels, liftBySegment, weakBySegment, basis };
   }
 
   // Rank segment × channel cells by incremental ROI × value, and split a budget toward the best channels.
@@ -79,12 +86,12 @@ export class SegmentChannelRoiService {
   // never touches the allocation math) and the response carries recent campaign delivery outcomes
   // (message_log via the owning CampaignsService read — an advisory deliverability signal).
   async rank(user: JwtUser, opts?: { budget?: number; top?: number }): Promise<Record<string, unknown>> {
-    const { segments, channels, liftBySegment, basis } = await this.loadInputs(user);
+    const { segments, channels, liftBySegment, weakBySegment, basis } = await this.loadInputs(user);
     const offersRaw = await this.propensity.topOffersForSegments(user, segments.map((s) => s.segment), { top: 3 });
     const offersBySegment = new Map<string, CellOffer[]>();
     for (const [seg, offers] of offersRaw) offersBySegment.set(seg, offers.map((o) => ({ item_id: o.item_id, name: o.name, score: o.score, reach: o.reach })));
     const budget = Math.max(0, Number(opts?.budget ?? 0) || 0);
-    const plan = rankSegmentChannel(segments, channels, liftBySegment, budget, { top: opts?.top ?? 50, offersBySegment });
+    const plan = rankSegmentChannel(segments, channels, liftBySegment, budget, { top: opts?.top ?? 50, offersBySegment, weakBySegment });
     const delivery = await this.campaigns.outcomeSummary(user, { since_days: 90, limit: 10 });
     return {
       budget,
@@ -105,8 +112,8 @@ export class SegmentChannelRoiService {
   async stage(user: JwtUser, body: { total_budget: number; top?: number; note?: string }): Promise<Record<string, unknown>> {
     const budget = Number(body?.total_budget);
     if (!Number.isFinite(budget) || budget <= 0) throw new BadRequestException({ code: 'INVALID_BUDGET', message: 'total_budget must be a positive number', messageTh: 'งบต้องเป็นจำนวนบวก' });
-    const { segments, channels, liftBySegment } = await this.loadInputs(user);
-    const plan = rankSegmentChannel(segments, channels, liftBySegment, budget, { top: body?.top ?? 50 });
+    const { segments, channels, liftBySegment, weakBySegment } = await this.loadInputs(user);
+    const plan = rankSegmentChannel(segments, channels, liftBySegment, budget, { top: body?.top ?? 50, weakBySegment });
     const topCell = plan.cells[0];
     const note = body?.note ?? (topCell ? `Segment×Channel ROI: top cell ${topCell.segment} × ${topCell.channel} (${plan.basis})` : `Segment×Channel ROI (${plan.basis})`);
     // Delegate to MKT-17 staging (validates MMM data, computes predicted sales off the curves, enforces the

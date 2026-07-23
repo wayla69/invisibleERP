@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.18** _(2026-07-23: **Offer-level ⑤ + plan backtest (docs/62 Phase 2, NEW detective control MKT-26)** — §5g ⑤: cells gain a **แนะนำเสนอ** top-offer chip (from ③) and an **อัตราส่งถึงล่าสุด** deliverability line; §5c: approved budget plans gain **ตรวจสอบแผน (backtest)** — planned vs actual per channel, red flags on drift/unplanned spend, adherence %, schedulable as ตรวจสอบแผนงบเทียบจ่ายจริง. Variances are findings; nothing moves money. UAT-MA-26.)_ _(2026-07-23: **Autopilot + action center (docs/62 Phase 1)** — §5g: three schedulable marketing jobs (auto-stage NBA / auto-stage save sweep / measure elapsed windows — machine prepares with an `(auto)` marker, humans keep activation/approval; one-in-flight idempotency) and the สิ่งที่รอคุณตอนนี้ action-center card on the overview + the marketing queues in the pending-approvals monitor. UAT-MA-AUTO-01/02.)_ _(2026-07-23: **Realized measurement (docs/61 loop close)** — §5g ② and ④ gain a **วัดผล** step: after the window, journeys pin a realized treatment-vs-control lift chip and save runs replace the expected P&L with a **พิสูจน์แล้ว** realized net benefit, both on real POS revenue; the proven lift feeds the ROI กลุ่ม × ช่องทาง ranking. UAT-MA-22b/24b.)_ _(2026-07-23: **Studio v2 (MKT-21 unchanged)** — §5g ①: the draft now carries an **เขียนโดย AI / แม่แบบมาตรฐาน** badge (a live AI model refines the copy when the company has not opted out of external AI processing; the deterministic template is the automatic fail-closed fallback), the fact sheet now includes the segment's top un-bought product as the concrete offer, and targeting always stays fact-driven with the producing model recorded on the model card. UAT-MA-21b.)_ _(2026-07-23: **docs/61 web** — new §5g **Marketing Activation workspace** (`/marketing-activation`): one Marketing-Studio home for the five activation tools — ③ cross-sell lookup, ⑤ segment×channel budget ranking (staged via the MKT-17 maker-checker plan), ② NBA journeys (maker-checker activation, suppression reasons shown), ① AI campaign drafts with the model-card evidence, ④ churn-save policy/preview/runs with the capped-offer chips and retention P&L. Amounts show as "THB" (no ฿ sign). UAT-UI-MA-01.)_ _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.19** _(2026-07-23: **Statistical honesty + creative A/B (docs/62 Phase 3)** — §5e/§5g: every measured lift (experiments, journeys, save runs) now shows its 95% confidence interval and a ⚠ หลักฐานยังอ่อน flag on small/inconclusive samples (display-only — numbers never adjusted; the ⑤ cells inherit the flag); §5g ①: the Studio states the TOWS-derived โทนกลยุทธ์, drafts an ข้อความแบบ B second creative angle staged as a real 50/50 A/B, and the new ผล A/B จากยอดขายจริง panel compares the two wordings on real POS revenue per contacted arm. UAT-MA-27.)_ _(2026-07-23: **Offer-level ⑤ + plan backtest (docs/62 Phase 2, NEW detective control MKT-26)** — §5g ⑤: cells gain a **แนะนำเสนอ** top-offer chip (from ③) and an **อัตราส่งถึงล่าสุด** deliverability line; §5c: approved budget plans gain **ตรวจสอบแผน (backtest)** — planned vs actual per channel, red flags on drift/unplanned spend, adherence %, schedulable as ตรวจสอบแผนงบเทียบจ่ายจริง. Variances are findings; nothing moves money. UAT-MA-26.)_ _(2026-07-23: **Autopilot + action center (docs/62 Phase 1)** — §5g: three schedulable marketing jobs (auto-stage NBA / auto-stage save sweep / measure elapsed windows — machine prepares with an `(auto)` marker, humans keep activation/approval; one-in-flight idempotency) and the สิ่งที่รอคุณตอนนี้ action-center card on the overview + the marketing queues in the pending-approvals monitor. UAT-MA-AUTO-01/02.)_ _(2026-07-23: **Realized measurement (docs/61 loop close)** — §5g ② and ④ gain a **วัดผล** step: after the window, journeys pin a realized treatment-vs-control lift chip and save runs replace the expected P&L with a **พิสูจน์แล้ว** realized net benefit, both on real POS revenue; the proven lift feeds the ROI กลุ่ม × ช่องทาง ranking. UAT-MA-22b/24b.)_ _(2026-07-23: **Studio v2 (MKT-21 unchanged)** — §5g ①: the draft now carries an **เขียนโดย AI / แม่แบบมาตรฐาน** badge (a live AI model refines the copy when the company has not opted out of external AI processing; the deterministic template is the automatic fail-closed fallback), the fact sheet now includes the segment's top un-bought product as the concrete offer, and targeting always stays fact-driven with the producing model recorded on the model card. UAT-MA-21b.)_ _(2026-07-23: **docs/61 web** — new §5g **Marketing Activation workspace** (`/marketing-activation`): one Marketing-Studio home for the five activation tools — ③ cross-sell lookup, ⑤ segment×channel budget ranking (staged via the MKT-17 maker-checker plan), ② NBA journeys (maker-checker activation, suppression reasons shown), ① AI campaign drafts with the model-card evidence, ④ churn-save policy/preview/runs with the capped-offer chips and retention P&L. Amounts show as "THB" (no ฿ sign). UAT-UI-MA-01.)_ _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -533,6 +533,10 @@ difference is the real **lift**.
    at that moment and **never contacted**.
 2. After the window has passed, press **วัดผล (Measure)**. The system compares the average sales per
    person in each group and reports the **lift %** and the **incremental revenue** the campaign caused.
+   The measured card also states the **ช่วงความเชื่อมั่น 95%** (the range the true lift plausibly sits in)
+   and shows **หลักฐานยังอ่อน** with a ⚠ when either group had fewer than 30 people or the result is
+   statistically inconclusive — a +900% from a handful of customers *should* look weaker than a +12% from
+   two thousand. The flag is honesty only; the numbers themselves are never adjusted.
 
 > The control group is chosen once and never contacted, so the comparison is fair. You can't measure
 > before the window ends, and a test can't be re-measured (the result is locked). Each company sees
@@ -593,7 +597,9 @@ guardrails.
 **To decide where the next budget goes (⑤ Segment × Channel):**
 1. Open **ROI กลุ่ม × ช่องทาง**, set the budget and press **จัดอันดับ**.
 2. Cells are ranked by incremental ROI × segment value; a **lift จริง** chip means a real measured
-   experiment (MKT-19) backs that cell, not just the model. A **แนะนำเสนอ** chip names the segment's
+   experiment (MKT-19) backs that cell, not just the model. If that measurement came from a small or
+   inconclusive sample the chip adds **⚠ หลักฐานยังอ่อน** — the number still shows and the ranking math is
+   unchanged, but you know how much to trust it. A **แนะนำเสนอ** chip names the segment's
    top un-bought product (from ③) — the concrete offer to lead with in that cell — and a small
    **อัตราส่งถึงล่าสุด** line shows recent campaign deliverability so a weak channel is visible before
    you fund it. Neither changes the budget math; they tell you *what to say* where the money goes.
@@ -608,21 +614,39 @@ guardrails.
    แบ่งแยกหน้าที่) and only then a consent-gated draft is created for the treatment arm.
 3. **Prove it worked:** activation starts a measurement window (14 days by default). Once it elapses, press
    **วัดผล** on the journey — the system compares the treatment arm's *real* POS revenue against the
-   never-contacted control arm and pins the **realized lift** on the journey (a green/red chip). Measuring
+   never-contacted control arm and pins the **realized lift** on the journey (a green/red chip). The chip
+   also shows the **95% confidence interval** in brackets, and a **⚠ หลักฐานยังอ่อน** tag appears when the
+   sample was too small (under 30 per group) or the result is inconclusive — the honest read of how solid
+   the number is; the lift itself is never adjusted. Measuring
    early tells you the window hasn't elapsed; a journey staged without a control group can never claim a
    measured lift. The proven lift automatically feeds the **ROI กลุ่ม × ช่องทาง** ranking.
 
 **To draft a campaign with AI (① Studio):**
 1. Open **สตูดิโอ AI**, pick a segment — the studio drafts bilingual copy from the segment's *facts*
    (size, CLV, dominant action, best channel, send-hour, and the segment's **top un-bought product** as the
-   concrete offer). Expand **ดูพรอมป์ + model card** to see the grounding evidence.
+   concrete offer). If your analytics platform has pushed a **TOWS** strategy matrix, a
+   **โทนกลยุทธ์ (TOWS)** chip shows the voice the copy was steered toward (e.g. *confident-growth* when the
+   strategy is dominated by strengths×opportunities) — with no TOWS data the tone is simply neutral, never
+   invented. Expand **ดูพรอมป์ + model card** to see the grounding evidence.
 2. A badge on the draft shows **who wrote the copy**: **เขียนโดย AI** (a live AI model refined the wording —
    only when your company has not opted out of external AI processing in Settings › Labs & AI, per PDPA) or
    **แม่แบบมาตรฐาน** (the built-in deterministic template — also the automatic fallback whenever AI is
    unavailable). Either way the *targeting* (channel, send-hour, reach, holdout) always comes straight from
    the facts, and the model card records which one produced it.
-3. **สร้างดราฟต์แคมเปญ** logs the model card and creates a *draft* — a human always reviews; you edit and
-   send it from the normal campaign flow; nothing auto-sends.
+3. Below the main draft, an **ข้อความแบบ B** box shows a second creative angle for the same facts (offer-first
+   wording). **สร้างดราฟต์แคมเปญ** logs the model card (both variants) and creates a *draft* that carries the
+   A/B pair on a fixed 50/50 per-member split — a human always reviews; you edit and send it from the normal
+   campaign flow; nothing auto-sends.
+
+**To see which wording actually sold (① Studio A/B):**
+1. After the campaign has been sent (the normal consent-gated flow) and customers have had time to buy, open
+   **สตูดิโอ AI → ดราฟต์ที่เคยสร้าง** and press **A/B** on the generation's row.
+2. The **ผล A/B จากยอดขายจริง** panel splits the *actually contacted* recipients back into their A and B
+   groups (the split is deterministic, so it is exactly reconstructable from the send audit) and compares
+   real POS revenue per head: **B เทียบ A** shows the lift with its 95% confidence interval, and
+   **⚠ หลักฐานยังอ่อน** flags a small or inconclusive sample.
+3. A campaign that was never sent reports that it has no recipients yet, and one staged without a B variant
+   reports that no A/B exists — the panel never invents groups.
 
 **To save at-risk customers (④ Churn-save):**
 1. Open **รักษาลูกค้า** and stage a policy (risk threshold, minimum CLV, offer rate and the **hard offer

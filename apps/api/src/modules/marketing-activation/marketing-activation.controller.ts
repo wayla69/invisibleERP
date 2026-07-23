@@ -155,6 +155,14 @@ export class MarketingActivationController {
     return this.studio.listGenerations(u);
   }
 
+  // ① Studio A/B outcome — real POS revenue per creative arm since the send, with the honest CI /
+  // weak-evidence math (docs/62 Phase 3). Advisory + read-only.
+  @Get('studio/ab/:campaignId')
+  @Permissions('marketing', 'exec')
+  studioAbOutcome(@Param('campaignId') campaignId: string, @CurrentUser() u: JwtUser) {
+    return this.studio.abOutcome(u, Number(campaignId));
+  }
+
   // ④ Churn-Save Autopilot — STAGE a save-offer policy (capped offer); a DIFFERENT user must approve it.
   @Post('save/policy')
   @Permissions('marketing', 'exec', 'crm_campaign')

@@ -45,3 +45,65 @@ describe('measureLift', () => {
     expect(measureLift(i)).toEqual(measureLift(i));
   });
 });
+
+// docs/62 Phase 3 — statistical honesty. measureLiftDetailed adds the evidence around the point estimate.
+import { measureLiftDetailed } from '../src/common/lift-math';
+
+describe('measureLiftDetailed', () => {
+  it('zero within-arm variance → CI collapses onto the point estimate; small arms still flag weak', () => {
+    // 8×1000 vs 8×100/head (the MKT-19 fixture): lift 900%, SE 0, CI [900, 900] — but n=8 < 30 → weak.
+    const r = measureLiftDetailed(Array(8).fill(1000), Array(8).fill(100));
+    expect(r.lift_pct).toBeCloseTo(900, 6);
+    expect(r.lift_se_pct).toBe(0);
+    expect(r.lift_ci_low_pct).toBeCloseTo(900, 6);
+    expect(r.lift_ci_high_pct).toBeCloseTo(900, 6);
+    expect(r.weak_evidence).toBe(true);
+    expect(r.min_arm_n).toBe(8);
+  });
+
+  it('large same-variance arms with a clear separation → strong evidence (not weak)', () => {
+    // 40/arm alternating ±100 around means 1000 vs 100 — big diff, small SE, CI well above 0.
+    const t = Array.from({ length: 40 }, (_, i) => 1000 + (i % 2 ? 100 : -100));
+    const c = Array.from({ length: 40 }, (_, i) => 100 + (i % 2 ? 100 : -100));
+    const r = measureLiftDetailed(t, c);
+    expect(r.lift_pct).toBeCloseTo(900, 6);
+    expect(r.weak_evidence).toBe(false);
+    expect(r.lift_ci_low_pct!).toBeGreaterThan(0);
+  });
+
+  it('a CI spanning 0 flags weak even with big arms (the lift is not distinguishable from nothing)', () => {
+    // Means 105 vs 100 with a large ±100 swing — the CI comfortably includes 0.
+    const t = Array.from({ length: 60 }, (_, i) => 105 + (i % 2 ? 100 : -100));
+    const c = Array.from({ length: 60 }, (_, i) => 100 + (i % 2 ? 100 : -100));
+    const r = measureLiftDetailed(t, c);
+    expect(r.lift_ci_low_pct!).toBeLessThan(0);
+    expect(r.lift_ci_high_pct!).toBeGreaterThan(0);
+    expect(r.weak_evidence).toBe(true);
+  });
+
+  it('CI is null (and weak) when an arm has < 2 members or the control earned nothing', () => {
+    const tiny = measureLiftDetailed([1000], [100, 100]);
+    expect(tiny.lift_ci_low_pct).toBeNull();
+    expect(tiny.weak_evidence).toBe(true);
+    const zeroControl = measureLiftDetailed([500, 500], [0, 0]);
+    expect(zeroControl.lift_pct).toBeNull();
+    expect(zeroControl.lift_ci_low_pct).toBeNull();
+    expect(zeroControl.weak_evidence).toBe(true);
+  });
+
+  it('agrees with measureLift on the shared aggregate fields', () => {
+    const t = [900, 1100, 1000];
+    const c = [90, 110, 100];
+    const d = measureLiftDetailed(t, c);
+    const a = measureLift({ treatmentRevenue: 3000, treatmentN: 3, controlRevenue: 300, controlN: 3 });
+    expect(d.treatment_per_head).toBeCloseTo(a.treatment_per_head, 9);
+    expect(d.lift_pct).toBeCloseTo(a.lift_pct!, 9);
+    expect(d.incremental_revenue).toBeCloseTo(a.incremental_revenue, 9);
+  });
+
+  it('is deterministic', () => {
+    const t = [1, 2, 3, 4];
+    const c = [1, 1, 2, 2];
+    expect(measureLiftDetailed(t, c)).toEqual(measureLiftDetailed(t, c));
+  });
+});

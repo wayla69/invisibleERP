@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, posMembers, miJourneys, miJourneyTargets } from '../../database/schema';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
-import { measureLift } from '../../common/lift-math';
+import { measureLiftDetailed } from '../../common/lift-math';
 import { CampaignsService } from '../campaigns/campaigns.service';
 import { CrmService } from '../crm/crm.service';
 import { assembleJourney, type NbaCustomer, type Journey } from './nba-scoring';
@@ -126,6 +126,9 @@ export class NbaOrchestratorService {
       requested_by: r.requestedBy, approved_by: r.approvedBy, campaign_id: r.campaignId, created_at: r.createdAt, activated_at: r.activatedAt,
       measure_after: r.measureAfter, measured_at: r.measuredAt, measured_by: r.measuredBy,
       realized_lift_pct: r.realizedLiftPct == null ? null : Number(r.realizedLiftPct),
+      lift_ci_low_pct: r.liftCiLowPct == null ? null : Number(r.liftCiLowPct),
+      lift_ci_high_pct: r.liftCiHighPct == null ? null : Number(r.liftCiHighPct),
+      weak_evidence: r.weakEvidence ?? null,
       incremental_revenue: r.incrementalRevenue == null ? null : Number(r.incrementalRevenue),
       treatment_per_head: r.treatmentPerHead == null ? null : Number(r.treatmentPerHead),
       control_per_head: r.controlPerHead == null ? null : Number(r.controlPerHead),
@@ -194,15 +197,19 @@ export class NbaOrchestratorService {
 
     const from = journey.activatedAt ? new Date(journey.activatedAt) : new Date(journey.createdAt ?? now);
     const rev = await this.crm.revenueByMembers(tenantId, [...treatment, ...control], from, now);
-    const sum = (ids: number[]) => ids.reduce((s, id) => s + (rev.get(id) ?? 0), 0);
-    const tRev = sum(treatment), cRev = sum(control);
-    const lift = measureLift({ treatmentRevenue: tRev, treatmentN: treatment.length, controlRevenue: cRev, controlN: control.length });
+    // Per-member detailed lift (docs/62 Phase 3): 95% CI + weak-evidence flag ride along, display-only.
+    const lift = measureLiftDetailed(treatment.map((id) => rev.get(id) ?? 0), control.map((id) => rev.get(id) ?? 0));
+    const tRev = lift.treatment_per_head * treatment.length;
+    const cRev = lift.control_per_head * control.length;
 
     await this.db.update(miJourneys).set({
       treatmentRevenue: String(round2(tRev)), controlRevenue: String(round2(cRev)),
       treatmentPerHead: String(round2(lift.treatment_per_head)), controlPerHead: String(round2(lift.control_per_head)),
       realizedLiftPct: lift.lift_pct == null ? null : String(round2(lift.lift_pct)),
       incrementalRevenue: String(round2(lift.incremental_revenue)),
+      liftCiLowPct: lift.lift_ci_low_pct == null ? null : String(round2(lift.lift_ci_low_pct)),
+      liftCiHighPct: lift.lift_ci_high_pct == null ? null : String(round2(lift.lift_ci_high_pct)),
+      weakEvidence: lift.weak_evidence,
       measuredAt: now, measuredBy: user.username ?? 'user',
     }).where(and(eq(miJourneys.tenantId, tenantId), eq(miJourneys.id, journey.id)));
 
@@ -211,6 +218,9 @@ export class NbaOrchestratorService {
       treatment_count: treatment.length, control_count: control.length,
       treatment_per_head: round2(lift.treatment_per_head), control_per_head: round2(lift.control_per_head),
       realized_lift_pct: lift.lift_pct == null ? null : round2(lift.lift_pct),
+      lift_ci_low_pct: lift.lift_ci_low_pct == null ? null : round2(lift.lift_ci_low_pct),
+      lift_ci_high_pct: lift.lift_ci_high_pct == null ? null : round2(lift.lift_ci_high_pct),
+      weak_evidence: lift.weak_evidence,
       incremental_revenue: round2(lift.incremental_revenue),
       note: 'Realized treatment-vs-control lift on real POS revenue (MKT-19 discipline). The measured lift feeds the Segment×Channel ROI ranking (⑤).',
     };

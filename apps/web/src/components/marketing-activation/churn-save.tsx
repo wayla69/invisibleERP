@@ -207,6 +207,11 @@ export function ChurnSave() {
                     <span className={`inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-semibold shadow-sm ${Number(r.realized_net_benefit ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
                       <TrendingUp className="size-3.5" /> {t('ma.measured_proven')} {compactThb(r.realized_net_benefit)}
                       {r.realized_lift_pct != null && <span className="text-muted-foreground">· lift {Number(r.realized_lift_pct) >= 0 ? '+' : ''}{num(r.realized_lift_pct, 1)}%</span>}
+                      {r.lift_ci_low_pct != null && r.lift_ci_high_pct != null && (
+                        <span className="font-normal text-muted-foreground">[{num(r.lift_ci_low_pct, 0)}, {num(r.lift_ci_high_pct, 0)}]</span>
+                      )}
+                      {/* Statistical honesty (docs/62 Phase 3): small/inconclusive samples are flagged, never hidden. */}
+                      {r.weak_evidence === true && <span title={t('ma.weak_evidence')}>⚠</span>}
                     </span>
                   )}
                 </div>

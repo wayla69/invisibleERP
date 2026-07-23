@@ -4,7 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, posMembers, miSavePolicies, miSaveRuns, miSaveTargets } from '../../database/schema';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
-import { measureLift } from '../../common/lift-math';
+import { measureLiftDetailed } from '../../common/lift-math';
 import { CampaignsService } from '../campaigns/campaigns.service';
 import { CrmService } from '../crm/crm.service';
 import { computeSavePnl, type SaveCustomer, type SavePolicy } from './save-offer';
@@ -172,9 +172,10 @@ export class SaveAutopilotService {
 
     const from = run.createdAt ? new Date(run.createdAt) : now;
     const rev = await this.crm.revenueByMembers(tenantId, [...treatment, ...control], from, now);
-    const sum = (ids: number[]) => ids.reduce((s, id) => s + (rev.get(id) ?? 0), 0);
-    const tRev = sum(treatment), cRev = sum(control);
-    const lift = measureLift({ treatmentRevenue: tRev, treatmentN: treatment.length, controlRevenue: cRev, controlN: control.length });
+    // Per-member detailed lift (docs/62 Phase 3): 95% CI + weak-evidence flag ride along, display-only.
+    const lift = measureLiftDetailed(treatment.map((id) => rev.get(id) ?? 0), control.map((id) => rev.get(id) ?? 0));
+    const tRev = lift.treatment_per_head * treatment.length;
+    const cRev = lift.control_per_head * control.length;
     const realizedNet = lift.incremental_revenue - Number(run.offerCost ?? 0);
 
     await this.db.update(miSaveRuns).set({
@@ -182,6 +183,9 @@ export class SaveAutopilotService {
       treatmentPerHead: String(round2(lift.treatment_per_head)), controlPerHead: String(round2(lift.control_per_head)),
       realizedLiftPct: lift.lift_pct == null ? null : String(round2(lift.lift_pct)),
       incrementalRevenue: String(round2(lift.incremental_revenue)), realizedNetBenefit: String(round2(realizedNet)),
+      liftCiLowPct: lift.lift_ci_low_pct == null ? null : String(round2(lift.lift_ci_low_pct)),
+      liftCiHighPct: lift.lift_ci_high_pct == null ? null : String(round2(lift.lift_ci_high_pct)),
+      weakEvidence: lift.weak_evidence,
       measuredAt: now, measuredBy: user.username ?? 'user',
     }).where(and(eq(miSaveRuns.tenantId, tenantId), eq(miSaveRuns.id, run.id)));
 
@@ -190,6 +194,9 @@ export class SaveAutopilotService {
       treatment_count: treatment.length, control_count: control.length,
       treatment_per_head: round2(lift.treatment_per_head), control_per_head: round2(lift.control_per_head),
       realized_lift_pct: lift.lift_pct == null ? null : round2(lift.lift_pct),
+      lift_ci_low_pct: lift.lift_ci_low_pct == null ? null : round2(lift.lift_ci_low_pct),
+      lift_ci_high_pct: lift.lift_ci_high_pct == null ? null : round2(lift.lift_ci_high_pct),
+      weak_evidence: lift.weak_evidence,
       realized_saved_revenue: round2(lift.incremental_revenue),
       offer_cost: run.offerCost == null ? null : Number(run.offerCost),
       realized_net_benefit: round2(realizedNet),
@@ -214,6 +221,9 @@ export class SaveAutopilotService {
       campaign_id: r.campaignId, created_at: r.createdAt,
       measure_after: r.measureAfter, measured_at: r.measuredAt, measured_by: r.measuredBy,
       realized_lift_pct: r.realizedLiftPct == null ? null : Number(r.realizedLiftPct),
+      lift_ci_low_pct: r.liftCiLowPct == null ? null : Number(r.liftCiLowPct),
+      lift_ci_high_pct: r.liftCiHighPct == null ? null : Number(r.liftCiHighPct),
+      weak_evidence: r.weakEvidence ?? null,
       realized_saved_revenue: r.incrementalRevenue == null ? null : Number(r.incrementalRevenue),
       realized_net_benefit: r.realizedNetBenefit == null ? null : Number(r.realizedNetBenefit),
     })) };

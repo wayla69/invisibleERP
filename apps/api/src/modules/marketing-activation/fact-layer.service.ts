@@ -4,6 +4,7 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, posMembers } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { MarketingIntelService } from '../marketing-intel/marketing-intel.service';
+import { toneFromTows } from './campaign-studio';
 
 // Marketing Activation — the shared FACT LAYER (docs/61 Phase 0). A single READ-ONLY aggregator that
 // COMPOSES facts the ERP already captures — per customer and per segment — into one governed shape every
@@ -111,6 +112,8 @@ export class FactLayerService {
       best_channel: bestChannel ? { channel: String(bestChannel.channel), roi: num(bestChannel.roi) } : null,
       mmm_basis: summary?.mmm?.model_run_ref ?? null,
       has_mmm: channels.length > 0,
+      // Strategic tone from the pushed TOWS (docs/62 Phase 3) — the Studio grounds its copy voice on it.
+      tows_tone: toneFromTows((summary?.tows?.payload as { items?: unknown } | null)?.items),
     };
   }
 
