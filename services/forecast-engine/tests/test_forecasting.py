@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from conftest import daily_history
 
-from app.contracts import HolidayEvent, SeriesInput
+from app.contracts import HolidayEvent, SeriesInput, WarmStart
 from app.forecasting import (
     build_frame,
     croston_sba_paths,
@@ -311,3 +311,102 @@ def test_stockout_days_excluded_from_elasticity():
     reg = build_regctx(s, promo_regressor=True, price_regressor=True)
     eps, r2, n = estimate_elasticity(s, reg)
     assert n == len(s.history) - 1
+
+
+# ── docs/59 D2 — warm-start / model registry ───────────────────────────────────
+# The engine fits Prophet deterministically (MAP/L-BFGS) and reseeds numpy right before sampling, so a
+# serialized fit reused on an UNCHANGED training window must reproduce the cold fit byte-for-byte. These
+# need a real prophet wheel (importorskip); CI installs it.
+
+
+def test_warm_start_cold_fit_returns_fitted_state():
+    pytest.importorskip("prophet")
+    out = run(series(days=120))
+    assert out.model == "prophet"
+    assert out.fitted_state is not None  # a fresh fit ships its serialized state for the API to cache
+    assert out.fitted_state.params and out.fitted_state.fit_hash
+    assert out.fitted_state.fit_wape is not None  # 120 days ≥ BACKTEST_MIN_DAYS ⇒ a holdout WAPE baseline
+
+
+def test_warm_start_reproduces_cold_fit_byte_identical():
+    pytest.importorskip("prophet")
+    cold = run(series(days=120))
+    assert cold.fitted_state is not None
+    warm = run(series(days=120, warm_start=WarmStart(params=cold.fitted_state.params, fit_hash=cold.fitted_state.fit_hash)))
+    assert warm.fitted_state is None  # a HIT reuses the cache — nothing new to persist
+    assert warm.sample_paths == cold.sample_paths  # reuse ≡ cold fit, byte-for-byte (determinism gate)
+
+
+def test_warm_start_refits_on_training_window_change():
+    pytest.importorskip("prophet")
+    cold = run(series(days=120))
+    assert cold.fitted_state is not None
+    # A changed training window (one more day, so every dated row differs) recomputes to a different
+    # fit_hash than the cached one ⇒ the stale warm-start is ignored and the series refits.
+    changed = run(series(days=121, warm_start=WarmStart(params=cold.fitted_state.params, fit_hash=cold.fitted_state.fit_hash)))
+    assert changed.fitted_state is not None  # a refit happened
+    assert changed.fitted_state.fit_hash != cold.fitted_state.fit_hash
+
+
+def test_warm_start_corrupt_cache_falls_back_to_fit():
+    pytest.importorskip("prophet")
+    cold = run(series(days=120))
+    assert cold.fitted_state is not None
+    # Same window (hash matches) but unparseable params ⇒ the reconstruct fails closed to a fresh fit.
+    out = run(series(days=120, warm_start=WarmStart(params="{not-prophet-json}", fit_hash=cold.fitted_state.fit_hash)))
+    assert out.model == "prophet"
+    assert out.fitted_state is not None  # refit, not a crash
+
+
+# ── docs/56 A4 — analog / zero-history cold-start ──────────────────────────────
+from app.contracts import ForecastSeriesResult, Accuracy, ForecastPoint  # noqa: E402
+from app.forecasting import forecast_series as _fs  # noqa: E402
+from app.service import run_forecast  # noqa: E402
+from app.contracts import ForecastRequest  # noqa: E402
+
+
+def _donor_result(series_id="DONOR", level=20.0, horizon=7, k=20):
+    return ForecastSeriesResult(
+        series_id=series_id, model="prophet",
+        points=[ForecastPoint(ds="2026-07-01", yhat=level, q={"0.1": level*0.8, "0.5": level, "0.9": level*1.2})],
+        sample_paths=[[level] * horizon for _ in range(k)],  # flat k×horizon, mean == level
+        accuracy=Accuracy(wape=None, cutoffs=0),
+    )
+
+
+def test_analog_borrows_donor_shape_and_is_flagged():
+    new_sku = SeriesInput(series_id="NEW", history=daily_history(10, 5.0), analog_of=["DONOR"])
+    out = _fs(series=new_sku, holidays=[], closures=set(), horizon=7, k=20, quantiles=[0.1, 0.5, 0.9],
+              payday_regressor=True, rng=np.random.default_rng(3), donors={"DONOR": _donor_result(level=20.0)})
+    assert out.model == "baseline_dow"
+    assert "analog" in out.attribution.regressors_used  # a reviewer sees it is borrowed, not observed
+    mean = float(np.mean([v for p in out.sample_paths for v in p]))
+    assert 3.0 < mean < 8.0  # rescaled to the NEW sku's own ~5 baseline, not the donor's 20
+
+
+def test_analog_without_donors_falls_back_to_own_baseline():
+    # analog_of declared but the donor is absent from the batch ⇒ no borrow; forecast the short own history.
+    new_sku = SeriesInput(series_id="NEW", history=daily_history(10, 5.0), analog_of=["MISSING"])
+    out = _fs(series=new_sku, holidays=[], closures=set(), horizon=7, k=20, quantiles=[0.1, 0.5, 0.9],
+              payday_regressor=True, rng=np.random.default_rng(3), donors={})
+    assert "analog" not in out.attribution.regressors_used
+
+
+def test_analog_ignored_when_history_is_sufficient():
+    # a SKU with enough history does NOT borrow even if analog_of is set (it can fit its own model).
+    established = SeriesInput(series_id="OLD", history=daily_history(120, 8.0), analog_of=["DONOR"])
+    out = _fs(series=established, holidays=[], closures=set(), horizon=7, k=20, quantiles=[0.1, 0.5, 0.9],
+              payday_regressor=True, rng=np.random.default_rng(3), donors={"DONOR": _donor_result()})
+    assert "analog" not in out.attribution.regressors_used
+
+
+def test_run_forecast_two_phase_analog_end_to_end():
+    donor = SeriesInput(series_id="DONOR", history=daily_history(120, 20.0, weekend_lift=1.5))
+    newbie = SeriesInput(series_id="NEW", history=daily_history(8, 6.0), analog_of=["DONOR"])
+    req = ForecastRequest(contract_version="2", request_id="r-a4", horizon_days=7, scenario_count=20,
+                          quantiles=[0.1, 0.5, 0.9], holidays=[], series=[newbie, donor])  # analog listed first
+    resp = run_forecast(req)
+    by = {r.series_id: r for r in resp.results}
+    assert set(by) == {"DONOR", "NEW"}
+    assert "analog" in by["NEW"].attribution.regressors_used  # borrowed the donor forecast (phase 2)
+    assert "analog" not in by["DONOR"].attribution.regressors_used

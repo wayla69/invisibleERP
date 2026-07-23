@@ -14,7 +14,9 @@ import { ScmEngineClientService } from './scm-engine-client.service';
 import { ScmExtractService } from './scm-extract.service';
 import { ScmElasticityService } from './scm-elasticity.service';
 import { ScmCrossElasticityService } from './scm-cross-elasticity.service';
+import { ScmModelCacheService } from './scm-model-cache.service';
 import { explodePaths, planHelpers, ScmFallbackPlanner } from './scm-planner';
+import { analogDonors } from './scm-analog';
 import {
   PLAN_STATUS, SYSTEM_ACTOR, type BranchPlanDraft, type ExtractedTenantData, type PlanRunResult,
   type SuggestedLine,
@@ -37,7 +39,66 @@ export class ScmRunService {
     private readonly emit: (tenantId: number | null, type: 'scm_run_completed' | 'scm_run_failed', extra: Record<string, unknown>) => void,
     private readonly elasticity: ScmElasticityService,
     private readonly cross: ScmCrossElasticityService,
-  ) {}
+  ) {
+    // docs/59 D2 — the model registry (warm-start read/persist). Built from db in the ctor body so the
+    // facade's positional ctor (goldenmaster contract) is untouched; a distinct concern from the run.
+    this.modelCache = new ScmModelCacheService(this.db);
+  }
+
+  private readonly modelCache: ScmModelCacheService;
+
+  /**
+   * docs/57 Track B (B2b) — per-branch demand SAMPLE PATHS for a set of items: the loose-coupling
+   * seam `ScmNetworkExtractService` consumes (it never touches scm-planning's tables). Reuses the same
+   * extract → engine.forecast → explodePaths pipeline a planning run uses, but returns the raw K×H
+   * ingredient paths per (branch, item) instead of persisting an order plan. Engine-only: with the
+   * engine disabled it returns empty and the caller runs its in-process network fallback (no paths
+   * needed). Returns branchId → (itemId → number[][]); a `null` branch = the untagged unit.
+   */
+  async demandPathsFor(
+    tenantId: number | null,
+    itemIds: string[],
+    branchIds?: (number | null)[],
+  ): Promise<Map<number | null, Map<string, number[][]>>> {
+    const out = new Map<number | null, Map<string, number[][]>>();
+    if (!this.engine.enabled() || !itemIds.length) return out;
+    const wanted = new Set(itemIds);
+    const data = await this.extract.extractAll(tenantId, { branchIds, itemIds });
+    const horizon = data.settings.horizon_days;
+    let reqSeq = 0;
+    for (const branchId of data.branchIds) {
+      const branchSeries = data.series.filter((s) => s.branchId === branchId);
+      if (!branchSeries.length) continue;
+      const menuPaths = new Map<string, number[][]>();
+      const closures = this.extract.futureClosures(data.settings, branchId, horizon);
+      for (const chunk of this.engine.chunk(branchSeries)) {
+        const req: ScmForecastRequest = {
+          contract_version: this.engine.contractVersion(),
+          request_id: `net:${tenantId ?? 'null'}:${branchId ?? 'null'}:${reqSeq++}`,
+          horizon_days: horizon,
+          scenario_count: data.settings.sample_paths,
+          quantiles: [0.1, 0.5, 0.9],
+          holidays: data.holidays.map((h) => ({ ...h, lower_window: 0, upper_window: 0 })),
+          closures: [...new Set([...closures, ...chunk.flatMap((s) => s.closedDays)])],
+          payday_regressor: true,
+          promo_regressor: true,
+          price_regressor: true,
+          scenario: false,
+          series: chunk.map((s) => ({
+            series_id: s.itemId,
+            class_hint: 'auto' as const,
+            history: s.values.map((y, i) => ({ ds: addDaysYmd(s.startDate, i), y })),
+            ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
+          })),
+        };
+        const res = await this.engine.forecast(req);
+        for (const r of res.results) menuPaths.set(r.series_id, r.sample_paths);
+      }
+      const ingredientPaths = explodePaths(menuPaths, data.recipes, wanted);
+      if (ingredientPaths.size) out.set(branchId, ingredientPaths);
+    }
+    return out;
+  }
 
   async executePlanRun(
     tenantId: number | null,
@@ -166,6 +227,14 @@ export class ScmRunService {
       // One branch at a time, chunked — bounded memory and a payload the engine will accept.
       const menuPaths = new Map<string, number[][]>();
       const closures = this.extract.futureClosures(data.settings, branchId, horizon);
+      // docs/59 D2 — cached Prophet fits still inside the refit cadence; the engine reuses one only when
+      // its fit_hash still matches this run's training window (else refits + returns fresh state).
+      const warmByItem = await this.modelCache.loadWarmStarts(
+        tenantId, branchId, branchSeries.map((s) => s.itemId), data.settings.refit_cadence_days,
+      );
+      const windowByItem = new Map(branchSeries.map((s) => [s.itemId, s]));
+      // docs/56 A4 — a too-new series borrows the pooled shape of established same-branch siblings.
+      const donorsByItem = analogDonors(branchSeries);
       for (const chunk of this.engine.chunk(branchSeries)) {
         const req: ScmForecastRequest = {
           contract_version: this.engine.contractVersion(),
@@ -193,12 +262,19 @@ export class ScmRunService {
               ...chunk.map((s) => ({ node_id: `L:${s.itemId}`, parent_id: 'TOTAL', series_id: s.itemId })),
             ],
           },
-          series: chunk.map((s) => ({
-            series_id: s.itemId,
-            class_hint: 'auto' as const,
-            history: s.values.map((y, i) => ({ ds: addDaysYmd(s.startDate, i), y })),
-            ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
-          })),
+          series: chunk.map((s) => {
+            const warm = warmByItem.get(s.itemId);
+            return {
+              series_id: s.itemId,
+              class_hint: 'auto' as const,
+              history: s.values.map((y, i) => ({ ds: addDaysYmd(s.startDate, i), y })),
+              ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
+              // D2: ship the cached fit; the engine ignores it on a hash mismatch or a non-Prophet route.
+              ...(warm ? { warm_start: { params: warm.params, fit_hash: warm.fit_hash } } : {}),
+              // A4: a too-new series declares donor siblings; the engine borrows their pooled shape.
+              ...(donorsByItem.get(s.itemId)?.length ? { analog_of: donorsByItem.get(s.itemId) } : {}),
+            };
+          }),
         };
         digestParts.push(createHash('sha256').update(JSON.stringify(req)).digest('hex'));
         const res = await this.engine.forecast(req);
@@ -220,7 +296,18 @@ export class ScmRunService {
         for (const r of res.results) {
           const paths = coherent ? (reconLeaf.get(r.series_id) ?? r.sample_paths) : r.sample_paths;
           menuPaths.set(r.series_id, paths);
-          await this.saveForecast(tenantId, runId, branchId, r.series_id, 'menu', r, today, horizon);
+          // D2: on a warm-start HIT the engine skips the backtest (accuracy.wape null), so carry the
+          // cached fit_wape forward to keep the forecast's WAPE meaningful across reuse runs.
+          const warm = warmByItem.get(r.series_id);
+          await this.saveForecast(tenantId, runId, branchId, r.series_id, 'menu', r, today, horizon, warm?.fit_wape ?? null);
+          // D2: a (re)fit ships fitted_state — persist it so the next stable run can warm-start.
+          if (r.fitted_state) {
+            const sw = windowByItem.get(r.series_id);
+            await this.modelCache.persistFit(tenantId, branchId, r.series_id, r.model, r.fitted_state, {
+              from: sw ? sw.startDate : null,
+              to: sw ? addDaysYmd(sw.startDate, sw.values.length - 1) : null,
+            });
+          }
         }
         for (const err of res.errors) engineErrors.push(`${err.ref}: ${err.code}`);
       }
@@ -372,10 +459,14 @@ export class ScmRunService {
       } | null;
     },
     today: string, horizon: number,
+    // docs/59 D2 — WAPE to record when the engine reported none (a warm-start hit skips the backtest):
+    // the cached fit's baseline WAPE, so reuse runs don't blank the accuracy column.
+    cachedWape: number | null = null,
   ) {
     // docs/56 A1 — persist attribution so the plan can surface promo reasons and a reviewer can tie
     // a moved quantity back to a governed input (SCM-04).
     const a = r.attribution ?? null;
+    const wape = r.accuracy.wape ?? cachedWape;
     await this.db.insert(scmDemandForecasts).values({
       tenantId: tenantId ?? null, runId, branchId, itemId, level, method: r.model,
       horizon, startDate: addDaysYmd(today, 1),
@@ -383,7 +474,7 @@ export class ScmRunService {
       p10: r.points.map((p) => p.q['0.1'] ?? null),
       p50: r.points.map((p) => p.q['0.5'] ?? null),
       p90: r.points.map((p) => p.q['0.9'] ?? null),
-      wape: r.accuracy.wape != null ? String(r.accuracy.wape) : null,
+      wape: wape != null ? String(wape) : null,
       promoUpliftPct: a?.promo_uplift_pct != null ? String(a.promo_uplift_pct) : null,
       priceElasticity: a?.price_elasticity != null ? String(a.price_elasticity) : null,
       regressorsUsed: a?.regressors_used ?? [],

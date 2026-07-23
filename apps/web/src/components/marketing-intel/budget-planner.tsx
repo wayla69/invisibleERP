@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Wand2, Wallet, TrendingUp, Megaphone, Check, Sparkles, Info } from 'lucide-react';
 import { api } from '@/lib/api';
-import { num, baht } from '@/lib/format';
+import { num, thb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { StateView } from '@/components/state-view';
@@ -96,7 +96,7 @@ export function BudgetPlanner() {
             <div className="rounded-2xl border p-5" style={tintBg('var(--chart-2)')}>
               <label className="text-sm font-medium text-muted-foreground">{t('mi.bp_total_budget')}</label>
               <div className="mt-2 flex items-center gap-2">
-                <span className="text-lg" style={softText('var(--chart-2)')}>฿</span>
+                <span className="text-xs font-semibold" style={softText('var(--chart-2)')}>THB</span>
                 <input
                   type="number" min={0} value={budget || ''}
                   onChange={(e) => setBudget(Math.max(0, Number(e.target.value) || 0))}
@@ -109,15 +109,15 @@ export function BudgetPlanner() {
             </div>
             <div className="rounded-2xl border p-5" style={tintBg('var(--chart-3)')}>
               <p className="text-sm font-medium text-muted-foreground">{t('mi.bp_predicted')}</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums" style={softText('var(--chart-3)')}>{baht(predicted)}</p>
+              <p className="mt-2 text-2xl font-semibold tabular-nums" style={softText('var(--chart-3)')}>{thb(predicted)}</p>
               <p className={`mt-1 inline-flex items-center gap-1 text-xs font-medium ${uplift >= 0 ? 'text-success' : 'text-destructive'}`}>
                 <TrendingUp className="size-3.5" /> {uplift >= 0 ? '+' : ''}{num(uplift, 1)}% {t('mi.bp_uplift')}
               </p>
             </div>
             <div className="rounded-2xl border p-5" style={tintBg('var(--chart-4)')}>
               <p className="text-sm font-medium text-muted-foreground">{t('mi.bp_current')}</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">{baht(totalAlloc)}</p>
-              <p className="mt-1 text-xs text-muted-foreground tabular-nums">{t('mi.bp_predicted')}: {baht(currentPredicted)}</p>
+              <p className="mt-2 text-2xl font-semibold tabular-nums">{thb(totalAlloc)}</p>
+              <p className="mt-1 text-xs text-muted-foreground tabular-nums">{t('mi.bp_predicted')}: {thb(currentPredicted)}</p>
             </div>
           </div>
 
@@ -136,8 +136,8 @@ export function BudgetPlanner() {
                       {c.roi != null && <span className="text-xs text-muted-foreground">· ROI {num(c.roi)}×</span>}
                     </div>
                     <div className="text-right text-sm tabular-nums">
-                      <span className="font-semibold" style={softText(hue)}>{baht(spend)}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">→ {baht(pred)}</span>
+                      <span className="font-semibold" style={softText(hue)}>{thb(spend)}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">→ {thb(pred)}</span>
                     </div>
                   </div>
                   <input
@@ -174,7 +174,7 @@ export function BudgetPlanner() {
                     <div key={p.plan_no} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3" style={tintBg(approved ? 'var(--chart-3)' : 'var(--chart-4)', 8)}>
                       <div className="min-w-0 text-sm">
                         <span className="font-semibold tabular-nums">{p.plan_no}</span>
-                        <span className="ml-2 text-muted-foreground tabular-nums">{baht(p.total_budget)} → {baht(p.predicted_sales ?? 0)}</span>
+                        <span className="ml-2 text-muted-foreground tabular-nums">{thb(p.total_budget)} → {thb(p.predicted_sales ?? 0)}</span>
                         <span className="ml-2 text-xs text-muted-foreground">{t('mi.bp_by')} {p.requested_by}{approved && p.approved_by ? ` · ✓ ${p.approved_by}` : ''}</span>
                       </div>
                       {approved ? (

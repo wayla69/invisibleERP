@@ -2,9 +2,10 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto';
 import {
   SCM_ENGINE_CONTRACT_VERSION, SCM_ENGINE_HEADERS,
-  zForecastResponse, zOptimizeResponse,
+  zForecastResponse, zOptimizeResponse, zOptimizeNetworkResponse,
   type ScmForecastRequest, type ScmForecastResponse,
   type ScmOptimizeRequest, type ScmOptimizeResponse,
+  type ScmOptimizeNetworkRequest, type ScmOptimizeNetworkResponse,
 } from '@ierp/shared';
 import { hmacSha256Hex } from '../../common/crypto';
 import { captureOpsAlert } from '../../observability/instrumentation';
@@ -136,6 +137,17 @@ export class ScmEngineClientService {
       const parsed = zOptimizeResponse.safeParse(raw);
       if (!parsed.success) {
         throw new Error(`ENGINE_CONTRACT_MISMATCH (optimize): ${parsed.error.issues[0]?.message ?? 'schema'}`);
+      }
+      return parsed.data;
+    });
+  }
+
+  /** docs/57 Track B (B2) — two-echelon MEIO network optimization. One item across the whole network. */
+  async optimizeNetwork(req: ScmOptimizeNetworkRequest): Promise<ScmOptimizeNetworkResponse> {
+    return this.post('/v1/optimize-network', req, (raw) => {
+      const parsed = zOptimizeNetworkResponse.safeParse(raw);
+      if (!parsed.success) {
+        throw new Error(`ENGINE_CONTRACT_MISMATCH (optimize-network): ${parsed.error.issues[0]?.message ?? 'schema'}`);
       }
       return parsed.data;
     });

@@ -574,6 +574,8 @@ export const INTERNAL_NAV: NavGroup[] = [
       { label: 'nav.profitability', href: '/profitability', icon: PieChart, perms: ['exec', 'marketing'] },
       { label: 'nav.mmm', href: '/mmm', icon: BarChart3, perms: ['marketing', 'exec'] },
       { label: 'nav.marketing_intel', href: '/marketing-intel', icon: Sparkles, perms: ['marketing', 'exec'] },
+      // docs/61 — the five activation tools (MKT-21…25) turned into one Marketing Studio workspace.
+      { label: 'nav.marketing_activation', href: '/marketing-activation', icon: Rocket, perms: ['marketing', 'exec'] },
       { label: 'nav.insights', href: '/insights', icon: Lightbulb, perms: ['exec', 'dashboard', 'planner', 'warehouse'] },
       { label: 'nav.bi', href: '/bi', icon: BarChart3, perms: ['exec', 'dashboard'] },
       { label: 'nav.query', href: '/query', icon: BarChart3, perms: ['exec', 'dashboard', 'masterdata'] },

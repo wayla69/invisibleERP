@@ -11,7 +11,7 @@
 | Effective date | `<<effective-date>>` |
 | Review cadence | Nightly planning run · per demand-spike replan · per order-plan approval · monthly forecast-accuracy review |
 | Version note | Rev **0.1** (2026-07-21) — docs/54 Phase 2: per-(branch, item) probabilistic demand planning + perishable-aware order optimization. New controls **SCM-01** (order-plan maker-checker), **SCM-02** (planning-job monitoring & idempotency), **SCM-03** (auditable demand-driven order sizing); migration `0459`; new permissions `scm_plan` / `scm_approve` with SoD rule **R24**. The compute engine is an optional external microservice (`services/forecast-engine`, docs/54 Phase 1); with it disabled the module plans in-process. |
-| Related RCM controls | SCM-01, SCM-02, SCM-03, INV-10 (waste), EXP-01/EXP-12 (PR/receiving), GOV-01 (pending approvals), ITGC-OP-04 (job failure alerting) |
+| Related RCM controls | SCM-01, SCM-02, SCM-03, SCM-04, SCM-05, INV-10 (waste), EXP-01/EXP-12 (PR/receiving), GOV-01 (pending approvals), ITGC-OP-04 (job failure alerting) |
 | Related policy | `compliance/policies/09-inventory-policy.md` |
 
 ## 2. Purpose
@@ -293,6 +293,129 @@ cut; γ<0 (complements) reinforces it. With nothing on file the response is 1 (u
 **no new control** — the same forecast-quality governance as A2. This completes Track A's demand-shaping
 levers (promo, own-price, cross-price); attribute-based cold-start (A4) is a later wave.
 
+### 7.15 Two-echelon network replenishment plans (docs/57 Track B · B2) — control SCM-05
+
+The topology declared in §7.12 becomes actionable in B2: a planner runs a **two-echelon network plan** for
+one item across the supplier → DC → branch network, and the plan pools the safety buffer at the DC rather
+than carrying it at every branch. `POST /api/scm-network/plans/run {item_code}` builds the plan; it draws
+each branch's demand paths through **scm-planning's public `demandPathsFor` seam** (loose coupling — it calls
+the documented service API, never reaches into another module's tables) and calls the B2a
+`/v1/optimize-network` engine route (guaranteed-service base-stock + risk pooling, §1.3–§1.4) when
+`SCM_ENGINE_URL`/`SCM_ENGINE_SECRET` are set and demand paths exist; otherwise it runs an **in-process
+fallback** — independent per-branch base-stock `B = μ·(L+R) + z·σ·√(L+R)` with the DC echelon the plain sum
+of its branches (no pooling), safe and auditable, and the plan records which path produced it. Every engine
+base-stock/order quantity is **zod-validated and clamped** before persistence — the §7.4 engine trust
+boundary extended to the network, so a faulty or compromised engine cannot plant an absurd order. Plans and
+their per-node lines persist (`scm_network_plans` / `scm_network_plan_lines`, migration 0474, canonical
+0232-form RLS loop + leading `(tenant_id, …)` index) as **Draft** — never actionable.
+
+A network run never produces an order; it produces a **Draft** plan governed by **control SCM-05**
+(preventive), the same maker-checker spine as an order plan (§7.5):
+
+1. The planner reviews the Draft and **submits** it (`scm_plan`); the plan moves to *PendingApproval* and
+   appears in the GOV-01 pending-approvals centre.
+2. An **approver** holding `scm_approve` acts on it, and **must be a different person from the submitter** —
+   self-approval is refused (`SOD_SELF_APPROVAL`). The "maker" is the human who *submitted*, bound to the
+   submitter rather than `created_by`, because nightly runs are created by the scheduler. Approval reuses the
+   existing SoD rule **R24** (`scm_plan` build vs `scm_approve` approve) — B2 introduces **no new SoD rule**.
+3. Only an **Approved** network plan may be **converted**: the DC's supplier-facing order rolls up to a
+   **purchase requisition** through the existing `ProcurementService.createPr` seam (reason `SCM-NET`),
+   **idempotent by `pr_no`** — converting twice returns the first requisition, never a second.
+
+Track B posts **no journal entries** of its own and touches no golden-master money path; like §7.5 it ends
+at a maker-checker'd requisition, from which the normal procure-to-pay controls (PN-02) take over.
+Allocation-policy governance on DC shortage (SCM-06) and the full DRP branch→DC→supplier roll-up build on
+this spine in B3/B4.
+
+### 7.16 Warm-start / model registry (docs/59 Track D · D2)
+
+Fitting a Prophet model is the expensive step of a planning run — a cmdstan child process per (branch,
+item) series. For a settled series whose demand history has not changed since it was last fitted, that refit
+buys nothing: the same window produces the same model. D2 caches each series' fitted model so a run whose
+**training window is unchanged reuses the cached fit and only samples** from it, skipping both the primary
+fit and the backtest refit. This is a **compute optimization only** — it changes no forecast number, no
+order quantity and no plan lifecycle, and introduces **no new control** (the forecast-accuracy detective
+control SCM-07 belongs to D4, not D2).
+
+The flow rides the existing engine boundary. On each run the API loads any cached fit for the series
+(`ScmModelCacheService`, under RLS) and **ships it in the `/v1/forecast` payload** as an optional
+`warm_start:{params, fit_hash}` — the engine stays stateless and DB-free (docs/54 §2.1). The engine computes
+a `fit_hash` fingerprint over the training window (the fitted dates, the demand values and the regressor
+columns); when the supplied hash **matches**, it deserializes the cached fit (`prophet.serialize.
+model_from_json`) and reuses it, else it refits from scratch. Either way it returns the model's state as an
+optional `fitted_state:{params, fit_hash, fit_wape}` in the response, which the API **upserts** back into
+the cache. On a warm hit the engine skips the backtest, so the API **carries the cached `fit_wape` forward**
+onto the persisted forecast — the accuracy figure stays meaningful across reuse runs rather than going
+blank.
+
+Reuse is bounded by **two independent staleness guards, both fail-safe toward refitting** — a stale model is
+never silently trusted:
+
+1. **`fit_hash` mismatch** — the training window changed materially (a new business day, an amended promo
+   calendar, a day reclassified as a stockout), so the fingerprint no longer matches and the series is
+   refit.
+2. **Refit cadence** — a cached fit older than `scm_settings.refit_cadence_days` (default 14, range 1–90) is
+   force-refit even when the window is unchanged, so a model can never drift arbitrarily far from a fresh
+   fit. The cadence is a new additive setting on the scm-planning settings surface (`GET`/`PUT
+   /api/scm-planning/settings`), validated in `ScmExtractService.upsertSettings`.
+
+**Determinism is preserved.** Prophet's MAP fit plus the reseeded sampling mean a warm reuse reproduces the
+cold fit **byte-for-byte** for the same inputs, so an API retry stays safe (docs/54's `seeded_rng`
+invariant). A **corrupt cache entry fails closed to a refit** rather than an error — an unreadable serialized
+fit is treated as a cache miss.
+
+The cached fits persist in a new tenant table **`scm_model_cache`** (migration `0475`) — one row per
+(tenant, branch, item) carrying the serialized `model`, `fit_params` (jsonb), the `fit_hash`, the `fit_wape`,
+the `training_from`/`training_to` window and `fitted_at`. It follows the `scm_settings` shape: the canonical
+0232-form RLS loop (excluding `audit_expectations`), a leading `(tenant_id, branch_id, item_id)` index and a
+`coalesce(branch_id, 0)` unique index (NULL-branch = tenant default). The same migration adds the additive
+`scm_settings.refit_cadence_days` column. Like the rest of Track D, D2 posts **no journal entries** and
+touches no golden-master money path.
+
+### 7.17 Cold-start / analog forecasting for new items (docs/56 Track A · A4)
+
+A brand-new SKU has almost no sales history, so it cannot be fitted the ordinary way — but it is rarely
+*unlike everything already on the menu*. A4 lets such an item borrow the demand **shape** of established
+similar items until it has built enough of its own history, and it is explicit about the borrowing so a
+reviewer is never misled into treating a borrowed forecast as an observed one.
+
+The donor selection is server-side and by construction. When the run assembles the per-series requests
+(`scm-analog.ts analogDonors`, wired into `ScmRunService.runWithEngine`), a **too-new** series — one whose
+dense history is shorter than the Prophet floor (56 days) — is matched to **established same-branch
+siblings** (items at the same branch with ≥ 90 days of history), capped at **5 donors**. The branch is the
+signal that matters most here: it drives the weekly rhythm, the payday bump and the holiday pattern the new
+item will share. (Category/attribute-nearest refinement — pairing on price band, unit and item attributes —
+is a noted future enhancement; A4 ships the branch heuristic.) The donor series ids ride the existing,
+already-reserved `analog_of` field on the per-series forecast input — **no contract change** and **no
+version bump** (the engine contract stays `'2'`).
+
+In the engine, the analog branch (`forecasting.py _analog_paths`) fires only when **all** hold: `analog_of`
+is set, the item's own fitted history is below the 56-day Prophet floor, **and** at least one donor is
+present; otherwise the series routes normally. The whole run is a **two-phase fan-out** — non-analog donor
+series are forecast first, then the analog series are forecast with a map of their donors' results, a pure
+pre-pass — so a request with no `analog_of` anywhere is byte-identical to the pre-A4 behaviour. When it
+fires, the engine pools the donors' **normalized** sample-path shapes (each donor de-levelled to its own
+mean) and rescales the pooled shape to the new item's **own observed baseline** where it has one, else to
+the donors' mean level. The result is flagged **`analog`** in `attribution.regressors_used`, which persists
+through `saveForecast` onto `scm_demand_forecasts.regressorsUsed`, so the planner and any reviewer can see
+at a glance that the line is a *borrowed* forecast rather than an observed one, and drop back to their own
+judgement accordingly. A4 introduces **no new control** (it is a forecast-quality path governed by the same
+SCM-01/02/03 as any other run), no migration and no GL posting; `analog` was already an allowed
+`regressors_used` member, so nothing on the wire moved.
+
+### 7.18 Shared engine result cache across replicas (docs/59 Track D · D3)
+
+The forecast engine is stateless by design and scales horizontally to N replicas, but its per-request
+idempotency **result cache** (`service.py` `ResultCache`) was in-process, so a retry that landed on a
+*different* replica recomputed the solve. D3 makes that cache optionally **shared via Redis**, reusing the
+`common/rate-limit-store.ts` fail-open shape: with `SCM_ENGINE_REDIS_URL` (or the existing
+`REALTIME_REDIS_URL`) set, `ResultCache` reads Redis first then the in-process store and write-throughs to
+both under the idempotency key already carried on every request (TTL `SCM_ENGINE_CACHE_TTL_S`, default 900s);
+unset **or Redis unreachable** falls straight back to the current per-process TTL/LRU path, so CI,
+single-node and PGlite runs need no Redis. This is **infrastructure only** — it changes no forecast number,
+no wire contract, no plan lifecycle and adds **no control**, no migration and no GL. It is an operational
+scale-out lever recorded here for completeness (ops/deployment notes carry the replica wiring).
+
 ## 8. Process flow
 
 ```mermaid
@@ -332,6 +455,7 @@ flowchart TD
 | **SCM-02** | Detective/Preventive · Automated | Per scheduled run | Planning jobs ride the shared queue (retry → dead-letter → ops alert). A duplicate nightly enqueue plans exactly once (database-enforced); the spike scan is watermarked so any cadence is idempotent; spike events are deduped per day with a cooldown. | Plan-run register (status, engine, error), spike-event register, background-job rows |
 | **SCM-03** | Preventive/Detective · Automated | Per planning run | Demand is extracted by channel partition so a dine-in dish is counted once; closed and stockout days are excluded; menu demand is exploded per scenario; order size respects shelf life, lead-time variability and FEFO stock; every line records its rationale. The shelf-life cap holds even when the external engine is unavailable. | Demand forecasts per run with accuracy, order-plan lines with full rationale |
 | **SCM-04** | Preventive · Automated | Per planning run | Promo/price forecast inputs are governed and auditable: the `promo_flag`/`discount` regressors on a production run are **server-derived** from the tenant's approved `promotions` under RLS (never the request body), so a fabricated promo cannot inflate a forecast. Advisory what-ifs are `scenario`-flagged and barred from auto-convert; a per-day uplift cap plus the order clamp bound any residual lift; each forecast persists its promo attribution. | Demand forecasts carrying promo/price attribution tied to approved promotions |
+| **SCM-05** | Preventive · Automated | Per network plan | A two-echelon (network) replenishment plan is built and submitted by a planner (`scm_plan`) but can only be approved by a **different** user holding `scm_approve` (SoD **R24**, reused); self-approval is refused (`SOD_SELF_APPROVAL`), the maker bound to the submitter. Engine base-stock/order quantities are clamped before storage. Only an approved plan converts, rolling the DC's supplier order up to a purchase requisition through the purchasing API, idempotently by `pr_no`. | Network plans with maker/checker identities, the GOV-01 queue entry, the linked requisition number |
 | INV-10 | — | Per waste event | Waste/spoilage capture feeds the observed spoilage rate used to calibrate planning. | Waste log by reason |
 | GOV-01 | Detective | Continuous | Submitted plans appear in the unified pending-approvals monitor with their age. | Pending-approvals worklist |
 
@@ -389,6 +513,9 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.10 | 2026-07-23 | Supply-chain / Planning | Added §7.17 — cold-start / analog forecasting for new items (docs/56 Track A · A4): a too-new series (dense history < the 56-day Prophet floor) borrows the pooled, normalized demand shape of **established same-branch siblings** (≥ 90 days, capped at 5 donors — `scm-analog.ts analogDonors`, wired into `ScmRunService.runWithEngine`) via the already-reserved `analog_of` per-series input, and the engine (`forecasting.py _analog_paths`) rescales the pooled shape to the new item's own baseline seed (else the donors' mean level). The run is a two-phase fan-out (donors first, then analog series) so a request with no `analog_of` is byte-identical to before; the forecast is flagged **`analog`** in `attribution.regressors_used` and persists to `scm_demand_forecasts.regressorsUsed` so a reviewer sees it is borrowed, not observed. **Contract unchanged, no version bump** (stays `'2'`; `analog_of` and the `analog` flag were already reserved); category/attribute-nearest donor refinement is a future enhancement. Added §7.18 — shared engine result cache across replicas (docs/59 Track D · D3): the engine's in-process `ResultCache` becomes optionally Redis-shared via `SCM_ENGINE_REDIS_URL` (or `REALTIME_REDIS_URL`) + `SCM_ENGINE_CACHE_TTL_S` (default 900), reusing `rate-limit-store.ts`'s fail-open shape (unset or Redis down ⇒ per-process path). Both are forecast-quality / infrastructure paths — **no new control**, no migration, no GL, no golden-master path. A4: engine pytest (borrow+flag / no-donor fallback / ignored-when-history-sufficient / two-phase) + `scm` harness; D3: engine pytest (cross-replica share / fail-open without or with a Redis error). |
+| 0.9 | 2026-07-23 | Supply-chain / Planning | Added §7.16 — warm-start / model registry (docs/59 Track D · D2): a planning run ships each series' cached Prophet fit as an optional `warm_start:{params, fit_hash}` on `/v1/forecast`; the engine computes a `fit_hash` over the training window and, on a match, reuses the serialized fit (skipping BOTH the primary fit and the backtest refit) else refits, returning `fitted_state:{params, fit_hash, fit_wape}` the API upserts to `scm_model_cache` (migration `0475`, canonical 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique). Two fail-safe staleness guards — `fit_hash` mismatch (window changed) and `refit_cadence_days` age (default 14, additive `scm_settings` column) — force a refit; a warm hit carries the cached `fit_wape` forward. Determinism preserved (warm reuse ≡ cold fit byte-for-byte); a corrupt cache entry fails closed to a refit. Compute-only — **no new control** (SCM-07 is D4), no GL, no golden-master path. Harness `cutover/scm.ts` +4 D2 checks (57/57, `scm-mfg` shard); engine pytest warm-start reproducibility / refit-on-window-change / corrupt-cache fallback. |
+| 0.8 | 2026-07-23 | Supply-chain / Planning | Added §7.15 — two-echelon network replenishment plans (docs/57 Track B · B2): `POST /api/scm-network/plans/run {item_code}` builds a Draft plan pooling the safety buffer at the DC — via scm-planning's public `demandPathsFor` seam and the B2a `/v1/optimize-network` route (GSM base-stock + risk pooling), or an in-process fallback (`B=μ·(L+R)+z·σ·√(L+R)`, DC = Σ, no pooling); every engine quantity zod-validated + clamped; persisted to `scm_network_plans`/`scm_network_plan_lines` (migration 0474, canonical RLS + tenant-leading index) as Draft. New control **SCM-05** (network-plan maker-checker): submit → approve by a DIFFERENT `scm_approve` holder (self-approval `SOD_SELF_APPROVAL`, maker bound to submitter; SoD **R24** reused, no new rule) → convert rolls the DC order up to a PR via the existing `ProcurementService.createPr` seam (reason `SCM-NET`, idempotent by `pr_no`). No GL, no golden-master money path. Harness `cutover/scm.ts` +8 B2 checks (`scm-mfg` shard). |
 | 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |
 | 0.7 | 2026-07-22 | Supply-chain / Planning | Added §7.14 — cannibalization & halo cross-price elasticity (docs/56 Track A · A3): `ScmCrossElasticityService` estimates γ_{a,b}=∂log(demand_a)/∂log(price_b) API-side by log-log OLS with the A2 identifiability floor, CATEGORY-SCOPED to `item_categories` siblings only (never the full cross-product); a run persists credible pairs to `scm_cross_elasticity` (migration 0470); `GET /api/scm-planning/cross-elasticity`. The scenario what-if composes own ε + Σ sibling γ (`demand × price^(ε+Σγ)`). Advisory only, no new control. apps/api vitest +7 (estimator) & `cutover/scm.ts` +3 A3 checks. |
 | 0.6 | 2026-07-22 | Supply-chain / Planning | Added §7.13 — own-price elasticity (docs/56 Track A · A2): `ScmPromoExtractService` emits a governed effective price (base × (1−discount)) so a promo's price cut identifies ε; the engine estimates ε by an OLS log-log fit with an identifiability floor (ε=null when not identified), returned in attribution; the run persists it to `scm_price_elasticity` (migration 0464) via `ScmElasticityService` (`GET /api/scm-planning/elasticity`); the scenario what-if gains `price_multiplier` applying `demand × (price)^ε`. Advisory only, no new control. Harness `cutover/scm.ts` +4 A2 checks; engine pytest +7. |

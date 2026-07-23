@@ -35,6 +35,7 @@ export interface ScmSettingsView {
   spike_cooldown_hours: number;
   auto_replan: boolean;
   engine_enabled: boolean;
+  refit_cadence_days: number; // docs/59 D2: a cached Prophet fit older than this is force-refit
 }
 
 /** A planning unit: one branch of one tenant. branchId null = the untagged/HQ unit. */

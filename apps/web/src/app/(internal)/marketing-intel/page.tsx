@@ -13,7 +13,7 @@ import {
   Crown, ArrowUpRight, Compass, PieChart,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { num, baht } from '@/lib/format';
+import { num, thb, compactThb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { StateView } from '@/components/state-view';
@@ -47,8 +47,6 @@ const fill = (h: string): string => `color-mix(in oklch, ${h} 78%, var(--card))`
 // One-shot staggered entrance (tw-animate-css). fill-mode-both keeps items hidden until their delay.
 const ENTER = 'animate-in fade-in-0 slide-in-from-bottom-3 duration-500 fill-mode-both';
 const stagger = (i: number): CSSProperties => ({ animationDelay: `${i * 55}ms` });
-const compactBaht = (v: number): string =>
-  v >= 1e6 ? `฿${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `฿${Math.round(v / 1e3)}K` : `฿${Math.round(v)}`;
 
 // Named segments get a stable, meaningful hue; anything else cycles the palette.
 const SEGMENT_HUE: Record<string, string> = {
@@ -145,7 +143,7 @@ export default function MarketingIntelPage() {
                   <KpiCard hue="var(--chart-2)" icon={BarChart3} label={t('mi.kpi_r2')}
                     value={mmm.r2 != null ? Number(mmm.r2).toFixed(2) : '—'} />
                   <KpiCard hue="var(--chart-3)" icon={Wallet} label={t('mi.kpi_spend')}
-                    value={baht(mmm.total_spend ?? 0)} />
+                    value={thb(mmm.total_spend ?? 0)} />
                   <KpiCard hue="var(--chart-4)" icon={TrendingUp} label={t('mi.kpi_top')}
                     value={topChannel ? String(topChannel.channel) : '—'} />
                 </div>
@@ -159,7 +157,7 @@ export default function MarketingIntelPage() {
                     </div>
                     <Donut
                       segments={channels.map((c, i) => ({ label: String(c.channel), value: Number(c?.spend) || 0, hue: HUES[i % HUES.length] }))}
-                      center={compactBaht(totalSpend)}
+                      center={compactThb(totalSpend)}
                     />
                     <div className="mt-4 space-y-1.5">
                       {channels.map((c, i) => {
@@ -203,7 +201,7 @@ export default function MarketingIntelPage() {
                             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(4, (roi / maxRoi) * 100)}%`, background: fill(hue) }} />
                           </div>
                           <div className="w-40 shrink-0 text-right text-xs text-muted-foreground">
-                            <span className="tabular-nums">{baht(c.spend ?? 0)}</span>
+                            <span className="tabular-nums">{thb(c.spend ?? 0)}</span>
                             {c.contribution_pct != null && <span> · {num(c.contribution_pct)}%</span>}
                           </div>
                         </div>
@@ -272,7 +270,7 @@ export default function MarketingIntelPage() {
                             <div className="text-xs text-muted-foreground">{t('mi.col_customers')}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-sm font-semibold tabular-nums">{baht(s.monetary ?? 0)}</div>
+                            <div className="text-sm font-semibold tabular-nums">{thb(s.monetary ?? 0)}</div>
                             <div className="text-xs text-muted-foreground">{t('mi.col_monetary')}</div>
                           </div>
                         </div>

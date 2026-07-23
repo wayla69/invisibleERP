@@ -29,10 +29,12 @@ from .classify import classify, route
 from .contracts import (
     Accuracy,
     Attribution,
+    FittedState,
     ForecastPoint,
     ForecastSeriesResult,
     HolidayEvent,
     SeriesInput,
+    WarmStart,
 )
 
 MIN_PROPHET_DAYS = 56  # fitted (non-dropped) observations needed before Prophet is attempted
@@ -154,6 +156,38 @@ def _holidays_df(holidays: list[HolidayEvent]):
     return df
 
 
+# ── docs/59 D2 — warm-start / model registry ───────────────────────────────────
+# The engine fits a Prophet model deterministically (MAP/L-BFGS), so a serialized fit reused on an
+# UNCHANGED training window reproduces the cold fit byte-for-byte (the sampling seed is reset before
+# predictive_samples). `fit_hash` fingerprints the exact training window (dates + demand + regressor
+# columns); the API stores it opaquely and ships it back — a mismatch (new day, changed promo calendar,
+# reclassified stockout) recomputes to a different hash, so a stale warm-start silently refits.
+
+
+def _fit_hash(df, reg_names: list[str]) -> str:
+    import hashlib
+
+    parts: list[str] = [f"regs={','.join(reg_names)}"]
+    for _, row in df.iterrows():
+        parts.append(row["ds"].strftime("%Y-%m-%d"))
+        parts.append(repr(round(float(row["y"]), 6)))
+        for rn in reg_names:
+            parts.append(repr(round(float(row[rn]), 6)))
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _model_to_json(m) -> str:
+    from prophet.serialize import model_to_json
+
+    return model_to_json(m)
+
+
+def _model_from_json(s: str):
+    from prophet.serialize import model_from_json
+
+    return model_from_json(s)
+
+
 def _fit_prophet(df, holidays_df, reg_names: list[str]):
     from prophet import Prophet
 
@@ -211,7 +245,8 @@ def prophet_paths(
     payday_regressor: bool,
     reg: RegCtx,
     rng: np.random.Generator,
-) -> tuple[np.ndarray, Accuracy]:
+    warm_start: WarmStart | None = None,
+) -> tuple[np.ndarray, Accuracy, FittedState | None]:
     import pandas as pd
 
     df, kept_dates = _prophet_frame(frame, payday_regressor, reg)
@@ -219,7 +254,19 @@ def prophet_paths(
         raise SeriesTooShort()
     reg_names = _regressor_names(payday_regressor, reg)
     holidays_df = _holidays_df(holidays)
-    m = _fit_prophet(df, holidays_df, reg_names)
+
+    # D2 warm-start: reuse the cached fit ONLY when this run's training window hashes identically to the
+    # one the cache was fit on. A hit skips BOTH the primary fit and the backtest refit (the compute win).
+    fit_hash = _fit_hash(df, reg_names)
+    reused = warm_start is not None and warm_start.fit_hash == fit_hash
+    if reused:
+        try:
+            m = _model_from_json(warm_start.params)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001 — a corrupt/incompatible cache entry falls back to a fresh fit
+            reused = False
+            m = _fit_prophet(df, holidays_df, reg_names)
+    else:
+        m = _fit_prophet(df, holidays_df, reg_names)
 
     last = frame.dates[-1]
     fut_dates = future_days(last, horizon)
@@ -237,8 +284,10 @@ def prophet_paths(
         extra = rng.choice(paths.shape[0], size=k - paths.shape[0])
         paths = np.vstack([paths, paths[extra]])
 
+    # On a warm-start HIT we skip the backtest's second fit too — the API carries the cached fit_wape
+    # forward, so a reused run reports no fresh WAPE (cutoffs=0) rather than paying for a refit.
     acc = Accuracy(wape=None, cutoffs=0)
-    if len(df) >= BACKTEST_MIN_DAYS:
+    if not reused and len(df) >= BACKTEST_MIN_DAYS:
         try:
             train, test = df.iloc[:-BACKTEST_HOLDOUT], df.iloc[-BACKTEST_HOLDOUT:]
             mb = _fit_prophet(train, holidays_df, reg_names)
@@ -247,7 +296,10 @@ def prophet_paths(
             acc = Accuracy(wape=w, cutoffs=1)
         except Exception:  # noqa: BLE001 — backtest is best-effort reporting, never fails the series
             acc = Accuracy(wape=None, cutoffs=0)
-    return paths, acc
+
+    # A (re)fit returns its serialized state for the API to persist; a reuse returns None (nothing new).
+    fitted_state = None if reused else FittedState(params=_model_to_json(m), fit_hash=fit_hash, fit_wape=acc.wape)
+    return paths, acc, fitted_state
 
 
 # ── Croston–SBA (intermittent) ────────────────────────────────────────────────
@@ -380,8 +432,49 @@ def estimate_elasticity(series: SeriesInput, reg: RegCtx) -> tuple[float | None,
     return round(eps, 4), round(r2, 4), n
 
 
-def _attribution(series: SeriesInput, points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool) -> Attribution:
+# ── docs/56 A4 — analog / zero-history cold-start ──────────────────────────────
+# A brand-new SKU has too little history to fit, but is rarely unlike everything. The API supplies donor
+# series_ids (`analog_of`, chosen by category + nearest attributes); the engine pools the donors' NORMALIZED
+# sample-path shapes (each divided by its own mean) and rescales by this SKU's own baseline seed (its
+# observed mean, else the donors' mean level). The borrowed forecast is flagged `analog` in
+# regressors_used so a reviewer sees it is borrowed, not observed. Deterministic given the donor results
+# and the per-series seeded RNG.
+
+
+def _analog_paths(
+    series: SeriesInput,
+    donors: dict[str, "ForecastSeriesResult"],
+    horizon: int,
+    k: int,
+    rng: np.random.Generator,
+    own_frame: "SeriesFrame",
+) -> np.ndarray | None:
+    donor_results = [donors[a] for a in (series.analog_of or []) if a in donors]
+    shapes: list[np.ndarray] = []
+    levels: list[float] = []
+    for d in donor_results:
+        arr = np.asarray(d.sample_paths, dtype=float)  # k × horizon (all series in a request share both)
+        if arr.ndim != 2 or arr.shape[1] != horizon or arr.size == 0:
+            continue
+        m = float(arr.mean())
+        if m <= 0:
+            continue
+        shapes.append(arr / m)  # unit-mean shape
+        levels.append(m)
+    if not shapes:
+        return None
+    pooled = np.vstack(shapes)  # (Σ donor scenarios) × horizon, each row a unit-mean donor path
+    idx = rng.choice(pooled.shape[0], size=k, replace=pooled.shape[0] < k)
+    own = own_frame.values[~own_frame.drop]
+    own_mean = float(np.mean(own)) if own.size else 0.0
+    seed = own_mean if own_mean > 0 else float(np.mean(levels))  # baseline level for the new SKU
+    return np.clip(pooled[idx] * seed, 0.0, None)
+
+
+def _attribution(series: SeriesInput, points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool, analog: bool = False) -> Attribution:
     used: list[str] = (["payday"] if payday else []) + (["promo"] if reg.promo_on else []) + (["price"] if reg.price_on else [])
+    if analog:
+        used.append("analog")
     uplift_pct = None
     if reg.promo_on:
         promo = reg.promo_col(fut)
@@ -411,28 +504,42 @@ def forecast_series(
     rng: np.random.Generator,
     promo_regressor: bool = True,
     price_regressor: bool = True,
+    donors: dict[str, "ForecastSeriesResult"] | None = None,
 ) -> ForecastSeriesResult:
     frame = build_frame(series, closures)
     reg = build_regctx(series, promo_regressor, price_regressor)
-    cls = series.class_hint if series.class_hint != "auto" else classify(list(frame.values[~frame.drop]))
-    model = route(cls)
 
     acc = Accuracy(wape=None, cutoffs=0)
+    fitted_state: FittedState | None = None  # D2: set only when Prophet (re)fit — persisted by the API
     applied_uplift = False  # Prophet learns the promo effect via add_regressor; others get the term
-    if model == "prophet":
-        try:
-            paths, acc = prophet_paths(frame, holidays, horizon, k, payday_regressor, reg, rng)
-        except Exception:  # noqa: BLE001 — missing wheel, fit failure, too short: degrade, don't fail
-            model = "baseline_dow"
+    analog_used = False
+
+    # docs/56 A4 — a zero/low-history SKU with declared donors borrows their pooled shape (cold-start).
+    n_fit = int((~frame.drop).sum())
+    analog_paths = None
+    if series.analog_of and n_fit < MIN_PROPHET_DAYS and donors:
+        analog_paths = _analog_paths(series, donors, horizon, k, rng, frame)
+    if analog_paths is not None:
+        model, paths, analog_used = "baseline_dow", analog_paths, True
+    else:
+        cls = series.class_hint if series.class_hint != "auto" else classify(list(frame.values[~frame.drop]))
+        model = route(cls)
+        if model == "prophet":
+            try:
+                paths, acc, fitted_state = prophet_paths(
+                    frame, holidays, horizon, k, payday_regressor, reg, rng, series.warm_start
+                )
+            except Exception:  # noqa: BLE001 — missing wheel, fit failure, too short: degrade, don't fail
+                model = "baseline_dow"
+                paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
+        elif model == "croston_sba":
+            try:
+                paths, acc = croston_sba_paths(frame, horizon, k, rng)
+            except SeriesTooShort:
+                model = "baseline_dow"
+                paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
+        else:  # bootstrap | baseline_dow share the dow resampler
             paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
-    elif model == "croston_sba":
-        try:
-            paths, acc = croston_sba_paths(frame, horizon, k, rng)
-        except SeriesTooShort:
-            model = "baseline_dow"
-            paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
-    else:  # bootstrap | baseline_dow share the dow resampler
-        paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
 
     last = frame.dates[-1]
     fut = future_days(last, horizon)
@@ -462,5 +569,6 @@ def forecast_series(
         points=points,
         sample_paths=[[float(v) for v in row] for row in paths],
         accuracy=acc,
-        attribution=_attribution(series, points, fut, reg, payday_regressor),
+        attribution=_attribution(series, points, fut, reg, payday_regressor, analog_used),
+        fitted_state=fitted_state,  # D2: present ⇔ a Prophet (re)fit happened this run
     )

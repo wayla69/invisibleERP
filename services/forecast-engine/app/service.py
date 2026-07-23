@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import os
 import threading
 import time
@@ -29,15 +30,46 @@ from .contracts import (
     ForecastRequest,
     ForecastResponse,
     OptimizeItem,
+    OptimizeNetworkRequest,
+    OptimizeNetworkResponse,
     OptimizeRequest,
     OptimizeResponse,
+    PoolingReport,
 )
 from .forecasting import forecast_series
+from .network import NetworkFailure, run_optimize_network as _run_optimize_network
 from .optimization import EngineItemFailure, solve_item, solve_joint, sample_lead_times, _validated_scenarios
 from .reconcile import ReconcileError, reconcile
 
 CACHE_TTL_S = 900
 CACHE_MAX = 64
+
+# docs/59 D3 — shared result cache across N stateless replicas. Mirrors common/rate-limit-store.ts's
+# FAIL-OPEN shape: a lazily-built single connection, and any error (no package / bad URL / Redis down)
+# degrades to the per-process cache. Unset SCM_ENGINE_REDIS_URL (or REALTIME_REDIS_URL) ⇒ single-node
+# behaviour unchanged (CI / PGlite need no Redis). The idempotency key already rides every request, so a
+# retry landing on a DIFFERENT replica now returns the original solve instead of recomputing.
+_ENGINE_CACHE_TTL_S = float(os.getenv("SCM_ENGINE_CACHE_TTL_S") or CACHE_TTL_S)
+_redis_client: object = "unset"  # sentinel until first use (lazy — import never touches the network)
+
+
+def _engine_redis():
+    global _redis_client
+    if _redis_client != "unset":
+        return _redis_client
+    url = (os.getenv("SCM_ENGINE_REDIS_URL") or os.getenv("REALTIME_REDIS_URL") or "").strip()
+    if not url:
+        _redis_client = None
+        return None
+    try:
+        import redis  # lazy — importing this module must not require the redis package
+
+        _redis_client = redis.Redis.from_url(
+            url, socket_connect_timeout=1, socket_timeout=1, retry_on_timeout=False
+        )
+    except Exception:  # noqa: BLE001 — no package / bad URL ⇒ degrade to the per-process cache
+        _redis_client = None
+    return _redis_client
 
 
 def _workers() -> int:
@@ -63,6 +95,15 @@ class ResultCache:
     def get(self, key: str | None):
         if not key:
             return None
+        # D3: shared Redis first (a hit here serves a retry that landed on another replica), fail-open.
+        r = _engine_redis()
+        if r is not None:
+            try:
+                raw = r.get(f"scmeng:{key}")
+                if raw is not None:
+                    return json.loads(raw)
+            except Exception:  # noqa: BLE001 — Redis unavailable ⇒ fall through to the per-process cache
+                pass
         with self._lock:
             hit = self._data.get(key)
             if not hit:
@@ -76,6 +117,13 @@ class ResultCache:
     def put(self, key: str | None, value: object) -> None:
         if not key:
             return
+        # D3: write-through to Redis (best-effort, fail-open) AND the per-process cache.
+        r = _engine_redis()
+        if r is not None:
+            try:
+                r.set(f"scmeng:{key}", json.dumps(value), px=int(_ENGINE_CACHE_TTL_S * 1000))
+            except Exception:  # noqa: BLE001 — Redis unavailable ⇒ still cache in-process below
+                pass
         with self._lock:
             if len(self._data) >= self._max:
                 oldest = min(self._data.items(), key=lambda kv: kv[1][0])[0]
@@ -83,14 +131,14 @@ class ResultCache:
             self._data[key] = (time.time(), value)
 
 
-cache = ResultCache()
+cache = ResultCache(ttl=_ENGINE_CACHE_TTL_S)
 
 
 def run_forecast(req: ForecastRequest) -> ForecastResponse:
     closures = set(req.closures)
     results, errors = [], []
 
-    def one(s):
+    def one(s, donors=None):
         return forecast_series(
             series=s,
             holidays=req.holidays,
@@ -102,15 +150,31 @@ def run_forecast(req: ForecastRequest) -> ForecastResponse:
             promo_regressor=req.promo_regressor,
             price_regressor=req.price_regressor,
             rng=seeded_rng(req.request_id, s.series_id),
+            donors=donors,
         )
 
-    with ThreadPoolExecutor(max_workers=_workers()) as pool:
-        for s, fut in [(s, pool.submit(one, s)) for s in req.series]:
-            try:
-                results.append(fut.result())
-            except Exception as exc:  # noqa: BLE001 — one bad series never fails the batch
-                code = getattr(exc, "code", "MODEL_ERROR")
-                errors.append(EngineItemError(ref=s.series_id, code=code, message=str(exc) or code))
+    # docs/56 A4 — two-phase fan-out so an analog (zero-history) series can borrow its donors' shape:
+    # forecast the NON-analog series first (they are the donor pool), then the analog series with a
+    # {series_id: result} map. Pure pre-pass — base-series results and the per-series seed are unchanged,
+    # so a request with no `analog_of` behaves byte-identically to before.
+    base_series = [s for s in req.series if not s.analog_of]
+    analog_series = [s for s in req.series if s.analog_of]
+    donors: dict = {}
+
+    def _run(batch, donors_map):
+        with ThreadPoolExecutor(max_workers=_workers()) as pool:
+            for s, fut in [(s, pool.submit(one, s, donors_map)) for s in batch]:
+                try:
+                    r = fut.result()
+                    results.append(r)
+                    donors[r.series_id] = r
+                except Exception as exc:  # noqa: BLE001 — one bad series never fails the batch
+                    code = getattr(exc, "code", "MODEL_ERROR")
+                    errors.append(EngineItemError(ref=s.series_id, code=code, message=str(exc) or code))
+
+    _run(base_series, None)
+    if analog_series:
+        _run(analog_series, donors)
     order = {s.series_id: i for i, s in enumerate(req.series)}
     results.sort(key=lambda r: order.get(r.series_id, 0))
 
@@ -200,3 +264,22 @@ def run_optimize(req: OptimizeRequest) -> OptimizeResponse:
     return OptimizeResponse(
         contract_version=CONTRACT_VERSION, request_id=req.request_id, plans=plans, errors=errors
     )
+
+
+def run_optimize_network(req: OptimizeNetworkRequest) -> OptimizeNetworkResponse:
+    """docs/57 Track B (B2) — two-echelon MEIO. A topology-level failure returns a response with an
+    error item + an empty pooling report, mirroring how a bad item never fails the /v1/optimize batch."""
+    try:
+        return _run_optimize_network(req)
+    except NetworkFailure as exc:
+        return OptimizeNetworkResponse(
+            contract_version=CONTRACT_VERSION, request_id=req.request_id, node_plans=[], allocations=[],
+            pooling=PoolingReport(independent_safety_units=0.0, pooled_safety_units=0.0, pooling_benefit_pct=0.0),
+            errors=[EngineItemError(ref=req.item_code, code=exc.code, message=exc.message)],
+        )
+    except Exception as exc:  # noqa: BLE001 — never 500 the caller; surface as an error item
+        return OptimizeNetworkResponse(
+            contract_version=CONTRACT_VERSION, request_id=req.request_id, node_plans=[], allocations=[],
+            pooling=PoolingReport(independent_safety_units=0.0, pooled_safety_units=0.0, pooling_benefit_pct=0.0),
+            errors=[EngineItemError(ref=req.item_code, code="NETWORK_ERROR", message=str(exc))],
+        )
