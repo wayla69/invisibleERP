@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Inject, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { eq, desc } from 'drizzle-orm';
-import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, type Permission, type SuiteKey } from '@ierp/shared';
+import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, applyAiAddonFeatures, type Permission, type SuiteKey } from '@ierp/shared';
 import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { subscriptions, plans, entitlementObservations } from '../../database/schema';
 import { bizYmdDash } from '../../common/bizdate';
@@ -209,8 +209,10 @@ export class PlanGuard implements CanActivate {
       }
     }
 
-    // Legacy explicit feature flag (fail-closed under enforce).
-    if (feature && !features[feature]) {
+    // Legacy explicit feature flag (fail-closed under enforce). The AI add-on overlay applies first —
+    // a purchased 'ai' add-on confers ai_chat + its token band (applyAiAddonFeatures; no-op otherwise).
+    const effFeatures = applyAiAddonFeatures(features, row?.addons);
+    if (feature && !effFeatures[feature]) {
       return this.decide(shadow, enforce, () => new ForbiddenException({
         code: 'PLAN_FEATURE_REQUIRED',
         message: `Your current plan does not include '${feature}'. Please upgrade to access this feature.`,
@@ -225,7 +227,7 @@ export class PlanGuard implements CanActivate {
   private async legacyFeatureCheck(tenantId: number, feature: string): Promise<boolean> {
     try {
       const [row] = await runGlobalDb('plan-guard:legacy-feature', () => this.db
-        .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt })
+        .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt, addons: subscriptions.addons })
         .from(subscriptions)
         .leftJoin(plans, eq(subscriptions.planCode, plans.code))
         .where(eq(subscriptions.tenantId, tenantId))
@@ -241,7 +243,9 @@ export class PlanGuard implements CanActivate {
       if (row.status === 'PastDue' || row.status === 'Canceled') {
         throw new ForbiddenException({ code: 'SUBSCRIPTION_INACTIVE', message: `Subscription is ${row.status}. Please update your billing to restore access.`, messageTh: 'การสมัครสมาชิกไม่ได้ใช้งาน กรุณาตรวจสอบการชำระเงิน' });
       }
-      const features: Record<string, unknown> = (row.features as Record<string, unknown> | null) ?? {};
+      // A purchased 'ai' add-on grants ai_chat even in legacy mode — the add-on is live product today,
+      // not something that waits for the entitlements flags (applyAiAddonFeatures is a no-op otherwise).
+      const features: Record<string, unknown> = applyAiAddonFeatures(row.features as Record<string, unknown> | null, row.addons);
       if (!features[feature]) {
         throw new ForbiddenException({ code: 'PLAN_FEATURE_REQUIRED', message: `Your current plan does not include '${feature}'. Please upgrade to access this feature.`, messageTh: `แพ็กเกจปัจจุบันของคุณไม่รองรับฟีเจอร์ '${feature}' กรุณาอัปเกรดแพ็กเกจ` });
       }

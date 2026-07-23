@@ -188,32 +188,67 @@ export default function BillingPage() {
               <strong className="text-sm">{t('st.bill.addons_title')}</strong>
             </div>
             <p className="text-xs text-muted-foreground">{t('st.bill.addons_sub')}</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {ADDON_KEYS.map((k) => {
-                const planSuites: string[] = Array.isArray(sub.data?.features?.suites) ? sub.data.features.suites : [];
-                const inPlan = ADDON_GRANTS[k].every((sv) => planSuites.includes(sv));
-                const checked = addonSel.includes(k);
-                return (
-                  <label key={k} className={cn('flex items-center justify-between gap-2 rounded-lg border p-3 text-sm', checked && !inPlan && 'border-primary/50')}>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={inPlan || checked}
-                        disabled={inPlan}
-                        onChange={(e) => setAddonSel(e.target.checked ? [...addonSel, k] : addonSel.filter((x) => x !== k))}
-                      />
-                      <span className="truncate">{lang === 'en' ? ADDONS[k].labels.en : ADDONS[k].labels.th}</span>
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {inPlan ? t('st.bill.addon_in_plan') : `${baht(ADDONS[k].priceMonthly)}${t('st.bill.per_month_short')}`}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            <Button size="sm" variant="outline" className="w-fit" disabled={saveAddons.isPending} onClick={() => saveAddons.mutate()}>
-              {t('st.bill.addons_save')}
-            </Button>
+            {(() => {
+              const planSuites: string[] = Array.isArray(sub.data?.features?.suites) ? sub.data.features.suites : [];
+              const inPlan = (k: string) => ADDON_GRANTS[k as keyof typeof ADDON_GRANTS].every((sv) => planSuites.includes(sv));
+              const MODULE_ADDONS = ['planning', 'marketing', 'crm_loyalty', 'ai'] as const;
+              const groups = [
+                { header: t('st.bill.addons_group_modules'), keys: ADDON_KEYS.filter((k) => (MODULE_ADDONS as readonly string[]).includes(k)) },
+                { header: t('st.bill.addons_group_advanced'), keys: ADDON_KEYS.filter((k) => !(MODULE_ADDONS as readonly string[]).includes(k)) },
+              ];
+              // Live billable delta (selected, not already in the plan) — what บันทึก will actually add.
+              const billable = addonSel.filter((k) => !inPlan(k));
+              const deltaSum = billable.reduce((s, k) => s + (ADDONS[k as keyof typeof ADDONS]?.priceMonthly ?? 0), 0);
+              const moduleCount = billable.filter((k) => (MODULE_ADDONS as readonly string[]).includes(k)).length;
+              return (
+                <>
+                  {groups.map((g) => (
+                    <div key={g.header} className="grid gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.header}</div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {g.keys.map((k) => {
+                          const included = inPlan(k);
+                          const checked = addonSel.includes(k);
+                          return (
+                            <label key={k} className={cn('flex items-center justify-between gap-2 rounded-lg border p-3 text-sm', checked && !included && 'border-primary/50', included && 'opacity-80')}>
+                              <span className="flex min-w-0 items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={included || checked}
+                                  disabled={included}
+                                  onChange={(e) => setAddonSel(e.target.checked ? [...addonSel, k] : addonSel.filter((x) => x !== k))}
+                                />
+                                <span className="min-w-0">
+                                  <span className="block truncate">{lang === 'en' ? ADDONS[k].labels.en : ADDONS[k].labels.th}</span>
+                                  {k === 'ai' && !included && <span className="block text-[11px] text-muted-foreground">{t('st.bill.addons_ai_note')}</span>}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {included ? `✓ ${t('st.bill.addon_in_plan')}` : `${baht(ADDONS[k].priceMonthly)}${t('st.bill.per_month_short')}`}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Honesty nudge: at 3+ module add-ons the Professional bundle is the better deal by design. */}
+                  {moduleCount >= 3 && (
+                    <p data-testid="addons-upsell" className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs leading-relaxed">
+                      💡 {t('st.bill.addons_upsell_hint')}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button size="sm" variant="outline" disabled={saveAddons.isPending} onClick={() => saveAddons.mutate()}>
+                      {t('st.bill.addons_save')}
+                    </Button>
+                    {deltaSum > 0 && (
+                      <span className="text-sm text-muted-foreground">{t('st.bill.addons_delta', { amount: baht(deltaSum) })}</span>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </Card>
         )}
 
