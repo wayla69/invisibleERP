@@ -7,7 +7,8 @@ import { expect, test, type Page } from '@playwright/test';
  * Run with a local config that clears testIgnore (see CLAUDE.md local-e2e recipe).
  */
 
-const OUT = process.env.MOCKUP_OUT ?? '/tmp/mockups';
+// Playwright resolves screenshot paths from cwd (apps/web when run via pnpm --filter @ierp/web).
+const OUT = process.env.MOCKUP_OUT ?? '../../docs/user-manual/img';
 
 async function bootBilling(page: Page, addons: string[]) {
   await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
@@ -39,10 +40,9 @@ test('plans configurator — desktop, Growth + module add-ons toggled', async ({
   }).toPass();
   await page.getByTestId('addon-ai').getByRole('switch').click();
   await expect(page.locator('aside')).toContainText('฿8,790');
-  await page.screenshot({ path: `${OUT}/plans-desktop-growth-addons.png`, fullPage: true });
   // Close-up: the add-on groups (module SKUs first, advanced second) + the sticky summary.
   await page.getByText('ขายยกโมดูล').first().scrollIntoViewIfNeeded();
-  await page.screenshot({ path: `${OUT}/plans-desktop-addons-closeup.png` });
+  await page.screenshot({ path: `${OUT}/plans-module-addons.png` });
 });
 
 test('plans configurator — desktop, Scale shows included badges (display honesty)', async ({ page }) => {
@@ -53,7 +53,7 @@ test('plans configurator — desktop, Scale shows included badges (display hones
     await expect(page.getByTestId('addon-planning').getByText('รวมในแพ็กเกจนี้แล้ว')).toBeVisible({ timeout: 1_000 });
   }).toPass();
   await page.getByText('ขายยกโมดูล').first().scrollIntoViewIfNeeded();
-  await page.screenshot({ path: `${OUT}/plans-desktop-scale-included.png` });
+  await page.screenshot({ path: `${OUT}/plans-included-badges.png` });
 });
 
 test('plans configurator — phone, bottom bar with expanded breakdown', async ({ page }) => {
@@ -66,7 +66,7 @@ test('plans configurator — phone, bottom bar with expanded breakdown', async (
   }).toPass();
   await page.getByRole('button', { name: /ดูรายละเอียด/ }).click();
   await expect(page.locator('div.fixed.bottom-0')).toContainText('ค่าบริการโดยประมาณ');
-  await page.screenshot({ path: `${OUT}/plans-mobile-summary-open.png` });
+  await page.screenshot({ path: `${OUT}/plans-mobile-summary.png` });
 });
 
 test('billing — add-on card with the ai module active', async ({ page }) => {
