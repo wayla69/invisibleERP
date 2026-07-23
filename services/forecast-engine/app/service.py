@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import os
 import threading
 import time
@@ -43,6 +44,33 @@ from .reconcile import ReconcileError, reconcile
 CACHE_TTL_S = 900
 CACHE_MAX = 64
 
+# docs/59 D3 — shared result cache across N stateless replicas. Mirrors common/rate-limit-store.ts's
+# FAIL-OPEN shape: a lazily-built single connection, and any error (no package / bad URL / Redis down)
+# degrades to the per-process cache. Unset SCM_ENGINE_REDIS_URL (or REALTIME_REDIS_URL) ⇒ single-node
+# behaviour unchanged (CI / PGlite need no Redis). The idempotency key already rides every request, so a
+# retry landing on a DIFFERENT replica now returns the original solve instead of recomputing.
+_ENGINE_CACHE_TTL_S = float(os.getenv("SCM_ENGINE_CACHE_TTL_S") or CACHE_TTL_S)
+_redis_client: object = "unset"  # sentinel until first use (lazy — import never touches the network)
+
+
+def _engine_redis():
+    global _redis_client
+    if _redis_client != "unset":
+        return _redis_client
+    url = (os.getenv("SCM_ENGINE_REDIS_URL") or os.getenv("REALTIME_REDIS_URL") or "").strip()
+    if not url:
+        _redis_client = None
+        return None
+    try:
+        import redis  # lazy — importing this module must not require the redis package
+
+        _redis_client = redis.Redis.from_url(
+            url, socket_connect_timeout=1, socket_timeout=1, retry_on_timeout=False
+        )
+    except Exception:  # noqa: BLE001 — no package / bad URL ⇒ degrade to the per-process cache
+        _redis_client = None
+    return _redis_client
+
 
 def _workers() -> int:
     env = os.getenv("ENGINE_WORKERS")
@@ -67,6 +95,15 @@ class ResultCache:
     def get(self, key: str | None):
         if not key:
             return None
+        # D3: shared Redis first (a hit here serves a retry that landed on another replica), fail-open.
+        r = _engine_redis()
+        if r is not None:
+            try:
+                raw = r.get(f"scmeng:{key}")
+                if raw is not None:
+                    return json.loads(raw)
+            except Exception:  # noqa: BLE001 — Redis unavailable ⇒ fall through to the per-process cache
+                pass
         with self._lock:
             hit = self._data.get(key)
             if not hit:
@@ -80,6 +117,13 @@ class ResultCache:
     def put(self, key: str | None, value: object) -> None:
         if not key:
             return
+        # D3: write-through to Redis (best-effort, fail-open) AND the per-process cache.
+        r = _engine_redis()
+        if r is not None:
+            try:
+                r.set(f"scmeng:{key}", json.dumps(value), px=int(_ENGINE_CACHE_TTL_S * 1000))
+            except Exception:  # noqa: BLE001 — Redis unavailable ⇒ still cache in-process below
+                pass
         with self._lock:
             if len(self._data) >= self._max:
                 oldest = min(self._data.items(), key=lambda kv: kv[1][0])[0]
@@ -87,7 +131,7 @@ class ResultCache:
             self._data[key] = (time.time(), value)
 
 
-cache = ResultCache()
+cache = ResultCache(ttl=_ENGINE_CACHE_TTL_S)
 
 
 def run_forecast(req: ForecastRequest) -> ForecastResponse:

@@ -15,6 +15,7 @@ dependencies = [
   "pandas>=2.2",
   "prophet>=1.1.6",
   "pulp>=2.8",
+  "redis>=5",
 ]
 
 [project.optional-dependencies]
