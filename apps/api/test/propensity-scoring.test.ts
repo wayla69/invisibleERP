@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  marginWeight, rankNextOffers, rankBestAudiences, type AffinityPair, type SkuMargin,
+  marginWeight, rankNextOffers, rankBestAudiences, rankSegmentOffer, type AffinityPair, type SkuMargin,
 } from '../src/modules/marketing-activation/propensity-scoring';
 
 // Propensity & Cross-Sell scoring (docs/61 Phase 1, MKT-23). Pure, deterministic.
@@ -106,5 +106,62 @@ describe('rankBestAudiences', () => {
     expect(aud[0]!.segment).toBe('—');
     expect(aud[0]!.avg_clv).toBeNull();
     expect(aud[0]!.score).toBe(0);
+  });
+});
+
+describe('rankSegmentOffer (the ③→① top-offer hook)', () => {
+  const margins = new Map<string, SkuMargin>([
+    ['B', { name: 'Croissant', margin: 30, margin_pct: 50 }],
+    ['C', { name: 'Cake', margin: 60, margin_pct: 60 }],
+  ]);
+  const member = (...favs: string[]) => ({ favorites: favs });
+
+  it('returns the reach-weighted top un-bought product with its driver ("why")', () => {
+    // 3 members own A; one already owns B → reach for A→B is 2. conf 80% × lift 2 × mw 1.5 × reach 2 = 4.8.
+    const offer = rankSegmentOffer([member('A'), member('A'), member('A', 'B')], [pair()], margins);
+    expect(offer).not.toBeNull();
+    expect(offer!.item_id).toBe('B');
+    expect(offer!.name).toBe('Croissant');
+    expect(offer!.driver_item_id).toBe('A');
+    expect(offer!.reach).toBe(2);
+    expect(offer!.score).toBeCloseTo(4.8, 4);
+  });
+
+  it('excludes a candidate already owned by a majority of the segment (the staple)', () => {
+    // B owned by 2 of 3 members (67% > 50%) → not an offer; C (driven by A) wins instead.
+    const pairs = [pair(), pair({ item_a: 'A', item_b: 'C', name_b: 'Cake', confidence_a_to_b_pct: 50, lift: 1.5 })];
+    const offer = rankSegmentOffer([member('A', 'B'), member('A', 'B'), member('A')], pairs, margins);
+    expect(offer!.item_id).toBe('C');
+  });
+
+  it('weights by margin — a fatter-margin candidate out-ranks a same-signal thin one', () => {
+    const pairs = [
+      pair({ item_b: 'B', name_b: 'Croissant' }),                     // margin_pct 50 → weight 1.5
+      pair({ item_b: 'C', name_b: 'Cake' }),                          // margin_pct 60 → weight 1.6
+    ];
+    const offer = rankSegmentOffer([member('A')], pairs, margins);
+    expect(offer!.item_id).toBe('C');
+  });
+
+  it('needs real reach — a driver nobody owns yields nothing', () => {
+    expect(rankSegmentOffer([member('Z')], [pair()], margins)).toBeNull();
+  });
+
+  it('honours minLift and returns null on an empty segment or empty pairs', () => {
+    expect(rankSegmentOffer([], [pair()], margins)).toBeNull();
+    expect(rankSegmentOffer([member('A')], [], margins)).toBeNull();
+    expect(rankSegmentOffer([member('A')], [pair({ lift: 0.9 })], margins)).toBeNull(); // default minLift 1
+  });
+
+  it('is deterministic — ties break toward the lexicographically-smaller item', () => {
+    const noMargin = new Map<string, SkuMargin>();
+    const pairs = [
+      pair({ item_b: 'D', name_b: 'D' }),
+      pair({ item_b: 'C', name_b: 'C' }),
+    ];
+    const a = rankSegmentOffer([member('A')], pairs, noMargin);
+    const b = rankSegmentOffer([member('A')], pairs, noMargin);
+    expect(a).toEqual(b);
+    expect(a!.item_id).toBe('C'); // identical scores → smaller id wins
   });
 });

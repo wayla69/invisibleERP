@@ -8,7 +8,7 @@ import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import { FoodCostService } from '../menu/food-cost.service';
 import { FactLayerService } from './fact-layer.service';
 import {
-  rankNextOffers, rankBestAudiences, type AffinityPair, type SkuMargin,
+  rankNextOffers, rankBestAudiences, rankSegmentOffer, type AffinityPair, type SkuMargin, type SegmentOffer,
 } from './propensity-scoring';
 
 // Propensity & Cross-Sell Targeting (docs/61 Phase 1, control MKT-23) — "who should we sell what to next?",
@@ -104,6 +104,22 @@ export class PropensityService {
       audiences,
       note: 'Advisory scoring only (MKT-23). Contact any ranked segment via a consent-gated campaign draft.',
     };
+  }
+
+  // Per SEGMENT → the single top un-bought product (the ③→① hook): the AI Campaign Studio calls this to
+  // put a CONCRETE offer on the fact sheet (`top_offer`). Same basis as nextBestOffers, ranked at segment
+  // scale by rankSegmentOffer (majority-owned staples excluded, reach-weighted). Advisory read only.
+  async topSegmentOffer(user: JwtUser, segment: string, opts?: { from?: string; to?: string }): Promise<SegmentOffer | null> {
+    const tenantId = this.assertTenant(user);
+    const seg = (segment ?? '').trim();
+    if (!seg) return null;
+    const rows = await this.db.select({ favorites: customerProfiles.favoriteItemIds })
+      .from(customerProfiles)
+      .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.miRfmSegment, seg)));
+    const members = rows.map((r) => ({ favorites: Array.isArray(r.favorites) ? (r.favorites as unknown[]).map(String) : [] }));
+    if (members.length === 0) return null;
+    const { pairs, marginBySku } = await this.loadBasis(user, opts);
+    return rankSegmentOffer(members, pairs, marginBySku);
   }
 
   private assertTenant(user: JwtUser): number {

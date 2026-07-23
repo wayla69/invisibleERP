@@ -138,6 +138,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
     th: 'ข้อเท็จจริงอยู่ในพรอมป์ ไม่กุขึ้นเอง (MKT-21) — ผลลัพธ์เป็นดราฟต์เสมอ การส่งจริงผ่าน flow ความยินยอม + maker-checker เดิม',
     en: 'The facts are in the prompt, never hallucinated (MKT-21) — output is always a draft; sending stays the existing consent + maker-checker flow',
   },
+  'ma.studio_ai_badge': { th: 'เขียนโดย AI', en: 'AI-written' },
+  'ma.studio_template_badge': { th: 'แม่แบบมาตรฐาน', en: 'Template' },
   'ma.studio_gens_heading': { th: 'ดราฟต์ที่เคยสร้าง (model cards)', en: 'Past generations (model cards)' },
   'ma.studio_no_gens': { th: 'ยังไม่เคยสร้างดราฟต์', en: 'No generations yet' },
   'ma.studio_draft_created': { th: 'ดราฟต์แคมเปญ #{id}', en: 'campaign draft #{id}' },
