@@ -1206,10 +1206,16 @@ async function main() {
 
   // ── Marketing Activation — ① AI CAMPAIGN STUDIO (docs/61 Phase 4, control MKT-21, migration 0471). Generate
   //    a FACT-GROUNDED campaign draft for 'NbaSeg' (5 members, dominant NBA UPSELL, best channel from MMM),
-  //    then stage it as a consent-gated DRAFT while LOGGING the model card. Nothing is sent. ──
+  //    then stage it as a consent-gated DRAFT while LOGGING the model card. Nothing is sent. Studio v2: the
+  //    ③→① hook puts the segment's top un-bought product on the fact sheet — give NBA-1 the AFF-A favourite
+  //    so the affinity basis (AFF-A → AFF-B 'Croissant', seeded above) yields a deterministic top_offer; and
+  //    this keyless run MUST stay on the deterministic template path (the LLM swap is fail-closed). ──
+  await db.update(s.customerProfiles).set({ favoriteItemIds: ['AFF-A'] })
+    .where(and(eq(s.customerProfiles.tenantId, cf2.id), eq(s.customerProfiles.memberId, nbaMembers[0]!)));
   const gen = await inj('GET', '/api/marketing-activation/studio/generate/NbaSeg', cf2admin);
   ok('Studio ①: generates a fact-grounded draft (channel/send-hour/th+en copy) from the segment fact sheet', gen.status === 200 && gen.json.draft?.audience === 'mi_segment' && typeof gen.json.draft?.subject_th === 'string' && typeof gen.json.draft?.subject_en === 'string' && gen.json.draft?.channel != null && gen.json.model === 'studio-template-v1', `${gen.status} ${JSON.stringify({ ch: gen.json.draft?.channel, hour: gen.json.draft?.send_hour, model: gen.json.model })}`);
   ok('Studio ①: the prompt is retrieval-grounded (the segment + its facts are IN the prompt, not hallucinated)', gen.status === 200 && typeof gen.json.prompt === 'string' && gen.json.prompt.includes('NbaSeg') && /ground/i.test(gen.json.prompt) && gen.json.facts?.count === 5, `${(gen.json.prompt ?? '').slice(0, 40)}… count=${gen.json.facts?.count}`);
+  ok('Studio ① v2: the ③→① hook — the segment\'s top un-bought product (Croissant, via the AFF-A driver) lands on the fact sheet, in the prompt and in the offer copy', gen.status === 200 && gen.json.facts?.top_offer === 'Croissant' && gen.json.prompt.includes('Croissant') && String(gen.json.draft?.offer_th ?? '').includes('Croissant'), `top_offer=${JSON.stringify(gen.json.facts?.top_offer)}`);
 
   const genStage = await inj('POST', '/api/marketing-activation/studio/stage', cf2admin, { segment: 'NbaSeg' });
   ok('Studio ①: staging creates a consent-gated campaign DRAFT + logs the model card (never auto-sends)', (genStage.status === 200 || genStage.status === 201) && genStage.json.status === 'draft' && typeof genStage.json.gen_no === 'string' && genStage.json.campaign_id != null, `${genStage.status} ${JSON.stringify({ g: genStage.json.gen_no, camp: genStage.json.campaign_id, st: genStage.json.status })}`);
