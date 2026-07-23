@@ -9,7 +9,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Users, Megaphone, TrendingDown, Crown, Sparkles, ArrowDownUp } from 'lucide-react';
 import { api } from '@/lib/api';
-import { num, baht } from '@/lib/format';
+import { num, thb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { StateView } from '@/components/state-view';
@@ -130,11 +130,11 @@ export function CustomerIntel() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{c.name ?? c.customer_no ?? '—'}</div>
                         <div className="truncate text-xs text-muted-foreground tabular-nums">
-                          {c.customer_no}{c.total_spend != null ? ` · ${t('mi.col_monetary')} ${baht(c.total_spend)}` : ''}{c.last_order_at ? ` · ${new Date(c.last_order_at).toLocaleDateString()}` : ''}
+                          {c.customer_no}{c.total_spend != null ? ` · ${t('mi.col_monetary')} ${thb(c.total_spend)}` : ''}{c.last_order_at ? ` · ${new Date(c.last_order_at).toLocaleDateString()}` : ''}
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold tabular-nums" style={softText('var(--chart-3)')}>{c.clv != null ? baht(c.clv) : '—'}</div>
+                        <div className="text-sm font-semibold tabular-nums" style={softText('var(--chart-3)')}>{c.clv != null ? thb(c.clv) : '—'}</div>
                         <div className="text-[11px] text-muted-foreground">{t('mi.ci_clv')}</div>
                       </div>
                       <div className="w-24 text-right">

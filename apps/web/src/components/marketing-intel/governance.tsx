@@ -6,7 +6,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ShieldCheck, AlertTriangle, Check, FileText, GitBranch, ToggleLeft, ToggleRight } from 'lucide-react';
 import { api } from '@/lib/api';
-import { num, baht } from '@/lib/format';
+import { num, thb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { StateView } from '@/components/state-view';
@@ -134,7 +134,7 @@ export function Governance() {
                   </div>
                   <div>
                     <div className="mb-1 font-semibold" style={softText('var(--chart-3)')}>{t('mi.gv_outcome')} ({auditQ.data.experiments.length})</div>
-                    {auditQ.data.experiments.slice(0, 6).map((e) => <div key={e.experiment_no} className="truncate text-muted-foreground">{e.experiment_no} · {e.lift_pct == null ? e.status : `+${num(e.lift_pct, 0)}% (${baht(e.incremental_revenue ?? 0)})`}</div>)}
+                    {auditQ.data.experiments.slice(0, 6).map((e) => <div key={e.experiment_no} className="truncate text-muted-foreground">{e.experiment_no} · {e.lift_pct == null ? e.status : `+${num(e.lift_pct, 0)}% (${thb(e.incremental_revenue ?? 0)})`}</div>)}
                   </div>
                 </div>
               </div>
