@@ -1166,6 +1166,44 @@ async function main() {
   const scForbidden = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', token2);
   ok('SegChannelROI ⑤: a non-marketing/exec principal is refused (403)', scForbidden.status === 403, `${scForbidden.status}`);
 
+  // ── Marketing Activation — ② NBA ORCHESTRATOR (docs/61 Phase 2, control MKT-22, migration 0470). Seed a
+  //    cf2 cohort 'NbaSeg' exercising every path: 2 eligible (ranked by EV), + CONSENT / NO_ACTION /
+  //    RECENT_PURCHASE suppression. Stage → maker-checker activate (a DIFFERENT user) → consent-gated draft. ──
+  const nbaMembers: number[] = [];
+  const mkNbaMember = async (code: string, optIn: boolean, nba: string | null, clv: number, churn: number, lastOrderAt: Date | null): Promise<void> => {
+    const [m] = await db.insert(s.posMembers).values({ tenantId: cf2.id, memberCode: code, name: code, marketingOptIn: optIn, active: true }).returning({ id: s.posMembers.id });
+    await db.insert(s.customerProfiles).values({ tenantId: cf2.id, memberId: Number(m!.id), miNba: nba, miClv: String(clv), miChurnRisk: String(churn), miRfmSegment: 'NbaSeg', lastOrderAt });
+    nbaMembers.push(Number(m!.id));
+  };
+  await mkNbaMember('NBA-1', true, 'UPSELL', 1000, 0.2, null);                          // eligible, EV 200
+  await mkNbaMember('NBA-2', true, 'WINBACK', 2000, 0.8, null);                         // eligible, EV 540 (ranks first)
+  await mkNbaMember('NBA-3', false, 'UPSELL', 1500, 0.3, null);                         // suppressed CONSENT
+  await mkNbaMember('NBA-4', true, null, 800, 0.1, null);                               // suppressed NO_ACTION
+  await mkNbaMember('NBA-5', true, 'CROSS_SELL', 900, 0.2, new Date(Date.now() - 86400000)); // suppressed RECENT_PURCHASE
+
+  const nbaPrev = await inj('GET', '/api/marketing-activation/nba/preview?segment=NbaSeg&recent_days=14&control_pct=0', cf2admin);
+  ok('NBA ②: preview ranks eligible customers by expected value (WINBACK VIP first) and suppresses the rest', nbaPrev.status === 200 && nbaPrev.json.scored === 5 && nbaPrev.json.suppressed_count === 3 && (nbaPrev.json.targets ?? [])[0]?.action === 'WINBACK' && nbaPrev.json.treatment_count === 2, `${nbaPrev.status} ${JSON.stringify({ scored: nbaPrev.json.scored, supp: nbaPrev.json.suppressed_count, first: (nbaPrev.json.targets ?? [])[0]?.action, tc: nbaPrev.json.treatment_count })}`);
+  ok('NBA ②: suppression records the reason per member (CONSENT / NO_ACTION / RECENT_PURCHASE)', nbaPrev.status === 200 && new Set((nbaPrev.json.suppressed ?? []).map((x: any) => x.reason)).size === 3 && (nbaPrev.json.suppressed ?? []).every((x: any) => ['CONSENT', 'NO_ACTION', 'RECENT_PURCHASE'].includes(x.reason)), `${JSON.stringify((nbaPrev.json.suppressed ?? []).map((x: any) => x.reason))}`);
+
+  const nbaStage = await inj('POST', '/api/marketing-activation/nba/stage', cf2admin, { segment: 'NbaSeg', control_pct: 0, recent_days: 14 });
+  ok('NBA ②: staging persists a Pending journey (nothing contacted yet)', (nbaStage.status === 200 || nbaStage.status === 201) && nbaStage.json.status === 'Pending' && typeof nbaStage.json.journey_no === 'string' && nbaStage.json.treatment_count === 2, `${nbaStage.status} ${JSON.stringify({ j: nbaStage.json.journey_no, st: nbaStage.json.status, tc: nbaStage.json.treatment_count })}`);
+
+  // A DIFFERENT user activates → maker-checker passes → a consent-gated DRAFT for the treatment arm.
+  const nbaAct = await inj('POST', '/api/marketing-activation/nba/activate', cf2ex, { journey_no: nbaStage.json.journey_no });
+  ok('NBA ②: a DIFFERENT user activates it (maker-checker) → Active + a consent-gated draft for the treatment arm', (nbaAct.status === 200 || nbaAct.status === 201) && nbaAct.json.status === 'Active' && nbaAct.json.contacted === 2 && nbaAct.json.campaign_id != null, `${nbaAct.status} ${JSON.stringify({ st: nbaAct.json.status, n: nbaAct.json.contacted, camp: nbaAct.json.campaign_id })}`);
+
+  // The requester cannot activate their OWN staged journey (maker-checker).
+  const nbaStage2 = await inj('POST', '/api/marketing-activation/nba/stage', cf2admin, { segment: 'NbaSeg', control_pct: 0 });
+  const nbaSelf = await inj('POST', '/api/marketing-activation/nba/activate', cf2admin, { journey_no: nbaStage2.json.journey_no });
+  ok('NBA ②: the requester cannot activate their own journey (SOD_SELF_APPROVAL)', nbaSelf.status === 400 && nbaSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${nbaSelf.status} ${nbaSelf.json.error?.code}`);
+
+  const nbaForbidden = await inj('GET', '/api/marketing-activation/nba/preview?segment=NbaSeg', token2);
+  ok('NBA ②: a non-marketing/exec principal is refused (403)', nbaForbidden.status === 403, `${nbaForbidden.status}`);
+
+  // Tenant isolation: the journeys + targets are RLS-scoped (cf2 only).
+  const nbaJrows = await db.select().from(s.miJourneys);
+  ok('NBA ②: staged journeys are tenant-scoped (cf2 only)', nbaJrows.length >= 2 && nbaJrows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${nbaJrows.length} tenants=${[...new Set(nbaJrows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

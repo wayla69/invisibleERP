@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 309,
+    "total": 310,
     "by_status": {
-      "Implemented": 306,
+      "Implemented": 307,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 31,
+      "CRM — Loyalty": 32,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2581,6 +2581,25 @@
       "tod": "Inspect the pure deterministic cell scorer + its unit tests, the read-only advisory ranking (no direct spend), the staging that delegates to the MKT-17 Pending plan + the approver!=requester maker-checker, and the tenant_id filter/RLS on the reads + plans.",
       "toe": "Re-perform (ext harness, 6 MKT-25 checks): the ranking returns segment x channel cells + a channel allocation summing to ~the budget (advisory note, MKT-25); staging creates a Pending mi_budget_plans row (no spend posted); a DIFFERENT user approves it (Approved); the requester's self-approval is rejected SOD_SELF_APPROVAL (reused MKT-17 maker-checker); a non-marketing principal -> 403.",
       "evidence": "the pure cell scorer + its unit tests; the read-only ranking; the staged mi_budget_plans plan + its maker-checker approval",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-22",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A per-customer next-best-action journey is activated and sends WITHOUT independent review — the person who assembles it also launches it; or it contacts a non-consented member (PDPA breach) / a just-purchased member; or the holdout arm is contacted (destroying the lift measurement); or one tenant's journey/targets surface for another tenant.",
+      "assertion": "Authorization/Occurrence",
+      "description": "Next-Best-Action Orchestrator (docs/61 Phase 3, MKT-22): turns the advisory mi_nba into SEQUENCED, PRIORITISED action. For each customer it picks the single highest expected-value action now (CLV x action uplift, churn-weighted for retention), applies FATIGUE CAP + CONSENT suppression + RECENT-PURCHASE suppression (enforced server-side at STAGE time and RECORDED per target), and tags each acted-on member to a FIXED holdout arm (the same deterministic hash as MKT-19). STAGED + MAKER-CHECKER: staging persists a Pending mi_journeys row + per-customer mi_journey_targets (treatment/control + suppression evidence); NOTHING is contacted until a DIFFERENT user ACTIVATES it (POST /nba/activate -> assertMakerChecker, approver != requester -> SOD_SELF_APPROVAL), and even then activation only creates a consent-gated campaign DRAFT (audience:'members') for the TREATMENT arm — the control arm is structurally never contacted and nothing auto-sends. The pure ranking/suppression/holdout is nba-scoring.ts (unit-tested test/nba-scoring.test.ts). Reads customer_profiles + pos_members in SEPARATE queries (no cross-domain join). Gated to marketing/exec (preview), crm_campaign (stage/activate); mi_journeys/mi_journey_targets tenant-scoped (canonical 0232 org-clause RLS + leading tenant index, migration 0470). A read/orchestration model — no GL posting.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per journey / per activation",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-activation/nba-scoring.ts (pure assembleJourney/expectedValue/suppressionReason/inHoldout — unit-tested test/nba-scoring.test.ts, 13 checks); nba-orchestrator.service.ts (preview/stageJourney/activateJourney; assertMakerChecker on activate; consent-gated draft via CampaignsService); marketing-activation.controller.ts GET nba/preview + POST nba/stage + GET nba/journeys + POST nba/activate; schema/marketing-intel.ts mi_journeys + mi_journey_targets + migration 0470 (canonical RLS, tenant-leading indexes); cutover/ext.ts (MKT-22 ToE, 8 checks)",
+      "tod": "Inspect the pure deterministic scorer + its unit tests, the server-side suppression (consent/recent-purchase) recorded per target, the Pending-until-activated status + the approver!=requester maker-checker, the treatment-only consent-gated draft (control never contacted), and the tenant_id filter/RLS on the journeys + targets.",
+      "toe": "Re-perform (ext harness, 8 MKT-22 checks): preview ranks eligible customers by expected value (a high-churn VIP first) and suppresses no-consent/no-action/recent-purchase with the reason recorded; staging persists a Pending journey (nothing contacted); a DIFFERENT user activates it -> Active + a consent-gated draft for the treatment arm only; the requester's self-activation is rejected SOD_SELF_APPROVAL; a non-marketing principal -> 403; journeys are tenant-scoped.",
+      "evidence": "mi_journeys + mi_journey_targets (targets, arms, suppression reasons); the pure scorer + its unit tests; the maker-checker activation; the treatment-only consent-gated draft",
       "status": "Implemented"
     },
     {

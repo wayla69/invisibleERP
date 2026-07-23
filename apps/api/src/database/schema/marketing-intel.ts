@@ -105,3 +105,49 @@ export const miExperimentArms = pgTable('mi_experiment_arms', {
   byMember: uniqueIndex('ux_mi_arms_member').on(t.tenantId, t.experimentId, t.memberId),
   byArm: index('idx_mi_arms_tenant').on(t.tenantId, t.experimentId, t.arm),
 }));
+
+// NBA Orchestrator (docs/61 Phase 3 / control MKT-22, migration 0470). Turns the advisory mi_nba into
+// SEQUENCED, PRIORITISED action: a journey is STAGED (Pending) with its per-customer targets — each carrying
+// the chosen action, its expected value (CLV × action uplift), and a FIXED holdout arm (treatment/control,
+// same deterministic hash as MKT-19) — and requires MAKER-CHECKER activation by a DIFFERENT user before any
+// consent-gated draft is created. Suppression (consent off / recent purchase) is enforced at STAGE time and
+// recorded, so the control is auditable. Read/orchestration model — no GL posting.
+export const miJourneys = pgTable('mi_journeys', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  journeyNo: text('journey_no').notNull(),                    // NBA-YYYYMMDD-NNN
+  segment: text('segment'),                                   // the mi_segment scoped (null = all scored members)
+  channel: text('channel').notNull().default('sms'),
+  status: text('status').notNull().default('Pending'),        // Pending | Active | Cancelled
+  controlPct: numeric('control_pct').notNull().default('0.2'),
+  targetCount: integer('target_count').notNull().default(0),  // treatment targets (contactable)
+  controlCount: integer('control_count').notNull().default(0),// holdout (never contacted)
+  suppressedCount: integer('suppressed_count').notNull().default(0),
+  campaignId: bigint('campaign_id', { mode: 'number' }),      // the consent-gated draft created at activation
+  note: text('note'),
+  requestedBy: text('requested_by'),
+  approvedBy: text('approved_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  activatedAt: timestamp('activated_at', { withTimezone: true }),
+}, (t) => ({
+  byTenant: index('idx_mi_journeys_tenant').on(t.tenantId, t.status, t.createdAt),
+  byNo: uniqueIndex('ux_mi_journeys_no').on(t.tenantId, t.journeyNo),
+}));
+
+// One row per (journey, member): the chosen next-best action, its expected value, the fixed holdout arm, and
+// — for a suppressed member — why it was held back. Immutable once staged (the audit evidence of the plan).
+export const miJourneyTargets = pgTable('mi_journey_targets', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  journeyId: bigint('journey_id', { mode: 'number' }).notNull().references(() => miJourneys.id),
+  memberId: bigint('member_id', { mode: 'number' }).notNull(),
+  action: text('action'),                                     // the mi_nba chosen (null when suppressed with no action)
+  expectedValue: numeric('expected_value', { precision: 14, scale: 2 }),
+  arm: text('arm').notNull().default('treatment'),            // treatment | control
+  suppressed: boolean('suppressed').notNull().default(false),
+  suppressReason: text('suppress_reason'),                    // CONSENT | RECENT_PURCHASE | NO_ACTION
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byMember: uniqueIndex('ux_mi_journey_targets_member').on(t.tenantId, t.journeyId, t.memberId),
+  byArm: index('idx_mi_journey_targets_tenant').on(t.tenantId, t.journeyId, t.arm),
+}));

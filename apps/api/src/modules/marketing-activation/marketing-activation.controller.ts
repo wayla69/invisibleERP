@@ -3,6 +3,7 @@ import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators'
 import { FactLayerService } from './fact-layer.service';
 import { PropensityService } from './propensity.service';
 import { SegmentChannelRoiService } from './segment-channel-roi.service';
+import { NbaOrchestratorService, type JourneyOpts } from './nba-orchestrator.service';
 
 const qintOpt = (v?: string): number | undefined => {
   if (v == null || v === '') return undefined;
@@ -19,6 +20,7 @@ export class MarketingActivationController {
     private readonly facts: FactLayerService,
     private readonly propensity: PropensityService,
     private readonly segChannel: SegmentChannelRoiService,
+    private readonly nba: NbaOrchestratorService,
   ) {}
 
   @Get('facts/customer/:code')
@@ -78,5 +80,38 @@ export class MarketingActivationController {
     @CurrentUser() u: JwtUser,
   ) {
     return this.segChannel.stage(u, body ?? { total_budget: 0 });
+  }
+
+  // ② NBA Orchestrator — advisory preview of the prioritised per-customer journey (no persistence).
+  @Get('nba/preview')
+  @Permissions('marketing', 'exec')
+  nbaPreview(
+    @Query('segment') segment: string | undefined,
+    @Query('control_pct') controlPct: string | undefined,
+    @Query('max_targets') maxTargets: string | undefined,
+    @Query('recent_days') recentDays: string | undefined,
+    @CurrentUser() u: JwtUser,
+  ) {
+    return this.nba.preview(u, { segment, control_pct: qintOpt(controlPct), max_targets: qintOpt(maxTargets), recent_days: qintOpt(recentDays) });
+  }
+
+  // ② NBA Orchestrator — STAGE a journey (Pending); a DIFFERENT user must activate it.
+  @Post('nba/stage')
+  @Permissions('marketing', 'exec', 'crm_campaign')
+  nbaStage(@Body() body: JourneyOpts, @CurrentUser() u: JwtUser) {
+    return this.nba.stageJourney(u, body ?? {});
+  }
+
+  @Get('nba/journeys')
+  @Permissions('marketing', 'exec')
+  nbaJourneys(@CurrentUser() u: JwtUser) {
+    return this.nba.listJourneys(u);
+  }
+
+  // ② NBA Orchestrator — ACTIVATE a staged journey (maker-checker; creates a consent-gated draft, no send).
+  @Post('nba/activate')
+  @Permissions('marketing', 'exec', 'crm_campaign')
+  nbaActivate(@Body() body: { journey_no: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.nba.activateJourney(u, body ?? { journey_no: '' });
   }
 }
