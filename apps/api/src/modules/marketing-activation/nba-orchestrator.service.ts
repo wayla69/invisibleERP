@@ -4,7 +4,9 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, posMembers, miJourneys, miJourneyTargets } from '../../database/schema';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
+import { measureLift } from '../../common/lift-math';
 import { CampaignsService } from '../campaigns/campaigns.service';
+import { CrmService } from '../crm/crm.service';
 import { assembleJourney, type NbaCustomer, type Journey } from './nba-scoring';
 
 // Next-Best-Action Orchestrator (docs/61 Phase 3, control MKT-22) — turns the advisory mi_nba into
@@ -20,11 +22,15 @@ import { assembleJourney, type NbaCustomer, type Journey } from './nba-scoring';
 
 export interface JourneyOpts { segment?: string; control_pct?: number; max_targets?: number; recent_days?: number; channel?: string; note?: string }
 
+// Measurement window (days) after activation before realized lift may be measured. Clamped 1..90.
+const clampWindowDays = (v: unknown): number => Math.min(Math.max(Math.round(Number(v ?? 14) || 14), 1), 90);
+
 @Injectable()
 export class NbaOrchestratorService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly campaigns: CampaignsService,
+    private readonly crm: CrmService,
   ) {}
 
   // Load the scored customers (optionally scoped to one mi_segment): the mi_* action/value + reach facts from
@@ -118,12 +124,17 @@ export class NbaOrchestratorService {
       journey_no: r.journeyNo, status: r.status, segment: r.segment, channel: r.channel,
       target_count: r.targetCount, control_count: r.controlCount, suppressed_count: r.suppressedCount,
       requested_by: r.requestedBy, approved_by: r.approvedBy, campaign_id: r.campaignId, created_at: r.createdAt, activated_at: r.activatedAt,
+      measure_after: r.measureAfter, measured_at: r.measuredAt, measured_by: r.measuredBy,
+      realized_lift_pct: r.realizedLiftPct == null ? null : Number(r.realizedLiftPct),
+      incremental_revenue: r.incrementalRevenue == null ? null : Number(r.incrementalRevenue),
+      treatment_per_head: r.treatmentPerHead == null ? null : Number(r.treatmentPerHead),
+      control_per_head: r.controlPerHead == null ? null : Number(r.controlPerHead),
     })) };
   }
 
   // ACTIVATE — maker-checker (approver ≠ requester), then create a consent-gated campaign DRAFT for the
   // TREATMENT arm only. The control arm is structurally never contacted; nothing auto-sends (draft/scheduled).
-  async activateJourney(user: JwtUser, body: { journey_no: string; self_approval_reason?: string }): Promise<Record<string, unknown>> {
+  async activateJourney(user: JwtUser, body: { journey_no: string; self_approval_reason?: string; window_days?: number }): Promise<Record<string, unknown>> {
     const tenantId = this.assertTenant(user);
     const [journey] = await this.db.select().from(miJourneys)
       .where(and(eq(miJourneys.tenantId, tenantId), eq(miJourneys.journeyNo, body.journey_no))).limit(1);
@@ -152,10 +163,58 @@ export class NbaOrchestratorService {
       campaignId = camp && typeof camp === 'object' && 'id' in camp ? Number((camp as { id: unknown }).id) : null;
     }
 
+    // Activation starts the measurement clock (MKT-19 discipline): realized lift may be measured after the window.
+    const activatedAt = new Date();
+    const measureAfter = new Date(activatedAt.getTime() + clampWindowDays(body.window_days) * 86400_000);
     await this.db.update(miJourneys)
-      .set({ status: 'Active', approvedBy: user.username ?? 'user', campaignId, activatedAt: new Date() })
+      .set({ status: 'Active', approvedBy: user.username ?? 'user', campaignId, activatedAt, measureAfter })
       .where(and(eq(miJourneys.tenantId, tenantId), eq(miJourneys.id, journey.id)));
 
-    return { journey_no: journey.journeyNo, status: 'Active', approved_by: user.username ?? 'user', campaign_id: campaignId, contacted: memberIds.length, note: 'A consent-gated DRAFT was created for the treatment arm — a human edits + sends; the control arm is never contacted.' };
+    return { journey_no: journey.journeyNo, status: 'Active', approved_by: user.username ?? 'user', campaign_id: campaignId, contacted: memberIds.length, measure_after: measureAfter, note: 'A consent-gated DRAFT was created for the treatment arm — a human edits + sends; the control arm is never contacted.' };
+  }
+
+  // MEASURE realized lift once the window has elapsed: per-arm REAL POS revenue in [activated_at, now] via
+  // the CrmService read API (no cross-domain join), then the shared MKT-19 lift math. Idempotent-guarded.
+  async measureJourney(user: JwtUser, body: { journey_no: string }): Promise<Record<string, unknown>> {
+    const tenantId = this.assertTenant(user);
+    const [journey] = await this.db.select().from(miJourneys)
+      .where(and(eq(miJourneys.tenantId, tenantId), eq(miJourneys.journeyNo, body.journey_no))).limit(1);
+    if (!journey) throw new NotFoundException({ code: 'JOURNEY_NOT_FOUND', message: `journey ${body.journey_no} not found`, messageTh: `ไม่พบแผน ${body.journey_no}` });
+    if (journey.status !== 'Active') throw new BadRequestException({ code: 'JOURNEY_NOT_ACTIVE', message: `journey is ${journey.status} — only an activated journey can be measured`, messageTh: `แผนนี้สถานะ ${journey.status} — วัดผลได้เฉพาะแผนที่เปิดใช้งานแล้ว` });
+    if (journey.measuredAt) throw new BadRequestException({ code: 'ALREADY_MEASURED', message: 'journey already measured', messageTh: 'แผนนี้วัดผลแล้ว' });
+    const now = new Date();
+    if (journey.measureAfter && now < new Date(journey.measureAfter)) throw new BadRequestException({ code: 'WINDOW_NOT_ELAPSED', message: 'measurement window has not elapsed yet', messageTh: 'ยังไม่ครบช่วงวัดผล' });
+    if (Number(journey.controlCount) <= 0) throw new BadRequestException({ code: 'NO_CONTROL', message: 'no control arm to measure lift against', messageTh: 'ไม่มีกลุ่มควบคุมให้เทียบ' });
+
+    const armRows = await this.db.select({ memberId: miJourneyTargets.memberId, arm: miJourneyTargets.arm })
+      .from(miJourneyTargets)
+      .where(and(eq(miJourneyTargets.tenantId, tenantId), eq(miJourneyTargets.journeyId, journey.id), eq(miJourneyTargets.suppressed, false)));
+    const treatment = armRows.filter((a) => a.arm === 'treatment').map((a) => Number(a.memberId));
+    const control = armRows.filter((a) => a.arm === 'control').map((a) => Number(a.memberId));
+
+    const from = journey.activatedAt ? new Date(journey.activatedAt) : new Date(journey.createdAt ?? now);
+    const rev = await this.crm.revenueByMembers(tenantId, [...treatment, ...control], from, now);
+    const sum = (ids: number[]) => ids.reduce((s, id) => s + (rev.get(id) ?? 0), 0);
+    const tRev = sum(treatment), cRev = sum(control);
+    const lift = measureLift({ treatmentRevenue: tRev, treatmentN: treatment.length, controlRevenue: cRev, controlN: control.length });
+
+    await this.db.update(miJourneys).set({
+      treatmentRevenue: String(round2(tRev)), controlRevenue: String(round2(cRev)),
+      treatmentPerHead: String(round2(lift.treatment_per_head)), controlPerHead: String(round2(lift.control_per_head)),
+      realizedLiftPct: lift.lift_pct == null ? null : String(round2(lift.lift_pct)),
+      incrementalRevenue: String(round2(lift.incremental_revenue)),
+      measuredAt: now, measuredBy: user.username ?? 'user',
+    }).where(and(eq(miJourneys.tenantId, tenantId), eq(miJourneys.id, journey.id)));
+
+    return {
+      journey_no: journey.journeyNo, segment: journey.segment, status: 'Active', measured: true,
+      treatment_count: treatment.length, control_count: control.length,
+      treatment_per_head: round2(lift.treatment_per_head), control_per_head: round2(lift.control_per_head),
+      realized_lift_pct: lift.lift_pct == null ? null : round2(lift.lift_pct),
+      incremental_revenue: round2(lift.incremental_revenue),
+      note: 'Realized treatment-vs-control lift on real POS revenue (MKT-19 discipline). The measured lift feeds the Segment×Channel ROI ranking (⑤).',
+    };
   }
 }
+
+const round2 = (v: number): number => Math.round(v * 100) / 100;

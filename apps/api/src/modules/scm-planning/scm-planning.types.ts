@@ -5,6 +5,7 @@ import type { ScmSeriesRegressor } from '@ierp/shared';
 
 export const SCM_NIGHTLY_JOB = 'scm_nightly_plan';
 export const SCM_REPLAN_JOB = 'scm_replan';
+export const SCM_BATCH_RETRAIN_JOB = 'scm_batch_retrain'; // docs/59 D1 — scheduled refit off the request path
 
 export const PLAN_STATUS = {
   draft: 'Draft',

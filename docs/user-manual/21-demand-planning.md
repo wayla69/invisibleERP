@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.10**
+**Status: DRAFT v0.11 · 2026-07-23**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -94,6 +94,15 @@ looks at the expiry dates you have been receiving and proposes the typical figur
 > never drift too far from the fresh figures. You do not have to do anything — the shorter you set the
 > cadence, the more often stable items are refreshed; the longer, the faster the run. This changes no order
 > quantity, only how quickly the plan is produced.
+
+> **You can retrain the models on a schedule so the nightly plan is fast.** The slow part of a plan is
+> training the forecast models. You can now ask your administrator to schedule a separate **batch retrain**
+> job that trains every item's model ahead of time and saves the fresh forecasts. When the overnight plan
+> then runs, it **reuses those freshly-trained forecasts** instead of retraining from scratch, so the plan
+> is produced much more quickly on a large catalogue. If a retrain is missing or too old, the plan simply
+> trains that part itself as before — so scheduling a retrain only ever speeds the plan up, it never changes
+> an order quantity. (How "recent" a retrain must be to be reused is an operational setting your
+> administrator controls.)
 
 ### To declare a reporting hierarchy (optional)
 
@@ -324,6 +333,7 @@ design; ask your administrator.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.11 | 2026-07-23 | Added §2 note "You can retrain the models on a schedule so the nightly plan is fast" — docs/59 Track D · D1: a schedulable **batch retrain** trains every item's forecast model ahead of time and saves the fresh forecasts, which the overnight plan then reuses instead of retraining from scratch, so a plan is produced faster on a large catalogue; a missing/too-old retrain simply falls back to training in the plan itself (freshness is an ops setting). Compute-only; changes no order quantity, no new control. |
 | 0.10 | 2026-07-23 | Added §1 note "Brand-new items are forecast by borrowing from similar items" — docs/56 Track A · A4: a newly added item with too little history of its own is forecast by borrowing the demand shape of established similar items at the **same branch** and scaling it to the expected size, marked **`analog`** so a reviewer sees it is a borrowed estimate; the system switches to forecasting the item directly once it has built its own history. Forecast-quality only; no new control. (docs/59 Track D · D3 — a shared engine result cache across replicas — is infrastructure with no user-facing change and needs no manual update.) |
 | 0.9 | 2026-07-23 | Added §2 note "The planner now runs faster on stable catalogs" + a **Refit cadence** settings row — docs/59 Track D · D2: the planner caches each item's fitted forecast model and reuses it when demand history is unchanged, refitting automatically when the history changes or after the refit cadence (default 14 days). Compute-only; changes no order quantity, no new control. |
 | 0.8 | 2026-07-23 | Added §2 "To run and approve a multi-echelon network plan" — docs/57 Track B · B2: run a two-echelon plan (`POST /api/scm-network/plans/run`) that pools safety stock at the DC, then submit → approve (a different `scm_approve` holder; self-approval → `SOD_SELF_APPROVAL`) → convert to a purchase requisition (idempotent). New control **SCM-05**; falls back to per-branch (no pooling) when the engine is off; raises no accounting entries. |

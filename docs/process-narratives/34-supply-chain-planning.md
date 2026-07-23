@@ -416,6 +416,45 @@ single-node and PGlite runs need no Redis. This is **infrastructure only** — i
 no wire contract, no plan lifecycle and adds **no control**, no migration and no GL. It is an operational
 scale-out lever recorded here for completeness (ops/deployment notes carry the replica wiring).
 
+### 7.19 Scheduled batch retrain + forecast-source seam (docs/59 Track D · D1)
+
+The expensive step of a planning run is the forecast itself — a Prophet/cmdstan refit per (branch, item)
+series plus the reconciliation over the sample paths. D2 (§7.16) skips that refit for stable series; D1
+goes further and moves the whole forecast **off the interactive nightly path** onto a **schedulable batch
+job**, so a nightly *plan* run reads freshly-trained forecasts rather than recomputing them. Like the rest
+of Track D this is a **compute/scheduling optimization only** — it changes no forecast number, no order
+quantity and no plan lifecycle, and introduces **no new control**.
+
+**The producer — a scheduled batch retrain.** A new job type **`scm_batch_retrain`**
+(`SCM_BATCH_RETRAIN_JOB`) is registered in `ScmPlanJobsService` with a `runRetrain` handler and exposed as a
+**BI action-report** in `ScmBiReports` (a `report-registry` catalog entry `scm_batch_retrain`), so a tenant
+schedules it at a cadence through the **existing BI report scheduler** — exactly the `scm_nightly_plan`
+precedent, no new scheduling machinery. The job forecasts **every planning-enabled series** via
+`executePlanRun(scope='retrain')` and **persists the reconciled sample paths** it produces.
+
+**The consumer — a forecast-source seam.** `ScmRunService.runWithEngine` now, on a **nightly** plan run,
+**prefers a recent batch-retrain's persisted forecasts** instead of re-forecasting. The reuse is
+conservative and **all-or-nothing per branch**: it reuses the persisted paths only when a fresh retrain
+covered the **whole** branch. Because the persisted sample paths are already reconciled, this avoids any
+partial engine/cache mix and any re-reconciliation; a miss simply falls through to a **full fresh forecast**
+(the unchanged pre-D1 behaviour). The reuse reads only `scope='retrain'` **Completed** forecasts newer than
+**`SCM_FORECAST_STALENESS_HOURS`** (default 24, a new env var), via `loadFreshMenuPaths` in the small
+`scm-forecast-source.ts` helper. **Retrain, manual and replan runs always forecast fresh** — they are the
+producers, never consumers of a stale cache.
+
+**Idempotency — per (tenant, run_date).** A duplicate scheduler tick for the same tenant and run date is a
+**no-op**: a partial unique index **`uq_scm_retrain_run`** on `scm_plan_runs` (migration **0477**) plus the
+generalized `executePlanRun` run guard short-circuit the second run, mirroring the nightly guard of §7.7.
+
+**Migration 0477** is additive on **existing** tables — no RLS loop and no new grant. It adds a
+`scm_demand_forecasts.sample_paths` **jsonb** column (persisting the reconciled K×H paths, which
+`saveForecast` now writes — quantiles alone are not additive and the BoM explosion of §7.3 needs the paths)
+and the retrain partial-unique index. The engine **contract is unchanged** (`SCM_ENGINE_CONTRACT_VERSION`
+stays `'2'`); D1 is scheduling + persistence on the API side, with no wire change. D1 posts **no journal
+entries** and touches no golden-master money path. Harness `cutover/scm.ts` +3 D1 checks (60/60,
+`scm-mfg` shard): a batch retrain persists `sample_paths`; a nightly run reuses them without re-calling the
+engine; a duplicate retrain the same day is a no-op.
+
 ## 8. Process flow
 
 ```mermaid
@@ -513,6 +552,7 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.11 | 2026-07-23 | Supply-chain / Planning | Added §7.19 — scheduled batch retrain + forecast-source seam (docs/59 Track D · D1): the expensive forecast moves off the interactive nightly path onto a schedulable **`scm_batch_retrain`** job (`SCM_BATCH_RETRAIN_JOB`, `runRetrain` handler in `ScmPlanJobsService`), exposed as a **BI action-report** in `ScmBiReports` (catalog entry `scm_batch_retrain`) so a tenant schedules it via the existing BI report scheduler (the `scm_nightly_plan` precedent); it forecasts every planning-enabled series via `executePlanRun(scope='retrain')` and **persists the reconciled sample paths**. A **nightly** plan run then **prefers a recent batch-retrain's persisted forecasts** — conservative **all-or-nothing per branch** (reuse only when a fresh retrain covered the whole branch; the paths are already reconciled, so no partial mix / no re-reconciliation), a miss falls through to a full fresh forecast (unchanged); retrain/manual/replan runs always forecast fresh. Reuse reads only `scope='retrain'` Completed forecasts newer than **`SCM_FORECAST_STALENESS_HOURS`** (default 24, new env) via `loadFreshMenuPaths` (`scm-forecast-source.ts`). **Idempotency** per (tenant, run_date): partial unique index **`uq_scm_retrain_run`** on `scm_plan_runs` (migration **0477**) + the generalized `executePlanRun` guard make a duplicate scheduler tick a no-op. **Migration 0477** — additive `scm_demand_forecasts.sample_paths` jsonb (reconciled K×H paths; `saveForecast` persists them) + the retrain index, both on existing tables (no RLS loop, no new grant). Contract **unchanged** (`SCM_ENGINE_CONTRACT_VERSION` stays `'2'`); **no new control**, no GL, no golden-master path. Harness `cutover/scm.ts` +3 D1 checks (60/60, `scm-mfg` shard). |
 | 0.10 | 2026-07-23 | Supply-chain / Planning | Added §7.17 — cold-start / analog forecasting for new items (docs/56 Track A · A4): a too-new series (dense history < the 56-day Prophet floor) borrows the pooled, normalized demand shape of **established same-branch siblings** (≥ 90 days, capped at 5 donors — `scm-analog.ts analogDonors`, wired into `ScmRunService.runWithEngine`) via the already-reserved `analog_of` per-series input, and the engine (`forecasting.py _analog_paths`) rescales the pooled shape to the new item's own baseline seed (else the donors' mean level). The run is a two-phase fan-out (donors first, then analog series) so a request with no `analog_of` is byte-identical to before; the forecast is flagged **`analog`** in `attribution.regressors_used` and persists to `scm_demand_forecasts.regressorsUsed` so a reviewer sees it is borrowed, not observed. **Contract unchanged, no version bump** (stays `'2'`; `analog_of` and the `analog` flag were already reserved); category/attribute-nearest donor refinement is a future enhancement. Added §7.18 — shared engine result cache across replicas (docs/59 Track D · D3): the engine's in-process `ResultCache` becomes optionally Redis-shared via `SCM_ENGINE_REDIS_URL` (or `REALTIME_REDIS_URL`) + `SCM_ENGINE_CACHE_TTL_S` (default 900), reusing `rate-limit-store.ts`'s fail-open shape (unset or Redis down ⇒ per-process path). Both are forecast-quality / infrastructure paths — **no new control**, no migration, no GL, no golden-master path. A4: engine pytest (borrow+flag / no-donor fallback / ignored-when-history-sufficient / two-phase) + `scm` harness; D3: engine pytest (cross-replica share / fail-open without or with a Redis error). |
 | 0.9 | 2026-07-23 | Supply-chain / Planning | Added §7.16 — warm-start / model registry (docs/59 Track D · D2): a planning run ships each series' cached Prophet fit as an optional `warm_start:{params, fit_hash}` on `/v1/forecast`; the engine computes a `fit_hash` over the training window and, on a match, reuses the serialized fit (skipping BOTH the primary fit and the backtest refit) else refits, returning `fitted_state:{params, fit_hash, fit_wape}` the API upserts to `scm_model_cache` (migration `0475`, canonical 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique). Two fail-safe staleness guards — `fit_hash` mismatch (window changed) and `refit_cadence_days` age (default 14, additive `scm_settings` column) — force a refit; a warm hit carries the cached `fit_wape` forward. Determinism preserved (warm reuse ≡ cold fit byte-for-byte); a corrupt cache entry fails closed to a refit. Compute-only — **no new control** (SCM-07 is D4), no GL, no golden-master path. Harness `cutover/scm.ts` +4 D2 checks (57/57, `scm-mfg` shard); engine pytest warm-start reproducibility / refit-on-window-change / corrupt-cache fallback. |
 | 0.8 | 2026-07-23 | Supply-chain / Planning | Added §7.15 — two-echelon network replenishment plans (docs/57 Track B · B2): `POST /api/scm-network/plans/run {item_code}` builds a Draft plan pooling the safety buffer at the DC — via scm-planning's public `demandPathsFor` seam and the B2a `/v1/optimize-network` route (GSM base-stock + risk pooling), or an in-process fallback (`B=μ·(L+R)+z·σ·√(L+R)`, DC = Σ, no pooling); every engine quantity zod-validated + clamped; persisted to `scm_network_plans`/`scm_network_plan_lines` (migration 0474, canonical RLS + tenant-leading index) as Draft. New control **SCM-05** (network-plan maker-checker): submit → approve by a DIFFERENT `scm_approve` holder (self-approval `SOD_SELF_APPROVAL`, maker bound to submitter; SoD **R24** reused, no new rule) → convert rolls the DC order up to a PR via the existing `ProcurementService.createPr` seam (reason `SCM-NET`, idempotent by `pr_no`). No GL, no golden-master money path. Harness `cutover/scm.ts` +8 B2 checks (`scm-mfg` shard). |

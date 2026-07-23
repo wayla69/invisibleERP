@@ -126,6 +126,15 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
     en: 'Activation needs a different person than the requester and only creates a consent-gated draft — the control arm is never contacted, so impact stays measurable',
   },
 
+  // ── Realized measurement (MKT-19 discipline on ② journeys + ④ save runs) ──
+  'ma.measure': { th: 'วัดผล', en: 'Measure' },
+  'ma.measured_done': { th: 'วัดผลจริงเรียบร้อย — เทียบกลุ่มทดลองกับกลุ่มควบคุมจากยอดขายจริง', en: 'Measured — treatment vs control on real revenue' },
+  'ma.measure_window': { th: 'ยังไม่ครบช่วงวัดผล — รอให้ครบกำหนดก่อนวัด', en: 'The measurement window has not elapsed yet' },
+  'ma.measure_no_control': { th: 'ไม่มีกลุ่มควบคุมให้เทียบ — รอบนี้วัดผลไม่ได้', en: 'No control arm to compare against — this one cannot be measured' },
+  'ma.measured_lift': { th: 'lift จริง', en: 'realized lift' },
+  'ma.measured_no_baseline': { th: 'วัดแล้ว (กลุ่มควบคุมไม่มียอด)', en: 'measured (control earned nothing)' },
+  'ma.measured_proven': { th: 'พิสูจน์แล้ว', en: 'proven' },
+
   // ── ① AI Campaign Studio ──
   'ma.studio_heading': { th: 'ร่างแคมเปญจากข้อเท็จจริงของกลุ่ม', en: 'Draft a campaign from the segment’s facts' },
   'ma.studio_stage': { th: 'สร้างดราฟต์แคมเปญ', en: 'Create campaign draft' },
