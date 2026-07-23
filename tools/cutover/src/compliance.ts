@@ -649,10 +649,19 @@ async function main() {
   const cashierLogin = await inj('POST', '/api/login', undefined, { username: 'cashier1', password: 'pw123456' });
   ok('ITGC-AC-06: non-privileged role not flagged for MFA', cashierLogin.json.must_setup_mfa !== true, JSON.stringify({ setup: cashierLogin.json.must_setup_mfa }));
 
+  // Mint a TOTP with enough of the 30s step remaining that the (in-process) server verify lands in the
+  // SAME step. otplib's default verify window is 0 — a code minted at a step boundary would 401 as
+  // MFA_INVALID, a time-of-day flake that bit CI on the 00:0x-second runs. Harness-only; no product change.
+  const freshTotp = async (s: string): Promise<string> => {
+    const rem = authenticator.timeRemaining();
+    if (rem < 3) await new Promise((r) => setTimeout(r, (rem + 1) * 1000));
+    return authenticator.generate(s);
+  };
+
   // 3. Enrol TOTP for fincon: setup → secret; enable with a valid code activates the factor.
   const setup = await inj('POST', '/api/auth/mfa/setup', fincon);
   const secret = setup.json.secret as string;
-  const enable = await inj('POST', '/api/auth/mfa/enable', fincon, { code: authenticator.generate(secret) });
+  const enable = await inj('POST', '/api/auth/mfa/enable', fincon, { code: await freshTotp(secret) });
   ok('ITGC-AC-06: TOTP enrolment (setup → enable) activates the second factor', !!secret && enable.status === 200 && enable.json.enabled === true, `${enable.status} ${enable.json.enabled}`);
 
   // 4. With MFA enabled, password alone is rejected → 401 MFA_REQUIRED.
@@ -664,7 +673,7 @@ async function main() {
   ok('ITGC-AC-06: MFA-enabled login with a wrong code → 401 MFA_INVALID', badCode.status === 401 && badCode.json.error?.code === 'MFA_INVALID', `${badCode.status} ${badCode.json.error?.code}`);
 
   // 6. Password + a valid TOTP code authenticates (and the enrolled user is no longer flagged for setup).
-  const goodCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw', totp: authenticator.generate(secret) });
+  const goodCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw', totp: await freshTotp(secret) });
   ok('ITGC-AC-06: password + valid TOTP authenticates; setup flag cleared', goodCode.status === 200 && !!goodCode.json.token && goodCode.json.must_setup_mfa !== true, `${goodCode.status} setup=${goodCode.json.must_setup_mfa}`);
 
   // ════════════════════ ITGC-AC-10 — audit trail is tamper-evident (append-only) ════════════════════
