@@ -1003,6 +1003,41 @@ async function main() {
   ok('D1 duplicate retrain the same day is a no-op (per-tenant run guard, migration 0477)',
     retrain2.status === 'Skipped', `status=${retrain2.status}`);
 
+  // ════════════════════════ docs/59 D4 — forecast-accuracy monitoring (SCM-07) ════════════════════════
+  const accSvc = app.get(require('../../../apps/api/dist/modules/scm-planning/scm-accuracy.service').ScmAccuracyService, { strict: false });
+  const liveSvc = app.get(require('../../../apps/api/dist/modules/scm-planning/scm-live.service').ScmLiveService, { strict: false });
+  // Seed a MENU forecast that badly OVER-forecasts (40/day) vs the ~10/day seeded actuals, over a past
+  // window that has fully elapsed. fit-baseline WAPE 0.05 → realized ≈ 3.0 ≫ 0.05×1.5, so it is over the
+  // threshold every as-of date — but only a SUSTAINED run (default 3 consecutive) must alert.
+  const [accRun] = await db.select({ id: s.scmPlanRuns.id }).from(s.scmPlanRuns).where(eq(s.scmPlanRuns.tenantId, hq)).limit(1);
+  await db.insert(s.scmDemandForecasts).values({
+    tenantId: hq, runId: Number(accRun.id), branchId, itemId: 'MENU-KP', level: 'menu', method: 'engine',
+    horizon: 7, startDate: dayStr(12), mean: [40, 40, 40, 40, 40, 40, 40], wape: '0.0500',
+  });
+  await accSvc.refreshAccuracy(hq, { asOf: dayStr(3) });
+  await accSvc.refreshAccuracy(hq, { asOf: dayStr(2) });
+  const eventsBefore = liveSvc.recent(hq).filter((e: any) => e.type === 'scm_accuracy_degraded').length;
+  const acc3 = await accSvc.refreshAccuracy(hq, { asOf: dayStr(1) });
+  const eventsAfter = liveSvc.recent(hq).filter((e: any) => e.type === 'scm_accuracy_degraded').length;
+  const accRows = await db.select().from(s.scmAccuracyHistory)
+    .where(and(eq(s.scmAccuracyHistory.tenantId, hq), eq(s.scmAccuracyHistory.itemId, 'MENU-KP')));
+  const rowBy = (d: string) => accRows.find((r: any) => String(r.asOfDate) === d);
+  const r1 = rowBy(dayStr(3)); const r3 = rowBy(dayStr(1));
+  ok('D4 accuracy refresh records realized WAPE vs the fit-time baseline in scm_accuracy_history',
+    accRows.length >= 3 && r1 != null && Number(r1.wape) > Number(r1.fitWape),
+    `rows=${accRows.length} realizedWape=${r1?.wape} fitWape=${r1?.fitWape}`);
+  ok('D4 a SINGLE bad as-of date does NOT flag degraded (sustained window not yet met) — negative control',
+    r1?.degraded === false, `r1.degraded=${r1?.degraded}`);
+  ok('D4 SUSTAINED degradation (3 consecutive as-of dates) flags degraded + fires the drift alert (ops + SSE)',
+    r3?.degraded === true && acc3.degraded >= 1 && eventsAfter > eventsBefore,
+    `r3.degraded=${r3?.degraded} degradedCount=${acc3.degraded} events ${eventsBefore}→${eventsAfter}`);
+  const degradedSet = await accSvc.degradedItems(hq, branchId, ['MENU-KP']);
+  ok('D4 a degraded series feeds the D2 force-refit trigger (degradedItems includes it)',
+    degradedSet.has('MENU-KP'), `degraded=${JSON.stringify([...degradedSet])}`);
+  const t2Digest = await accSvc.digest(t2);
+  ok('D4 cross-tenant: T2 sees 0 of HQ’s accuracy-history rows (tenant-scoped)',
+    (t2Digest.items?.length ?? 0) === 0, `t2items=${t2Digest.items?.length}`);
+
   await app.close();
   await engine.close();
 

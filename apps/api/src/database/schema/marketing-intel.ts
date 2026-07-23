@@ -84,7 +84,7 @@ export const miCampaignExperiments = pgTable('mi_campaign_experiments', {
   controlPerHead: numeric('control_per_head'),
   incrementalRevenue: numeric('incremental_revenue'),
   liftPct: numeric('lift_pct'),
-  // Statistical honesty (migration 0479, docs/62 Phase 3): the 95% CI on the lift% + the weak-evidence
+  // Statistical honesty (migration 0480, docs/62 Phase 3): the 95% CI on the lift% + the weak-evidence
   // flag (small arm / CI not computable / CI spans 0). Display/report only — never alters downstream math.
   liftCiLowPct: numeric('lift_ci_low_pct', { precision: 10, scale: 2 }),
   liftCiHighPct: numeric('lift_ci_high_pct', { precision: 10, scale: 2 }),
@@ -142,7 +142,7 @@ export const miJourneys = pgTable('mi_journeys', {
   treatmentPerHead: numeric('treatment_per_head', { precision: 16, scale: 2 }),
   controlPerHead: numeric('control_per_head', { precision: 16, scale: 2 }),
   realizedLiftPct: numeric('realized_lift_pct', { precision: 10, scale: 2 }), // null = control earned 0
-  // Statistical honesty (migration 0479, docs/62 Phase 3): the 95% CI on the lift% + the weak-evidence
+  // Statistical honesty (migration 0480, docs/62 Phase 3): the 95% CI on the lift% + the weak-evidence
   // flag (small arm / CI not computable / CI spans 0). Display/report only — never alters downstream math.
   liftCiLowPct: numeric('lift_ci_low_pct', { precision: 10, scale: 2 }),
   liftCiHighPct: numeric('lift_ci_high_pct', { precision: 10, scale: 2 }),
@@ -245,7 +245,7 @@ export const miSaveRuns = pgTable('mi_save_runs', {
   treatmentPerHead: numeric('treatment_per_head', { precision: 16, scale: 2 }),
   controlPerHead: numeric('control_per_head', { precision: 16, scale: 2 }),
   realizedLiftPct: numeric('realized_lift_pct', { precision: 10, scale: 2 }),
-  // Statistical honesty (migration 0479, docs/62 Phase 3): the 95% CI on the lift% + the weak-evidence
+  // Statistical honesty (migration 0480, docs/62 Phase 3): the 95% CI on the lift% + the weak-evidence
   // flag (small arm / CI not computable / CI spans 0). Display/report only — never alters downstream math.
   liftCiLowPct: numeric('lift_ci_low_pct', { precision: 10, scale: 2 }),
   liftCiHighPct: numeric('lift_ci_high_pct', { precision: 10, scale: 2 }),

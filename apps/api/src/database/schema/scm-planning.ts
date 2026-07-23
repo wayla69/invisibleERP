@@ -38,6 +38,12 @@ export const scmSettings = pgTable('scm_settings', {
   // its training window is unchanged (default 14 days). Additive column (migration 0475); default
   // preserves prior behaviour (a stable series warm-starts within the cadence, refits after it).
   refitCadenceDays: integer('refit_cadence_days').notNull().default(14),
+  // docs/59 D4 — forecast-accuracy monitoring (SCM-07): a series whose realized WAPE exceeds its
+  // fit-time baseline by `accuracyDegradationFactor` (default 1.5×) for `accuracySustainedPeriods`
+  // consecutive as-of dates (default 3, so one bad day is not an alert) is flagged degraded. Additive
+  // columns (migration 0479); defaults preserve prior behaviour (no monitoring configured ⇒ these apply).
+  accuracyDegradationFactor: numeric('accuracy_degradation_factor', { precision: 6, scale: 3 }).notNull().default('1.5'),
+  accuracySustainedPeriods: integer('accuracy_sustained_periods').notNull().default(3),
   updatedBy: text('updated_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_settings_tenant').on(t.tenantId) }));
@@ -277,7 +283,30 @@ export const scmModelCache = pgTable('scm_model_cache', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_scm_model_cache_tenant').on(t.tenantId, t.branchId, t.itemId) }));
 
+// docs/59 D4 — forecast-accuracy history (control SCM-07). One row per (tenant, branch, item, as_of_date):
+// the REALIZED WAPE/bias computed by comparing a prior forecast to the actuals that have since arrived,
+// against the series' fit-time baseline (`fitWape`). `degraded` is set when the realized WAPE exceeds the
+// baseline by the configured factor for the configured number of consecutive as-of dates — the SCM-07
+// detective teeth: a silently drifting model is flagged (ops alert + SSE) rather than accepted. Migration
+// 0479, canonical 0232-form RLS + leading (tenant_id, branch_id, item_id, as_of_date) index.
+export const scmAccuracyHistory = pgTable('scm_accuracy_history', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  branchId: bigint('branch_id', { mode: 'number' }),
+  itemId: text('item_id').notNull(),
+  asOfDate: date('as_of_date').notNull(),            // the business day the accuracy was reconciled
+  wape: numeric('wape', { precision: 10, scale: 4 }),      // realized WAPE over the elapsed horizon
+  bias: numeric('bias', { precision: 10, scale: 4 }),      // mean signed error / mean actual (over-forecast +)
+  fitWape: numeric('fit_wape', { precision: 10, scale: 4 }), // the fit-time baseline it is judged against
+  model: text('model'),                              // the forecasting model/method that produced it
+  sampleN: integer('sample_n'),                      // # of horizon days with an actual observation
+  degraded: boolean('degraded').notNull().default(false),  // sustained realized WAPE above the baseline
+  runId: bigint('run_id', { mode: 'number' }),       // the forecast run whose accuracy this reconciles
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({ byTenant: index('idx_scm_accuracy_history_tenant').on(t.tenantId, t.branchId, t.itemId, t.asOfDate) }));
+
 export type ScmSettingsRow = typeof scmSettings.$inferSelect;
+export type ScmAccuracyHistoryRow = typeof scmAccuracyHistory.$inferSelect;
 export type ScmModelCacheRow = typeof scmModelCache.$inferSelect;
 export type ScmPriceElasticityRow = typeof scmPriceElasticity.$inferSelect;
 export type ScmCrossElasticityRow = typeof scmCrossElasticity.$inferSelect;

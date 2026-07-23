@@ -45,6 +45,7 @@ auditConfig:
     - GHSA-fx2h-pf6j-xcff # vite — dev server (build/test only)
     - GHSA-5j98-mcp5-4vw2 # glob CLI command injection (via @nestjs/cli; build tool)
     - GHSA-c2c7-rcm5-vvqj # picomatch ReDoS (via @angular-devkit/@nestjs/cli; build tool)
+    - GHSA-6g55-p6wh-862q # postcss<=8.5.11 arbitrary file read via attacker-controlled sourceMappingURL in CSS comments — BUILD-TIME transitive of next (compiles OUR authored CSS at build; never processes attacker-controlled CSS at runtime), so not exploitable in prod. Track the Next bump that pulls postcss≥8.5.12.
     # --- runtime: REMEDIATED by Step 7 (fastify-5 / Nest-11 + fast-uri/middie overrides) — entries removed:
     #     middie (GHSA-72c6/cxrg/8p85/v9ww — no longer a dependency under platform-fastify 11),
     #     @nestjs/platform-fastify (GHSA-r4wm/wf42/6v32 — now 11.1.27),

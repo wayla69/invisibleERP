@@ -1,4 +1,4 @@
--- 0479 — Statistical honesty on measured lift (docs/62 Phase 3): the 95% CI bounds + the weak-evidence
+-- 0480 — Statistical honesty on measured lift (docs/62 Phase 3): the 95% CI bounds + the weak-evidence
 -- flag land next to every realized lift (MKT-19 experiments, MKT-22 journeys, MKT-24 save runs) so a
 -- +900% from n=2 is visibly weaker evidence than +12% from n=2,000. All three tables already carry
 -- tenant_id + the canonical org RLS policy + grants — adding nullable columns needs no RLS/GRANT change

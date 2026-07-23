@@ -10,7 +10,8 @@ export interface ScmLiveEvent extends BusEvent {
   type:
     | 'scm_run_completed' | 'scm_run_failed'
     | 'scm_plan_submitted' | 'scm_plan_approved' | 'scm_plan_converted'
-    | 'scm_spike';
+    | 'scm_spike'
+    | 'scm_accuracy_degraded'; // docs/59 D4 (SCM-07) — a series' realized WAPE sustained above its baseline
 }
 
 @Injectable()
