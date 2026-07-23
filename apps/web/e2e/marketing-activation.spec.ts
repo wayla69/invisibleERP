@@ -64,6 +64,11 @@ const RUNS = { runs: [
   { run_no: 'SAVE-0', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 90, control_count: 20, offer_cost: 40000, expected_saved_revenue: 180000, net_benefit: 140000, campaign_id: 5, created_at: '2026-07-01T00:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 42.5, realized_saved_revenue: 160000, realized_net_benefit: 120000 },
 ] };
 
+const CENTER = { items: [
+  { kind: 'journey_measure_due', severity: 'high', control: 'MKT-22', ref: 'NBA-9', title_th: 'ครบกำหนดวัดผลแผน NBA NBA-9', title_en: 'NBA journey NBA-9 is due for measurement' },
+  { kind: 'save_policy_pending', severity: 'medium', control: 'MKT-24', ref: 'SAVEPOL-9', title_th: 'นโยบายรักษาลูกค้า SAVEPOL-9 รออนุมัติ', title_en: 'Save-offer policy SAVEPOL-9 awaits approval' },
+], count: 2 };
+
 async function boot(page: Page) {
   await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
   let stagedRoiBody: any = null;
@@ -72,6 +77,7 @@ async function boot(page: Page) {
     const url = req.url();
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (url.includes('/api/auth/me')) return json(ME);
+    if (url.includes('/api/marketing-activation/action-center')) return json(CENTER);
     if (url.includes('/api/modules/effective')) return json({ modules: [], disabled: [] });
     if (url.includes('/api/user-prefs')) return json({ favourites: [], nav: {} });
     if (url.includes('/api/marketing-intel/summary')) return json(MI_SUMMARY);
@@ -109,6 +115,9 @@ test('marketing activation (desktop): the five tools render their facts, staging
   await expect(page.getByText('Journey ทั้งหมด')).toBeVisible();
   await expect(page.getByText('154K THB').first()).toBeVisible(); // compactThb(153600)
   await expect(page.getByText('ทำงานอย่างปลอดภัย')).toBeVisible();
+  // docs/62 action center: the "what needs me now" card lists severity-dotted items with their controls.
+  await expect(page.getByText('สิ่งที่รอคุณตอนนี้')).toBeVisible();
+  await expect(page.getByText('ครบกำหนดวัดผลแผน NBA NBA-9')).toBeVisible();
 
   // ③ Propensity: look a customer up → ranked offers with the driver/lift facts.
   await page.getByRole('tab', { name: 'สินค้าที่ควรเสนอ' }).click();

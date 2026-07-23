@@ -5,6 +5,9 @@ import { SegmentChannelRoiService } from './segment-channel-roi.service';
 import { NbaOrchestratorService } from './nba-orchestrator.service';
 import { CampaignStudioService } from './campaign-studio.service';
 import { SaveAutopilotService } from './save-autopilot.service';
+import { MarketingActivationBiReports } from './marketing-activation-bi-reports';
+import { MarketingActivationApprovalQueues } from './marketing-activation-approval-queues';
+import { MarketingActivationActionCenterService } from './marketing-activation-action-center.service';
 import { MarketingActivationController } from './marketing-activation.controller';
 import { MarketingIntelModule } from '../marketing-intel/marketing-intel.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
@@ -30,7 +33,7 @@ import { CrmModule } from '../crm/crm.module';
 @Module({
   imports: [MarketingIntelModule, AnalyticsModule, MenuModule, CampaignsModule, CrmModule],
   controllers: [MarketingActivationController],
-  providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService],
-  exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService],
+  providers: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService, MarketingActivationBiReports, MarketingActivationApprovalQueues, MarketingActivationActionCenterService],
+  exports: [FactLayerService, PropensityService, SegmentChannelRoiService, NbaOrchestratorService, CampaignStudioService, SaveAutopilotService, MarketingActivationActionCenterService],
 })
 export class MarketingActivationModule {}

@@ -126,6 +126,14 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
     en: 'Activation needs a different person than the requester and only creates a consent-gated draft — the control arm is never contacted, so impact stays measurable',
   },
 
+  // ── Action center (docs/62 — what needs me now) ──
+  'ma.center_title': { th: 'สิ่งที่รอคุณตอนนี้', en: 'What needs you now' },
+  'ma.center_clear': { th: 'ไม่มีอะไรค้าง — ทุกอย่างเดินตามรอบของมันเอง', en: 'Nothing waiting — everything is running on its own cadence' },
+  'ma.center_note': {
+    th: 'รายการนี้อ่านอย่างเดียว — การเปิดใช้งาน อนุมัติ และวัดผลยังทำที่หน้าที่ของมัน (แบ่งแยกหน้าที่เสมอ)',
+    en: 'Read-only list — activating, approving and measuring stay on their own screens (maker-checker always)',
+  },
+
   // ── Realized measurement (MKT-19 discipline on ② journeys + ④ save runs) ──
   'ma.measure': { th: 'วัดผล', en: 'Measure' },
   'ma.measured_done': { th: 'วัดผลจริงเรียบร้อย — เทียบกลุ่มทดลองกับกลุ่มควบคุมจากยอดขายจริง', en: 'Measured — treatment vs control on real revenue' },
