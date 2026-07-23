@@ -16,6 +16,7 @@ import { ScmElasticityService } from './scm-elasticity.service';
 import { ScmCrossElasticityService } from './scm-cross-elasticity.service';
 import { ScmModelCacheService } from './scm-model-cache.service';
 import { explodePaths, planHelpers, ScmFallbackPlanner } from './scm-planner';
+import { analogDonors } from './scm-analog';
 import {
   PLAN_STATUS, SYSTEM_ACTOR, type BranchPlanDraft, type ExtractedTenantData, type PlanRunResult,
   type SuggestedLine,
@@ -232,6 +233,8 @@ export class ScmRunService {
         tenantId, branchId, branchSeries.map((s) => s.itemId), data.settings.refit_cadence_days,
       );
       const windowByItem = new Map(branchSeries.map((s) => [s.itemId, s]));
+      // docs/56 A4 — a too-new series borrows the pooled shape of established same-branch siblings.
+      const donorsByItem = analogDonors(branchSeries);
       for (const chunk of this.engine.chunk(branchSeries)) {
         const req: ScmForecastRequest = {
           contract_version: this.engine.contractVersion(),
@@ -268,6 +271,8 @@ export class ScmRunService {
               ...(data.regressors.get(s.itemId)?.length ? { regressors: data.regressors.get(s.itemId) } : {}),
               // D2: ship the cached fit; the engine ignores it on a hash mismatch or a non-Prophet route.
               ...(warm ? { warm_start: { params: warm.params, fit_hash: warm.fit_hash } } : {}),
+              // A4: a too-new series declares donor siblings; the engine borrows their pooled shape.
+              ...(donorsByItem.get(s.itemId)?.length ? { analog_of: donorsByItem.get(s.itemId) } : {}),
             };
           }),
         };

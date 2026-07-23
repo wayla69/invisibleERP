@@ -138,7 +138,7 @@ def run_forecast(req: ForecastRequest) -> ForecastResponse:
     closures = set(req.closures)
     results, errors = [], []
 
-    def one(s):
+    def one(s, donors=None):
         return forecast_series(
             series=s,
             holidays=req.holidays,
@@ -150,15 +150,31 @@ def run_forecast(req: ForecastRequest) -> ForecastResponse:
             promo_regressor=req.promo_regressor,
             price_regressor=req.price_regressor,
             rng=seeded_rng(req.request_id, s.series_id),
+            donors=donors,
         )
 
-    with ThreadPoolExecutor(max_workers=_workers()) as pool:
-        for s, fut in [(s, pool.submit(one, s)) for s in req.series]:
-            try:
-                results.append(fut.result())
-            except Exception as exc:  # noqa: BLE001 — one bad series never fails the batch
-                code = getattr(exc, "code", "MODEL_ERROR")
-                errors.append(EngineItemError(ref=s.series_id, code=code, message=str(exc) or code))
+    # docs/56 A4 — two-phase fan-out so an analog (zero-history) series can borrow its donors' shape:
+    # forecast the NON-analog series first (they are the donor pool), then the analog series with a
+    # {series_id: result} map. Pure pre-pass — base-series results and the per-series seed are unchanged,
+    # so a request with no `analog_of` behaves byte-identically to before.
+    base_series = [s for s in req.series if not s.analog_of]
+    analog_series = [s for s in req.series if s.analog_of]
+    donors: dict = {}
+
+    def _run(batch, donors_map):
+        with ThreadPoolExecutor(max_workers=_workers()) as pool:
+            for s, fut in [(s, pool.submit(one, s, donors_map)) for s in batch]:
+                try:
+                    r = fut.result()
+                    results.append(r)
+                    donors[r.series_id] = r
+                except Exception as exc:  # noqa: BLE001 — one bad series never fails the batch
+                    code = getattr(exc, "code", "MODEL_ERROR")
+                    errors.append(EngineItemError(ref=s.series_id, code=code, message=str(exc) or code))
+
+    _run(base_series, None)
+    if analog_series:
+        _run(analog_series, donors)
     order = {s.series_id: i for i, s in enumerate(req.series)}
     results.sort(key=lambda r: order.get(r.series_id, 0))
 
