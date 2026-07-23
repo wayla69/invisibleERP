@@ -5,6 +5,10 @@ import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { LaneBody, NodeBody, ScmNetworkService, type LaneDto, type NodeDto } from './scm-network.service';
 import { ScmNetworkRunService } from './scm-network-run.service';
 import { ScmNetworkPlanService, ApproveBody, RejectBody } from './scm-network-plan.service';
+import {
+  ScmAllocationService, PolicyBody, OverrideBody,
+  ApproveBody as AllocApproveBody, RejectBody as AllocRejectBody,
+} from './scm-allocation.service';
 
 const RunBody = z.object({ item_code: z.string().min(1).max(64) });
 
@@ -21,6 +25,7 @@ export class ScmNetworkController {
     private readonly svc: ScmNetworkService,
     private readonly runner: ScmNetworkRunService,
     private readonly plans: ScmNetworkPlanService,
+    private readonly alloc: ScmAllocationService,
   ) {}
 
   // ── nodes ──
@@ -90,5 +95,44 @@ export class ScmNetworkController {
   @Post('plans/:id/convert')
   convertPlan(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: JwtUser) {
     return this.plans.convertPlan(id, u);
+  }
+
+  // ── DC-shortage allocation governance (B3, control SCM-06 / SoD R25) ──
+  // Setting/overriding the policy is the `scm_allocate` maker duty; approving it is `scm_approve`.
+  @Get('allocation/policies')
+  listAllocPolicies(@Query('dc_node_code') dc: string | undefined, @Query('status') status: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.alloc.listPolicies(u, { dc_node_code: dc, status });
+  }
+
+  @Post('allocation/policies') @Permissions('scm_allocate', 'exec')
+  setAllocPolicy(@Body(new ZodValidationPipe(PolicyBody)) b: z.infer<typeof PolicyBody>, @CurrentUser() u: JwtUser) {
+    return this.alloc.setPolicy(u, b);
+  }
+
+  @Post('allocation/policies/:id/approve') @Permissions('scm_approve', 'exec')
+  approveAllocPolicy(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AllocApproveBody)) b: z.infer<typeof AllocApproveBody>, @CurrentUser() u: JwtUser) {
+    return this.alloc.approvePolicy(id, b, u);
+  }
+
+  @Post('allocation/policies/:id/reject') @Permissions('scm_approve', 'exec')
+  rejectAllocPolicy(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AllocRejectBody)) b: z.infer<typeof AllocRejectBody>, @CurrentUser() u: JwtUser) {
+    return this.alloc.rejectPolicy(id, b, u);
+  }
+
+  // A per-plan override — the maker proposes; an UNLOGGED one is rejected, a logged one staged for a
+  // SECOND approver (never auto-applied).
+  @Post('plans/:id/allocation-override') @Permissions('scm_allocate', 'exec')
+  stageAllocOverride(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(OverrideBody)) b: z.infer<typeof OverrideBody>, @CurrentUser() u: JwtUser) {
+    return this.alloc.stageOverride(id, b, u);
+  }
+
+  @Get('allocation/overrides')
+  listAllocOverrides(@Query('plan_id') planId: string | undefined, @Query('status') status: string | undefined, @CurrentUser() u: JwtUser) {
+    return this.alloc.listOverrides(u, { plan_id: planId ? Number(planId) : undefined, status });
+  }
+
+  @Post('allocation/overrides/:id/approve') @Permissions('scm_approve', 'exec')
+  approveAllocOverride(@Param('id', ParseIntPipe) id: number, @Body(new ZodValidationPipe(AllocApproveBody)) b: z.infer<typeof AllocApproveBody>, @CurrentUser() u: JwtUser) {
+    return this.alloc.approveOverride(id, b, u);
   }
 }
