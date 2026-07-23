@@ -51,7 +51,7 @@ export const supplyLanes = pgTable('supply_lanes', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({ byTenant: index('idx_supply_lanes_tenant').on(t.tenantId, t.fromNodeId, t.toNodeId) }));
 
-// docs/57 Track B (B2b) — a two-echelon network REPLENISHMENT PLAN for one item (migration 0471).
+// docs/57 Track B (B2b) — a two-echelon network REPLENISHMENT PLAN for one item (migration 0474).
 //
 // Draft → PendingApproval → Approved → Converted (+ Rejected). Same maker-checker lifecycle as
 // scm_order_plans: approvedBy MUST differ from the maker (the SUBMITTER, not created_by) — enforced in
