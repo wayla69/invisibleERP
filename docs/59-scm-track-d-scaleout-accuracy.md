@@ -1,6 +1,6 @@
 # 59 · SCM Track D — Scale-out retraining & accuracy operations
 
-**Status: DRAFT v0.1 · 2026-07-21** · Owner: Supply-chain / Planning · Depends on **docs/54**
+**Status: DRAFT v0.2 · 2026-07-23** · Owner: Supply-chain / Planning · Depends on **docs/54**
 (delivered — `services/forecast-engine` + `modules/scm-planning`) · Implements **docs/55 §6** (Track D,
 phases D1–D4) and its cross-cutting rules (§2) · Related: docs/46 (module/report-registry boundaries),
 `common/rate-limit-store.ts` (L-8/L-12 shared-backend pattern)
@@ -71,33 +71,41 @@ in `bi-generate.service.ts`).
   (`main.py` `_handle`), and a retrain job that re-runs for the same `(tenant, run_date)` short-circuits on
   the run guard.
 
-### D2 — Warm-start / model registry (Size M, planned)
+### D2 — Warm-start / model registry (Size M, **DELIVERED** 2026-07-23)
 
-*Cache fitted Prophet params so stable series skip refit.*
+*Cache fitted Prophet params so stable series skip refit.* **Shipped** — the tenant-table option (a) below;
+migration **0475**; contract change is **additive, no version bump** (see §3).
 
-- **Where fitted state lives.** Two options, decided in D2's PR:
-  - **(a) A tenant table `scm_model_cache`** (preferred for auditability + RLS uniformity) storing the
-    serialized Prophet fit (`stan_init` params + changepoints + fit metadata) per `(tenant, branch, item)`,
-    a `fit_hash` over the training window, `fitted_at`, `fit_wape`, and `model` name. Canonical **0232-form
-    RLS loop**, a leading `(tenant_id, branch_id, item_id)` index, and a journaled migration — **next free
-    `0460`** (idx 434, when `2023820000399`; re-derive from the journal tail after any main merge — mantra
-    #10). The API extracts the cached fit under RLS and **ships it in the forecast payload** so the engine
-    stays stateless and DB-free (docs/54 §2.1 is non-negotiable).
-  - **(b) Object-storage keying** (`isSafeObjectKey`-validated, per L-9) under `scm-model-cache/<tenant>/…`
-    for the bulky serialized state, with only the pointer + metadata in a small table. Chosen only if the
-    serialized fit is too large to carry in the payload comfortably.
-- **Contract delta (planned, bumps `SCM_ENGINE_CONTRACT_VERSION`).** `/v1/forecast` per-series input gains
-  an optional `warm_start:{params, fit_hash}`; the engine reuses it when the training window's hash
-  matches, else refits and returns the new fitted state in the response for the API to persist. The zod
-  and pydantic sides move together; the shared fixtures fail one side's CI on drift (docs/55 §2 rule 2).
+- **Where fitted state lives (shipped: option a).** A tenant table **`scm_model_cache`** stores the
+  serialized Prophet fit (`fit_params` jsonb: `stan_init` params + changepoints + fit metadata) per
+  `(tenant, branch, item)`, a `fit_hash` over the training window, `fitted_at`, `fit_wape`, `model` name,
+  and the `training_from`/`training_to` window. Canonical **0232-form RLS loop** (excluding
+  `audit_expectations`), a leading `(tenant_id, branch_id, item_id)` index, a `coalesce(branch_id, 0)`
+  unique index, and a journaled migration — **`0475`**. `ScmModelCacheService` extracts the cached fit under
+  RLS and **ships it in the forecast payload** so the engine stays stateless and DB-free (docs/54 §2.1).
+  - *(Option b — object-storage keying for bulky serialized state — was not needed: the serialized fit
+    carries in the payload comfortably.)*
+- **Contract delta (shipped — additive, NO version bump).** `/v1/forecast` per-series input gains an
+  **optional** `warm_start:{params, fit_hash}` and each result gains an **optional**
+  `fitted_state:{params, fit_hash, fit_wape}`; the engine reuses the fit when the training window's hash
+  matches, else cold-fits and returns fresh `fitted_state` for the API to persist. Because both fields are
+  optional and an engine that ignores `warm_start` simply cold-fits, this is **additive with no
+  `SCM_ENGINE_CONTRACT_VERSION` bump** (stays `'2'`) — mirroring B2a's additive network-route delta. A
+  version bump was avoided deliberately: a strict version check would otherwise hard-break a rolling deploy
+  (old API ↔ new engine, or vice versa) for a field that is optional on both sides, which contradicts the
+  "no hard break" clause below. The zod and pydantic sides move together; the shared fixtures fail one
+  side's CI on drift (docs/55 §2 rule 2).
 - **Refit triggers (fail-safe toward refitting).** A series refits when **any** holds: (i) no cached fit;
-  (ii) cadence elapsed (`scm_settings.refit_cadence_days`, default 14); (iii) the training window changed
-  materially (`fit_hash` mismatch beyond a tolerance — new history length / closures / promo calendar);
-  (iv) **WAPE-degradation trigger** from D4 (`recent_wape > fit_wape × degradation_factor`). A stable
-  series with a valid warm-start skips the cmdstan fit entirely and only samples — the compute win.
-- **Determinism preserved.** Warm-start must be a *pure function of inputs*: the same
-  `(history, warm_start, request_id)` replays byte-identically (docs/54's `seeded_rng` invariant), so the
-  API retry stays safe and pytest can assert warm-start ≡ cold-fit-then-reuse. This is a hard test gate.
+  (ii) cadence elapsed (`scm_settings.refit_cadence_days`, default 14, range 1–90); (iii) the training
+  window changed materially (`fit_hash` mismatch — new history length / closures / promo calendar). *(The
+  D4 WAPE-degradation force-refit is a fourth trigger that lands with D4's accuracy monitoring, not D2.)* A
+  stable series with a valid warm-start skips the cmdstan fit **and the backtest refit** entirely and only
+  samples — the compute win; on a warm hit the API carries the cached `fit_wape` forward so the persisted
+  forecast WAPE stays meaningful.
+- **Determinism preserved.** Warm-start is a *pure function of inputs*: the same `(history, warm_start,
+  request_id)` replays byte-identically (docs/54's `seeded_rng` invariant), so an API retry stays safe and
+  pytest asserts warm-start ≡ cold-fit-then-reuse. A **corrupt cache entry fails closed to a refit**. This
+  is a hard test gate.
 
 ### D3 — Horizontal scale (Size L, planned)
 
@@ -131,8 +139,8 @@ in `bi-generate.service.ts`).
   WAPE** (`saveForecast`); D4 additionally computes **realized accuracy** by comparing a prior forecast to
   the actuals that have since arrived (a backtest→realized reconciliation over the elapsed horizon).
   Canonical **0232-form RLS loop**, leading `(tenant_id, branch_id, item_id, as_of_date)` index, journaled
-  in the **same 0460 migration** as the model cache (one migration, two tables — both new, both fully
-  tenant-scoped).
+  in **its own migration at D4 delivery** (re-derive the next-free number then — the model cache already
+  shipped standalone in 0475 with D2, so this table lands separately, both new and fully tenant-scoped).
 - **Drift alert (the SCM-07 teeth).** After each accuracy refresh, a series whose realized WAPE exceeds its
   fit-time baseline by `degradation_factor` (default 1.5×) **for `sustained_periods` consecutive as-of
   dates** (default 3, so one bad day is not an alert) is flagged `degraded`, raises a **`captureOpsAlert`
@@ -160,11 +168,14 @@ in `bi-generate.service.ts`).
 - **Wire contract: mostly none.** D1 and D3 change **nothing** on the zod↔pydantic wire — D1 is scheduling
   + persistence on the API side, D3 is infrastructure behind the same HTTP surface. The response envelope,
   header names, and error shapes are untouched.
-- **The one wire change is D2's warm-start:** an optional per-series `warm_start` input and a fitted-state
-  field in the forecast response. This **bumps `SCM_ENGINE_CONTRACT_VERSION`**, moves the zod and pydantic
-  sides together, and extends the shared fixtures (a warm-start request/response pair) so drift fails one
-  side's CI. Because the field is optional, an old API against a new engine (or vice versa) degrades to
-  cold-fit — no hard break.
+- **The one wire change is D2's warm-start (shipped — additive, NO version bump):** an optional per-series
+  `warm_start` input and an optional `fitted_state` field in the forecast response. Both fields are
+  optional and an engine that ignores `warm_start` cold-fits, so this is **additive and does NOT bump
+  `SCM_ENGINE_CONTRACT_VERSION`** (stays `'2'`) — mirroring B2a's additive network route. This is the safer
+  choice for a rolling deploy: a strict version check would hard-break old-API↔new-engine (or vice versa)
+  for a field that is optional on both sides, contradicting the no-hard-break intent; instead each side
+  degrades to cold-fit. The zod and pydantic sides move together, and the shared fixtures (a warm-start
+  request/response pair) fail one side's CI on drift.
 - **New internal (non-wire) interfaces:**
   - Job type `scm_batch_retrain` (JobWorkerService registration) + its action-report entry.
   - BI report type `scm_forecast_accuracy` (a `REPORT_TYPES` catalog entry + a generator in `ScmBiReports`).
@@ -179,10 +190,12 @@ in `bi-generate.service.ts`).
 
 ## 4. Data model / migrations
 
-One journaled migration, **next free `0460_scm_model_cache_accuracy`** (idx 434, when
-`2023820000399` — **re-derive from the journal tail after any main merge**; concurrent PRs steal numbers,
-mantra #10). Two new **fully tenant-scoped** tables, both with the canonical **0232-form org RLS loop** and
-a leading `(tenant_id, …)` index (the `tenant-idx` gate + RLS loop are mandatory — docs/55 §2 rule 3):
+The two tables were originally planned as one migration; **they shipped separately.** `scm_model_cache`
+delivered with **D2** in **migration `0475`** (plus the additive `scm_settings.refit_cadence_days` column);
+`scm_accuracy_history` remains **planned with D4** (its own migration, re-derived from the journal tail then
+— concurrent PRs steal numbers, mantra #10). Both are **fully tenant-scoped** with the canonical **0232-form
+org RLS loop** and a leading `(tenant_id, …)` index (the `tenant-idx` gate + RLS loop are mandatory —
+docs/55 §2 rule 3):
 
 | Table | Grain | Key columns | Index (leading tenant) |
 |---|---|---|---|
@@ -239,12 +252,13 @@ already exists (0459).
 | Phase | Scope & key deliverables | New control | Size |
 |---|---|---|---|
 | **D1** | **Scheduled batch retrain.** `scm_batch_retrain` job + action report on the BI scheduler; persist forecasts; nightly *plan* reads fresh persisted forecasts (engine only on miss); per-tenant fairness (queue) + backpressure (run guard). No wire change. | — | M |
-| **D2** | **Warm-start / model registry.** `scm_model_cache` table (0460, 0232-form RLS + leading index); optional `warm_start` on `/v1/forecast` (bumps `SCM_ENGINE_CONTRACT_VERSION`); refit only on cadence / hash-change / WAPE degradation; determinism preserved. | — | M |
+| **D2** ✅ | **Warm-start / model registry — DELIVERED (2026-07-23).** `scm_model_cache` table (**migration 0475**, 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique) + additive `scm_settings.refit_cadence_days`; **optional** `warm_start` input + `fitted_state` output on `/v1/forecast` — **additive, NO version bump** (stays `'2'`); refit only on cadence (default 14) / `fit_hash`-change; determinism preserved, corrupt cache fails closed to refit. `scm` harness 57/57 (+4 D2). | — | M |
 | **D3** | **Horizontal scale.** Shared `ResultCache` via `SCM_ENGINE_REDIS_URL` reusing `rate-limit-store.ts`'s fail-open shape; idempotency now cross-replica; N stateless replicas; README/.env env docs. No app behavior change. | — | L |
-| **D4** | **Accuracy monitoring.** `scm_accuracy_history` table (0460); WAPE/bias trend + drift alert (ops alert + SSE) + force-refit feedback into D2; champion/challenger advisory; `scm_forecast_accuracy` BI report type. | **SCM-07** (detective) | M |
+| **D4** | **Accuracy monitoring.** `scm_accuracy_history` table (a future migration at D4); WAPE/bias trend + drift alert (ops alert + SSE) + force-refit feedback into D2; champion/challenger advisory; `scm_forecast_accuracy` BI report type. | **SCM-07** (detective) | M |
 
-Sequencing (docs/55 §7, wave 5): **D1 → D2** ship together with the 0460 migration and the contract bump;
-**D3** is independent infra; **D4** lands the control and the report type. Each phase is ~1–3 doc-synced PRs.
+Sequencing (docs/55 §7, wave 5): **D2 shipped standalone** (migration 0475, additive contract — no bump);
+**D1** (batch retrain) remains planned; **D3** is independent infra; **D4** lands `scm_accuracy_history`, the
+control (SCM-07) and the report type. Each phase is ~1–3 doc-synced PRs.
 
 ---
 
@@ -282,7 +296,7 @@ mirroring exact expected results/error codes:
   change).
 - **Gates:** shared build → `pnpm -r typecheck` → `pnpm -r build` → api coverage → the CI ratchets
   (service-size: land accuracy logic as its own `scm-accuracy.service.ts`, never on a facade;
-  `migrations-journaled` for 0460; `check-rcm-census` for the 302→303 bump; `tenant-idx` for both new
+  `migrations-journaled` for D4's migration; `check-rcm-census` for the 302→303 bump; `tenant-idx` for both new
   tables' leading index).
 - **Load / scale testing (note, not a CI gate):** D3's horizontal-scale claim is validated **outside** the
   functional suite — a load run against N replicas with `SCM_ENGINE_REDIS_URL` set, asserting cross-replica
@@ -317,4 +331,5 @@ mirroring exact expected results/error codes:
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| 0.2 | 2026-07-23 | Supply-chain / Planning | **D2 delivered — warm-start / model registry.** `scm_model_cache` tenant table (**migration 0475**, canonical 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique) caches each series' serialized Prophet fit; `ScmModelCacheService` loads a fit within the refit cadence and ships it as an **optional** `warm_start:{params, fit_hash}` on `/v1/forecast`, and persists the returned optional `fitted_state`. The engine's `fit_hash` over the training window governs reuse — a match reuses the serialized fit (skipping BOTH the primary fit and the backtest refit), else it cold-fits. **Contract is additive with NO version bump** (`SCM_ENGINE_CONTRACT_VERSION` stays `'2'`; both fields optional so a rolling deploy never hard-breaks — corrects the §3 planning note that said it would bump). Two fail-safe staleness guards: `fit_hash` mismatch and `refit_cadence_days` (new additive `scm_settings` column, default 14, range 1–90, validated in `ScmExtractService.upsertSettings`); a warm hit carries `fit_wape` forward. Determinism preserved (warm reuse ≡ cold fit byte-for-byte); corrupt cache fails closed to a refit. **No new control** (SCM-07 belongs to D4). `scm` harness 57/57 (+4 D2) + engine pytest (reproducibility / refit-on-window-change / corrupt-cache fallback). PN-34 §7.16, manual ch.21, UAT §15 (UAT-SCM-061..063). D1/D3/D4 remain planned. |
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial plan for **Track D — Scale-out retraining & accuracy operations** (docs/55 §6, phases D1–D4): batch retrain off the request path on the BI scheduler; warm-start / model registry (`scm_model_cache`, optional `warm_start` contract field bumping `SCM_ENGINE_CONTRACT_VERSION`); horizontal scale via a shared fail-open Redis result cache reusing `rate-limit-store.ts`; accuracy monitoring (`scm_accuracy_history`, WAPE/bias drift alerts on the SSE bus + a `scm_forecast_accuracy` BI report type) with new detective control **SCM-07** (RCM 302→303). Migration **0460** (two 0232-form RLS tenant tables + leading indexes). **Planning only** — no code, contract, schema, or control change yet. |

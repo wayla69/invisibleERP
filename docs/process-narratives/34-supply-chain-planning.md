@@ -327,6 +327,51 @@ at a maker-checker'd requisition, from which the normal procure-to-pay controls 
 Allocation-policy governance on DC shortage (SCM-06) and the full DRP branch→DC→supplier roll-up build on
 this spine in B3/B4.
 
+### 7.16 Warm-start / model registry (docs/59 Track D · D2)
+
+Fitting a Prophet model is the expensive step of a planning run — a cmdstan child process per (branch,
+item) series. For a settled series whose demand history has not changed since it was last fitted, that refit
+buys nothing: the same window produces the same model. D2 caches each series' fitted model so a run whose
+**training window is unchanged reuses the cached fit and only samples** from it, skipping both the primary
+fit and the backtest refit. This is a **compute optimization only** — it changes no forecast number, no
+order quantity and no plan lifecycle, and introduces **no new control** (the forecast-accuracy detective
+control SCM-07 belongs to D4, not D2).
+
+The flow rides the existing engine boundary. On each run the API loads any cached fit for the series
+(`ScmModelCacheService`, under RLS) and **ships it in the `/v1/forecast` payload** as an optional
+`warm_start:{params, fit_hash}` — the engine stays stateless and DB-free (docs/54 §2.1). The engine computes
+a `fit_hash` fingerprint over the training window (the fitted dates, the demand values and the regressor
+columns); when the supplied hash **matches**, it deserializes the cached fit (`prophet.serialize.
+model_from_json`) and reuses it, else it refits from scratch. Either way it returns the model's state as an
+optional `fitted_state:{params, fit_hash, fit_wape}` in the response, which the API **upserts** back into
+the cache. On a warm hit the engine skips the backtest, so the API **carries the cached `fit_wape` forward**
+onto the persisted forecast — the accuracy figure stays meaningful across reuse runs rather than going
+blank.
+
+Reuse is bounded by **two independent staleness guards, both fail-safe toward refitting** — a stale model is
+never silently trusted:
+
+1. **`fit_hash` mismatch** — the training window changed materially (a new business day, an amended promo
+   calendar, a day reclassified as a stockout), so the fingerprint no longer matches and the series is
+   refit.
+2. **Refit cadence** — a cached fit older than `scm_settings.refit_cadence_days` (default 14, range 1–90) is
+   force-refit even when the window is unchanged, so a model can never drift arbitrarily far from a fresh
+   fit. The cadence is a new additive setting on the scm-planning settings surface (`GET`/`PUT
+   /api/scm-planning/settings`), validated in `ScmExtractService.upsertSettings`.
+
+**Determinism is preserved.** Prophet's MAP fit plus the reseeded sampling mean a warm reuse reproduces the
+cold fit **byte-for-byte** for the same inputs, so an API retry stays safe (docs/54's `seeded_rng`
+invariant). A **corrupt cache entry fails closed to a refit** rather than an error — an unreadable serialized
+fit is treated as a cache miss.
+
+The cached fits persist in a new tenant table **`scm_model_cache`** (migration `0475`) — one row per
+(tenant, branch, item) carrying the serialized `model`, `fit_params` (jsonb), the `fit_hash`, the `fit_wape`,
+the `training_from`/`training_to` window and `fitted_at`. It follows the `scm_settings` shape: the canonical
+0232-form RLS loop (excluding `audit_expectations`), a leading `(tenant_id, branch_id, item_id)` index and a
+`coalesce(branch_id, 0)` unique index (NULL-branch = tenant default). The same migration adds the additive
+`scm_settings.refit_cadence_days` column. Like the rest of Track D, D2 posts **no journal entries** and
+touches no golden-master money path.
+
 ## 8. Process flow
 
 ```mermaid
@@ -424,6 +469,7 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.9 | 2026-07-23 | Supply-chain / Planning | Added §7.16 — warm-start / model registry (docs/59 Track D · D2): a planning run ships each series' cached Prophet fit as an optional `warm_start:{params, fit_hash}` on `/v1/forecast`; the engine computes a `fit_hash` over the training window and, on a match, reuses the serialized fit (skipping BOTH the primary fit and the backtest refit) else refits, returning `fitted_state:{params, fit_hash, fit_wape}` the API upserts to `scm_model_cache` (migration `0475`, canonical 0232-form RLS + leading `(tenant_id, branch_id, item_id)` index + `coalesce(branch_id,0)` unique). Two fail-safe staleness guards — `fit_hash` mismatch (window changed) and `refit_cadence_days` age (default 14, additive `scm_settings` column) — force a refit; a warm hit carries the cached `fit_wape` forward. Determinism preserved (warm reuse ≡ cold fit byte-for-byte); a corrupt cache entry fails closed to a refit. Compute-only — **no new control** (SCM-07 is D4), no GL, no golden-master path. Harness `cutover/scm.ts` +4 D2 checks (57/57, `scm-mfg` shard); engine pytest warm-start reproducibility / refit-on-window-change / corrupt-cache fallback. |
 | 0.8 | 2026-07-23 | Supply-chain / Planning | Added §7.15 — two-echelon network replenishment plans (docs/57 Track B · B2): `POST /api/scm-network/plans/run {item_code}` builds a Draft plan pooling the safety buffer at the DC — via scm-planning's public `demandPathsFor` seam and the B2a `/v1/optimize-network` route (GSM base-stock + risk pooling), or an in-process fallback (`B=μ·(L+R)+z·σ·√(L+R)`, DC = Σ, no pooling); every engine quantity zod-validated + clamped; persisted to `scm_network_plans`/`scm_network_plan_lines` (migration 0474, canonical RLS + tenant-leading index) as Draft. New control **SCM-05** (network-plan maker-checker): submit → approve by a DIFFERENT `scm_approve` holder (self-approval `SOD_SELF_APPROVAL`, maker bound to submitter; SoD **R24** reused, no new rule) → convert rolls the DC order up to a PR via the existing `ProcurementService.createPr` seam (reason `SCM-NET`, idempotent by `pr_no`). No GL, no golden-master money path. Harness `cutover/scm.ts` +8 B2 checks (`scm-mfg` shard). |
 | 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |
 | 0.7 | 2026-07-22 | Supply-chain / Planning | Added §7.14 — cannibalization & halo cross-price elasticity (docs/56 Track A · A3): `ScmCrossElasticityService` estimates γ_{a,b}=∂log(demand_a)/∂log(price_b) API-side by log-log OLS with the A2 identifiability floor, CATEGORY-SCOPED to `item_categories` siblings only (never the full cross-product); a run persists credible pairs to `scm_cross_elasticity` (migration 0470); `GET /api/scm-planning/cross-elasticity`. The scenario what-if composes own ε + Σ sibling γ (`demand × price^(ε+Σγ)`). Advisory only, no new control. apps/api vitest +7 (estimator) & `cutover/scm.ts` +3 A3 checks. |
