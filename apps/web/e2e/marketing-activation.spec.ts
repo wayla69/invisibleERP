@@ -52,9 +52,17 @@ const SAVE_PREVIEW = {
   ],
   note: 'Advisory retention P&L (MKT-24).',
 };
-const JOURNEYS = { journeys: [{ journey_no: 'NBA-1', status: 'Pending', segment: 'At Risk VIPs', channel: 'sms', target_count: 2, control_count: 1, suppressed_count: 1, requested_by: 'napa', approved_by: null, campaign_id: null, created_at: '2026-07-23T00:00:00Z', activated_at: null }] };
+const JOURNEYS = { journeys: [
+  { journey_no: 'NBA-1', status: 'Pending', segment: 'At Risk VIPs', channel: 'sms', target_count: 2, control_count: 1, suppressed_count: 1, requested_by: 'napa', approved_by: null, campaign_id: null, created_at: '2026-07-23T00:00:00Z', activated_at: null },
+  // A measured journey — the realized-lift chip (MKT-19 discipline extended to ② journeys).
+  { journey_no: 'NBA-0', status: 'Active', segment: 'At Risk VIPs', channel: 'sms', target_count: 1, control_count: 1, suppressed_count: 0, requested_by: 'napa', approved_by: 'somchai', campaign_id: 7, created_at: '2026-07-01T00:00:00Z', activated_at: '2026-07-01T01:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 900, incremental_revenue: 900, treatment_per_head: 1000, control_per_head: 100 },
+] };
 const POLICIES = { policies: [{ policy_no: 'SAVEPOL-1', status: 'Active', churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 500, requested_by: 'napa', approved_by: 'somchai', created_at: '2026-07-23T00:00:00Z' }] };
-const RUNS = { runs: [{ run_no: 'SAVE-1', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 96, control_count: 24, offer_cost: 48000, expected_saved_revenue: 201600, net_benefit: 153600, campaign_id: 9, created_at: '2026-07-23T00:00:00Z' }] };
+const RUNS = { runs: [
+  { run_no: 'SAVE-1', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 96, control_count: 24, offer_cost: 48000, expected_saved_revenue: 201600, net_benefit: 153600, campaign_id: 9, created_at: '2026-07-23T00:00:00Z' },
+  // A measured run — expected becomes PROVEN (realized retention P&L).
+  { run_no: 'SAVE-0', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 90, control_count: 20, offer_cost: 40000, expected_saved_revenue: 180000, net_benefit: 140000, campaign_id: 5, created_at: '2026-07-01T00:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 42.5, realized_saved_revenue: 160000, realized_net_benefit: 120000 },
+] };
 
 async function boot(page: Page) {
   await page.addInitScript(() => { document.cookie = 'ierp_csrf=e2e; path=/'; });
@@ -125,12 +133,18 @@ test('marketing activation (desktop): the five tools render their facts, staging
   await page.getByRole('option', { name: 'At Risk VIPs' }).click();
   await expect(page.getByText('WINBACK').first()).toBeVisible();
   await expect(page.getByText('RECENT_PURCHASE')).toBeVisible();
+  // The measured journey shows its realized-lift chip (MKT-19 discipline); the unmeasured Active one would
+  // show วัดผล — here NBA-0 is measured, so the proven lift renders instead of a button.
+  await expect(page.getByText(/lift จริง \+900/)).toBeVisible();
 
   // ④ Churn-save: the retention P&L + a capped offer chip (the MKT-24 control made visible).
   await page.getByRole('tab', { name: 'รักษาลูกค้า' }).click();
   await expect(page.getByText('เข้าเกณฑ์ + ยินยอม')).toBeVisible();
   await expect(page.getByText('202K THB').first()).toBeVisible(); // compactThb(201600) expected saved
   await expect(page.getByText('ชนเพดาน').first()).toBeVisible();
+  // Run history: the unmeasured run offers วัดผล; the measured run shows the PROVEN realized net benefit.
+  await expect(page.getByRole('button', { name: 'วัดผล' })).toBeVisible();
+  await expect(page.getByText(/พิสูจน์แล้ว 120K THB/)).toBeVisible(); // compactThb(120000) realized net
 
   // The marketing-family style rule: no ฿ sign anywhere on the workspace.
   await expect(page.getByText('฿')).toHaveCount(0);

@@ -115,8 +115,15 @@ export class MarketingActivationController {
   // ② NBA Orchestrator — ACTIVATE a staged journey (maker-checker; creates a consent-gated draft, no send).
   @Post('nba/activate')
   @Permissions('marketing', 'exec', 'crm_campaign')
-  nbaActivate(@Body() body: { journey_no: string; self_approval_reason?: string }, @CurrentUser() u: JwtUser) {
+  nbaActivate(@Body() body: { journey_no: string; self_approval_reason?: string; window_days?: number }, @CurrentUser() u: JwtUser) {
     return this.nba.activateJourney(u, body ?? { journey_no: '' });
+  }
+
+  // ② NBA Orchestrator — MEASURE realized lift (treatment vs control, real POS revenue) after the window.
+  @Post('nba/measure')
+  @Permissions('marketing', 'exec')
+  nbaMeasure(@Body() body: { journey_no: string }, @CurrentUser() u: JwtUser) {
+    return this.nba.measureJourney(u, body ?? { journey_no: '' });
   }
 
   // ① AI Campaign Studio — generate a fact-grounded campaign draft for a segment (advisory, not sent).
@@ -168,8 +175,15 @@ export class MarketingActivationController {
   // ④ Churn-Save Autopilot — STAGE a save run (consent-gated draft for the treatment arm + a recorded P&L).
   @Post('save/run')
   @Permissions('marketing', 'exec', 'crm_campaign')
-  saveStageRun(@Body() body: { segment?: string; control_pct?: number }, @CurrentUser() u: JwtUser) {
+  saveStageRun(@Body() body: { segment?: string; control_pct?: number; window_days?: number }, @CurrentUser() u: JwtUser) {
     return this.save.stageRun(u, body ?? {});
+  }
+
+  // ④ Churn-Save Autopilot — MEASURE the realized retention P&L (treatment vs control) after the window.
+  @Post('save/measure')
+  @Permissions('marketing', 'exec')
+  saveMeasure(@Body() body: { run_no: string }, @CurrentUser() u: JwtUser) {
+    return this.save.measureRun(u, body ?? { run_no: '' });
   }
 
   @Get('save/runs')

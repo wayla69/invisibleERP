@@ -1262,6 +1262,67 @@ async function main() {
   const saveRunRows = await db.select().from(s.miSaveRuns);
   ok('SaveAutopilot ④: policies + runs are tenant-scoped (cf2 only)', savePolRows.length >= 2 && saveRunRows.length >= 1 && savePolRows.every((r: any) => Number(r.tenantId) === cf2.id) && saveRunRows.every((r: any) => Number(r.tenantId) === cf2.id), `pol=${savePolRows.length} run=${saveRunRows.length}`);
 
+  // ── Marketing Activation — REALIZED-OUTCOME MEASUREMENT (migration 0476; MKT-19 discipline extended to
+  //    MKT-22 journeys + MKT-24 save runs). The measurement math is under test — the harness pins the arm
+  //    assignment deterministically (a fixture convenience; the product's hash split stays untouched), seeds
+  //    per-arm dineInOrders revenue AFTER the anchor, backdates only the measure_after threshold, and checks
+  //    that the measured lift feeds ⑤'s ranking. ──
+  // stageRun now persists BOTH arms: the earlier control_pct-0 run has treatment-only targets on record.
+  const firstRunRow = (await db.select().from(s.miSaveRuns)).find((r: any) => r.runNo === saveRun.json.run_no);
+  const firstRunTargets = (await db.select().from(s.miSaveTargets)).filter((t: any) => Number(t.runId) === Number(firstRunRow?.id));
+  ok('Measure: staging a save run PERSISTS its per-member holdout arms (mi_save_targets, tenant-scoped)', firstRunTargets.length >= 1 && firstRunTargets.every((t: any) => Number(t.tenantId) === cf2.id && t.arm === 'treatment' && Number(t.offer) <= 500), `n=${firstRunTargets.length}`);
+  const firstRunNoCtrl = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: saveRun.json.run_no });
+  // (window still open on the control-less run — prove WINDOW_NOT_ELAPSED first, then NO_CONTROL after backdating)
+  ok('Measure: a save run cannot be measured before its window elapses (WINDOW_NOT_ELAPSED)', firstRunNoCtrl.status === 400 && firstRunNoCtrl.json.error?.code === 'WINDOW_NOT_ELAPSED', `${firstRunNoCtrl.status} ${firstRunNoCtrl.json.error?.code}`);
+  await db.update(s.miSaveRuns).set({ measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miSaveRuns.id, Number(firstRunRow!.id)));
+  const firstRunNoCtrl2 = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: saveRun.json.run_no });
+  ok('Measure: a run with no control arm cannot claim a measured save (NO_CONTROL — holdout integrity)', firstRunNoCtrl2.status === 400 && firstRunNoCtrl2.json.error?.code === 'NO_CONTROL', `${firstRunNoCtrl2.status} ${firstRunNoCtrl2.json.error?.code}`);
+
+  // ② Journey realized lift: stage on NbaSeg, PIN one treatment + one control, maker-checker activate,
+  // seed ฿1000/head vs ฿100/head AFTER activation, then measure → ~900% realized lift.
+  const mJourney = await inj('POST', '/api/marketing-activation/nba/stage', cf2admin, { segment: 'NbaSeg', control_pct: 0.5 });
+  const mJourneyRow = (await db.select().from(s.miJourneys)).find((r: any) => r.journeyNo === mJourney.json.journey_no);
+  const mjTargets = (await db.select().from(s.miJourneyTargets)).filter((t: any) => Number(t.journeyId) === Number(mJourneyRow?.id) && !t.suppressed).sort((a: any, b: any) => Number(a.memberId) - Number(b.memberId));
+  ok('Measure ②: the staged journey has recoverable non-suppressed arms (mi_journey_targets)', mjTargets.length === 2, `n=${mjTargets.length}`);
+  await db.update(s.miJourneyTargets).set({ arm: 'treatment' }).where(eq(s.miJourneyTargets.id, Number(mjTargets[0]!.id)));
+  await db.update(s.miJourneyTargets).set({ arm: 'control' }).where(eq(s.miJourneyTargets.id, Number(mjTargets[1]!.id)));
+  await db.update(s.miJourneys).set({ targetCount: 1, controlCount: 1 }).where(eq(s.miJourneys.id, Number(mJourneyRow!.id)));
+  const mjActivate = await inj('POST', '/api/marketing-activation/nba/activate', cf2ex, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: activation stamps the measurement window (measure_after)', (mjActivate.status === 200 || mjActivate.status === 201) && mjActivate.json.status === 'Active' && mjActivate.json.measure_after != null, `${mjActivate.status} after=${mjActivate.json.measure_after}`);
+  const mjEarly = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: a journey cannot be measured before its window elapses (WINDOW_NOT_ELAPSED)', mjEarly.status === 400 && mjEarly.json.error?.code === 'WINDOW_NOT_ELAPSED', `${mjEarly.status} ${mjEarly.json.error?.code}`);
+  await db.update(s.miJourneys).set({ measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miJourneys.id, Number(mJourneyRow!.id)));
+  let mOrd = 0;
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mjTargets[0]!.memberId), total: '1000', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mjTargets[1]!.memberId), total: '100', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  const mjMeasure = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: realized journey lift on REAL POS revenue (฿1000/head vs ฿100/head → 900%)', (mjMeasure.status === 200 || mjMeasure.status === 201) && Number(mjMeasure.json.realized_lift_pct) === 900 && Number(mjMeasure.json.incremental_revenue) === 900, `${mjMeasure.status} lift=${mjMeasure.json.realized_lift_pct}% inc=${mjMeasure.json.incremental_revenue}`);
+  const mjAgain = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: a measured journey is not re-measured (ALREADY_MEASURED)', mjAgain.status === 400 && mjAgain.json.error?.code === 'ALREADY_MEASURED', `${mjAgain.status} ${mjAgain.json.error?.code}`);
+  const mjPending = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: nbaStage2.json.journey_no });
+  ok('Measure ②: a Pending (never-activated) journey cannot be measured (JOURNEY_NOT_ACTIVE)', mjPending.status === 400 && mjPending.json.error?.code === 'JOURNEY_NOT_ACTIVE', `${mjPending.status} ${mjPending.json.error?.code}`);
+
+  // ④ Save-run realized retention P&L: a second run WITH a control arm (pinned), measured the same way.
+  const mRun = await inj('POST', '/api/marketing-activation/save/run', cf2admin, { control_pct: 0.5 });
+  const mRunRow = (await db.select().from(s.miSaveRuns)).find((r: any) => r.runNo === mRun.json.run_no);
+  const mRunTargets = (await db.select().from(s.miSaveTargets)).filter((t: any) => Number(t.runId) === Number(mRunRow?.id)).sort((a: any, b: any) => Number(a.memberId) - Number(b.memberId));
+  ok('Measure ④: the staged run persisted BOTH holdout arms for later measurement', mRunTargets.length === 2, `n=${mRunTargets.length}`);
+  await db.update(s.miSaveTargets).set({ arm: 'treatment' }).where(eq(s.miSaveTargets.id, Number(mRunTargets[0]!.id)));
+  await db.update(s.miSaveTargets).set({ arm: 'control' }).where(eq(s.miSaveTargets.id, Number(mRunTargets[1]!.id)));
+  await db.update(s.miSaveRuns).set({ treatmentCount: 1, controlCount: 1, measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miSaveRuns.id, Number(mRunRow!.id)));
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mRunTargets[0]!.memberId), total: '1000', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mRunTargets[1]!.memberId), total: '100', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  const mRunMeasure = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: mRun.json.run_no });
+  const mNetConsistent = Math.abs(Number(mRunMeasure.json.realized_net_benefit) - (Number(mRunMeasure.json.realized_saved_revenue) - Number(mRunMeasure.json.offer_cost ?? 0))) < 0.01;
+  ok('Measure ④: realized retention P&L — saved revenue is treatment-vs-control incremental, net = saved − offer cost', (mRunMeasure.status === 200 || mRunMeasure.status === 201) && Number(mRunMeasure.json.realized_saved_revenue) === 900 && Number(mRunMeasure.json.realized_lift_pct) === 900 && mNetConsistent, `${mRunMeasure.status} saved=${mRunMeasure.json.realized_saved_revenue} net=${mRunMeasure.json.realized_net_benefit} cost=${mRunMeasure.json.offer_cost}`);
+  const mRunAgain = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: mRun.json.run_no });
+  ok('Measure ④: a measured run is not re-measured (ALREADY_MEASURED)', mRunAgain.status === 400 && mRunAgain.json.error?.code === 'ALREADY_MEASURED', `${mRunAgain.status} ${mRunAgain.json.error?.code}`);
+
+  // ⑤ closes the loop: the journey's measured NbaSeg lift now feeds the segment×channel ranking.
+  const mRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
+  const mNbaCell = (mRoi.json.cells ?? []).find((c: any) => c.segment === 'NbaSeg');
+  ok('Measure ⑤: the realized journey lift feeds back into the Segment×Channel ROI ranking (measured+mmm)', mRoi.status === 200 && mRoi.json.recommendation_basis === 'measured+mmm' && mNbaCell != null && Number(mNbaCell.lift_pct) === 900 && Number(mNbaCell.lift_multiplier) === 10, `basis=${mRoi.json.recommendation_basis} cell=${JSON.stringify({ lift: mNbaCell?.lift_pct, mult: mNbaCell?.lift_multiplier })}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });

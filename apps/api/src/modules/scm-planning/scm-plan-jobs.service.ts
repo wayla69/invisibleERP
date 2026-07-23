@@ -32,7 +32,7 @@ export class ScmPlanJobsService implements OnModuleInit {
    * docs/59 D1 — scheduled batch retrain. Moves the expensive forecast (cmdstan refit) OFF the request
    * path onto a cadence: it forecasts every planning-enabled series and PERSISTS the reconciled sample
    * paths (scm_demand_forecasts.sample_paths), which a later nightly plan then consumes without
-   * re-forecasting. Same idempotency as nightly — a per-(tenant, run_date) partial unique index (0476)
+   * re-forecasting. Same idempotency as nightly — a per-(tenant, run_date) partial unique index (0477)
    * + the executePlanRun guard make a duplicate scheduler tick a no-op.
    */
   private async runRetrain(payload: { run_date?: string }, ctx: JobContext) {

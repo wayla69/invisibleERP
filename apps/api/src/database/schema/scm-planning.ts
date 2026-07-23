@@ -107,7 +107,7 @@ export const scmDemandForecasts = pgTable('scm_demand_forecasts', {
   promoUpliftPct: numeric('promo_uplift_pct', { precision: 10, scale: 4 }),
   priceElasticity: numeric('price_elasticity', { precision: 10, scale: 4 }),
   regressorsUsed: jsonb('regressors_used').default([]), // string[] subset of promo|price|payday|analog|cross
-  // docs/59 D1 — the K×H reconciled sample paths (migration 0476). Persisted so a batch-retrain's
+  // docs/59 D1 — the K×H reconciled sample paths (migration 0477). Persisted so a batch-retrain's
   // forecast can feed a later nightly plan's BoM explosion without re-forecasting (the quantiles alone
   // are not additive). NULL on pre-D1 rows and on fallback point-forecasts.
   samplePaths: jsonb('sample_paths'),

@@ -109,7 +109,7 @@ export class ScmRunService {
     const runDate = ymd();
 
     // docs/59 D1 — both scheduled scopes are per-(tenant, run_date) idempotent (partial unique indexes,
-    // 0459 for nightly + 0476 for retrain), so a duplicate scheduler tick is a no-op.
+    // 0459 for nightly + 0477 for retrain), so a duplicate scheduler tick is a no-op.
     if (scope === 'nightly' || scope === 'retrain') {
       const [existing] = await this.db.select({ id: scmPlanRuns.id, runNo: scmPlanRuns.runNo })
         .from(scmPlanRuns).where(and(

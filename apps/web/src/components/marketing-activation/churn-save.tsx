@@ -5,7 +5,7 @@
 // NO 'use client' (inherits the /marketing-activation page boundary — see viz.tsx).
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { HeartHandshake, SlidersHorizontal, Sparkles, Play, Lock, CheckCheck } from 'lucide-react';
+import { HeartHandshake, SlidersHorizontal, Sparkles, Play, Lock, CheckCheck, Ruler, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { num, thb, compactThb } from '@/lib/format';
 import { useLang } from '@/lib/i18n';
@@ -49,6 +49,14 @@ export function ChurnSave() {
     mutationFn: () => api('/api/marketing-activation/save/run', { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: (r: any) => { notifySuccess(t('ma.save_run_done', { r: String(r?.run_no ?? '') })); qc.invalidateQueries({ queryKey: ['ma', 'save-runs'] }); },
     onError: (e: any) => notifyError(e?.body?.error?.code === 'NO_ACTIVE_POLICY' ? t('ma.save_no_policy') : (e?.message ?? 'error')),
+  });
+  const measure = useMutation({
+    mutationFn: (runNo: string) => api('/api/marketing-activation/save/measure', { method: 'POST', body: JSON.stringify({ run_no: runNo }) }),
+    onSuccess: () => { notifySuccess(t('ma.measured_done')); qc.invalidateQueries({ queryKey: ['ma', 'save-runs'] }); },
+    onError: (e: any) => {
+      const code = e?.body?.error?.code;
+      notifyError(code === 'WINDOW_NOT_ELAPSED' ? t('ma.measure_window') : code === 'NO_CONTROL' ? t('ma.measure_no_control') : (e?.message ?? 'error'));
+    },
   });
 
   const policies: any[] = Array.isArray(policiesQ.data?.policies) ? policiesQ.data.policies : [];
@@ -190,6 +198,17 @@ export function ChurnSave() {
                     <span className="text-muted-foreground">{t('ma.save_cost')} {compactThb(r.offer_cost)}</span>
                     <span className="font-semibold" style={softText('var(--chart-3)')}>{t('ma.save_net')} {compactThb(r.net_benefit)}</span>
                   </span>
+                  {/* Realized measurement (MKT-19 discipline): expected becomes PROVEN once measured. */}
+                  {r.measured_at == null ? (
+                    <Button size="sm" variant="outline" className="bg-background/60" disabled={measure.isPending} onClick={() => measure.mutate(String(r.run_no))}>
+                      <Ruler className="mr-1 size-3.5" /> {t('ma.measure')}
+                    </Button>
+                  ) : (
+                    <span className={`inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-semibold shadow-sm ${Number(r.realized_net_benefit ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                      <TrendingUp className="size-3.5" /> {t('ma.measured_proven')} {compactThb(r.realized_net_benefit)}
+                      {r.realized_lift_pct != null && <span className="text-muted-foreground">· lift {Number(r.realized_lift_pct) >= 0 ? '+' : ''}{num(r.realized_lift_pct, 1)}%</span>}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

@@ -896,7 +896,7 @@ async function main() {
     `nightly=${nightlyRun.status} forecasts ${fcBefore}→${engine.state.forecasts}`);
 
   const retrain2 = await planningSvc.executePlanRun(hq, 'retrain', { actor: 'system:test' });
-  ok('D1 duplicate retrain the same day is a no-op (per-tenant run guard, migration 0476)',
+  ok('D1 duplicate retrain the same day is a no-op (per-tenant run guard, migration 0477)',
     retrain2.status === 'Skipped', `status=${retrain2.status}`);
 
   await app.close();

@@ -1,7 +1,7 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { customerProfiles, miCampaignExperiments } from '../../database/schema';
+import { customerProfiles, miCampaignExperiments, miJourneys, miSaveRuns } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { MarketingIntelService } from '../marketing-intel/marketing-intel.service';
 import { rankSegmentChannel, type SegmentValue, type ChannelRoi } from './segment-channel-scoring';
@@ -43,18 +43,28 @@ export class SegmentChannelRoiService {
     const channels: ChannelRoi[] = chRaw.map((c) => ({ channel: String(c.channel), roi: c.roi == null ? null : Number(c.roi) }));
     const basis = summary?.mmm?.model_run_ref ?? null;
 
-    // Latest MEASURED lift per segment (MKT-19) — the real counterfactual where an experiment exists.
-    const expRows = await this.db.select({ segment: miCampaignExperiments.segment, liftPct: miCampaignExperiments.liftPct, measuredAt: miCampaignExperiments.measuredAt })
-      .from(miCampaignExperiments)
-      .where(and(eq(miCampaignExperiments.tenantId, tenantId), eq(miCampaignExperiments.status, 'Measured')));
+    // Latest MEASURED lift per segment — the real counterfactual wherever ANY holdout was measured:
+    // MKT-19 experiments, ② NBA journeys and ④ save runs (migration 0476) all feed the same map; the most
+    // recently measured lift per segment wins. This is the "realised lift feeds back into ⑤" loop closer.
     const liftBySegment = new Map<string, number | null>();
     const seenAt = new Map<string, number>();
-    for (const r of expRows) {
-      if (r.segment == null || r.liftPct == null) continue;
-      const seg = String(r.segment);
-      const at = r.measuredAt ? new Date(r.measuredAt).getTime() : 0;
-      if (!seenAt.has(seg) || at >= (seenAt.get(seg) ?? 0)) { seenAt.set(seg, at); liftBySegment.set(seg, Number(r.liftPct)); }
-    }
+    const fold = (rows: Array<{ segment: unknown; liftPct: unknown; measuredAt: unknown }>): void => {
+      for (const r of rows) {
+        if (r.segment == null || r.liftPct == null) continue;
+        const seg = String(r.segment);
+        const at = r.measuredAt ? new Date(r.measuredAt as string | Date).getTime() : 0;
+        if (!seenAt.has(seg) || at >= (seenAt.get(seg) ?? 0)) { seenAt.set(seg, at); liftBySegment.set(seg, Number(r.liftPct)); }
+      }
+    };
+    fold(await this.db.select({ segment: miCampaignExperiments.segment, liftPct: miCampaignExperiments.liftPct, measuredAt: miCampaignExperiments.measuredAt })
+      .from(miCampaignExperiments)
+      .where(and(eq(miCampaignExperiments.tenantId, tenantId), eq(miCampaignExperiments.status, 'Measured'))));
+    fold(await this.db.select({ segment: miJourneys.segment, liftPct: miJourneys.realizedLiftPct, measuredAt: miJourneys.measuredAt })
+      .from(miJourneys)
+      .where(and(eq(miJourneys.tenantId, tenantId), sql`${miJourneys.measuredAt} is not null`)));
+    fold(await this.db.select({ segment: miSaveRuns.segment, liftPct: miSaveRuns.realizedLiftPct, measuredAt: miSaveRuns.measuredAt })
+      .from(miSaveRuns)
+      .where(and(eq(miSaveRuns.tenantId, tenantId), sql`${miSaveRuns.measuredAt} is not null`)));
     return { segments, channels, liftBySegment, basis };
   }
 
