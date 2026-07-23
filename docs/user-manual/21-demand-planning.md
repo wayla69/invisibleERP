@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.12 · 2026-07-23**
+**Status: DRAFT v0.13 · 2026-07-23**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -183,6 +183,30 @@ person** — exactly like an order plan, because an approved plan turns into com
 > stops. As with order plans, this raises **no accounting entries** of its own; the financial effect happens
 > later, when the requisition becomes a purchase order and goods are received.
 
+### To govern how a short DC is shared out (fair-share allocation)
+
+When the central kitchen / DC cannot cover the **sum** of what its branches need in a period, the scarce
+stock has to be **rationed** — and *which* branch gets served is a decision worth controlling. You choose a
+fair **allocation policy** per DC and have a second person approve it:
+
+1. **Set the policy** — `POST /api/scm-network/allocation/policies` (required permission: **`scm_allocate`**)
+   with the DC and a method: **proportional** (share in proportion to each branch's need — the default),
+   **fair-share** (level every branch to the same days-of-cover), or **priority** (serve higher-priority
+   branches first; give weights per branch). It is saved as *pending approval*.
+2. **Approve it** — a **different** person holding `scm_approve` approves it
+   (`POST /api/scm-network/allocation/policies/:id/approve`). You **cannot** approve a policy you set — the
+   system refuses self-approval. From then on, a network run that hits a shortage shares the DC out by this
+   method, and the allocation is checked so no branch is ever given a negative amount and the shares never
+   add up to more than the DC actually has.
+3. **Override for one plan (only with a reason, only with a second sign-off)** — if a specific plan needs a
+   different split, `POST /api/scm-network/plans/:id/allocation-override` with your proposed amounts **and a
+   justification**. An override **without** a reason is refused, and even a justified one is **not applied
+   immediately** — it waits for a different `scm_approve` holder to approve it. This keeps any deviation from
+   the fair split on the record, never quietly favouring one branch.
+
+> Setting or overriding the allocation policy is the `scm_allocate` duty; approving it is `scm_approve`. The
+> same person can never do both for the same decision (segregation of duties **R25**, control **SCM-06**).
+
 ---
 
 ## 3. To run a plan
@@ -332,7 +356,7 @@ design; ask your administrator.
 ## 10. Related
 
 - Process narrative: `docs/process-narratives/34-supply-chain-planning.md`
-- Controls: **SCM-01** (order-plan approval), **SCM-02** (job reliability), **SCM-03** (how quantities are derived), **SCM-04** (promo-forecast governance), **SCM-05** (network-plan approval)
+- Controls: **SCM-01** (order-plan approval), **SCM-02** (job reliability), **SCM-03** (how quantities are derived), **SCM-04** (promo-forecast governance), **SCM-05** (network-plan approval), **SCM-06** (DC-shortage allocation fairness)
 - Purchasing continues in chapter **03 — Procurement**
 - Waste and spoilage recording: chapter **04 — Inventory**
 
@@ -344,6 +368,7 @@ design; ask your administrator.
 | 0.11 | 2026-07-23 | Added §2 note "You can retrain the models on a schedule so the nightly plan is fast" — docs/59 Track D · D1: a schedulable **batch retrain** trains every item's forecast model ahead of time and saves the fresh forecasts, which the overnight plan then reuses instead of retraining from scratch, so a plan is produced faster on a large catalogue; a missing/too-old retrain simply falls back to training in the plan itself (freshness is an ops setting). Compute-only; changes no order quantity, no new control. |
 | 0.10 | 2026-07-23 | Added §1 note "Brand-new items are forecast by borrowing from similar items" — docs/56 Track A · A4: a newly added item with too little history of its own is forecast by borrowing the demand shape of established similar items at the **same branch** and scaling it to the expected size, marked **`analog`** so a reviewer sees it is a borrowed estimate; the system switches to forecasting the item directly once it has built its own history. Forecast-quality only; no new control. (docs/59 Track D · D3 — a shared engine result cache across replicas — is infrastructure with no user-facing change and needs no manual update.) |
 | 0.9 | 2026-07-23 | Added §2 note "The planner now runs faster on stable catalogs" + a **Refit cadence** settings row — docs/59 Track D · D2: the planner caches each item's fitted forecast model and reuses it when demand history is unchanged, refitting automatically when the history changes or after the refit cadence (default 14 days). Compute-only; changes no order quantity, no new control. |
+| 0.13 | 2026-07-23 | Added §2 "To govern how a short DC is shared out (fair-share allocation)" — docs/57 Track B · B3, control **SCM-06**: when the DC can't cover the sum of branch needs, rationing follows an **approved** allocation policy (proportional / fair-share / priority) set under the new `scm_allocate` permission and approved by a **different** `scm_approve` holder (SoD **R25**; self-approval refused). A per-plan **override** needs a justification **and** a second approver — it is never applied immediately. Raises no accounting entries. |
 | 0.8 | 2026-07-23 | Added §2 "To run and approve a multi-echelon network plan" — docs/57 Track B · B2: run a two-echelon plan (`POST /api/scm-network/plans/run`) that pools safety stock at the DC, then submit → approve (a different `scm_approve` holder; self-approval → `SOD_SELF_APPROVAL`) → convert to a purchase requisition (idempotent). New control **SCM-05**; falls back to per-branch (no pooling) when the engine is off; raises no accounting entries. |
 | 0.7 | 2026-07-22 | Added §7 note "Neighbours react too" — docs/56 Track A · A3: a price what-if across same-category items now also reflects category-scoped cannibalization/halo between the items whose price moved. Advisory only. |
 | 0.6 | 2026-07-22 | Added §7 note "Try a price change too" — docs/56 Track A · A2: the scenario what-if gains a price multiplier that applies each item's learned own-price elasticity (unchanged when none is on file). Advisory only. |

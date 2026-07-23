@@ -109,7 +109,47 @@ export const scmNetworkPlanLines = pgTable('scm_network_plan_lines', {
   detail: jsonb('detail').notNull().default({}),      // engine rationale, clamped flag
 }, (t) => ({ byTenant: index('idx_scm_network_plan_lines_tenant').on(t.tenantId, t.planId) }));
 
+// docs/57 Track B (B3) — the approved DC-shortage allocation policy, GOVERNED master data (migration
+// 0478). When the DC cannot fill the sum of branch replenishment orders, rationing follows the APPROVED
+// method (proportional / fair_share / priority, §1.5). Set/changed under `scm_allocate`, approved by a
+// DIFFERENT `scm_approve` holder (maker ≠ approver — control SCM-06 / SoD R25, enforced by
+// assertMakerChecker). One approved policy per (tenant, dc_node_code); absent ⇒ proportional default.
+export const scmAllocationPolicies = pgTable('scm_allocation_policies', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  dcNodeCode: text('dc_node_code').notNull(),        // → supply_nodes.node_code (a DC / central kitchen)
+  method: text('method').notNull().default('proportional'), // 'proportional' | 'fair_share' | 'priority'
+  priorities: jsonb('priorities').notNull().default({}),    // { [branch_node_code]: weight } (priority tiers)
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  reason: text('reason'),                            // maker's rationale for the policy/change
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  submittedBy: text('submitted_by'),                 // the maker (bound as maker for SoD R25)
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, (t) => ({ byTenant: index('idx_scm_allocation_policies_tenant').on(t.tenantId, t.dcNodeCode) }));
+
+// docs/57 Track B (B3) — a planner-entered OVERRIDE of a plan's computed fair-share allocation. Rejected
+// unless a justification is recorded (ALLOCATION_OVERRIDE_UNLOGGED) AND staged for a second approver
+// (never auto-applied) — the two-person control so no branch is quietly favoured. Surfaced in GOV-01.
+export const scmAllocationOverrides = pgTable('scm_allocation_overrides', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  planId: bigint('plan_id', { mode: 'number' }).notNull().references(() => scmNetworkPlans.id),
+  proposed: jsonb('proposed').notNull().default([]), // the override allocation lines the maker proposes
+  justification: text('justification').notNull(),    // mandatory — an unlogged override is rejected
+  status: text('status').notNull().default('PendingApproval'), // PendingApproval | Approved | Rejected
+  requestedBy: text('requested_by'),                 // the maker (bound as maker for SoD R25)
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, (t) => ({ byTenant: index('idx_scm_allocation_overrides_tenant').on(t.tenantId, t.planId) }));
+
 export type SupplyNodeRow = typeof supplyNodes.$inferSelect;
 export type SupplyLaneRow = typeof supplyLanes.$inferSelect;
 export type ScmNetworkPlanRow = typeof scmNetworkPlans.$inferSelect;
 export type ScmNetworkPlanLineRow = typeof scmNetworkPlanLines.$inferSelect;
+export type ScmAllocationPolicyRow = typeof scmAllocationPolicies.$inferSelect;
+export type ScmAllocationOverrideRow = typeof scmAllocationOverrides.$inferSelect;

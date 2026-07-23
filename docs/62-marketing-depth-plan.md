@@ -53,7 +53,7 @@ each independently shippable and doc-synced, none adding a new money/contact pat
   offers from ③ (`rankSegmentOffers` top-3, batched `topOffersForSegments`; a within-cell recommendation —
   the allocation math is untouched) and the ⑤ response carries recent campaign deliverability from the
   `message_log` send audit via the new owning `CampaignsService.outcomeSummary` read.
-- **Plan-vs-actual reconciliation — delivered (NEW detective control MKT-26, census 314)**: every APPROVED
+- **Plan-vs-actual reconciliation — delivered (NEW detective control MKT-26)**: every APPROVED
   `mi_budget_plans` allocation reconciles against actual per-channel spend (MMM-run actuals via the owning
   `MmmModelService.latestSummary`; pushed-snapshot fallback; basis recorded) through the pure
   `plan-backtest.ts` — variance/flags/adherence, fail-honest `PLAN_NOT_APPROVED`/`NO_ACTUALS` — surfaced as
@@ -81,5 +81,5 @@ AI drafts, humans send.
 
 | Rev | Date | Notes |
 |---|---|---|
-| v0.2 | 2026-07-23 | **Phase 2 DELIVERED — offer-level ⑤ + plan-vs-actual backtest (NEW detective control MKT-26; census 313→314/311; no migration).** ⑤ cells carry ③'s per-segment top offers + message_log deliverability (`CampaignsService.outcomeSummary`); MKT-26 backtest endpoint + schedulable `mkt_plan_backtest` (marketing-intel imports MmmModule for run actuals; pushed fallback; pure `plan-backtest.ts`, 8 unit tests). Web: offer chips + Budget Planner backtest expander. ToE ext +6 / mmm +3. PN-19 §7 item 51 + §9 row 51 + rev 1.74; manual 09 v0.18; UAT-MA-26 + UAT 09 v3.10; RCM regenerated. |
+| v0.2 | 2026-07-23 | **Phase 2 DELIVERED — offer-level ⑤ + plan-vs-actual backtest (NEW detective control MKT-26; census +1 (315/312 after main's concurrent SCM-06); no migration).** ⑤ cells carry ③'s per-segment top offers + message_log deliverability (`CampaignsService.outcomeSummary`); MKT-26 backtest endpoint + schedulable `mkt_plan_backtest` (marketing-intel imports MmmModule for run actuals; pushed fallback; pure `plan-backtest.ts`, 8 unit tests). Web: offer chips + Budget Planner backtest expander. ToE ext +6 / mmm +3. PN-19 §7 item 51 + §9 row 51 + rev 1.74; manual 09 v0.18; UAT-MA-26 + UAT 09 v3.10; RCM regenerated. |
 | v0.1 | 2026-07-23 | Roadmap created; **Phase 1 (autopilot cadence + action center) DELIVERED** — 3 scheduled action jobs (`mkt_nba_autostage`/`mkt_save_autostage`/`mkt_measure_windows`, one-in-flight idempotency, "(auto)" maker attribution, human maker-checker unchanged), 4 GOV-01 queues (MKT-17/22/24 + measure-due), `GET /api/marketing-activation/action-center` + the สิ่งที่รอคุณตอนนี้ overview card. No new control/migration; census unchanged. ToE `ext.ts` +13 (423). PN-19 rev 1.73; manual 09 v0.17; UAT-MA-AUTO-01/02 + UAT 09 v3.9; traceability bumped. |

@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 314,
+    "total": 315,
     "by_status": {
-      "Implemented": 311,
+      "Implemented": 312,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 26,
+      "Inventory & COGS": 27,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -5997,10 +5997,29 @@
       "frequency": "Per network plan",
       "owner": "Planner / Controller",
       "coso": "P11",
-      "code_reference": "scm-network/scm-network-run.service.ts (engine /v1/optimize-network or in-process fallback -> clamp qty -> persist Draft plan + per-node lines); scm-network/scm-network-plan.service.ts (submit/approve maker-checker via assertMakerChecker event 'scm.network-plan.approve' -> 403 SOD_SELF_APPROVAL; convert via ProcurementService.createPr idempotent by pr_no); scm-network/scm-network.controller.ts (@Permissions scm_plan build, scm_approve approve, SoD R24); scm-network/scm-network-extract.service.ts (loose-coupling demand extraction via scm-planning public API); schema/scm-network.ts scm_network_plans/scm_network_plan_lines (migration 0471); scm-planning/scm-engine-client.service.ts optimizeNetwork; services/forecast-engine/app/network.py (GSM base-stock + risk pooling); cutover/scm.ts (ToE)",
+      "code_reference": "scm-network/scm-network-run.service.ts (engine /v1/optimize-network or in-process fallback -> clamp qty -> persist Draft plan + per-node lines); scm-network/scm-network-plan.service.ts (submit/approve maker-checker via assertMakerChecker event 'scm.network-plan.approve' -> 403 SOD_SELF_APPROVAL; convert via ProcurementService.createPr idempotent by pr_no); scm-network/scm-network.controller.ts (@Permissions scm_plan build, scm_approve approve, SoD R24); scm-network/scm-network-extract.service.ts (loose-coupling demand extraction via scm-planning public API); schema/scm-network.ts scm_network_plans/scm_network_plan_lines (migration 0474); scm-planning/scm-engine-client.service.ts optimizeNetwork; services/forecast-engine/app/network.py (GSM base-stock + risk pooling); cutover/scm.ts (ToE)",
       "tod": "Inspect that a network run persists a Draft plan across the stocking echelons, that approve is gated by scm_approve and rejects the submitter (SOD_SELF_APPROVAL), that only an Approved plan converts, that the roll-up goes through ProcurementService.createPr rather than a direct PR write, and that engine quantities are clamped before persistence.",
       "toe": "Re-perform: run a two-echelon plan -> Draft echelon plans (DC + branch base-stock) persist; submit then approve as the submitter -> 403 SOD_SELF_APPROVAL; approve as a second scm_approve holder -> Approved; convert -> a real purchase_requests row (pr_no), re-convert -> the same pr_no (idempotent); a foreign tenant cannot read or approve the plan (404) - re-performed by the scm harness.",
       "evidence": "Two-echelon network plans built + approved by different people before any PR roll-up",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SCM-06",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Supply chain planning; Multi-echelon replenishment; DC-shortage allocation",
+      "risk": "When the DC/central-kitchen cannot fill the sum of branch replenishment orders, scarce stock is rationed across branches by whoever runs the plan, so a person could quietly favour one branch (diverting scarce stock and starving others) with no independent check, or self-approve a deviation from the fair-share method - an allocation decision that determines which branch gets served on a shortage and can conceal preferential treatment or a related-party diversion.",
+      "assertion": "Authorization/Segregation of Duties",
+      "description": "DC-shortage rationing follows an APPROVED allocation policy (method proportional/fair_share/priority + priority weights) that is GOVERNED data: set/changed under the scm_allocate maker duty and approved by a DIFFERENT scm_approve holder (SoD R25 flags scm_allocate + scm_approve; assertMakerChecker binds maker != approver -> 403 SOD_SELF_APPROVAL). At run time the allocation is computed by the approved method and is trust-boundary checked - every share is non-negative and the total never exceeds the DC's available stock (ALLOCATION_NEGATIVE / ALLOCATION_OVER_AVAILABLE), and equal-priority equal-demand branches receive equal shares (symmetry). A planner-entered OVERRIDE of the computed fair-share is REJECTED unless a justification is recorded (ALLOCATION_OVERRIDE_UNLOGGED) AND it is staged for a SECOND approver (never auto-applied), so no branch is quietly favoured.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per network plan / per allocation-policy change",
+      "owner": "Planner / Controller",
+      "coso": "P11",
+      "code_reference": "scm-network/scm-allocation.service.ts (allocateShortage proportional/fair_share/priority; assertAllocationSound non-negative + sum<=available; policy setPolicy/approvePolicy maker-checker event 'scm.allocation-policy.approve'; override stageOverride -> ALLOCATION_OVERRIDE_UNLOGGED when no justification, approveOverride event 'scm.allocation-override.approve' applies only on second approval); scm-network/scm-network-run.service.ts (reads effectivePolicy for the DC, emits fair-share lines on a projected shortage, asserts soundness); scm-network/scm-network.controller.ts (@Permissions scm_allocate set/override, scm_approve approve, SoD R25); permissions.ts scm_allocate + SoD R25; schema/scm-network.ts scm_allocation_policies/scm_allocation_overrides (migration 0478, canonical 0232-form RLS); cutover/scm.ts (ToE)",
+      "tod": "Inspect that DC-shortage allocations are non-negative and sum to no more than available, that equal-priority equal-demand branches get equal shares, that the allocation policy is set under scm_allocate and approved by a different scm_approve holder, and that an unjustified override is rejected while a justified one is staged for a second approver rather than applied immediately.",
+      "toe": "Re-perform: force a DC shortage (branch demand > DC on-hand) -> allocation lines are non-negative, sum <= available, and two equal-priority equal-demand branches receive equal shares; override the computed fair-share WITHOUT a justification -> 403 ALLOCATION_OVERRIDE_UNLOGGED; override WITH a justification -> staged PendingApproval (not applied) until a different scm_approve holder approves; a foreign tenant cannot read or approve the policy/override (404) - re-performed by the scm harness.",
+      "evidence": "DC-shortage allocations follow an approved fair-share policy; overrides are justified + second-approved",
       "status": "Implemented"
     }
   ]

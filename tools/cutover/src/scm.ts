@@ -39,6 +39,7 @@ import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exception
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { ymd } from '../../../apps/api/dist/database/queries';
 import { JobWorkerService } from '../../../apps/api/dist/modules/jobs/job-worker.service';
+import { ScmAllocationService } from '../../../apps/api/dist/modules/scm-network/scm-allocation.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -829,6 +830,70 @@ async function main() {
   ok('B2 cross-tenant: T2 cannot read HQ network plan (404) + sees 0 in its list',
     netCross.status === 404 && (netListB.json?.length ?? 0) === 0,
     `crossStatus=${netCross.status} t2plans=${netListB.json?.length}`);
+
+  // ════════════════════════ docs/57 B3 — DC-shortage allocation fairness (SCM-06 / SoD R25) ════════════════════════
+  // (a) the PURE rationing primitive — non-negative, Σ ≤ available, equal shares for equal branches,
+  //     priority tiers served first, and the trust boundary rejects an over-issue. Deterministic; no DB.
+  const eqReqs = [
+    { node: 'BR-A', requested: 30, mu: 10, onHand: 0 },
+    { node: 'BR-B', requested: 30, mu: 10, onHand: 0 },
+    { node: 'BR-C', requested: 30, mu: 10, onHand: 0 },
+  ];
+  const propAlloc = ScmAllocationService.allocateShortage(eqReqs, 30, 'proportional', {});
+  const propSum = propAlloc.reduce((a: number, b: number) => a + b, 0);
+  ok('SCM-06 fair-share rationing is non-negative, sums to available, and equal branches get EQUAL shares',
+    propAlloc.every((a: number) => a >= 0) && Math.abs(propSum - 30) < 1e-6
+      && Math.abs(propAlloc[0]! - propAlloc[1]!) < 1e-6 && Math.abs(propAlloc[1]! - propAlloc[2]!) < 1e-6,
+    `alloc=${JSON.stringify(propAlloc)} sum=${propSum}`);
+  const priAlloc = ScmAllocationService.allocateShortage(eqReqs, 30, 'priority', { 'BR-A': 2, 'BR-B': 1, 'BR-C': 1 });
+  ok('SCM-06 priority rationing serves the higher-priority tier first (before lower tiers)',
+    priAlloc[0] === 30 && priAlloc[1] === 0 && priAlloc[2] === 0, `pri=${JSON.stringify(priAlloc)}`);
+  let overThrew = false;
+  try { ScmAllocationService.assertAllocationSound([{ ds: 'x', from_node: 'DC', to_node: 'BR-A', requested: 10, allocated: 20, shortfall: 0 }], 10); } catch { overThrew = true; }
+  ok('SCM-06 the trust boundary rejects an allocation that exceeds available DC stock', overThrew, `threw=${overThrew}`);
+
+  // (b) the allocation POLICY is GOVERNED data — maker-checker'd (SoD R25). plannerA gains scm_allocate.
+  await db.insert(s.userPermissions).values({ userId: await uid('plannerA'), perm: 'scm_allocate' }).onConflictDoNothing();
+  const tAlloc = await login('plannerA');
+  const setPol = await inj('POST', '/api/scm-network/allocation/policies', tAlloc, { dc_node_code: 'DC-1', method: 'fair_share', reason: 'peak season equal runout' });
+  ok('SCM-06 an allocation policy is staged PendingApproval by the scm_allocate maker',
+    (setPol.status === 200 || setPol.status === 201) && setPol.json.status === 'PendingApproval', `${setPol.status} ${setPol.json.status}`);
+  const polId = setPol.json.id;
+  const setPolGuard = await inj('POST', '/api/scm-network/allocation/policies', tApprover, { dc_node_code: 'DC-1', method: 'proportional' });
+  ok('SCM-06 setting a policy is gated by scm_allocate (an scm_approve-only caller is refused at the guard)',
+    setPolGuard.status === 403, `${setPolGuard.status}`);
+  const polSelf = await inj('POST', `/api/scm-network/allocation/policies/${polId}/approve`, tAlloc, {});
+  ok('SCM-06 the policy maker cannot self-approve (403 SOD_SELF_APPROVAL, SoD R25)',
+    polSelf.status === 403 && polSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${polSelf.status} ${polSelf.json.error?.code}`);
+  const polApprove = await inj('POST', `/api/scm-network/allocation/policies/${polId}/approve`, tApprover, {});
+  ok('SCM-06 an independent scm_approve holder (≠ maker) approves the allocation policy → Approved',
+    (polApprove.status === 200 || polApprove.status === 201) && polApprove.json.status === 'Approved', `${polApprove.status} ${polApprove.json.status}`);
+
+  // (c) a per-plan OVERRIDE of the computed fair-share — unlogged is rejected, logged is STAGED (not
+  //     auto-applied) and applied only on a SECOND approver's sign-off (the two-person control).
+  const ovrUnlogged = await inj('POST', `/api/scm-network/plans/${netPlanId}/allocation-override`, tAlloc, { allocations: [{ to_node: 'BR-1', allocated: 5 }] });
+  ok('SCM-06 an UNLOGGED override (no justification) is rejected (403 ALLOCATION_OVERRIDE_UNLOGGED)',
+    ovrUnlogged.status === 403 && ovrUnlogged.json.error?.code === 'ALLOCATION_OVERRIDE_UNLOGGED', `${ovrUnlogged.status} ${ovrUnlogged.json.error?.code}`);
+  const ovr = await inj('POST', `/api/scm-network/plans/${netPlanId}/allocation-override`, tAlloc, { allocations: [{ to_node: 'BR-1', allocated: 5 }], justification: 'BR-1 has a confirmed catering event this week' });
+  ok('SCM-06 a JUSTIFIED override is STAGED for a second approver (PendingApproval, not auto-applied)',
+    (ovr.status === 200 || ovr.status === 201) && ovr.json.status === 'PendingApproval' && ovr.json.applied === false, `${ovr.status} ${ovr.json.status} applied=${ovr.json.applied}`);
+  const ovrId = ovr.json.id;
+  const ovrSelf = await inj('POST', `/api/scm-network/allocation/overrides/${ovrId}/approve`, tAlloc, {});
+  ok('SCM-06 the override maker cannot self-approve their own deviation (403 SOD_SELF_APPROVAL)',
+    ovrSelf.status === 403 && ovrSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${ovrSelf.status} ${ovrSelf.json.error?.code}`);
+  const ovrApprove = await inj('POST', `/api/scm-network/allocation/overrides/${ovrId}/approve`, tApprover, {});
+  ok('SCM-06 an independent approver applies the override to the plan (two-person control)',
+    (ovrApprove.status === 200 || ovrApprove.status === 201) && ovrApprove.json.applied === true, `${ovrApprove.status} applied=${ovrApprove.json.applied}`);
+  const planAfterOvr = await inj('GET', `/api/scm-network/plans/${netPlanId}`, tPlanner);
+  ok('SCM-06 the approved override becomes the plan’s persisted allocation',
+    JSON.stringify(planAfterOvr.json.plan?.allocations ?? []).includes('BR-1'), `alloc=${JSON.stringify(planAfterOvr.json.plan?.allocations)}`);
+
+  // (d) cross-tenant boundary (mandatory): T2 sees 0 HQ policies and cannot approve an HQ override.
+  const polCrossList = await inj('GET', '/api/scm-network/allocation/policies', tPlannerB);
+  const ovrCross = await inj('POST', `/api/scm-network/allocation/overrides/${ovrId}/approve`, tPlannerB, {});
+  ok('SCM-06 cross-tenant: T2 sees 0 HQ allocation policies and cannot approve an HQ override (403/404)',
+    (polCrossList.json?.length ?? 0) === 0 && (ovrCross.status === 403 || ovrCross.status === 404),
+    `t2pols=${polCrossList.json?.length} crossStatus=${ovrCross.status}`);
 
   // ════════════════════════ docs/59 D2 — warm-start / model registry ════════════════════════
   // A prophet (re)fit persists to scm_model_cache; a run inside the refit cadence ships the cached fit

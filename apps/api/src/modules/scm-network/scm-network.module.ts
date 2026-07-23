@@ -6,6 +6,7 @@ import { ScmNetworkService } from './scm-network.service';
 import { ScmNetworkExtractService } from './scm-network-extract.service';
 import { ScmNetworkRunService } from './scm-network-run.service';
 import { ScmNetworkPlanService } from './scm-network-plan.service';
+import { ScmAllocationService } from './scm-allocation.service';
 
 // docs/57 Track B (B1 + B2b) — multi-echelon supply-network master data + two-echelon planning.
 //
@@ -19,7 +20,7 @@ import { ScmNetworkPlanService } from './scm-network-plan.service';
 @Module({
   imports: [ScmPlanningModule, ProcurementModule],
   controllers: [ScmNetworkController],
-  providers: [ScmNetworkService, ScmNetworkExtractService, ScmNetworkRunService, ScmNetworkPlanService],
+  providers: [ScmNetworkService, ScmNetworkExtractService, ScmNetworkRunService, ScmNetworkPlanService, ScmAllocationService],
   exports: [ScmNetworkService],
 })
 export class ScmNetworkModule {}
