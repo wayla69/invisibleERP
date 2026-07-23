@@ -24,6 +24,7 @@ interface Exp {
   started_at: string | null; measure_after: string | null;
   treatment_per_head: number | null; control_per_head: number | null;
   incremental_revenue: number | null; lift_pct: number | null;
+  lift_ci_low_pct?: number | null; lift_ci_high_pct?: number | null; weak_evidence?: boolean | null;
 }
 
 export function Experiments() {
@@ -123,7 +124,13 @@ export function Experiments() {
                           <div className="text-right">
                             <div className={`inline-flex items-center gap-1 text-lg font-semibold tabular-nums ${positive ? 'text-success' : 'text-destructive'}`}>
                               <TrendingUp className="size-4" /> {e.lift_pct == null ? '—' : `${positive ? '+' : ''}${num(e.lift_pct, 1)}%`}
+                              {/* Statistical honesty (docs/62 Phase 3): show the 95% CI + flag weak evidence. */}
+                              {e.weak_evidence === true && <span className="text-sm" title={t('mi.ex_weak')}>⚠</span>}
                             </div>
+                            {e.lift_ci_low_pct != null && e.lift_ci_high_pct != null && (
+                              <div className="text-xs text-muted-foreground tabular-nums">{t('mi.ex_ci')}: [{num(e.lift_ci_low_pct, 1)}%, {num(e.lift_ci_high_pct, 1)}%]</div>
+                            )}
+                            {e.weak_evidence === true && <div className="text-xs font-medium" style={softText('var(--chart-4)')}>{t('mi.ex_weak')}</div>}
                             <div className="text-xs text-muted-foreground tabular-nums">{t('mi.ex_incremental')}: {thb(e.incremental_revenue ?? 0)}</div>
                           </div>
                         ) : (

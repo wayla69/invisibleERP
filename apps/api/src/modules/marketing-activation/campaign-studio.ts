@@ -13,6 +13,33 @@ export interface SegmentFactSheet {
   best_channel_roi: number | null;
   send_hour: number | null;      // 0..23 Asia/Bangkok, modal preferred_hour
   top_offer: string | null;      // a featured product/offer hint (from Tool ③), optional
+  tone: string | null;           // strategic tone from the pushed TOWS (docs/62 Phase 3), optional
+}
+
+// Strategic TONE from the pushed TOWS matrix (docs/62 Phase 3 — closes the "TOWS informs nothing" gap):
+// the dominant quadrant of the platform's own strategy items sets the copy's voice, so an aggressive-growth
+// tenant and a defend-the-base tenant get differently-toned drafts from the same NBA facts. Pure and
+// deterministic; ties break toward the more confident stance (SO > ST > WO > WT). Unknown/empty → null
+// (the prompt then states "(neutral)" — no tone is ever invented).
+const TOWS_TONE: Record<string, string> = {
+  SO: 'confident-growth',       // strengths × opportunities → lean in, expansive voice
+  ST: 'reassuring-strength',    // strengths × threats → steady, trust-anchored voice
+  WO: 'candid-improvement',     // weaknesses × opportunities → honest, we-are-getting-better voice
+  WT: 'cautious-care',          // weaknesses × threats → careful, relationship-first voice
+};
+const TOWS_ORDER = ['SO', 'ST', 'WO', 'WT'] as const;
+
+export function toneFromTows(items: unknown): string | null {
+  if (!Array.isArray(items) || !items.length) return null;
+  const mix: Record<string, number> = {};
+  for (const it of items) {
+    const q = String((it as { quadrant?: unknown } | null)?.quadrant ?? '').toUpperCase();
+    if (q in TOWS_TONE) mix[q] = (mix[q] ?? 0) + 1;
+  }
+  const dominant = TOWS_ORDER
+    .filter((q) => (mix[q] ?? 0) > 0)
+    .sort((a, b) => (mix[b] ?? 0) - (mix[a] ?? 0) || TOWS_ORDER.indexOf(a) - TOWS_ORDER.indexOf(b))[0];
+  return dominant ? TOWS_TONE[dominant]! : null;
 }
 
 // Bilingual copy per next-best-action — the "right words" grounded in what the segment needs. Interpretable
@@ -58,6 +85,7 @@ export function buildPrompt(f: SegmentFactSheet): string {
     `- best channel (by MMM ROI): ${f.best_channel ?? 'unknown'}${f.best_channel_roi == null ? '' : ` (ROI ${f.best_channel_roi})`}`,
     `- best send-hour (Asia/Bangkok): ${f.send_hour == null ? 'unknown' : `${clampHour(f.send_hour)}:00`}`,
     f.top_offer ? `- product to feature: ${f.top_offer}` : `- product to feature: (none identified)`,
+    `- strategic tone (from the TOWS matrix): ${f.tone ?? '(neutral)'}`,
     `Output: audience, channel, send-time, an offer, and short th/en subject + body. The result is a DRAFT for human review — it must not be sent automatically, and only consented members may ever be contacted.`,
   ];
   return parts.join('\n');
@@ -85,5 +113,29 @@ export function draftCampaign(f: SegmentFactSheet): CampaignDraft {
     predicted_reach: Math.max(0, Math.round((Number(f.count) || 0) * 0.8)), // consent/deliverability haircut
     suggested_holdout_pct: 20,
     grounded_on: f,
+  };
+}
+
+// Variant B — the same grounded facts, a DIFFERENT creative angle (docs/62 Phase 3 A/B): offer-FIRST framing
+// where variant A leads with the sentiment. Deterministic, so the A/B contrast is a real creative contrast,
+// never noise; the send-time split itself is the existing per-member bucketPct on the campaign.
+export interface VariantCopy {
+  subject_th: string;
+  subject_en: string;
+  body_th: string;
+  body_en: string;
+}
+
+export function draftVariantB(f: SegmentFactSheet): VariantCopy {
+  const nba = (f.dominant_nba ?? '').toUpperCase();
+  const copy = NBA_COPY[nba] ?? DEFAULT_COPY;
+  const hour = clampHour(f.send_hour);
+  const offer_th = f.top_offer ? `${copy.offer_th} · ${f.top_offer}` : copy.offer_th;
+  const offer_en = f.top_offer ? `${copy.offer_en} · ${f.top_offer}` : copy.offer_en;
+  return {
+    subject_th: `${offer_th} — เฉพาะคุณ`,
+    subject_en: `${offer_en} — just for you`,
+    body_th: `${offer_th} วันนี้! ${copy.th} (กลุ่ม ${f.segment}). ส่งเวลา ${hour}:00`,
+    body_en: `${offer_en} today! ${copy.en} (segment ${f.segment}). Best sent around ${hour}:00`,
   };
 }

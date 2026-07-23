@@ -169,8 +169,15 @@ export function Nba() {
                     <span className={`inline-flex items-center gap-1 rounded-full bg-background/70 px-2.5 py-1 text-xs font-semibold shadow-sm ${Number(j.realized_lift_pct ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
                       <TrendingUp className="size-3.5" />
                       {j.realized_lift_pct == null ? t('ma.measured_no_baseline') : `${t('ma.measured_lift')} ${Number(j.realized_lift_pct) >= 0 ? '+' : ''}${num(j.realized_lift_pct, 1)}%`}
+                      {j.lift_ci_low_pct != null && j.lift_ci_high_pct != null && (
+                        <span className="font-normal text-muted-foreground">[{num(j.lift_ci_low_pct, 0)}, {num(j.lift_ci_high_pct, 0)}]</span>
+                      )}
                       {j.incremental_revenue != null && <span className="text-muted-foreground">· {thb(j.incremental_revenue)}</span>}
                     </span>
+                  )}
+                  {/* Statistical honesty (docs/62 Phase 3): a small/inconclusive sample is flagged, never hidden. */}
+                  {j.measured_at != null && j.weak_evidence === true && (
+                    <Chip hue="var(--chart-4)">⚠ {t('ma.weak_evidence')}</Chip>
                   )}
                 </div>
               ))}

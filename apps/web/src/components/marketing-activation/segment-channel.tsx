@@ -72,7 +72,7 @@ export function SegmentChannel() {
                         <span className="truncate">{String(c.segment)}</span>
                         <span className="text-muted-foreground">×</span>
                         <span className="truncate">{String(c.channel)}</span>
-                        {c.lift_pct != null && <Chip hue="var(--chart-4)">{t('ma.roi_measured')} {num(c.lift_pct)}%</Chip>}
+                        {c.lift_pct != null && <Chip hue="var(--chart-4)">{t('ma.roi_measured')} {num(c.lift_pct)}%{c.lift_weak === true ? ` ⚠ ${t('ma.weak_evidence')}` : ''}</Chip>}
                         {/* docs/62: WHAT to offer in this cell — ③'s top un-bought product for the segment. */}
                         {c.offer && <Chip hue="var(--chart-1)">{t('ma.roi_offer')} {String(c.offer)}</Chip>}
                       </div>

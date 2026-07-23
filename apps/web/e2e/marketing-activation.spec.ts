@@ -28,8 +28,9 @@ const ROI = {
   budget: 100000, basis: 'MMM-1', has_mmm: true, segment_count: 1,
   cells: [
     // docs/62 Phase 2: cells carry the segment's top un-bought offers (③) — a within-cell recommendation.
-    { segment: 'At Risk VIPs', channel: 'facebook', channel_roi: 3.2, lift_pct: 900, lift_multiplier: 10, incremental_roi: 32, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 3225792, offer: 'ครัวซองต์เนยสด', top_offers: [{ item_id: 'CROISSANT', name: 'ครัวซองต์เนยสด', score: 3.6, reach: 8 }] },
-    { segment: 'At Risk VIPs', channel: 'tiktok', channel_roi: 1.4, lift_pct: null, lift_multiplier: 1, incremental_roi: 1.4, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 141128, offer: null, top_offers: [] },
+    // docs/62 Phase 3: lift_weak flags a small/inconclusive measurement (display-only honesty).
+    { segment: 'At Risk VIPs', channel: 'facebook', channel_roi: 3.2, lift_pct: 900, lift_weak: true, lift_multiplier: 10, incremental_roi: 32, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 3225792, offer: 'ครัวซองต์เนยสด', top_offers: [{ item_id: 'CROISSANT', name: 'ครัวซองต์เนยสด', score: 3.6, reach: 8 }] },
+    { segment: 'At Risk VIPs', channel: 'tiktok', channel_roi: 1.4, lift_pct: null, lift_weak: null, lift_multiplier: 1, incremental_roi: 1.4, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 141128, offer: null, top_offers: [] },
   ],
   channel_allocation: { facebook: 95000, tiktok: 5000 }, recommendation_basis: 'measured+mmm',
   delivery: { since_days: 90, outcomes: [{ campaign: 'CMP-20260701-001', sent: 90, delivered: 5, failed: 5, undelivered: 0, skipped: 10, attempted: 100, delivery_rate: 95 }] },
@@ -57,15 +58,35 @@ const SAVE_PREVIEW = {
 };
 const JOURNEYS = { journeys: [
   { journey_no: 'NBA-1', status: 'Pending', segment: 'At Risk VIPs', channel: 'sms', target_count: 2, control_count: 1, suppressed_count: 1, requested_by: 'napa', approved_by: null, campaign_id: null, created_at: '2026-07-23T00:00:00Z', activated_at: null },
-  // A measured journey — the realized-lift chip (MKT-19 discipline extended to ② journeys).
-  { journey_no: 'NBA-0', status: 'Active', segment: 'At Risk VIPs', channel: 'sms', target_count: 1, control_count: 1, suppressed_count: 0, requested_by: 'napa', approved_by: 'somchai', campaign_id: 7, created_at: '2026-07-01T00:00:00Z', activated_at: '2026-07-01T01:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 900, incremental_revenue: 900, treatment_per_head: 1000, control_per_head: 100 },
+  // A measured journey — the realized-lift chip (MKT-19 discipline extended to ② journeys). docs/62
+  // Phase 3: the CI bounds render on the chip and weak_evidence (n=1 arms) is flagged, never hidden.
+  { journey_no: 'NBA-0', status: 'Active', segment: 'At Risk VIPs', channel: 'sms', target_count: 1, control_count: 1, suppressed_count: 0, requested_by: 'napa', approved_by: 'somchai', campaign_id: 7, created_at: '2026-07-01T00:00:00Z', activated_at: '2026-07-01T01:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 900, incremental_revenue: 900, treatment_per_head: 1000, control_per_head: 100, lift_ci_low_pct: null, lift_ci_high_pct: null, weak_evidence: true },
 ] };
 const POLICIES = { policies: [{ policy_no: 'SAVEPOL-1', status: 'Active', churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 500, requested_by: 'napa', approved_by: 'somchai', created_at: '2026-07-23T00:00:00Z' }] };
 const RUNS = { runs: [
   { run_no: 'SAVE-1', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 96, control_count: 24, offer_cost: 48000, expected_saved_revenue: 201600, net_benefit: 153600, campaign_id: 9, created_at: '2026-07-23T00:00:00Z' },
-  // A measured run — expected becomes PROVEN (realized retention P&L).
-  { run_no: 'SAVE-0', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 90, control_count: 20, offer_cost: 40000, expected_saved_revenue: 180000, net_benefit: 140000, campaign_id: 5, created_at: '2026-07-01T00:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 42.5, realized_saved_revenue: 160000, realized_net_benefit: 120000 },
+  // A measured run — expected becomes PROVEN (realized retention P&L). docs/62 Phase 3: a healthy-sample
+  // measurement carries its CI and is NOT flagged weak.
+  { run_no: 'SAVE-0', policy_no: 'SAVEPOL-1', segment: null, treatment_count: 90, control_count: 20, offer_cost: 40000, expected_saved_revenue: 180000, net_benefit: 140000, campaign_id: 5, created_at: '2026-07-01T00:00:00Z', measured_at: '2026-07-15T00:00:00Z', measured_by: 'napa', realized_lift_pct: 42.5, realized_saved_revenue: 160000, realized_net_benefit: 120000, lift_ci_low_pct: 30.1, lift_ci_high_pct: 54.9, weak_evidence: false },
 ] };
+
+// docs/62 Phase 3 — Studio: a generation with a tone-carrying fact sheet + variant B, and its A/B outcome.
+const STUDIO_GEN = {
+  segment: 'At Risk VIPs', model: 'studio-template-v1',
+  facts: { segment: 'At Risk VIPs', count: 12, avg_clv: 8400.5, dominant_nba: 'WINBACK', best_channel: 'facebook', best_channel_roi: 3.2, send_hour: 19, top_offer: 'ครัวซองต์เนยสด', tone: 'confident-growth' },
+  prompt: 'Draft a bilingual...',
+  draft: { audience: 'mi_segment', segment: 'At Risk VIPs', channel: 'facebook', send_hour: 19, offer_th: 'ส่วนลด 20%', offer_en: '20% off', subject_th: 'คิดถึงคุณ!', subject_en: 'We miss you', body_th: 'คิดถึงคุณ! — ส่วนลด 20%', body_en: 'We miss you — 20% off', predicted_reach: 9, suggested_holdout_pct: 20 },
+  draft_b: { subject_th: 'ส่วนลด 20% — เฉพาะคุณ', subject_en: '20% off — just for you', body_th: 'ส่วนลด 20% วันนี้! คิดถึงคุณ!', body_en: '20% off today! We miss you' },
+  note: 'Advisory generation (MKT-21).',
+};
+const STUDIO_GENS = { generations: [{ gen_no: 'GEN-20260723-001', segment: 'At Risk VIPs', channel: 'facebook', model: 'studio-template-v1', campaign_id: 7, requested_by: 'napa', created_at: '2026-07-23T00:00:00Z' }] };
+const STUDIO_AB = {
+  campaign_id: 7, campaign_code: 'CMP-20260701-001', name: 'AI · At Risk VIPs', status: 'sent',
+  split_b_pct: 50, window_from: '2026-07-01T01:00:00Z', measured_at: '2026-07-23T00:00:00Z',
+  arm_a: { n: 40, revenue: 4000, per_head: 100 }, arm_b: { n: 40, revenue: 4480, per_head: 112 },
+  b_vs_a: { lift_pct: 12, lift_ci_low_pct: 2.5, lift_ci_high_pct: 21.5, weak_evidence: false, min_arm_n: 40 },
+  note: 'Advisory A/B outcome (docs/62 Phase 3).',
+};
 
 const CENTER = { items: [
   { kind: 'journey_measure_due', severity: 'high', control: 'MKT-22', ref: 'NBA-9', title_th: 'ครบกำหนดวัดผลแผน NBA NBA-9', title_en: 'NBA journey NBA-9 is due for measurement' },
@@ -94,7 +115,9 @@ async function boot(page: Page) {
     if (url.includes('/api/marketing-activation/segment-channel-roi')) return json(ROI);
     if (url.includes('/api/marketing-activation/nba/preview')) return json(NBA_PREVIEW);
     if (url.includes('/api/marketing-activation/nba/journeys')) return json(JOURNEYS);
-    if (url.includes('/api/marketing-activation/studio/generations')) return json({ generations: [] });
+    if (url.includes('/api/marketing-activation/studio/generate/')) return json(STUDIO_GEN);
+    if (url.includes('/api/marketing-activation/studio/generations')) return json(STUDIO_GENS);
+    if (url.includes('/api/marketing-activation/studio/ab/')) return json(STUDIO_AB);
     if (url.includes('/api/marketing-activation/save/preview')) return json(SAVE_PREVIEW);
     if (url.includes('/api/marketing-activation/save/policies')) return json(POLICIES);
     if (url.includes('/api/marketing-activation/save/runs')) return json(RUNS);
@@ -136,6 +159,8 @@ test('marketing activation (desktop): the five tools render their facts, staging
   await page.getByRole('tab', { name: 'ROI กลุ่ม × ช่องทาง' }).click();
   await expect(page.getByText('At Risk VIPs').first()).toBeVisible();
   await expect(page.getByText(/lift จริง/).first()).toBeVisible();
+  // docs/62 Phase 3: the weak-evidence flag rides the measured-lift chip (display-only honesty).
+  await expect(page.getByText(/⚠ หลักฐานยังอ่อน/).first()).toBeVisible();
   await expect(page.getByText(/แนะนำเสนอ ครัวซองต์เนยสด/)).toBeVisible(); // the ③-sourced offer on the cell
   await expect(page.getByText(/อัตราส่งถึงล่าสุด/)).toBeVisible();          // message_log deliverability note
   await page.getByRole('button', { name: /จัดเป็นแผนงบ/ }).click();
@@ -149,8 +174,21 @@ test('marketing activation (desktop): the five tools render their facts, staging
   await expect(page.getByText('WINBACK').first()).toBeVisible();
   await expect(page.getByText('RECENT_PURCHASE')).toBeVisible();
   // The measured journey shows its realized-lift chip (MKT-19 discipline); the unmeasured Active one would
-  // show วัดผล — here NBA-0 is measured, so the proven lift renders instead of a button.
+  // show วัดผล — here NBA-0 is measured, so the proven lift renders instead of a button. docs/62 Phase 3:
+  // its n=1 arms are flagged weak on the journey row.
   await expect(page.getByText(/lift จริง \+900/)).toBeVisible();
+  await expect(page.getByRole('tabpanel', { name: 'ลำดับการกระทำ' }).getByText(/⚠ หลักฐานยังอ่อน/)).toBeVisible();
+
+  // ① Studio (docs/62 Phase 3): the TOWS tone chip, the variant-B bubble, and the A/B outcome panel.
+  await page.getByRole('tab', { name: 'สตูดิโอ AI' }).click();
+  await page.getByRole('tabpanel', { name: 'สตูดิโอ AI' }).getByRole('combobox').click();
+  await page.getByRole('option', { name: 'At Risk VIPs' }).click();
+  await expect(page.getByText(/โทนกลยุทธ์ \(TOWS\): confident-growth/)).toBeVisible();
+  await expect(page.getByText('ข้อความแบบ B')).toBeVisible();
+  await expect(page.getByText('ส่วนลด 20% — เฉพาะคุณ')).toBeVisible(); // offer-first variant-B subject
+  await page.getByRole('button', { name: 'A/B', exact: true }).click();
+  await expect(page.getByText('ผล A/B จากยอดขายจริง')).toBeVisible();
+  await expect(page.getByText(/B เทียบ A: \+12/)).toBeVisible();
 
   // ④ Churn-save: the retention P&L + a capped offer chip (the MKT-24 control made visible).
   await page.getByRole('tab', { name: 'รักษาลูกค้า' }).click();
@@ -160,6 +198,8 @@ test('marketing activation (desktop): the five tools render their facts, staging
   // Run history: the unmeasured run offers วัดผล; the measured run shows the PROVEN realized net benefit.
   await expect(page.getByRole('button', { name: 'วัดผล' })).toBeVisible();
   await expect(page.getByText(/พิสูจน์แล้ว 120K THB/)).toBeVisible(); // compactThb(120000) realized net
+  // docs/62 Phase 3: the healthy-sample CI renders on the proven chip (and no weak flag on this run).
+  await expect(page.getByText(/\[30, 55\]/)).toBeVisible();
 
   // The marketing-family style rule: no ฿ sign anywhere on the workspace.
   await expect(page.getByText('฿')).toHaveCount(0);

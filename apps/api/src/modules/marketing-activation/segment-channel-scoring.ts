@@ -27,6 +27,8 @@ export interface RoiCell {
   channel: string;
   channel_roi: number;
   lift_pct: number | null;      // measured Phase-3 lift for this segment (null = no experiment, MMM only)
+  lift_weak: boolean | null;    // docs/62 Phase 3: the measurement's weak-evidence flag (small/inconclusive
+                                // sample). DISPLAY-ONLY honesty — it never changes the multiplier or score.
   lift_multiplier: number;
   incremental_roi: number;      // channel_roi × lift_multiplier
   reach: number;                // segment size
@@ -53,7 +55,7 @@ export function rankSegmentChannel(
   channels: ChannelRoi[],
   liftBySegment: Map<string, number | null>,
   budget: number,
-  opts?: { top?: number; offersBySegment?: Map<string, CellOffer[]> },
+  opts?: { top?: number; offersBySegment?: Map<string, CellOffer[]>; weakBySegment?: Map<string, boolean> },
 ): SegmentChannelPlan {
   const top = Math.min(Math.max(Number(opts?.top ?? 50) || 50, 1), 500);
   const chans = channels.filter((c) => c.channel).map((c) => ({ channel: String(c.channel), roi: Number(c.roi) || 0 }));
@@ -73,6 +75,7 @@ export function rankSegmentChannel(
       const incRoi = c.roi * mult;
       cells.push({
         segment: seg, channel: c.channel, channel_roi: r4(c.roi), lift_pct: liftPct == null ? null : r2(liftPct),
+        lift_weak: liftPct == null ? null : (opts?.weakBySegment?.get(seg) ?? false),
         lift_multiplier: r4(mult), incremental_roi: r4(incRoi), reach, avg_clv: clv == null ? null : r2(clv),
         value_weight: r2(value), score: r4(incRoi * value),
         offer: offers[0]?.name ?? null, top_offers: offers,

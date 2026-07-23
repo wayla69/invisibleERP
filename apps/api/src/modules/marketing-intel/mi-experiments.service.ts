@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { miCampaignExperiments, miExperimentArms, customerProfiles, posMembers } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
-import { measureLift } from '../../common/lift-math';
+import { measureLiftDetailed } from '../../common/lift-math';
 import { CrmService } from '../crm/crm.service';
 import { CampaignsService } from '../campaigns/campaigns.service';
 
@@ -123,10 +123,11 @@ export class MiExperimentsService {
 
     const from = exp.startedAt ? new Date(exp.startedAt) : new Date(now.getTime() - Number(exp.windowDays) * 86400_000);
     const rev = await this.crm.revenueByMembers(tenantId, [...treatment, ...control], from, now);
-    const sum = (ids: number[]) => ids.reduce((s, id) => s + (rev.get(id) ?? 0), 0);
-    const tRev = sum(treatment), cRev = sum(control);
-    // Shared MKT-19 lift math (common/lift-math.ts) — also used by the journey/save-run measurements.
-    const lift = measureLift({ treatmentRevenue: tRev, treatmentN: treatment.length, controlRevenue: cRev, controlN: control.length });
+    // Shared MKT-19 lift math (common/lift-math.ts, per-member detailed variant — docs/62 Phase 3 adds the
+    // 95% CI + weak-evidence flag around the point estimate; display/report only, never alters the math).
+    const lift = measureLiftDetailed(treatment.map((id) => rev.get(id) ?? 0), control.map((id) => rev.get(id) ?? 0));
+    const tRev = lift.treatment_per_head * treatment.length;
+    const cRev = lift.control_per_head * control.length;
     const tPerHead = lift.treatment_per_head;
     const cPerHead = lift.control_per_head;
     const incremental = lift.incremental_revenue;
@@ -137,6 +138,9 @@ export class MiExperimentsService {
       treatmentRevenue: String(tRev), controlRevenue: String(cRev),
       treatmentPerHead: String(round2(tPerHead)), controlPerHead: String(round2(cPerHead)),
       incrementalRevenue: String(round2(incremental)), liftPct: liftPct == null ? null : String(round2(liftPct)),
+      liftCiLowPct: lift.lift_ci_low_pct == null ? null : String(round2(lift.lift_ci_low_pct)),
+      liftCiHighPct: lift.lift_ci_high_pct == null ? null : String(round2(lift.lift_ci_high_pct)),
+      weakEvidence: lift.weak_evidence,
       measuredAt: now, measuredBy: user.username ?? 'user',
     }).where(and(eq(miCampaignExperiments.tenantId, tenantId), eq(miCampaignExperiments.id, exp.id)));
 
@@ -145,6 +149,9 @@ export class MiExperimentsService {
       treatment_count: treatment.length, control_count: control.length,
       treatment_per_head: round2(tPerHead), control_per_head: round2(cPerHead),
       incremental_revenue: round2(incremental), lift_pct: liftPct == null ? null : round2(liftPct),
+      lift_ci_low_pct: lift.lift_ci_low_pct == null ? null : round2(lift.lift_ci_low_pct),
+      lift_ci_high_pct: lift.lift_ci_high_pct == null ? null : round2(lift.lift_ci_high_pct),
+      weak_evidence: lift.weak_evidence,
     };
   }
 
@@ -176,6 +183,9 @@ export class MiExperimentsService {
       control_per_head: r.controlPerHead == null ? null : Number(r.controlPerHead),
       incremental_revenue: r.incrementalRevenue == null ? null : Number(r.incrementalRevenue),
       lift_pct: r.liftPct == null ? null : Number(r.liftPct),
+      lift_ci_low_pct: r.liftCiLowPct == null ? null : Number(r.liftCiLowPct),
+      lift_ci_high_pct: r.liftCiHighPct == null ? null : Number(r.liftCiHighPct),
+      weak_evidence: r.weakEvidence ?? null,
       measured_at: r.measuredAt, measured_by: r.measuredBy, created_by: r.createdBy,
     };
   }

@@ -68,6 +68,34 @@ export class CampaignsService {
     return { since_days: sinceDays, outcomes, note: 'Delivery outcomes from the message_log send audit (advisory). skipped = consent/no-contact, never counted against the rate.' };
   }
 
+  // docs/62 Phase 3 — the OWNING per-variant recipient read for a body-A/B campaign: who was actually
+  // CONTACTED (sent/delivered) in each arm. The arm assignment is RECOMPUTED from the same deterministic
+  // bucketPct(campaignId, memberId) the send used, so the split is exactly reproducible from the audit —
+  // no separate variant column needed. Read-only, tenant-scoped; skipped/failed members belong to no arm
+  // (they were never treated).
+  async recipientsByVariant(user: JwtUser, campaignId: number) {
+    const db = this.db; const tenantId = this.tid(user);
+    const [c] = await db.select().from(loyaltyCampaigns)
+      .where(and(eq(loyaltyCampaigns.id, campaignId), eq(loyaltyCampaigns.tenantId, tenantId))).limit(1);
+    if (!c) throw new NotFoundException({ code: 'CAMPAIGN_NOT_FOUND', message: 'Campaign not found', messageTh: 'ไม่พบแคมเปญ' });
+    const splitB = Number(c.splitBPct ?? 0);
+    const hasB = !!c.variantBBody && splitB > 0;
+    const rows = await db.select({ memberId: messageLog.memberId }).from(messageLog)
+      .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.campaign, c.campaignCode), inArray(messageLog.status, ['sent', 'delivered'])));
+    const armA: number[] = []; const armB: number[] = [];
+    const seen = new Set<number>();
+    for (const r of rows) {
+      const mid = r.memberId == null ? 0 : Number(r.memberId);
+      if (!mid || seen.has(mid)) continue;
+      seen.add(mid);
+      (hasB && bucketPct(Number(c.id), mid) < splitB ? armB : armA).push(mid);
+    }
+    return {
+      campaign_id: Number(c.id), campaign_code: c.campaignCode, name: c.name, status: c.status,
+      sent_at: c.sentAt, split_b_pct: splitB, has_variant_b: hasB, arm_a: armA, arm_b: armB,
+    };
+  }
+
   async listCampaigns(user: JwtUser, q: { status?: string } = {}) {
     const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyCampaigns.tenantId, tenantId)];

@@ -40,7 +40,8 @@ function makeService(opts: { flagRows?: Array<{ enabled: boolean }> } = {}) {
   };
   const propensity = { topSegmentOffer: async () => OFFER };
   const campaigns = { upsertCampaign: async () => ({ id: 1 }) };
-  return new CampaignStudioService(makeDb(opts.flagRows) as any, facts as any, campaigns as any, propensity as any);
+  const crm = { revenueByMembers: async () => new Map<number, number>() }; // A/B outcome read — unused by generate()
+  return new CampaignStudioService(makeDb(opts.flagRows) as any, facts as any, campaigns as any, propensity as any, crm as any);
 }
 
 function fakeLlm(respond: () => Promise<{ content: Array<{ type: string; text?: string }> }>) {
@@ -85,6 +86,21 @@ describe('CampaignStudioService — studio v2 LLM refinement (fail-closed)', () 
     // The ③→① hook: the segment's top un-bought product is ON the fact sheet and IN the prompt.
     expect(res.facts.top_offer).toBe(OFFER.name);
     expect(res.prompt).toContain(OFFER.name);
+  });
+
+  it('an LLM variant_b (docs/62 Phase 3) is adopted as draft_b; without one the deterministic B stands in', async () => {
+    const B = { subject_th: 'B หัวข้อ', subject_en: 'B subject', body_th: 'B เนื้อหา', body_en: 'B body' };
+    const { client } = fakeLlm(async () => ({ content: [{ type: 'text', text: JSON.stringify({ ...VALID_COPY, variant_b: B }) }] }));
+    setLlmClientForTests(client);
+    const res: any = await makeService().generate(user, 'VIP');
+    expect(res.draft_b).toEqual(B);                      // the LLM's second angle is adopted
+    expect(res.draft.subject_th).toBe('หัวข้อ AI');      // and never leaks into variant A
+    // Without variant_b in the answer, the deterministic offer-first B fills in (a B always exists).
+    const { client: c2 } = fakeLlm(async () => ({ content: [{ type: 'text', text: JSON.stringify(VALID_COPY) }] }));
+    setLlmClientForTests(c2);
+    const res2: any = await makeService().generate(user, 'VIP');
+    expect(typeof res2.draft_b?.body_th).toBe('string');
+    expect(res2.draft_b.body_th).not.toBe(res2.draft.body_th);
   });
 
   it('garbage LLM output → deterministic template + studio-template-v1 (fail-closed)', async () => {

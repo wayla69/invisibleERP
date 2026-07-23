@@ -34,6 +34,14 @@ export function Studio() {
     retry: false,
   });
   const gensQ = useQuery<{ generations: any[] }>({ queryKey: ['ma', 'generations'], queryFn: () => api('/api/marketing-activation/studio/generations') });
+  // A/B outcome read (docs/62 Phase 3) — real POS revenue per creative arm, on demand per staged campaign.
+  const [abFor, setAbFor] = useState<number | null>(null);
+  const abQ = useQuery<any>({
+    queryKey: ['ma', 'studio-ab', abFor],
+    queryFn: () => api(`/api/marketing-activation/studio/ab/${abFor}`),
+    enabled: abFor != null,
+    retry: false,
+  });
 
   const stage = useMutation({
     mutationFn: () => api('/api/marketing-activation/studio/stage', { method: 'POST', body: JSON.stringify({ segment }) }),
@@ -92,10 +100,25 @@ export function Studio() {
                     <Chip hue="var(--chart-2)">{String(draft.channel)} · {num(draft.send_hour)}:00</Chip>
                     <Chip hue="var(--chart-3)">{t('ma.studio_reach', { n: num(draft.predicted_reach) })}</Chip>
                     <Chip hue="var(--chart-5)">holdout {num(draft.suggested_holdout_pct)}%</Chip>
+                    {/* Strategic tone from the pushed TOWS matrix (docs/62 Phase 3). */}
+                    {genQ.data.facts?.tone && <Chip hue="var(--chart-1)">{t('ma.studio_tone')}: {String(genQ.data.facts.tone)}</Chip>}
                   </div>
                   <div className="text-sm font-semibold">{String(copyLang === 'th' ? draft.subject_th : draft.subject_en)}</div>
                   <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{String(copyLang === 'th' ? draft.body_th : draft.body_en)}</p>
                 </div>
+
+                {/* Variant B — the second creative angle for the A/B split (docs/62 Phase 3). Staging wires it
+                    as the campaign's variant_b_body on a 50/50 deterministic per-member split. */}
+                {genQ.data.draft_b && (
+                  <div className="rounded-xl border border-dashed bg-background/60 p-4">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                      <Chip hue="var(--chart-5)">{t('ma.studio_variant_b')}</Chip>
+                      <span className="text-[11px] text-muted-foreground">{t('ma.studio_variant_b_note')}</span>
+                    </div>
+                    <div className="text-sm font-semibold">{String(copyLang === 'th' ? genQ.data.draft_b.subject_th : genQ.data.draft_b.subject_en)}</div>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{String(copyLang === 'th' ? genQ.data.draft_b.body_th : genQ.data.draft_b.body_en)}</p>
+                  </div>
+                )}
 
                 {/* Model card — the retrieval-grounded prompt, collapsible (the ICFR evidence). */}
                 <button
@@ -139,11 +162,45 @@ export function Studio() {
                   <span className="ml-auto text-xs text-muted-foreground">
                     {g.campaign_id != null ? t('ma.studio_draft_created', { id: String(g.campaign_id) }) : '—'}
                   </span>
+                  {g.campaign_id != null && (
+                    <Button size="sm" variant="outline" className="bg-background/60"
+                      onClick={() => setAbFor((cur) => (cur === Number(g.campaign_id) ? null : Number(g.campaign_id)))}>
+                      A/B
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
           ))}
         </StateView>
+        {/* Per-variant outcome (docs/62 Phase 3): B vs A on real POS revenue, with the honest CI/weak flag. */}
+        {abFor != null && (
+          <StateView q={abQ}>
+            {abQ.data && (
+              <div className="rounded-xl border bg-background/70 p-4 text-sm">
+                <div className="flex flex-wrap items-center gap-2 font-semibold">
+                  {t('ma.studio_ab_heading')} · {String(abQ.data.campaign_code ?? abFor)}
+                  {abQ.data.b_vs_a?.weak_evidence === true && <Chip hue="var(--chart-4)">⚠ {t('ma.weak_evidence')}</Chip>}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-lg bg-background/60 p-2.5">
+                    <div className="text-muted-foreground">A · n={num(abQ.data.arm_a?.n)}</div>
+                    <div className="font-semibold tabular-nums">{num(abQ.data.arm_a?.per_head, 2)} THB / {t('ma.studio_ab_perhead')}</div>
+                  </div>
+                  <div className="rounded-lg bg-background/60 p-2.5">
+                    <div className="text-muted-foreground">B · n={num(abQ.data.arm_b?.n)}</div>
+                    <div className="font-semibold tabular-nums">{num(abQ.data.arm_b?.per_head, 2)} THB / {t('ma.studio_ab_perhead')}</div>
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground tabular-nums">
+                  {t('ma.studio_ab_lift')}: {abQ.data.b_vs_a?.lift_pct == null ? '—' : `${Number(abQ.data.b_vs_a.lift_pct) >= 0 ? '+' : ''}${num(abQ.data.b_vs_a.lift_pct, 1)}%`}
+                  {abQ.data.b_vs_a?.lift_ci_low_pct != null && abQ.data.b_vs_a?.lift_ci_high_pct != null &&
+                    ` [${num(abQ.data.b_vs_a.lift_ci_low_pct, 1)}%, ${num(abQ.data.b_vs_a.lift_ci_high_pct, 1)}%]`}
+                </div>
+              </div>
+            )}
+          </StateView>
+        )}
         <SoftNote hue="var(--chart-5)">{t('ma.studio_gens_note')}</SoftNote>
       </section>
     </div>

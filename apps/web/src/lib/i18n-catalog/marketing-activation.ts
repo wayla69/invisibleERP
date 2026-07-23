@@ -147,6 +147,9 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'ma.measured_no_baseline': { th: 'วัดแล้ว (กลุ่มควบคุมไม่มียอด)', en: 'measured (control earned nothing)' },
   'ma.measured_proven': { th: 'พิสูจน์แล้ว', en: 'proven' },
 
+  // ── Statistical honesty (docs/62 Phase 3) ──
+  'ma.weak_evidence': { th: 'หลักฐานยังอ่อน', en: 'weak evidence' },
+
   // ── ① AI Campaign Studio ──
   'ma.studio_heading': { th: 'ร่างแคมเปญจากข้อเท็จจริงของกลุ่ม', en: 'Draft a campaign from the segment’s facts' },
   'ma.studio_stage': { th: 'สร้างดราฟต์แคมเปญ', en: 'Create campaign draft' },
@@ -168,6 +171,13 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
     th: 'ทุกการร่างบันทึก fact sheet + พรอมป์ + โมเดล + ผลลัพธ์ไว้เป็นหลักฐาน — ตรวจย้อนได้เสมอ',
     en: 'Every generation logs its fact sheet + prompt + model + output as evidence — always auditable',
   },
+  // ── Studio A/B + TOWS tone (docs/62 Phase 3) ──
+  'ma.studio_tone': { th: 'โทนกลยุทธ์ (TOWS)', en: 'strategic tone (TOWS)' },
+  'ma.studio_variant_b': { th: 'ข้อความแบบ B', en: 'Variant B' },
+  'ma.studio_variant_b_note': { th: 'มุมสร้างสรรค์ที่สอง — แบ่งส่งอัตโนมัติ 50/50 ต่อคนแบบคงที่เมื่อสร้างดราฟต์', en: 'A second creative angle — staged on a deterministic 50/50 per-member split' },
+  'ma.studio_ab_heading': { th: 'ผล A/B จากยอดขายจริง', en: 'A/B outcome on real revenue' },
+  'ma.studio_ab_perhead': { th: 'คน', en: 'head' },
+  'ma.studio_ab_lift': { th: 'B เทียบ A', en: 'B vs A' },
 
   // ── ④ Churn-Save Autopilot ──
   'ma.save_policy_heading': { th: 'กติกาข้อเสนอ', en: 'Save-offer policy' },
