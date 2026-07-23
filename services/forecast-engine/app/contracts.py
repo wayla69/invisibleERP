@@ -46,12 +46,22 @@ class SeriesRegressor(BaseModel):
     price: Optional[float] = Field(default=None, ge=0)  # effective/planned unit price that day
 
 
+class WarmStart(BaseModel):
+    """docs/59 D2 — a previously fitted Prophet state the API cached. The engine reuses `params` ONLY
+    when `fit_hash` matches the current training window's hash (skips the cmdstan refit), else it
+    refits and returns fresh fitted_state. Additive/optional — absent ⇒ cold-fit as before."""
+
+    params: str = Field(min_length=1)  # serialized fitted model (prophet.serialize.model_to_json)
+    fit_hash: str = Field(min_length=1)  # hash over the training window; mismatch ⇒ refit
+
+
 class SeriesInput(BaseModel):
     series_id: str = Field(min_length=1)
     history: list[DemandPoint] = Field(min_length=1)
     class_hint: Literal["auto", "smooth", "intermittent", "lumpy", "short"] = "auto"
     regressors: Optional[list[SeriesRegressor]] = None  # A1: dense over history∪horizon
     analog_of: Optional[list[str]] = None  # A4 (reserved): donor series_ids for a zero-history sku
+    warm_start: Optional[WarmStart] = None  # D2: reuse a cached Prophet fit; refit on fit_hash mismatch
 
 
 class HierarchyNode(BaseModel):
@@ -105,6 +115,16 @@ class Attribution(BaseModel):
     regressors_used: list[str] = Field(default_factory=list)  # subset of promo|price|payday|analog|cross
 
 
+class FittedState(BaseModel):
+    """docs/59 D2 — the fitted Prophet state a run produced, for the API to persist to scm_model_cache.
+    Returned ONLY when the engine (re)fit (Prophet path, warm-start miss/absent); absent on a warm-start
+    hit and on the non-Prophet models."""
+
+    params: str = Field(min_length=1)
+    fit_hash: str = Field(min_length=1)
+    fit_wape: Optional[float] = None  # this fit's holdout WAPE (the D4 degradation baseline)
+
+
 class ForecastSeriesResult(BaseModel):
     # `model` is contract vocabulary, not a pydantic-reserved word — silence the namespace warning.
     model_config = ConfigDict(protected_namespaces=())
@@ -117,6 +137,7 @@ class ForecastSeriesResult(BaseModel):
     sample_paths: list[list[float]]
     accuracy: Accuracy
     attribution: Optional[Attribution] = None  # A1
+    fitted_state: Optional[FittedState] = None  # D2: present ⇔ the engine (re)fit a Prophet model
 
 
 class EngineItemError(BaseModel):

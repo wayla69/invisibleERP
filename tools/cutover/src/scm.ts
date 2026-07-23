@@ -49,7 +49,7 @@ const dayStr = (back: number) => ymd(new Date(Date.now() - back * 86400_000));
 
 /** In-process engine stub: verifies our HMAC, then answers with contract-valid canned data. */
 function startEngineStub(secret: string) {
-  const state = { signed: 0, rejected: 0, forecasts: 0, optimizes: 0, reconRequests: 0, reconCoherent: false };
+  const state = { signed: 0, rejected: 0, forecasts: 0, optimizes: 0, reconRequests: 0, reconCoherent: false, warmHits: 0, fitsReturned: 0 };
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c) => chunks.push(c));
@@ -91,9 +91,16 @@ function startEngineStub(secret: string) {
             : [];
           const eps = prices.length >= 2 ? -1.2 : null;
           const used = ['payday', ...(hasPromo ? ['promo'] : []), ...(prices.length ? ['price'] : [])];
+          // D2: a deterministic fingerprint of the training window (stable across runs with unchanged
+          // history) mirrors the real engine's fit_hash. A shipped warm_start whose hash still matches ⇒
+          // a HIT (skip the "fit", no fitted_state, no fresh WAPE); else a (re)fit returns fitted_state.
+          const hist: any[] = Array.isArray(ser.history) ? ser.history : [];
+          const fitHash = `${hist.length}:${hist[hist.length - 1]?.ds ?? ''}:${hist.reduce((a: number, p: any) => a + (p.y || 0), 0)}`;
+          const warmHit = !!ser.warm_start && ser.warm_start.fit_hash === fitHash;
+          if (warmHit) state.warmHits++; else state.fitsReturned++;
           return {
             series_id: ser.series_id, model: 'prophet', points, sample_paths: flatPaths(),
-            accuracy: { wape: 0.12, cutoffs: 1 },
+            accuracy: { wape: warmHit ? null : 0.12, cutoffs: warmHit ? 0 : 1 },
             attribution: {
               promo_uplift_pct: hasPromo ? 0.3 : null,
               price_elasticity: eps,
@@ -101,6 +108,7 @@ function startEngineStub(secret: string) {
               elasticity_n_obs: prices.length ? 40 : 0,
               regressors_used: used,
             },
+            ...(warmHit ? {} : { fitted_state: { params: '{"stub":"prophet-fit"}', fit_hash: fitHash, fit_wape: 0.12 } }),
           };
         });
         // C2: bottom-up reconcile the requested forest — leaves unchanged, an aggregate = Σ children.
@@ -821,6 +829,42 @@ async function main() {
   ok('B2 cross-tenant: T2 cannot read HQ network plan (404) + sees 0 in its list',
     netCross.status === 404 && (netListB.json?.length ?? 0) === 0,
     `crossStatus=${netCross.status} t2plans=${netListB.json?.length}`);
+
+  // ════════════════════════ docs/59 D2 — warm-start / model registry ════════════════════════
+  // A prophet (re)fit persists to scm_model_cache; a run inside the refit cadence ships the cached fit
+  // as warm_start so the engine reuses it (skips the cmdstan refit); a fit older than the cadence forces
+  // a refit. The cache is fully tenant-scoped. Re-point at the still-running stub (the fallback test at
+  // §19 cleared the engine env).
+  process.env.SCM_ENGINE_URL = engine.url;
+  process.env.SCM_ENGINE_SECRET = ENGINE_SECRET;
+  const primeRun = await inj('POST', '/api/scm-planning/run', tPlanner, {});
+  const cacheRows = await db.select().from(s.scmModelCache).where(eq(s.scmModelCache.tenantId, hq));
+  ok('D2 a prophet fit persists to scm_model_cache (per branch/item, with fit_hash + serialized params)',
+    primeRun.status === 201 && cacheRows.length > 0 && cacheRows.every((r: any) => r.model === 'prophet' && !!r.fitHash && !!r.fitParams),
+    `run=${primeRun.status} rows=${cacheRows.length}`);
+
+  // Reuse: a second run within the cadence ships the cached fit and the engine reports a warm hit.
+  const hitsBefore = engine.state.warmHits;
+  const reuseRun = await inj('POST', '/api/scm-planning/run', tPlanner, {});
+  ok('D2 warm-start reuse — a run inside the cadence ships the cached fit (engine reports a warm hit)',
+    reuseRun.status === 201 && engine.state.warmHits > hitsBefore,
+    `status=${reuseRun.status} warmHits ${hitsBefore}→${engine.state.warmHits}`);
+
+  // Cadence guard (fail-safe toward refit): age every cached fit beyond the default 14-day cadence →
+  // the next run must NOT warm-start; the engine refits instead.
+  await db.update(s.scmModelCache).set({ fittedAt: new Date(Date.now() - 30 * 86_400_000) }).where(eq(s.scmModelCache.tenantId, hq));
+  const hitsAtStale = engine.state.warmHits;
+  const fitsAtStale = engine.state.fitsReturned;
+  const staleRun = await inj('POST', '/api/scm-planning/run', tPlanner, {});
+  ok('D2 cadence guard — a fit older than refit_cadence_days is not reused (forces a refit)',
+    staleRun.status === 201 && engine.state.warmHits === hitsAtStale && engine.state.fitsReturned > fitsAtStale,
+    `warmHits ${hitsAtStale}(unchanged) fitsReturned ${fitsAtStale}→${engine.state.fitsReturned}`);
+
+  // Cross-tenant boundary (mandatory): T2 owns none of HQ's cached fits.
+  const t2Cache = await db.select().from(s.scmModelCache).where(eq(s.scmModelCache.tenantId, t2));
+  ok('D2 cross-tenant: T2 owns 0 of HQ scm_model_cache rows (tenant-scoped registry)',
+    t2Cache.length === 0 && cacheRows.length > 0,
+    `t2=${t2Cache.length} hq=${cacheRows.length}`);
 
   await app.close();
   await engine.close();

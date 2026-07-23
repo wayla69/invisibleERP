@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from conftest import daily_history
 
-from app.contracts import HolidayEvent, SeriesInput
+from app.contracts import HolidayEvent, SeriesInput, WarmStart
 from app.forecasting import (
     build_frame,
     croston_sba_paths,
@@ -311,3 +311,48 @@ def test_stockout_days_excluded_from_elasticity():
     reg = build_regctx(s, promo_regressor=True, price_regressor=True)
     eps, r2, n = estimate_elasticity(s, reg)
     assert n == len(s.history) - 1
+
+
+# ── docs/59 D2 — warm-start / model registry ───────────────────────────────────
+# The engine fits Prophet deterministically (MAP/L-BFGS) and reseeds numpy right before sampling, so a
+# serialized fit reused on an UNCHANGED training window must reproduce the cold fit byte-for-byte. These
+# need a real prophet wheel (importorskip); CI installs it.
+
+
+def test_warm_start_cold_fit_returns_fitted_state():
+    pytest.importorskip("prophet")
+    out = run(series(days=120))
+    assert out.model == "prophet"
+    assert out.fitted_state is not None  # a fresh fit ships its serialized state for the API to cache
+    assert out.fitted_state.params and out.fitted_state.fit_hash
+    assert out.fitted_state.fit_wape is not None  # 120 days ≥ BACKTEST_MIN_DAYS ⇒ a holdout WAPE baseline
+
+
+def test_warm_start_reproduces_cold_fit_byte_identical():
+    pytest.importorskip("prophet")
+    cold = run(series(days=120))
+    assert cold.fitted_state is not None
+    warm = run(series(days=120, warm_start=WarmStart(params=cold.fitted_state.params, fit_hash=cold.fitted_state.fit_hash)))
+    assert warm.fitted_state is None  # a HIT reuses the cache — nothing new to persist
+    assert warm.sample_paths == cold.sample_paths  # reuse ≡ cold fit, byte-for-byte (determinism gate)
+
+
+def test_warm_start_refits_on_training_window_change():
+    pytest.importorskip("prophet")
+    cold = run(series(days=120))
+    assert cold.fitted_state is not None
+    # A changed training window (one more day, so every dated row differs) recomputes to a different
+    # fit_hash than the cached one ⇒ the stale warm-start is ignored and the series refits.
+    changed = run(series(days=121, warm_start=WarmStart(params=cold.fitted_state.params, fit_hash=cold.fitted_state.fit_hash)))
+    assert changed.fitted_state is not None  # a refit happened
+    assert changed.fitted_state.fit_hash != cold.fitted_state.fit_hash
+
+
+def test_warm_start_corrupt_cache_falls_back_to_fit():
+    pytest.importorskip("prophet")
+    cold = run(series(days=120))
+    assert cold.fitted_state is not None
+    # Same window (hash matches) but unparseable params ⇒ the reconstruct fails closed to a fresh fit.
+    out = run(series(days=120, warm_start=WarmStart(params="{not-prophet-json}", fit_hash=cold.fitted_state.fit_hash)))
+    assert out.model == "prophet"
+    assert out.fitted_state is not None  # refit, not a crash

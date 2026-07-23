@@ -54,12 +54,25 @@ export const zSeriesRegressor = z.object({
 });
 export type ScmSeriesRegressor = z.infer<typeof zSeriesRegressor>;
 
+// docs/59 D2 — warm-start / model registry. The API may ship a series' previously fitted Prophet state
+// (serialized) so the engine SKIPS the cmdstan refit when the training window is unchanged. Additive +
+// optional: absent ⇒ the engine cold-fits exactly as before (byte-identical), so an old engine that
+// ignores it simply refits — no version bump, no hard break on a rolling deploy. The engine reuses
+// `params` ONLY when `fit_hash` matches the current window's hash, else it refits and returns fresh
+// `fitted_state` (below) for the API to persist. Opaque to the API — do not parse `params`.
+export const zWarmStart = z.object({
+  params: z.string().min(1), // serialized fitted model (prophet.serialize.model_to_json)
+  fit_hash: z.string().min(1), // hash over the training window the params were fit on; mismatch ⇒ refit
+});
+export type ScmWarmStart = z.infer<typeof zWarmStart>;
+
 export const zSeriesInput = z.object({
   series_id: z.string().min(1), // opaque to the engine; the API maps it back to (branch, menu sku)
   history: z.array(zDemandPoint).min(1), // dense daily series, ascending, zeros filled on open days
   class_hint: z.enum(['auto', 'smooth', 'intermittent', 'lumpy', 'short']).default('auto'),
   regressors: z.array(zSeriesRegressor).optional(), // A1: dense over history∪horizon
   analog_of: z.array(z.string()).optional(), // A4 (reserved): donor series_ids for a zero-history sku
+  warm_start: zWarmStart.optional(), // D2: reuse a cached Prophet fit; engine refits on fit_hash mismatch
 });
 export type ScmSeriesInput = z.infer<typeof zSeriesInput>;
 
@@ -124,6 +137,16 @@ export const zForecastSeriesResult = z.object({
     elasticity_r2: z.number().nullable().optional(),
     elasticity_n_obs: z.number().int().nullable().optional(),
     regressors_used: z.array(z.enum(['promo', 'price', 'payday', 'analog', 'cross'])).default([]),
+  }).optional(),
+  // docs/59 D2 — the fitted Prophet state THIS run produced, returned ONLY when the engine (re)fit
+  // (Prophet path, on a warm-start miss or when no warm_start was shipped). The API persists it to
+  // scm_model_cache keyed by the series' training window so the next stable run can warm-start. Absent
+  // on a warm-start HIT (nothing new to persist) and on the non-Prophet models (croston/bootstrap/
+  // baseline_dow carry no stan fit). `fit_wape` is this fit's holdout WAPE — the D4 degradation baseline.
+  fitted_state: z.object({
+    params: z.string().min(1),
+    fit_hash: z.string().min(1),
+    fit_wape: z.number().nullable(),
   }).optional(),
 });
 export type ScmForecastSeriesResult = z.infer<typeof zForecastSeriesResult>;
