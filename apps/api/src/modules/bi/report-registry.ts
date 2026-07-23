@@ -51,6 +51,8 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   scm_batch_retrain: { label: 'เทรนโมเดลซัพพลายเชนใหม่ (แบตช์)', labelEn: 'Supply-chain batch retrain' },
   scm_spike_scan: { label: 'ตรวจจับดีมานด์พุ่ง', labelEn: 'Demand-spike scan' },
   scm_plan_summary: { label: 'สรุปแผนสั่งซื้อรออนุมัติ', labelEn: 'Supply-chain plan summary' },
+  scm_accuracy_refresh: { label: 'ตรวจสอบความแม่นยำพยากรณ์', labelEn: 'Forecast-accuracy refresh' },
+  scm_forecast_accuracy: { label: 'แนวโน้มความแม่นยำพยากรณ์', labelEn: 'Forecast-accuracy trend' },
   // docs/50 Wave 1 A2 — release stock reservations held past their TTL (filters: { max_age_days }, default 30).
   reservation_stale_release: { label: 'ปล่อยการจองสต๊อกที่ค้างเกินกำหนด', labelEn: 'Release stale stock reservations' },
   // docs/50 Wave 2 B3 — period-end STAGING jobs (auto-Draft; posting stays maker-checker).

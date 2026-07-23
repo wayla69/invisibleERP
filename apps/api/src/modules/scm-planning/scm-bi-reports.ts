@@ -3,9 +3,10 @@ import type { BiReportGenerator, BiReportSource } from '../bi/report-registry';
 import type { JwtUser } from '../../common/decorators';
 import { ymd } from '../../database/queries';
 import { JobQueueService } from '../jobs/job-queue.service';
+import { ScmAccuracyService } from './scm-accuracy.service';
 import { ScmPlanningService } from './scm-planning.service';
 import { ScmSpikeService } from './scm-spike.service';
-import { SCM_BATCH_RETRAIN_JOB, SCM_NIGHTLY_JOB } from './scm-planning.types';
+import { SCM_ACCURACY_REFRESH_JOB, SCM_BATCH_RETRAIN_JOB, SCM_NIGHTLY_JOB } from './scm-planning.types';
 
 // docs/54 §5 — cadence. These ride the BI report scheduler exactly like ar_collections_dunning:
 // a tenant subscribes at a frequency, the cross-tenant sweep (bi-schedule runDueAllAsync) enqueues
@@ -18,6 +19,7 @@ export class ScmBiReports implements BiReportSource {
     private readonly planning: ScmPlanningService,
     private readonly spikes: ScmSpikeService,
     private readonly jobs: JobQueueService,
+    private readonly accuracy: ScmAccuracyService,
   ) {}
 
   biReports(): BiReportGenerator[] {
@@ -91,6 +93,37 @@ export class ScmBiReports implements BiReportSource {
             },
             summary: `${pending.plans.length} plan(s) awaiting approval (฿${Math.round(value).toLocaleString()}), ${spikes.spikes.length} open demand spike(s)`,
             summaryTh: `มีแผนรออนุมัติ ${pending.plans.length} รายการ (฿${Math.round(value).toLocaleString()}) และดีมานด์พุ่งที่ยังไม่จัดการ ${spikes.spikes.length} รายการ`,
+          };
+        },
+      },
+      {
+        // docs/59 D4 (SCM-07) ACTION job: reconcile realized forecast accuracy + raise drift alerts.
+        type: SCM_ACCURACY_REFRESH_JOB,
+        generate: async (_filters: unknown, user: JwtUser) => {
+          const jobId = await this.jobs.enqueue({
+            jobType: SCM_ACCURACY_REFRESH_JOB,
+            payload: { as_of: ymd() },
+            tenantId: user.tenantId ?? null,
+            actor: user.username,
+          });
+          return {
+            data: { job_id: jobId, as_of: ymd() },
+            summary: `Forecast-accuracy refresh queued (job ${jobId})`,
+            summaryTh: `เข้าคิวตรวจสอบความแม่นยำพยากรณ์แล้ว (งาน ${jobId})`,
+          };
+        },
+      },
+      {
+        // docs/59 D4 (SCM-07) READ-ONLY digest: per-(branch,item) realized WAPE/bias trend + currently
+        // degraded items — schedulable for LINE/email like scm_plan_summary. The drift teeth live in the
+        // refresh job; this surfaces the state for a human.
+        type: 'scm_forecast_accuracy',
+        generate: async (_filters: unknown, user: JwtUser) => {
+          const d = await this.accuracy.digest(user.tenantId ?? null);
+          return {
+            data: d,
+            summary: `Forecast accuracy: ${d.degraded} degraded series, avg realized WAPE ${d.avg_wape != null ? (d.avg_wape * 100).toFixed(1) + '%' : 'n/a'}`,
+            summaryTh: `ความแม่นยำพยากรณ์: มีชุดข้อมูลเสื่อม ${d.degraded} รายการ, WAPE เฉลี่ย ${d.avg_wape != null ? (d.avg_wape * 100).toFixed(1) + '%' : 'ไม่มีข้อมูล'}`,
           };
         },
       },

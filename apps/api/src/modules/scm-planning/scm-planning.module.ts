@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DemandMlModule } from '../demand-ml/demand-ml.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ProcurementModule } from '../procurement/procurement.module';
+import { ScmAccuracyService } from './scm-accuracy.service';
 import { ScmApprovalQueues } from './scm-approval-queues';
 import { ScmBiReports } from './scm-bi-reports';
 import { ScmEngineClientService } from './scm-engine-client.service';
@@ -25,6 +26,7 @@ import { ScmSpikeService } from './scm-spike.service';
   controllers: [ScmPlanningController],
   providers: [
     ScmLiveService,
+    ScmAccuracyService,
     ScmEngineClientService,
     ScmPlanningService,
     ScmSpikeService,

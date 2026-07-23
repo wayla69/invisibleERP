@@ -20,6 +20,7 @@ import { ScmExtractService } from './scm-extract.service';
 import { ScmHierarchyService, type HierAxis, type HierDeclareDto } from './scm-hierarchy.service';
 import { ScmElasticityService } from './scm-elasticity.service';
 import { ScmCrossElasticityService } from './scm-cross-elasticity.service';
+import { ScmAccuracyService } from './scm-accuracy.service';
 import { ScmLiveService, type ScmLiveEvent } from './scm-live.service';
 import { ScmFallbackPlanner } from './scm-planner';
 import { ScmRunService } from './scm-run.service';
@@ -47,6 +48,7 @@ export class ScmPlanningService {
     private readonly docNo: DocNumberService,
     private readonly statusLog: StatusLogService,
     private readonly live: ScmLiveService,
+    readonly accuracy: ScmAccuracyService,
   ) {
     this.extract = new ScmExtractService(db);
     this.hierarchy = new ScmHierarchyService(db);
@@ -57,6 +59,9 @@ export class ScmPlanningService {
       db, this.extract, engine, this.fallback, docNo, statusLog,
       (tenantId, type, extra) => this.emit(tenantId, type, extra),
       this.elasticity, this.cross,
+      // docs/59 D4 (SCM-07) — force-refit the (branch, item) series flagged degraded by accuracy
+      // monitoring: drop their warm-start so the engine refits on this batch (closing the drift loop).
+      (tenantId, branchId, itemIds) => this.accuracy.degradedItems(tenantId, branchId, itemIds),
     );
   }
 

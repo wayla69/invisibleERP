@@ -40,6 +40,8 @@ export class ScmRunService {
     private readonly emit: (tenantId: number | null, type: 'scm_run_completed' | 'scm_run_failed', extra: Record<string, unknown>) => void,
     private readonly elasticity: ScmElasticityService,
     private readonly cross: ScmCrossElasticityService,
+    // docs/59 D4 (SCM-07) — (branch, item) keys flagged degraded by accuracy monitoring, force-refit here.
+    private readonly degradedLookup?: (tenantId: number | null, branchId: number | null, itemIds: string[]) => Promise<Set<string>>,
   ) {
     // docs/59 D2 — the model registry (warm-start read/persist). Built from db in the ctor body so the
     // facade's positional ctor (goldenmaster contract) is untouched; a distinct concern from the run.
@@ -252,6 +254,12 @@ export class ScmRunService {
       const warmByItem = fromPersisted ? new Map() : await this.modelCache.loadWarmStarts(
         tenantId, branchId, branchSeries.map((s) => s.itemId), data.settings.refit_cadence_days,
       );
+      // docs/59 D4 (SCM-07) — a series flagged degraded by accuracy monitoring is force-refit: drop its
+      // warm-start so the engine cold-fits it this batch (a stale/drifted model can't perpetuate itself).
+      if (!fromPersisted && this.degradedLookup && warmByItem.size) {
+        const degraded = await this.degradedLookup(tenantId, branchId, branchSeries.map((s) => s.itemId));
+        for (const itemId of degraded) warmByItem.delete(itemId);
+      }
       const windowByItem = new Map(branchSeries.map((s) => [s.itemId, s]));
       // docs/56 A4 — a too-new series borrows the pooled shape of established same-branch siblings.
       const donorsByItem = fromPersisted ? new Map<string, string[]>() : analogDonors(branchSeries);
