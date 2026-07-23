@@ -170,6 +170,12 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // GET /api/bi/mmm-summary.
   mmm_run: { label: 'รันโมเดล Marketing Mix (MMM)', labelEn: 'Run Marketing Mix Model (MMM)' },
   mmm_summary: { label: 'สรุปผล Marketing Mix (ROI ต่อช่องทาง)', labelEn: 'Marketing Mix summary (channel ROI)' },
+  // docs/62 Phase 1 — marketing autopilot cadence. Scheduled "action" jobs over the docs/61 activation
+  // tools: auto-STAGE only (activation/approval stays the human maker-checker act — SoD unchanged) and
+  // auto-MEASURE (a read). Idempotent: one auto-staged item in flight per job; elapsed windows measure once.
+  mkt_nba_autostage: { label: 'จัดแผน NBA อัตโนมัติ (รอเปิดใช้งาน)', labelEn: 'Auto-stage NBA journey (awaits activation)' },
+  mkt_save_autostage: { label: 'จัดรอบรักษาลูกค้าอัตโนมัติ (ตามนโยบาย)', labelEn: 'Auto-stage churn-save sweep (per policy)' },
+  mkt_measure_windows: { label: 'วัดผลการตลาดเมื่อครบกำหนด (lift จริง)', labelEn: 'Measure elapsed marketing windows (realized lift)' },
 };
 export const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 

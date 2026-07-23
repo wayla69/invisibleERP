@@ -1323,6 +1323,61 @@ async function main() {
   const mNbaCell = (mRoi.json.cells ?? []).find((c: any) => c.segment === 'NbaSeg');
   ok('Measure ⑤: the realized journey lift feeds back into the Segment×Channel ROI ranking (measured+mmm)', mRoi.status === 200 && mRoi.json.recommendation_basis === 'measured+mmm' && mNbaCell != null && Number(mNbaCell.lift_pct) === 900 && Number(mNbaCell.lift_multiplier) === 10, `basis=${mRoi.json.recommendation_basis} cell=${JSON.stringify({ lift: mNbaCell?.lift_pct, mult: mNbaCell?.lift_multiplier })}`);
 
+  // ── Marketing Activation — docs/62 Phase 1: AUTOPILOT CADENCE + ACTION CENTER (no new control; the
+  //    scheduled jobs only ever act as the MAKER — activation/approval stays human maker-checker; the
+  //    GOV-01 queues + the action center surface the waiting acts). Fixtures already pending at this
+  //    point: journey nbaStage2 (Pending), policy savePol2 (Pending), budget plan scStage2 (Pending). ──
+  // GOV-01: the marketing queues auto-append to the pending-approvals monitor.
+  const mktGov = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Autopilot GOV-01: a Pending NBA journey surfaces in the pending-approvals monitor (MKT-22)', mktGov.status === 200 && (mktGov.json.items ?? []).some((i: any) => i.type === 'mi_nba_journey' && i.control === 'MKT-22' && i.ref === nbaStage2.json.journey_no), `n=${(mktGov.json.items ?? []).length}`);
+  ok('Autopilot GOV-01: a Pending save-offer policy surfaces (MKT-24)', (mktGov.json.items ?? []).some((i: any) => i.type === 'mi_save_policy' && i.control === 'MKT-24' && i.ref === savePol2.json.policy_no), `${JSON.stringify((mktGov.json.items ?? []).filter((i: any) => i.type === 'mi_save_policy').map((i: any) => i.ref))}`);
+  ok('Autopilot GOV-01: a Pending marketing budget plan surfaces with its amount (MKT-17)', (mktGov.json.items ?? []).some((i: any) => i.type === 'mi_budget_plan' && i.control === 'MKT-17' && i.ref === scStage2.json.plan_no && Number(i.amount) === 50000), `${JSON.stringify((mktGov.json.items ?? []).filter((i: any) => i.type === 'mi_budget_plan').map((i: any) => [i.ref, i.amount]))}`);
+
+  // The action center: one "what needs me now" worklist, marketing/exec-gated.
+  const mktCenter = await inj('GET', '/api/marketing-activation/action-center', cf2admin);
+  ok('ActionCenter: lists the waiting acts (pending journey + pending policy + pending budget plan), severity-ranked', mktCenter.status === 200 && (mktCenter.json.items ?? []).some((i: any) => i.kind === 'journey_pending' && i.ref === nbaStage2.json.journey_no) && (mktCenter.json.items ?? []).some((i: any) => i.kind === 'save_policy_pending') && (mktCenter.json.items ?? []).some((i: any) => i.kind === 'budget_plan_pending' && i.ref === scStage2.json.plan_no), `n=${mktCenter.json.count} kinds=${[...new Set((mktCenter.json.items ?? []).map((i: any) => i.kind))].join(',')}`);
+  const mktCenterForbidden = await inj('GET', '/api/marketing-activation/action-center', token2);
+  ok('ActionCenter: a non-marketing/exec principal is refused (403)', mktCenterForbidden.status === 403, `${mktCenterForbidden.status}`);
+
+  // mkt_nba_autostage: stages ONE journey attributed "(auto)"; a re-run keeps one in flight (idempotent).
+  const autoNbaSub = await inj('POST', '/api/bi/subscriptions', cf2admin, { name: 'auto nba', report_type: 'mkt_nba_autostage', frequency: 'daily', filters: { segment: 'NbaSeg', control_pct: 0.5 } });
+  const autoNbaRun1 = await inj('POST', `/api/bi/subscriptions/${autoNbaSub.json.id}/run`, cf2admin, {});
+  const autoJourneys1 = (await db.select().from(s.miJourneys)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ②: the scheduled job stages a journey attributed "(auto)" — awaiting HUMAN activation', (autoNbaRun1.status === 200 || autoNbaRun1.status === 201) && autoNbaRun1.json.status === 'success' && autoJourneys1.length === 1 && autoJourneys1[0]!.status === 'Pending', `${autoNbaRun1.status} auto=${autoJourneys1.length} ${autoJourneys1[0]?.journeyNo}`);
+  await inj('POST', `/api/bi/subscriptions/${autoNbaSub.json.id}/run`, cf2admin, {});
+  const autoJourneys2 = (await db.select().from(s.miJourneys)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ②: a re-run stages NOTHING while one auto journey is in flight (one-in-flight idempotency)', autoJourneys2.length === 1, `auto=${autoJourneys2.length}`);
+
+  // A human activates the machine-staged journey — SOD is structurally clean (maker is the scheduler).
+  const autoJourneyNo = String(autoJourneys1[0]!.journeyNo);
+  const autoActivate = await inj('POST', '/api/marketing-activation/nba/activate', cf2ex, { journey_no: autoJourneyNo });
+  ok('Autopilot ②: a human activates the auto-staged journey with NO SOD trip (machine maker ≠ human checker)', (autoActivate.status === 200 || autoActivate.status === 201) && autoActivate.json.status === 'Active', `${autoActivate.status} ${autoActivate.json.status ?? autoActivate.json.error?.code}`);
+  const mktGovAfter = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Autopilot GOV-01: the activated journey CLEARS from the pending queue (surface-then-clear)', (mktGovAfter.json.items ?? []).every((i: any) => !(i.type === 'mi_nba_journey' && i.ref === autoJourneyNo)), `${JSON.stringify((mktGovAfter.json.items ?? []).filter((i: any) => i.type === 'mi_nba_journey').map((i: any) => i.ref))}`);
+
+  // mkt_measure_windows: pin the auto journey's arms (fixture determinism), backdate its window, then the
+  // scheduled job measures it — measured_by carries the "(auto)" evidence marker; a re-run measures 0.
+  const autoJRow = (await db.select().from(s.miJourneys)).find((r: any) => r.journeyNo === autoJourneyNo);
+  const autoJTargets = (await db.select().from(s.miJourneyTargets)).filter((t: any) => Number(t.journeyId) === Number(autoJRow?.id) && !t.suppressed).sort((a: any, b: any) => Number(a.memberId) - Number(b.memberId));
+  await db.update(s.miJourneyTargets).set({ arm: 'treatment' }).where(eq(s.miJourneyTargets.id, Number(autoJTargets[0]!.id)));
+  await db.update(s.miJourneyTargets).set({ arm: 'control' }).where(eq(s.miJourneyTargets.id, Number(autoJTargets[1]!.id)));
+  await db.update(s.miJourneys).set({ targetCount: 1, controlCount: 1, measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miJourneys.id, Number(autoJRow!.id)));
+  const measureSub = await inj('POST', '/api/bi/subscriptions', cf2admin, { name: 'auto measure', report_type: 'mkt_measure_windows', frequency: 'daily' });
+  const measureRun1 = await inj('POST', `/api/bi/subscriptions/${measureSub.json.id}/run`, cf2admin, {});
+  const autoJAfter = (await db.select().from(s.miJourneys)).find((r: any) => r.journeyNo === autoJourneyNo);
+  ok('Autopilot measure: the scheduled job measures the elapsed window (measured_by carries "(auto)")', measureRun1.json.status === 'success' && /Measured 1 journey/.test(measureRun1.json.summary ?? '') && autoJAfter?.measuredAt != null && String(autoJAfter?.measuredBy ?? '').endsWith('(auto)'), `${measureRun1.json.summary} by=${autoJAfter?.measuredBy}`);
+  const measureRun2 = await inj('POST', `/api/bi/subscriptions/${measureSub.json.id}/run`, cf2admin, {});
+  ok('Autopilot measure: a re-run measures NOTHING (windows measure exactly once)', /Measured 0 journey\(s\) \+ 0 save run/.test(measureRun2.json.summary ?? ''), `${measureRun2.json.summary}`);
+
+  // mkt_save_autostage: with the Active policy it stages one "(auto)" run; a re-run keeps one in flight.
+  const autoSaveSub = await inj('POST', '/api/bi/subscriptions', cf2admin, { name: 'auto save', report_type: 'mkt_save_autostage', frequency: 'weekly', filters: { control_pct: 0.5 } });
+  const autoSaveRun1 = await inj('POST', `/api/bi/subscriptions/${autoSaveSub.json.id}/run`, cf2admin, {});
+  const autoRuns1 = (await db.select().from(s.miSaveRuns)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ④: the scheduled job stages a save run attributed "(auto)" under the APPROVED policy', autoSaveRun1.json.status === 'success' && autoRuns1.length === 1, `${autoSaveRun1.json.summary} auto=${autoRuns1.length}`);
+  await inj('POST', `/api/bi/subscriptions/${autoSaveSub.json.id}/run`, cf2admin, {});
+  const autoRuns2 = (await db.select().from(s.miSaveRuns)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ④: a re-run stages NOTHING while the auto run is unmeasured (one-in-flight idempotency)', autoRuns2.length === 1, `auto=${autoRuns2.length}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
