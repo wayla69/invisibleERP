@@ -41,12 +41,17 @@ The gap is a **unified fact view + five action tools** that read it. That is thi
 
 ---
 
-## Foundation — the Marketing Fact Layer (shared, read-only)
+## Foundation — the Marketing Fact Layer (shared, read-only) — **DELIVERED** (Phase 0)
 A single read-only aggregator (`modules/marketing-activation/fact-layer.service.ts`) that assembles, per
 customer and per segment, the facts above **through owning-module read APIs** (no joins) into one
 governed shape every tool consumes. It computes nothing new — it *composes* existing signals — so all five
 tools speak the same facts and never drift out of sync. Endpoints: `GET …/facts/customer/:code`,
-`GET …/facts/segment/:segment`. Tenant-scoped (RLS). This is built first; the tools layer on top.
+`GET …/facts/segment/:segment` (`@Permissions('marketing','exec')`). Tenant-scoped (RLS) — reads
+`customer_profiles` (the marketing-intel `mi_*` scores) + `pos_members` in **separate** queries (no
+cross-domain SQL join, arch rule 3) and reuses `MarketingIntelService.getSummary` for the pushed MMM
+channel-ROI. A pure read model — no migration, no GL, no contact, no new RCM control (it reuses the
+existing tenant-isolation controls); the `marketing_opt_in` fact is surfaced so every tool that layers on
+top can honour consent. Built first; the tools layer on top. ToE: `cutover/ext.ts` (+5 checks).
 
 ---
 
@@ -151,4 +156,5 @@ PN-19 (+ PN-29 if a public surface is added) + user manual + UAT + RCM per tool.
 ## Revision history
 | Version | Date | Change |
 |---|---|---|
+| v0.2 | 2026-07-22 | **Phase 0 — Marketing Fact Layer DELIVERED.** New `modules/marketing-activation` (`fact-layer.service.ts` + controller + module, wired into `sales-crm-domain.module.ts`): read-only `GET /api/marketing-activation/facts/customer/:code` + `GET /api/marketing-activation/facts/segment/:segment` (`marketing`/`exec`), composing `customer_profiles` (`mi_*` CLV/churn/NBA) + `pos_members` (identity, tier, `marketing_opt_in`) in separate queries (no cross-domain join) and the pushed MMM channel-ROI via `MarketingIntelService.getSummary`. No migration, no GL, no new RCM control (reuses tenant isolation). ToE: `cutover/ext.ts` **+5** (customer fact sheet, 404 CUSTOMER_NOT_FOUND, segment roll-up with dominant NBA + best channel, tenant-scoped 404, 403 for a non-marketing principal) — all 361 pass. |
 | v0.1 | 2026-07-22 | Initial 5-tool activation roadmap + shared Fact Layer (③ propensity · ⑤ segment-ROI · ② NBA orchestrator · ① AI campaign studio · ④ churn-save), controls MKT-21..25. |

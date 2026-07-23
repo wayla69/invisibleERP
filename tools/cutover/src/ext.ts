@@ -1091,6 +1091,25 @@ async function main() {
   // Reset governance OFF so it can't affect any later checks.
   await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: false });
 
+  // ── Marketing Activation — the shared FACT LAYER (docs/61 Phase 0). A read-only aggregator that composes
+  //    the CRM + Marketing-Intelligence facts every activation tool consumes. M-CF2A carries the pushed
+  //    Customer-Intelligence scores (mi_clv 8400.5 / mi_churn 0.72 / mi_nba WINBACK) from the CustIntel block. ──
+  const custFacts = await inj('GET', '/api/marketing-activation/facts/customer/M-CF2A', cf2admin);
+  ok('FactLayer: customer fact sheet composes CRM + MI facts (CLV/churn/NBA/opt-in) for a member', custFacts.status === 200 && custFacts.json.customer_no === 'M-CF2A' && custFacts.json.value?.clv_platform === 8400.5 && Math.abs(Number(custFacts.json.risk?.churn_risk_platform) - 0.72) < 1e-6 && custFacts.json.next_best_action === 'WINBACK' && custFacts.json.marketing_opt_in === true, `${custFacts.status} ${JSON.stringify({ clv: custFacts.json.value?.clv_platform, nba: custFacts.json.next_best_action })}`);
+  const custMissing = await inj('GET', '/api/marketing-activation/facts/customer/M-NOPE', cf2admin);
+  ok('FactLayer: an unknown customer → 404 CUSTOMER_NOT_FOUND', custMissing.status === 404 && custMissing.json.error?.code === 'CUSTOMER_NOT_FOUND', `${custMissing.status} ${custMissing.json.error?.code}`);
+
+  const segFacts = await inj('GET', `/api/marketing-activation/facts/segment/${encodeURIComponent('GovSeg')}`, cf2admin);
+  ok('FactLayer: segment fact sheet rolls up count + value + dominant NBA + best channel (from MMM)', segFacts.status === 200 && segFacts.json.segment === 'GovSeg' && segFacts.json.count >= 1 && segFacts.json.next_best_action?.dominant === 'WINBACK' && segFacts.json.best_channel?.channel != null, `${segFacts.status} ${JSON.stringify({ n: segFacts.json.count, dom: segFacts.json.next_best_action?.dominant, ch: segFacts.json.best_channel?.channel })}`);
+
+  // Tenant isolation: the fact layer is RLS-scoped — HQ's member is invisible to cf2 and vice-versa.
+  const custHqFromCf2 = await inj('GET', '/api/marketing-activation/facts/customer/M-HQA', cf2admin);
+  ok('FactLayer: tenant-scoped — cf2 cannot read HQ member M-HQA (404)', custHqFromCf2.status === 404, `${custHqFromCf2.status}`);
+
+  // A principal without marketing/exec is refused the fact surface.
+  const custForbidden = await inj('GET', '/api/marketing-activation/facts/customer/M-CF2A', token2);
+  ok('FactLayer: a non-marketing/exec principal is refused (403)', custForbidden.status === 403, `${custForbidden.status}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
