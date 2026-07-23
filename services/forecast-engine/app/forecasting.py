@@ -432,8 +432,49 @@ def estimate_elasticity(series: SeriesInput, reg: RegCtx) -> tuple[float | None,
     return round(eps, 4), round(r2, 4), n
 
 
-def _attribution(series: SeriesInput, points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool) -> Attribution:
+# ── docs/56 A4 — analog / zero-history cold-start ──────────────────────────────
+# A brand-new SKU has too little history to fit, but is rarely unlike everything. The API supplies donor
+# series_ids (`analog_of`, chosen by category + nearest attributes); the engine pools the donors' NORMALIZED
+# sample-path shapes (each divided by its own mean) and rescales by this SKU's own baseline seed (its
+# observed mean, else the donors' mean level). The borrowed forecast is flagged `analog` in
+# regressors_used so a reviewer sees it is borrowed, not observed. Deterministic given the donor results
+# and the per-series seeded RNG.
+
+
+def _analog_paths(
+    series: SeriesInput,
+    donors: dict[str, "ForecastSeriesResult"],
+    horizon: int,
+    k: int,
+    rng: np.random.Generator,
+    own_frame: "SeriesFrame",
+) -> np.ndarray | None:
+    donor_results = [donors[a] for a in (series.analog_of or []) if a in donors]
+    shapes: list[np.ndarray] = []
+    levels: list[float] = []
+    for d in donor_results:
+        arr = np.asarray(d.sample_paths, dtype=float)  # k × horizon (all series in a request share both)
+        if arr.ndim != 2 or arr.shape[1] != horizon or arr.size == 0:
+            continue
+        m = float(arr.mean())
+        if m <= 0:
+            continue
+        shapes.append(arr / m)  # unit-mean shape
+        levels.append(m)
+    if not shapes:
+        return None
+    pooled = np.vstack(shapes)  # (Σ donor scenarios) × horizon, each row a unit-mean donor path
+    idx = rng.choice(pooled.shape[0], size=k, replace=pooled.shape[0] < k)
+    own = own_frame.values[~own_frame.drop]
+    own_mean = float(np.mean(own)) if own.size else 0.0
+    seed = own_mean if own_mean > 0 else float(np.mean(levels))  # baseline level for the new SKU
+    return np.clip(pooled[idx] * seed, 0.0, None)
+
+
+def _attribution(series: SeriesInput, points: list[ForecastPoint], fut: list[dt.date], reg: RegCtx, payday: bool, analog: bool = False) -> Attribution:
     used: list[str] = (["payday"] if payday else []) + (["promo"] if reg.promo_on else []) + (["price"] if reg.price_on else [])
+    if analog:
+        used.append("analog")
     uplift_pct = None
     if reg.promo_on:
         promo = reg.promo_col(fut)
@@ -463,31 +504,42 @@ def forecast_series(
     rng: np.random.Generator,
     promo_regressor: bool = True,
     price_regressor: bool = True,
+    donors: dict[str, "ForecastSeriesResult"] | None = None,
 ) -> ForecastSeriesResult:
     frame = build_frame(series, closures)
     reg = build_regctx(series, promo_regressor, price_regressor)
-    cls = series.class_hint if series.class_hint != "auto" else classify(list(frame.values[~frame.drop]))
-    model = route(cls)
 
     acc = Accuracy(wape=None, cutoffs=0)
     fitted_state: FittedState | None = None  # D2: set only when Prophet (re)fit — persisted by the API
     applied_uplift = False  # Prophet learns the promo effect via add_regressor; others get the term
-    if model == "prophet":
-        try:
-            paths, acc, fitted_state = prophet_paths(
-                frame, holidays, horizon, k, payday_regressor, reg, rng, series.warm_start
-            )
-        except Exception:  # noqa: BLE001 — missing wheel, fit failure, too short: degrade, don't fail
-            model = "baseline_dow"
+    analog_used = False
+
+    # docs/56 A4 — a zero/low-history SKU with declared donors borrows their pooled shape (cold-start).
+    n_fit = int((~frame.drop).sum())
+    analog_paths = None
+    if series.analog_of and n_fit < MIN_PROPHET_DAYS and donors:
+        analog_paths = _analog_paths(series, donors, horizon, k, rng, frame)
+    if analog_paths is not None:
+        model, paths, analog_used = "baseline_dow", analog_paths, True
+    else:
+        cls = series.class_hint if series.class_hint != "auto" else classify(list(frame.values[~frame.drop]))
+        model = route(cls)
+        if model == "prophet":
+            try:
+                paths, acc, fitted_state = prophet_paths(
+                    frame, holidays, horizon, k, payday_regressor, reg, rng, series.warm_start
+                )
+            except Exception:  # noqa: BLE001 — missing wheel, fit failure, too short: degrade, don't fail
+                model = "baseline_dow"
+                paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
+        elif model == "croston_sba":
+            try:
+                paths, acc = croston_sba_paths(frame, horizon, k, rng)
+            except SeriesTooShort:
+                model = "baseline_dow"
+                paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
+        else:  # bootstrap | baseline_dow share the dow resampler
             paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
-    elif model == "croston_sba":
-        try:
-            paths, acc = croston_sba_paths(frame, horizon, k, rng)
-        except SeriesTooShort:
-            model = "baseline_dow"
-            paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
-    else:  # bootstrap | baseline_dow share the dow resampler
-        paths, acc = dow_bootstrap_paths(frame, horizon, k, rng)
 
     last = frame.dates[-1]
     fut = future_days(last, horizon)
@@ -517,6 +569,6 @@ def forecast_series(
         points=points,
         sample_paths=[[float(v) for v in row] for row in paths],
         accuracy=acc,
-        attribution=_attribution(series, points, fut, reg, payday_regressor),
+        attribution=_attribution(series, points, fut, reg, payday_regressor, analog_used),
         fitted_state=fitted_state,  # D2: present ⇔ a Prophet (re)fit happened this run
     )
