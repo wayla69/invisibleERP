@@ -11,7 +11,7 @@
 | Effective date | `<<effective-date>>` |
 | Review cadence | Nightly planning run · per demand-spike replan · per order-plan approval · monthly forecast-accuracy review |
 | Version note | Rev **0.1** (2026-07-21) — docs/54 Phase 2: per-(branch, item) probabilistic demand planning + perishable-aware order optimization. New controls **SCM-01** (order-plan maker-checker), **SCM-02** (planning-job monitoring & idempotency), **SCM-03** (auditable demand-driven order sizing); migration `0459`; new permissions `scm_plan` / `scm_approve` with SoD rule **R24**. The compute engine is an optional external microservice (`services/forecast-engine`, docs/54 Phase 1); with it disabled the module plans in-process. |
-| Related RCM controls | SCM-01, SCM-02, SCM-03, INV-10 (waste), EXP-01/EXP-12 (PR/receiving), GOV-01 (pending approvals), ITGC-OP-04 (job failure alerting) |
+| Related RCM controls | SCM-01, SCM-02, SCM-03, SCM-04, SCM-05, INV-10 (waste), EXP-01/EXP-12 (PR/receiving), GOV-01 (pending approvals), ITGC-OP-04 (job failure alerting) |
 | Related policy | `compliance/policies/09-inventory-policy.md` |
 
 ## 2. Purpose
@@ -293,6 +293,40 @@ cut; γ<0 (complements) reinforces it. With nothing on file the response is 1 (u
 **no new control** — the same forecast-quality governance as A2. This completes Track A's demand-shaping
 levers (promo, own-price, cross-price); attribute-based cold-start (A4) is a later wave.
 
+### 7.15 Two-echelon network replenishment plans (docs/57 Track B · B2) — control SCM-05
+
+The topology declared in §7.12 becomes actionable in B2: a planner runs a **two-echelon network plan** for
+one item across the supplier → DC → branch network, and the plan pools the safety buffer at the DC rather
+than carrying it at every branch. `POST /api/scm-network/plans/run {item_code}` builds the plan; it draws
+each branch's demand paths through **scm-planning's public `demandPathsFor` seam** (loose coupling — it calls
+the documented service API, never reaches into another module's tables) and calls the B2a
+`/v1/optimize-network` engine route (guaranteed-service base-stock + risk pooling, §1.3–§1.4) when
+`SCM_ENGINE_URL`/`SCM_ENGINE_SECRET` are set and demand paths exist; otherwise it runs an **in-process
+fallback** — independent per-branch base-stock `B = μ·(L+R) + z·σ·√(L+R)` with the DC echelon the plain sum
+of its branches (no pooling), safe and auditable, and the plan records which path produced it. Every engine
+base-stock/order quantity is **zod-validated and clamped** before persistence — the §7.4 engine trust
+boundary extended to the network, so a faulty or compromised engine cannot plant an absurd order. Plans and
+their per-node lines persist (`scm_network_plans` / `scm_network_plan_lines`, migration 0471, canonical
+0232-form RLS loop + leading `(tenant_id, …)` index) as **Draft** — never actionable.
+
+A network run never produces an order; it produces a **Draft** plan governed by **control SCM-05**
+(preventive), the same maker-checker spine as an order plan (§7.5):
+
+1. The planner reviews the Draft and **submits** it (`scm_plan`); the plan moves to *PendingApproval* and
+   appears in the GOV-01 pending-approvals centre.
+2. An **approver** holding `scm_approve` acts on it, and **must be a different person from the submitter** —
+   self-approval is refused (`SOD_SELF_APPROVAL`). The "maker" is the human who *submitted*, bound to the
+   submitter rather than `created_by`, because nightly runs are created by the scheduler. Approval reuses the
+   existing SoD rule **R24** (`scm_plan` build vs `scm_approve` approve) — B2 introduces **no new SoD rule**.
+3. Only an **Approved** network plan may be **converted**: the DC's supplier-facing order rolls up to a
+   **purchase requisition** through the existing `ProcurementService.createPr` seam (reason `SCM-NET`),
+   **idempotent by `pr_no`** — converting twice returns the first requisition, never a second.
+
+Track B posts **no journal entries** of its own and touches no golden-master money path; like §7.5 it ends
+at a maker-checker'd requisition, from which the normal procure-to-pay controls (PN-02) take over.
+Allocation-policy governance on DC shortage (SCM-06) and the full DRP branch→DC→supplier roll-up build on
+this spine in B3/B4.
+
 ## 8. Process flow
 
 ```mermaid
@@ -332,6 +366,7 @@ flowchart TD
 | **SCM-02** | Detective/Preventive · Automated | Per scheduled run | Planning jobs ride the shared queue (retry → dead-letter → ops alert). A duplicate nightly enqueue plans exactly once (database-enforced); the spike scan is watermarked so any cadence is idempotent; spike events are deduped per day with a cooldown. | Plan-run register (status, engine, error), spike-event register, background-job rows |
 | **SCM-03** | Preventive/Detective · Automated | Per planning run | Demand is extracted by channel partition so a dine-in dish is counted once; closed and stockout days are excluded; menu demand is exploded per scenario; order size respects shelf life, lead-time variability and FEFO stock; every line records its rationale. The shelf-life cap holds even when the external engine is unavailable. | Demand forecasts per run with accuracy, order-plan lines with full rationale |
 | **SCM-04** | Preventive · Automated | Per planning run | Promo/price forecast inputs are governed and auditable: the `promo_flag`/`discount` regressors on a production run are **server-derived** from the tenant's approved `promotions` under RLS (never the request body), so a fabricated promo cannot inflate a forecast. Advisory what-ifs are `scenario`-flagged and barred from auto-convert; a per-day uplift cap plus the order clamp bound any residual lift; each forecast persists its promo attribution. | Demand forecasts carrying promo/price attribution tied to approved promotions |
+| **SCM-05** | Preventive · Automated | Per network plan | A two-echelon (network) replenishment plan is built and submitted by a planner (`scm_plan`) but can only be approved by a **different** user holding `scm_approve` (SoD **R24**, reused); self-approval is refused (`SOD_SELF_APPROVAL`), the maker bound to the submitter. Engine base-stock/order quantities are clamped before storage. Only an approved plan converts, rolling the DC's supplier order up to a purchase requisition through the purchasing API, idempotently by `pr_no`. | Network plans with maker/checker identities, the GOV-01 queue entry, the linked requisition number |
 | INV-10 | — | Per waste event | Waste/spoilage capture feeds the observed spoilage rate used to calibrate planning. | Waste log by reason |
 | GOV-01 | Detective | Continuous | Submitted plans appear in the unified pending-approvals monitor with their age. | Pending-approvals worklist |
 
@@ -389,6 +424,7 @@ maker ≠ checker test is the operative control regardless of the permissions he
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-21 | Supply-chain / Planning | Initial narrative — docs/54 Phase 2: per-(branch, item) probabilistic demand planning and perishable-aware order optimization. New controls SCM-01/02/03, migration `0459`, permissions `scm_plan`/`scm_approve`, SoD rule R24, harness `cutover/scm.ts` (20 checks). |
+| 0.8 | 2026-07-23 | Supply-chain / Planning | Added §7.15 — two-echelon network replenishment plans (docs/57 Track B · B2): `POST /api/scm-network/plans/run {item_code}` builds a Draft plan pooling the safety buffer at the DC — via scm-planning's public `demandPathsFor` seam and the B2a `/v1/optimize-network` route (GSM base-stock + risk pooling), or an in-process fallback (`B=μ·(L+R)+z·σ·√(L+R)`, DC = Σ, no pooling); every engine quantity zod-validated + clamped; persisted to `scm_network_plans`/`scm_network_plan_lines` (migration 0471, canonical RLS + tenant-leading index) as Draft. New control **SCM-05** (network-plan maker-checker): submit → approve by a DIFFERENT `scm_approve` holder (self-approval `SOD_SELF_APPROVAL`, maker bound to submitter; SoD **R24** reused, no new rule) → convert rolls the DC order up to a PR via the existing `ProcurementService.createPr` seam (reason `SCM-NET`, idempotent by `pr_no`). No GL, no golden-master money path. Harness `cutover/scm.ts` +8 B2 checks (`scm-mfg` shard). |
 | 0.4 | 2026-07-22 | Supply-chain / Planning | Added §7.11 — coherent forecast reconciliation (docs/58 Track C · C2): the API sends a bottom-up aggregation forest and explodes the reconciled leaf paths (coherence trust-boundary → degrade to base). No new control (SCM-01/02/03 unchanged), no GL/schema change. Harness `cutover/scm.ts` +1 C2 check. |
 | 0.7 | 2026-07-22 | Supply-chain / Planning | Added §7.14 — cannibalization & halo cross-price elasticity (docs/56 Track A · A3): `ScmCrossElasticityService` estimates γ_{a,b}=∂log(demand_a)/∂log(price_b) API-side by log-log OLS with the A2 identifiability floor, CATEGORY-SCOPED to `item_categories` siblings only (never the full cross-product); a run persists credible pairs to `scm_cross_elasticity` (migration 0470); `GET /api/scm-planning/cross-elasticity`. The scenario what-if composes own ε + Σ sibling γ (`demand × price^(ε+Σγ)`). Advisory only, no new control. apps/api vitest +7 (estimator) & `cutover/scm.ts` +3 A3 checks. |
 | 0.6 | 2026-07-22 | Supply-chain / Planning | Added §7.13 — own-price elasticity (docs/56 Track A · A2): `ScmPromoExtractService` emits a governed effective price (base × (1−discount)) so a promo's price cut identifies ε; the engine estimates ε by an OLS log-log fit with an identifiability floor (ε=null when not identified), returned in attribution; the run persists it to `scm_price_elasticity` (migration 0464) via `ScmElasticityService` (`GET /api/scm-planning/elasticity`); the scenario what-if gains `price_multiplier` applying `demand × (price)^ε`. Advisory only, no new control. Harness `cutover/scm.ts` +4 A2 checks; engine pytest +7. |

@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 307,
+    "total": 308,
     "by_status": {
-      "Implemented": 304,
+      "Implemented": 305,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 25,
+      "Inventory & COGS": 26,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -5868,6 +5868,25 @@
       "tod": "Inspect that the promo regressors are assembled from the approved promotions table (not the request body), that a production run sets scenario=false, and that each forecast persists its attribution.",
       "toe": "Re-perform: run a plan with NO governed promotion -> the menu forecast carries no promo attribution; seed an APPROVED promotion covering the horizon and re-run -> the forecast now carries regressors_used including 'promo' and a promo_uplift_pct; a promo is tenant-scoped (another tenant's promotion never enters the signal) - re-performed by the scm harness.",
       "evidence": "Demand forecasts per run carrying promo/price attribution tied to approved promotions",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SCM-05",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Supply chain planning; Multi-echelon replenishment; Purchasing commitment",
+      "risk": "A two-echelon (supplier -> DC/central-kitchen -> branch) network replenishment plan is built AND approved by the same person, so a planner can inflate DC/branch base-stock toward a favoured vendor or over-buy perishable stock at the central kitchen, and - because an Approved plan rolls its DC supplier-facing order DIRECTLY up to a purchase requisition - there is an unchecked path from 'the network needs this' to committed spend. A compromised or buggy optimization engine could also plant absurd order quantities into a Draft plan.",
+      "assertion": "Authorization/Segregation of Duties",
+      "description": "A multi-echelon network plan is built AND approved by DIFFERENT people before any requirement rolls up to a purchase requisition. A network run persists plans as Draft (never actionable); the planner submits -> PendingApproval; approval requires the scm_approve sub-permission (SoD R24 flags scm_plan + scm_approve) AND approver != submitter (assertMakerChecker -> 403 SOD_SELF_APPROVAL under the enterprise profile). Only an Approved plan may roll up, and the roll-up of the DC's supplier-facing order goes through the EXISTING ProcurementService.createPr seam, idempotent by pr_no (Track B writes no PR/PO rows and posts no GL of its own). Every engine base-stock/order quantity is zod-validated and CLAMPED to a bounded multiple of the node's need before persistence, so a buggy/compromised engine cannot plant absurd orders into a Draft plan. The maker is bound to the SUBMITTER, not created_by, so a scheduler-created run cannot be self-approved.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per network plan",
+      "owner": "Planner / Controller",
+      "coso": "P11",
+      "code_reference": "scm-network/scm-network-run.service.ts (engine /v1/optimize-network or in-process fallback -> clamp qty -> persist Draft plan + per-node lines); scm-network/scm-network-plan.service.ts (submit/approve maker-checker via assertMakerChecker event 'scm.network-plan.approve' -> 403 SOD_SELF_APPROVAL; convert via ProcurementService.createPr idempotent by pr_no); scm-network/scm-network.controller.ts (@Permissions scm_plan build, scm_approve approve, SoD R24); scm-network/scm-network-extract.service.ts (loose-coupling demand extraction via scm-planning public API); schema/scm-network.ts scm_network_plans/scm_network_plan_lines (migration 0471); scm-planning/scm-engine-client.service.ts optimizeNetwork; services/forecast-engine/app/network.py (GSM base-stock + risk pooling); cutover/scm.ts (ToE)",
+      "tod": "Inspect that a network run persists a Draft plan across the stocking echelons, that approve is gated by scm_approve and rejects the submitter (SOD_SELF_APPROVAL), that only an Approved plan converts, that the roll-up goes through ProcurementService.createPr rather than a direct PR write, and that engine quantities are clamped before persistence.",
+      "toe": "Re-perform: run a two-echelon plan -> Draft echelon plans (DC + branch base-stock) persist; submit then approve as the submitter -> 403 SOD_SELF_APPROVAL; approve as a second scm_approve holder -> Approved; convert -> a real purchase_requests row (pr_no), re-convert -> the same pr_no (idempotent); a foreign tenant cannot read or approve the plan (404) - re-performed by the scm harness.",
+      "evidence": "Two-echelon network plans built + approved by different people before any PR roll-up",
       "status": "Implemented"
     }
   ]

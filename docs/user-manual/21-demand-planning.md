@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.7**
+**Status: DRAFT v0.8**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -118,6 +118,34 @@ only** today — describing the network changes no order quantity on its own.
 
 > You do **not** have to describe a network. If you skip it, planning works exactly as before, per branch.
 > A node that still has lanes attached cannot be deleted — remove its lanes first.
+
+### To run and approve a multi-echelon network plan
+
+Once your supply network is described and **valid** (above), you can plan across it — one item at a time —
+so the safety stock **pools at the DC** instead of being carried at every branch (the same service level for
+less total inventory). Building a plan needs `scm_plan`; approving one needs `scm_approve` **and a different
+person** — exactly like an order plan, because an approved plan turns into committed spend (control
+**SCM-05**).
+
+1. **Run the plan** — `POST /api/scm-network/plans/run` with the item code. The system reads each branch's
+   demand, sizes a base-stock at every branch *and* at the DC (pooling the branch risk), and saves a
+   **draft** network plan — nothing is ordered yet.
+2. **Review it** — `GET /api/scm-network/plans/:id`. Each line shows the node, its base-stock, and the order
+   the DC would place upstream.
+3. **Submit it for approval** — `POST /api/scm-network/plans/:id/submit`. The plan moves to *pending
+   approval* and appears in the approvals centre.
+4. **A second person approves it** — a colleague holding `scm_approve` calls
+   `POST /api/scm-network/plans/:id/approve`. You **cannot** approve a plan you submitted: the system refuses
+   with **SOD_SELF_APPROVAL** — that is control **SCM-05** working as designed. To send it back instead,
+   `POST /api/scm-network/plans/:id/reject` with a reason.
+5. **Convert the approved plan** — `POST /api/scm-network/plans/:id/convert`. The DC's supplier order becomes
+   a normal **purchase requisition** (the same purchasing flow as §6). Converting twice is safe — it returns
+   the requisition already raised rather than a second one.
+
+> If the dedicated forecasting service is switched off or unreachable, the plan still runs using a simpler
+> built-in method — each branch buffered on its own, **without** the DC pooling benefit — so planning never
+> stops. As with order plans, this raises **no accounting entries** of its own; the financial effect happens
+> later, when the requisition becomes a purchase order and goods are received.
 
 ---
 
@@ -268,7 +296,7 @@ design; ask your administrator.
 ## 10. Related
 
 - Process narrative: `docs/process-narratives/34-supply-chain-planning.md`
-- Controls: **SCM-01** (approval), **SCM-02** (job reliability), **SCM-03** (how quantities are derived)
+- Controls: **SCM-01** (order-plan approval), **SCM-02** (job reliability), **SCM-03** (how quantities are derived), **SCM-04** (promo-forecast governance), **SCM-05** (network-plan approval)
 - Purchasing continues in chapter **03 — Procurement**
 - Waste and spoilage recording: chapter **04 — Inventory**
 
@@ -276,6 +304,7 @@ design; ask your administrator.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.8 | 2026-07-23 | Added §2 "To run and approve a multi-echelon network plan" — docs/57 Track B · B2: run a two-echelon plan (`POST /api/scm-network/plans/run`) that pools safety stock at the DC, then submit → approve (a different `scm_approve` holder; self-approval → `SOD_SELF_APPROVAL`) → convert to a purchase requisition (idempotent). New control **SCM-05**; falls back to per-branch (no pooling) when the engine is off; raises no accounting entries. |
 | 0.7 | 2026-07-22 | Added §7 note "Neighbours react too" — docs/56 Track A · A3: a price what-if across same-category items now also reflects category-scoped cannibalization/halo between the items whose price moved. Advisory only. |
 | 0.6 | 2026-07-22 | Added §7 note "Try a price change too" — docs/56 Track A · A2: the scenario what-if gains a price multiplier that applies each item's learned own-price elasticity (unchanged when none is on file). Advisory only. |
 | 0.5 | 2026-07-22 | Added §2 "To declare your supply network (optional)" — docs/57 Track B · B1: describe the supplier→DC→branch topology on `/network` (nodes + lanes as governed master data, with a live validity banner). Definition only; changes no order quantity (the two-echelon optimizer arrives in B2). |
