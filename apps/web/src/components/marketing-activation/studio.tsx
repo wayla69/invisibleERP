@@ -43,6 +43,8 @@ export function Studio() {
 
   const draft = genQ.data?.draft ?? null;
   const gens: any[] = Array.isArray(gensQ.data?.generations) ? gensQ.data.generations : [];
+  // Studio v2 — which path wrote the copy: the live LLM (real model id) or the deterministic template.
+  const isAiModel = (m: unknown) => String(m ?? '') !== '' && String(m) !== 'studio-template-v1';
 
   return (
     <div className="space-y-5">
@@ -84,7 +86,9 @@ export function Studio() {
                         </button>
                       ))}
                     </div>
-                    <Chip hue="var(--chart-4)">{String(genQ.data.model)}</Chip>
+                    <Chip hue={isAiModel(genQ.data.model) ? 'var(--chart-1)' : 'var(--chart-4)'}>
+                      {isAiModel(genQ.data.model) ? t('ma.studio_ai_badge') : t('ma.studio_template_badge')} · {String(genQ.data.model)}
+                    </Chip>
                     <Chip hue="var(--chart-2)">{String(draft.channel)} · {num(draft.send_hour)}:00</Chip>
                     <Chip hue="var(--chart-3)">{t('ma.studio_reach', { n: num(draft.predicted_reach) })}</Chip>
                     <Chip hue="var(--chart-5)">holdout {num(draft.suggested_holdout_pct)}%</Chip>
@@ -128,7 +132,9 @@ export function Studio() {
                 <div key={String(g.gen_no)} className={`flex flex-wrap items-center gap-2 rounded-xl border bg-background/60 p-3 text-sm ${ENTER}`} style={stagger(i)}>
                   <span className="font-semibold">{String(g.gen_no)}</span>
                   {g.segment && <span className="text-muted-foreground">· {String(g.segment)}</span>}
-                  <Chip hue="var(--chart-4)">{String(g.model)}</Chip>
+                  <Chip hue={isAiModel(g.model) ? 'var(--chart-1)' : 'var(--chart-4)'}>
+                    {isAiModel(g.model) ? t('ma.studio_ai_badge') : t('ma.studio_template_badge')} · {String(g.model)}
+                  </Chip>
                   {g.channel && <Chip hue="var(--chart-2)">{String(g.channel)}</Chip>}
                   <span className="ml-auto text-xs text-muted-foreground">
                     {g.campaign_id != null ? t('ma.studio_draft_created', { id: String(g.campaign_id) }) : '—'}

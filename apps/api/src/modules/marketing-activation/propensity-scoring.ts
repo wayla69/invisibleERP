@@ -85,6 +85,69 @@ export function rankNextOffers(
     .slice(0, top);
 }
 
+export interface SegmentOffer {
+  item_id: string;
+  name: string;
+  reach: number;           // members who own the driver but NOT the candidate (plausible next buyers)
+  driver_item_id: string;  // the owned item that most strongly implies the offer ("why")
+  driver_name: string;
+  score: number;           // per-member offer score × reach — where the segment-level upside sits
+}
+
+// The SEGMENT-level "top un-bought product" (the ③→① hook): aggregate the members' favourites, then rank
+// candidate products exactly like rankNextOffers — driver owned / candidate not — but at segment scale:
+// a candidate already owned by a MAJORITY of the segment is excluded (it is the segment's staple, not an
+// offer), and each (driver → candidate) edge is weighted by its actual reach (members owning the driver
+// without the candidate). Deterministic; returns the single best offer or null. Advisory only.
+export function rankSegmentOffer(
+  members: { favorites: string[] }[],
+  pairs: AffinityPair[],
+  marginBySku: Map<string, SkuMargin>,
+  opts?: { majorityPct?: number; minLift?: number },
+): SegmentOffer | null {
+  const n = members.length;
+  if (n === 0 || pairs.length === 0) return null;
+  const majorityPct = clamp(Number(opts?.majorityPct ?? 50) || 50, 0, 100);
+  const minLift = Number(opts?.minLift ?? 1) || 0;
+
+  // Ownership counts per item across the segment (favourites de-duplicated per member).
+  const ownedBy = new Map<string, Set<number>>();
+  members.forEach((m, i) => {
+    for (const f of m.favorites) {
+      const s = String(f ?? '').trim();
+      if (!s) continue;
+      let set = ownedBy.get(s);
+      if (!set) { set = new Set<number>(); ownedBy.set(s, set); }
+      set.add(i);
+    }
+  });
+
+  let best: SegmentOffer | null = null;
+  const consider = (
+    driverId: string, driverName: string, candId: string, candName: string, confPct: number, lift: number,
+  ): void => {
+    if (!candId || candId === driverId || lift < minLift) return;
+    const candOwners = ownedBy.get(candId)?.size ?? 0;
+    if ((candOwners / n) * 100 > majorityPct) return; // segment staple — nothing left to offer
+    const driverOwners = ownedBy.get(driverId);
+    if (!driverOwners || driverOwners.size === 0) return;
+    const candSet = ownedBy.get(candId);
+    let reach = 0;
+    for (const i of driverOwners) if (!candSet?.has(i)) reach += 1;
+    if (reach === 0) return;
+    const m = marginBySku.get(candId);
+    const score = r4((confPct / 100) * lift * marginWeight(m) * reach);
+    if (best && (best.score > score || (best.score === score && best.item_id.localeCompare(candId) <= 0))) return;
+    best = { item_id: candId, name: m?.name ?? candName ?? candId, reach, driver_item_id: driverId, driver_name: driverName, score };
+  };
+
+  for (const p of pairs) {
+    consider(p.item_a, p.name_a, p.item_b, p.name_b, p.confidence_a_to_b_pct, p.lift); // A → B
+    consider(p.item_b, p.name_b, p.item_a, p.name_a, p.confidence_b_to_a_pct, p.lift); // B → A
+  }
+  return best;
+}
+
 export interface AudienceSegment {
   segment: string;
   count: number;         // members whose basket implies the product (drivers ∈ their favourites)
