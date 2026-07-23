@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.13 · 2026-07-23**
+**Status: DRAFT v0.14 · 2026-07-23**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -174,9 +174,13 @@ person** — exactly like an order plan, because an approved plan turns into com
    `POST /api/scm-network/plans/:id/approve`. You **cannot** approve a plan you submitted: the system refuses
    with **SOD_SELF_APPROVAL** — that is control **SCM-05** working as designed. To send it back instead,
    `POST /api/scm-network/plans/:id/reject` with a reason.
-5. **Convert the approved plan** — `POST /api/scm-network/plans/:id/convert`. The DC's supplier order becomes
-   a normal **purchase requisition** (the same purchasing flow as §6). Converting twice is safe — it returns
-   the requisition already raised rather than a second one.
+5. **Convert the approved plan** — `POST /api/scm-network/plans/:id/convert`. The DC's supplier orders become
+   a normal **purchase requisition** (the same purchasing flow as §6). The plan is **time-phased** (DRP): the
+   quantity is split into planned releases across the horizon — netted against what's already on hand and in
+   transit, sized to the supplier's minimum-order/pack rules, and dated so each amount is ordered in time to
+   arrive when it's needed — so the requisition carries **one line per release with its own required date**,
+   not one lump order. Converting twice is safe — it returns the requisition already raised rather than a
+   second one.
 
 > If the dedicated forecasting service is switched off or unreachable, the plan still runs using a simpler
 > built-in method — each branch buffered on its own, **without** the DC pooling benefit — so planning never
@@ -368,6 +372,7 @@ design; ask your administrator.
 | 0.11 | 2026-07-23 | Added §2 note "You can retrain the models on a schedule so the nightly plan is fast" — docs/59 Track D · D1: a schedulable **batch retrain** trains every item's forecast model ahead of time and saves the fresh forecasts, which the overnight plan then reuses instead of retraining from scratch, so a plan is produced faster on a large catalogue; a missing/too-old retrain simply falls back to training in the plan itself (freshness is an ops setting). Compute-only; changes no order quantity, no new control. |
 | 0.10 | 2026-07-23 | Added §1 note "Brand-new items are forecast by borrowing from similar items" — docs/56 Track A · A4: a newly added item with too little history of its own is forecast by borrowing the demand shape of established similar items at the **same branch** and scaling it to the expected size, marked **`analog`** so a reviewer sees it is a borrowed estimate; the system switches to forecasting the item directly once it has built its own history. Forecast-quality only; no new control. (docs/59 Track D · D3 — a shared engine result cache across replicas — is infrastructure with no user-facing change and needs no manual update.) |
 | 0.9 | 2026-07-23 | Added §2 note "The planner now runs faster on stable catalogs" + a **Refit cadence** settings row — docs/59 Track D · D2: the planner caches each item's fitted forecast model and reuses it when demand history is unchanged, refitting automatically when the history changes or after the refit cadence (default 14 days). Compute-only; changes no order quantity, no new control. |
+| 0.14 | 2026-07-23 | Clarified §2 network-plan conversion — docs/57 Track B · B4: the roll-up is now **time-phased** (DRP), so an approved plan's requisition carries one line per planned release (each dated when it must arrive, netted against on-hand/in-transit and sized to the supplier's MOQ/pack), not one lump order. No new control; still raises no accounting entries. |
 | 0.13 | 2026-07-23 | Added §2 "To govern how a short DC is shared out (fair-share allocation)" — docs/57 Track B · B3, control **SCM-06**: when the DC can't cover the sum of branch needs, rationing follows an **approved** allocation policy (proportional / fair-share / priority) set under the new `scm_allocate` permission and approved by a **different** `scm_approve` holder (SoD **R25**; self-approval refused). A per-plan **override** needs a justification **and** a second approver — it is never applied immediately. Raises no accounting entries. |
 | 0.8 | 2026-07-23 | Added §2 "To run and approve a multi-echelon network plan" — docs/57 Track B · B2: run a two-echelon plan (`POST /api/scm-network/plans/run`) that pools safety stock at the DC, then submit → approve (a different `scm_approve` holder; self-approval → `SOD_SELF_APPROVAL`) → convert to a purchase requisition (idempotent). New control **SCM-05**; falls back to per-branch (no pooling) when the engine is off; raises no accounting entries. |
 | 0.7 | 2026-07-22 | Added §7 note "Neighbours react too" — docs/56 Track A · A3: a price what-if across same-category items now also reflects category-scoped cannibalization/halo between the items whose price moved. Advisory only. |

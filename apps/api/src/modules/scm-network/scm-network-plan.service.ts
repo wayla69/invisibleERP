@@ -116,19 +116,30 @@ export class ScmNetworkPlanService {
     }
     const lines = await this.db.select().from(scmNetworkPlanLines)
       .where(and(eq(scmNetworkPlanLines.planId, id), tenantId != null ? eq(scmNetworkPlanLines.tenantId, tenantId) : sql`true`));
-    // The supplier-facing release is the DC (echelon 1) line's order. (Full time-phased DRP is B4.)
-    const dcQty = lines.filter((l) => l.echelon === 1).reduce((a, l) => a + n(l.orderQty), 0);
-    if (dcQty <= 0) {
-      throw new BadRequestException({ code: 'NETWORK_PLAN_NOTHING_TO_ORDER', message: 'the DC line has no supplier-facing order to roll up' });
+    // docs/57 B4 — the supplier-facing releases are the DC (echelon 1) line's DRP-time-phased orders:
+    // one PR line per planned release, each with its own required (arrival) date, so procurement sees
+    // WHEN each quantity is needed rather than one lumped order. Falls back to the summed qty if a plan
+    // predates DRP (no per-release orders).
+    const dcLines = lines.filter((l) => l.echelon === 1);
+    const releases = dcLines
+      .flatMap((l) => ((l.orders ?? []) as Array<{ qty?: number; arrival_ds?: string }>))
+      .filter((o) => n(o?.qty) > 0);
+    let items: { item_id: string; request_qty: number; required_date: string; reason: string }[];
+    if (releases.length) {
+      items = releases.map((o) => ({
+        item_id: plan.itemCode, request_qty: n(o.qty),
+        required_date: o.arrival_ds ?? addDaysYmd(ymd(), 3), reason: 'SCM-NET',
+      }));
+    } else {
+      const dcQty = dcLines.reduce((a, l) => a + n(l.orderQty), 0);
+      if (dcQty <= 0) {
+        throw new BadRequestException({ code: 'NETWORK_PLAN_NOTHING_TO_ORDER', message: 'the DC line has no supplier-facing order to roll up' });
+      }
+      items = [{ item_id: plan.itemCode, request_qty: dcQty, required_date: addDaysYmd(ymd(), 3), reason: 'SCM-NET' }];
     }
     const pr = await this.procurement.createPr({
-      remarks: `SCM network plan ${plan.planNo}`,
-      items: [{
-        item_id: plan.itemCode,
-        request_qty: dcQty,
-        required_date: addDaysYmd(ymd(), 3),
-        reason: 'SCM-NET',
-      }],
+      remarks: `SCM network plan ${plan.planNo} (DRP time-phased, ${items.length} release${items.length === 1 ? '' : 's'})`,
+      items,
     }, user);
     await this.db.update(scmNetworkPlans)
       .set({ status: 'Converted', prNo: pr.pr_no, convertedAt: new Date() })

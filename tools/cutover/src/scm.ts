@@ -40,6 +40,7 @@ import { PasswordService } from '../../../apps/api/dist/modules/auth/password.se
 import { ymd } from '../../../apps/api/dist/database/queries';
 import { JobWorkerService } from '../../../apps/api/dist/modules/jobs/job-worker.service';
 import { ScmAllocationService } from '../../../apps/api/dist/modules/scm-network/scm-allocation.service';
+import { drpNode, daysBetweenYmd } from '../../../apps/api/dist/modules/scm-network/scm-drp.service';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '@ierp/shared';
 
 const MIGRATIONS_DIR = resolve(process.cwd(), '../../apps/api/drizzle');
@@ -894,6 +895,44 @@ async function main() {
   ok('SCM-06 cross-tenant: T2 sees 0 HQ allocation policies and cannot approve an HQ override (403/404)',
     (polCrossList.json?.length ?? 0) === 0 && (ovrCross.status === 403 || ovrCross.status === 404),
     `t2pols=${polCrossList.json?.length} crossStatus=${ovrCross.status}`);
+
+  // ════════════════════════ docs/57 B4 — DRP time-phased roll-up ════════════════════════
+  // A fresh run now time-phases each node's orders (net requirements offset by the inbound lead, lot-
+  // sized to the lane moq/pack) and rolls branch releases up into the DC's supplier-facing releases.
+  const drpRun = await inj('POST', '/api/scm-network/plans/run', tPlanner, { item_code: 'ING-CHK' });
+  const drpPlan = await inj('GET', `/api/scm-network/plans/${drpRun.json.id}`, tPlanner);
+  const drpDc = (drpPlan.json.lines ?? []).find((l: any) => l.echelon === 1);
+  const drpOrders = (drpDc?.orders ?? []) as { order_ds: string; arrival_ds: string; qty: number }[];
+  ok('B4 the DC line carries time-phased supplier-facing releases (each with an order + arrival date, qty > 0)',
+    drpOrders.length >= 1 && drpOrders.every((o) => !!o.order_ds && !!o.arrival_ds && o.order_ds <= o.arrival_ds && o.qty > 0),
+    `releases=${drpOrders.length} sample=${JSON.stringify(drpOrders[0])}`);
+  // Lead-offset + on-hand netting are proven deterministically on the pure DRP primitive (the plan
+  // fixture's demand can land entirely at day 0, clamping the offset — so assert the math directly):
+  // 10/day for 5 days, no on-hand, lead 2 ⇒ a receipt on day t is RELEASED on day t−2.
+  const drpUnit = drpNode({ nodeCode: 'X', grossReq: [10, 10, 10, 10, 10], onHand: 0, schedReceipts: [0, 0, 0, 0, 0], leadDays: 2, moq: 0, pack: 1 }, '2026-01-10', 'SUP');
+  ok('B4 DRP offsets a planned release back by the inbound lead time',
+    drpUnit.releases.length > 0 && drpUnit.releases.some((r) => daysBetweenYmd(r.order_ds, r.arrival_ds) === 2),
+    `rel=${JSON.stringify(drpUnit.releases.map((r) => [r.order_ds, r.arrival_ds]))}`);
+  // Net against on-hand: 100 on-hand covers all 50 of demand ⇒ NO planned release at all.
+  const drpCovered = drpNode({ nodeCode: 'X', grossReq: [10, 10, 10, 10, 10], onHand: 100, schedReceipts: [0, 0, 0, 0, 0], leadDays: 2, moq: 0, pack: 1 }, '2026-01-10', 'SUP');
+  ok('B4 DRP nets requirements against projected on-hand (demand covered by stock ⇒ no release)',
+    drpCovered.releases.length === 0, `releases=${drpCovered.releases.length}`);
+  // The SUP→DC lane has moq 20, pack 5 → every DC release is a whole number of packs, ≥ the moq.
+  ok('B4 DC releases respect the inbound lane lot-sizing (moq 20 + pack 5)',
+    drpOrders.length > 0 && drpOrders.every((o) => Math.abs(o.qty % 5) < 1e-6 && o.qty >= 20 - 1e-6),
+    `qtys=${JSON.stringify(drpOrders.map((o) => o.qty))}`);
+  const drpBr = (drpPlan.json.lines ?? []).find((l: any) => l.echelon === 2);
+  const drpBrOrders = (drpBr?.orders ?? []) as { from_node: string }[];
+  ok('B4 branch releases are sourced from the DC (the roll-up chains branch→DC→supplier)',
+    drpBrOrders.length === 0 || drpBrOrders.every((o) => o.from_node === 'DC-1'),
+    `brFrom=${JSON.stringify([...new Set(drpBrOrders.map((o) => o.from_node))])}`);
+  // Convert rolls the time-phased supplier releases up to a PR through the existing procurement seam.
+  await inj('POST', `/api/scm-network/plans/${drpRun.json.id}/submit`, tPlanner);
+  await inj('POST', `/api/scm-network/plans/${drpRun.json.id}/approve`, tApprover, {});
+  const drpConvert = await inj('POST', `/api/scm-network/plans/${drpRun.json.id}/convert`, tPlanner);
+  ok('B4 an approved plan rolls its time-phased supplier releases up to a PR (reuses ProcurementService.createPr)',
+    (drpConvert.status === 200 || drpConvert.status === 201) && !!drpConvert.json.pr_no && drpConvert.json.status === 'Converted',
+    JSON.stringify({ st: drpConvert.status, pr: drpConvert.json.pr_no, s: drpConvert.json.status }));
 
   // ════════════════════════ docs/59 D2 — warm-start / model registry ════════════════════════
   // A prophet (re)fit persists to scm_model_cache; a run inside the refit cadence ships the cached fit
