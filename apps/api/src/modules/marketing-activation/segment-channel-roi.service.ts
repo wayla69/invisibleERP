@@ -4,7 +4,9 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles, miCampaignExperiments, miJourneys, miSaveRuns } from '../../database/schema';
 import type { JwtUser } from '../../common/decorators';
 import { MarketingIntelService } from '../marketing-intel/marketing-intel.service';
-import { rankSegmentChannel, type SegmentValue, type ChannelRoi } from './segment-channel-scoring';
+import { CampaignsService } from '../campaigns/campaigns.service';
+import { PropensityService } from './propensity.service';
+import { rankSegmentChannel, type SegmentValue, type ChannelRoi, type CellOffer } from './segment-channel-scoring';
 
 // Segment × Channel ROI Command (docs/61 Phase 2, control MKT-25) — extends the Budget Optimizer (MKT-17)
 // from CHANNEL to SEGMENT × CHANNEL × the money behind it. It COMBINES existing signals through owning-module
@@ -21,6 +23,10 @@ export class SegmentChannelRoiService {
   constructor(
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly mi: MarketingIntelService,
+    // docs/62 Phase 2: ③'s batched per-segment offers (WHAT to offer per cell) + the owning message_log
+    // outcome read (deliverability, advisory) — both public module reads, no cross-domain join.
+    private readonly propensity: PropensityService,
+    private readonly campaigns: CampaignsService,
   ) {}
 
   // Load the three inputs the pure scorer needs, tenant-scoped: segment value, channel ROI, measured lift.
@@ -69,10 +75,17 @@ export class SegmentChannelRoiService {
   }
 
   // Rank segment × channel cells by incremental ROI × value, and split a budget toward the best channels.
+  // docs/62 Phase 2: each cell also carries the segment's top un-bought offers (③ — WHAT to offer there;
+  // never touches the allocation math) and the response carries recent campaign delivery outcomes
+  // (message_log via the owning CampaignsService read — an advisory deliverability signal).
   async rank(user: JwtUser, opts?: { budget?: number; top?: number }): Promise<Record<string, unknown>> {
     const { segments, channels, liftBySegment, basis } = await this.loadInputs(user);
+    const offersRaw = await this.propensity.topOffersForSegments(user, segments.map((s) => s.segment), { top: 3 });
+    const offersBySegment = new Map<string, CellOffer[]>();
+    for (const [seg, offers] of offersRaw) offersBySegment.set(seg, offers.map((o) => ({ item_id: o.item_id, name: o.name, score: o.score, reach: o.reach })));
     const budget = Math.max(0, Number(opts?.budget ?? 0) || 0);
-    const plan = rankSegmentChannel(segments, channels, liftBySegment, budget, { top: opts?.top ?? 50 });
+    const plan = rankSegmentChannel(segments, channels, liftBySegment, budget, { top: opts?.top ?? 50, offersBySegment });
+    const delivery = await this.campaigns.outcomeSummary(user, { since_days: 90, limit: 10 });
     return {
       budget,
       basis,
@@ -81,6 +94,7 @@ export class SegmentChannelRoiService {
       cells: plan.cells,
       channel_allocation: plan.channel_allocation,
       recommendation_basis: plan.basis, // 'measured+mmm' | 'mmm' | 'none'
+      delivery, // recent campaign delivery outcomes (advisory; from the message_log send audit)
       note: 'Advisory ranking only (MKT-25). To commit budget, stage a plan — it requires maker-checker approval (MKT-17), never posts spend directly.',
     };
   }

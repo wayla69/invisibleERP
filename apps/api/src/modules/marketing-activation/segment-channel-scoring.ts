@@ -8,6 +8,8 @@
 
 export interface SegmentValue { segment: string; count: number; avg_clv: number | null }
 export interface ChannelRoi { channel: string; roi: number | null }
+// docs/62 Phase 2 — the concrete offer(s) recommended for a segment (from ③'s rankSegmentOffers).
+export interface CellOffer { item_id: string; name: string; score: number; reach: number }
 
 const r4 = (x: number): number => Math.round(x * 10000) / 10000;
 const r2 = (x: number): number => Math.round(x * 100) / 100;
@@ -31,6 +33,9 @@ export interface RoiCell {
   avg_clv: number | null;
   value_weight: number;         // reach × avg_clv
   score: number;                // incremental_roi × value_weight — where the next ฿ most plausibly returns
+  offer: string | null;         // docs/62: the segment's top un-bought product (③) — WHAT to offer here
+  top_offers: CellOffer[];      // up to 3 ranked offers for the segment (within-cell recommendation only —
+                                // offers never touch the channel allocation math)
 }
 
 export interface SegmentChannelPlan {
@@ -48,7 +53,7 @@ export function rankSegmentChannel(
   channels: ChannelRoi[],
   liftBySegment: Map<string, number | null>,
   budget: number,
-  opts?: { top?: number },
+  opts?: { top?: number; offersBySegment?: Map<string, CellOffer[]> },
 ): SegmentChannelPlan {
   const top = Math.min(Math.max(Number(opts?.top ?? 50) || 50, 1), 500);
   const chans = channels.filter((c) => c.channel).map((c) => ({ channel: String(c.channel), roi: Number(c.roi) || 0 }));
@@ -63,12 +68,14 @@ export function rankSegmentChannel(
     const liftPct = liftBySegment.has(seg) ? liftBySegment.get(seg)! : null;
     if (liftPct != null) anyLift = true;
     const mult = liftMultiplier(liftPct);
+    const offers = (opts?.offersBySegment?.get(seg) ?? []).slice(0, 3);
     for (const c of chans) {
       const incRoi = c.roi * mult;
       cells.push({
         segment: seg, channel: c.channel, channel_roi: r4(c.roi), lift_pct: liftPct == null ? null : r2(liftPct),
         lift_multiplier: r4(mult), incremental_roi: r4(incRoi), reach, avg_clv: clv == null ? null : r2(clv),
         value_weight: r2(value), score: r4(incRoi * value),
+        offer: offers[0]?.name ?? null, top_offers: offers,
       });
     }
   }

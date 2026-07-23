@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  marginWeight, rankNextOffers, rankBestAudiences, rankSegmentOffer, type AffinityPair, type SkuMargin,
+  marginWeight, rankNextOffers, rankBestAudiences, rankSegmentOffer, rankSegmentOffers, type AffinityPair, type SkuMargin,
 } from '../src/modules/marketing-activation/propensity-scoring';
 
 // Propensity & Cross-Sell scoring (docs/61 Phase 1, MKT-23). Pure, deterministic.
@@ -163,5 +163,37 @@ describe('rankSegmentOffer (the ③→① top-offer hook)', () => {
     const b = rankSegmentOffer([member('A')], pairs, noMargin);
     expect(a).toEqual(b);
     expect(a!.item_id).toBe('C'); // identical scores → smaller id wins
+  });
+});
+
+describe('rankSegmentOffers (the offer-level ⑤ ranked list, docs/62 Phase 2)', () => {
+  const margins = new Map<string, SkuMargin>([
+    ['B', { name: 'Croissant', margin: 30, margin_pct: 50 }],
+    ['C', { name: 'Cake', margin: 60, margin_pct: 60 }],
+  ]);
+  const member = (...favs: string[]) => ({ favorites: favs });
+
+  it('returns a ranked list (score desc, item_id asc on ties) and the head equals rankSegmentOffer', () => {
+    const pairs = [pair(), pair({ item_a: 'A', item_b: 'C', name_b: 'Cake', confidence_a_to_b_pct: 50, lift: 1.5 })];
+    const list = rankSegmentOffers([member('A'), member('A')], pairs, margins);
+    expect(list.map((o) => o.item_id)).toEqual(['B', 'C']); // B: .8×2×1.5×2=4.8 > C: .5×1.5×1.6×2=2.4
+    expect(list[0]).toEqual(rankSegmentOffer([member('A'), member('A')], pairs, margins));
+  });
+
+  it('clamps top and keeps the strongest driver per candidate', () => {
+    const pairs = [
+      pair({ item_a: 'A', item_b: 'C', name_b: 'Cake', confidence_a_to_b_pct: 30, lift: 1.5 }), // weak A→C
+      pair({ item_a: 'D', name_a: 'Tea', item_b: 'C', name_b: 'Cake', confidence_a_to_b_pct: 90, lift: 3 }), // strong D→C
+      pair(), // A→B
+    ];
+    const list = rankSegmentOffers([member('A', 'D')], pairs, margins, { top: 1 });
+    expect(list).toHaveLength(1);
+    expect(list[0]!.item_id).toBe('C');
+    expect(list[0]!.driver_item_id).toBe('D'); // strongest driver won the candidate
+  });
+
+  it('is empty on an empty segment / no pairs', () => {
+    expect(rankSegmentOffers([], [pair()], margins)).toEqual([]);
+    expect(rankSegmentOffers([member('A')], [], margins)).toEqual([]);
   });
 });

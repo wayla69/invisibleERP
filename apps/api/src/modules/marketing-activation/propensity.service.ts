@@ -1,5 +1,5 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { customerProfiles } from '../../database/schema';
 import { ymd } from '../../database/queries';
@@ -8,7 +8,7 @@ import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import { FoodCostService } from '../menu/food-cost.service';
 import { FactLayerService } from './fact-layer.service';
 import {
-  rankNextOffers, rankBestAudiences, rankSegmentOffer, type AffinityPair, type SkuMargin, type SegmentOffer,
+  rankNextOffers, rankBestAudiences, rankSegmentOffers, type AffinityPair, type SkuMargin, type SegmentOffer,
 } from './propensity-scoring';
 
 // Propensity & Cross-Sell Targeting (docs/61 Phase 1, control MKT-23) — "who should we sell what to next?",
@@ -106,20 +106,43 @@ export class PropensityService {
     };
   }
 
-  // Per SEGMENT → the single top un-bought product (the ③→① hook): the AI Campaign Studio calls this to
-  // put a CONCRETE offer on the fact sheet (`top_offer`). Same basis as nextBestOffers, ranked at segment
-  // scale by rankSegmentOffer (majority-owned staples excluded, reach-weighted). Advisory read only.
-  async topSegmentOffer(user: JwtUser, segment: string, opts?: { from?: string; to?: string }): Promise<SegmentOffer | null> {
+  // BATCHED per-segment ranked top un-bought products (docs/62 Phase 2 offer-level ⑤): ONE profiles read +
+  // ONE affinity/margin basis load for any number of segments, then the pure rankSegmentOffers per segment
+  // (majority-owned staples excluded, reach-weighted, strongest driver per candidate). Advisory read only.
+  async topOffersForSegments(user: JwtUser, segments: string[], opts?: { from?: string; to?: string; top?: number }): Promise<Map<string, SegmentOffer[]>> {
     const tenantId = this.assertTenant(user);
-    const seg = (segment ?? '').trim();
-    if (!seg) return null;
-    const rows = await this.db.select({ favorites: customerProfiles.favoriteItemIds })
+    const out = new Map<string, SegmentOffer[]>();
+    const segs = [...new Set(segments.map((s) => (s ?? '').trim()).filter(Boolean))];
+    if (!segs.length) return out;
+    const rows = await this.db.select({ segment: customerProfiles.miRfmSegment, favorites: customerProfiles.favoriteItemIds })
       .from(customerProfiles)
-      .where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.miRfmSegment, seg)));
-    const members = rows.map((r) => ({ favorites: Array.isArray(r.favorites) ? (r.favorites as unknown[]).map(String) : [] }));
-    if (members.length === 0) return null;
+      .where(and(eq(customerProfiles.tenantId, tenantId), inArray(customerProfiles.miRfmSegment, segs)));
+    const membersBySeg = new Map<string, { favorites: string[] }[]>();
+    for (const r of rows) {
+      const seg = String(r.segment ?? '');
+      if (!seg) continue;
+      const list = membersBySeg.get(seg) ?? [];
+      list.push({ favorites: Array.isArray(r.favorites) ? (r.favorites as unknown[]).map(String) : [] });
+      membersBySeg.set(seg, list);
+    }
     const { pairs, marginBySku } = await this.loadBasis(user, opts);
-    return rankSegmentOffer(members, pairs, marginBySku);
+    for (const seg of segs) {
+      const members = membersBySeg.get(seg) ?? [];
+      out.set(seg, members.length ? rankSegmentOffers(members, pairs, marginBySku, { top: opts?.top ?? 3 }) : []);
+    }
+    return out;
+  }
+
+  // Per SEGMENT → the ranked list (single-segment convenience over the batched read).
+  async topSegmentOffers(user: JwtUser, segment: string, opts?: { from?: string; to?: string; top?: number }): Promise<SegmentOffer[]> {
+    const seg = (segment ?? '').trim();
+    if (!seg) return [];
+    return (await this.topOffersForSegments(user, [seg], opts)).get(seg) ?? [];
+  }
+
+  // The single top un-bought product (the ③→① Studio hook) — the head of the ranked list.
+  async topSegmentOffer(user: JwtUser, segment: string, opts?: { from?: string; to?: string }): Promise<SegmentOffer | null> {
+    return (await this.topSegmentOffers(user, segment, { ...opts, top: 1 }))[0] ?? null;
   }
 
   private assertTenant(user: JwtUser): number {

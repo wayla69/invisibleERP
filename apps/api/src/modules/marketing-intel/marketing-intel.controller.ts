@@ -8,6 +8,7 @@ import {
 } from './marketing-intel.service';
 import { MiExperimentsService, StartExperimentBody, MeasureExperimentBody } from './mi-experiments.service';
 import { MiGovernanceService, GovernanceSettingsBody, ApproveRunBody } from './mi-governance.service';
+import { MiBacktestService } from './mi-backtest.service';
 
 const ActivateBody = z.object({
   segment: z.string().min(1).max(80),
@@ -24,6 +25,7 @@ export class MarketingIntelController {
     private readonly svc: MarketingIntelService,
     private readonly experiments: MiExperimentsService,
     private readonly governance: MiGovernanceService,
+    private readonly backtest: MiBacktestService,
   ) {}
 
   @Get('summary')
@@ -101,6 +103,13 @@ export class MarketingIntelController {
   @Permissions('exec', 'approvals')
   approveBudgetPlan(@Body(new ZodValidationPipe(ApproveBudgetPlanBody)) b: z.infer<typeof ApproveBudgetPlanBody>, @CurrentUser() u: JwtUser) {
     return this.svc.approveBudgetPlan(u, b);
+  }
+
+  // docs/62 Phase 2 (MKT-26, detective) — reconcile an APPROVED plan against actual per-channel spend.
+  @Get('budget-plan/:planNo/backtest')
+  @Permissions('marketing', 'exec')
+  backtestPlan(@Param('planNo') planNo: string, @CurrentUser() u: JwtUser) {
+    return this.backtest.backtestPlan(u, planNo);
   }
 
   // ─── Closed-loop Measurement (docs/60 Phase 3, control MKT-19) ───────────────────────────────────────

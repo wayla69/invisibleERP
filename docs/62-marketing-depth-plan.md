@@ -1,6 +1,6 @@
 # docs/62 — Marketing Depth: make the loop run itself, get smarter per cell, and be statistically honest
 
-**Status: Phase 1 DELIVERED** · Owner: Platform · Builds on docs/47 (reputation), docs/48 (MMM), docs/60
+**Status: Phases 1–2 DELIVERED** · Owner: Platform · Builds on docs/47 (reputation), docs/48 (MMM), docs/60
 (marketing-intel, MKT-17..20), docs/61 (activation, MKT-21..25 + realized measurement).
 
 ## Why
@@ -47,14 +47,18 @@ each independently shippable and doc-synced, none adding a new money/contact pat
   action-center content + 403, autostage attribution + one-in-flight idempotency ×2, human activation with
   no SOD trip, scheduled measurement + measure-exactly-once).
 
-## Phase 2 — Money-loop depth (NEXT)
+## Phase 2 — Money-loop depth — **DELIVERED**
 
-- **⑤ offer-level cells**: extend segment×channel to segment×channel×**offer** using ③'s ranked offers and
-  `message_log` outcomes — budget lands on the right audience, channel AND offer. (The docs/61 §⑤ deferred
-  refinement.)
-- **Plan-vs-actual reconciliation**: compare each approved `mi_budget_plans` allocation against MMM-ingested
-  actual spend, and its predicted ROI against measured outcomes — a per-plan backtest report (candidate NEW
-  detective control MKT-26).
+- **⑤ offer-level cells — delivered**: each segment×channel cell carries the segment's top un-bought
+  offers from ③ (`rankSegmentOffers` top-3, batched `topOffersForSegments`; a within-cell recommendation —
+  the allocation math is untouched) and the ⑤ response carries recent campaign deliverability from the
+  `message_log` send audit via the new owning `CampaignsService.outcomeSummary` read.
+- **Plan-vs-actual reconciliation — delivered (NEW detective control MKT-26, census 314)**: every APPROVED
+  `mi_budget_plans` allocation reconciles against actual per-channel spend (MMM-run actuals via the owning
+  `MmmModelService.latestSummary`; pushed-snapshot fallback; basis recorded) through the pure
+  `plan-backtest.ts` — variance/flags/adherence, fail-honest `PLAN_NOT_APPROVED`/`NO_ACTUALS` — surfaced as
+  `GET /budget-plan/:planNo/backtest`, the schedulable `mkt_plan_backtest` detective report, and the Budget
+  Planner's ตรวจสอบแผน expander.
 
 ## Phase 3 — Statistical honesty + creative A/B
 
@@ -77,4 +81,5 @@ AI drafts, humans send.
 
 | Rev | Date | Notes |
 |---|---|---|
+| v0.2 | 2026-07-23 | **Phase 2 DELIVERED — offer-level ⑤ + plan-vs-actual backtest (NEW detective control MKT-26; census 313→314/311; no migration).** ⑤ cells carry ③'s per-segment top offers + message_log deliverability (`CampaignsService.outcomeSummary`); MKT-26 backtest endpoint + schedulable `mkt_plan_backtest` (marketing-intel imports MmmModule for run actuals; pushed fallback; pure `plan-backtest.ts`, 8 unit tests). Web: offer chips + Budget Planner backtest expander. ToE ext +6 / mmm +3. PN-19 §7 item 51 + §9 row 51 + rev 1.74; manual 09 v0.18; UAT-MA-26 + UAT 09 v3.10; RCM regenerated. |
 | v0.1 | 2026-07-23 | Roadmap created; **Phase 1 (autopilot cadence + action center) DELIVERED** — 3 scheduled action jobs (`mkt_nba_autostage`/`mkt_save_autostage`/`mkt_measure_windows`, one-in-flight idempotency, "(auto)" maker attribution, human maker-checker unchanged), 4 GOV-01 queues (MKT-17/22/24 + measure-due), `GET /api/marketing-activation/action-center` + the สิ่งที่รอคุณตอนนี้ overview card. No new control/migration; census unchanged. ToE `ext.ts` +13 (423). PN-19 rev 1.73; manual 09 v0.17; UAT-MA-AUTO-01/02 + UAT 09 v3.9; traceability bumped. |

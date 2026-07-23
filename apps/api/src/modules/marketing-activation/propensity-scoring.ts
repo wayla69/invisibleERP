@@ -94,19 +94,21 @@ export interface SegmentOffer {
   score: number;           // per-member offer score × reach — where the segment-level upside sits
 }
 
-// The SEGMENT-level "top un-bought product" (the ③→① hook): aggregate the members' favourites, then rank
-// candidate products exactly like rankNextOffers — driver owned / candidate not — but at segment scale:
-// a candidate already owned by a MAJORITY of the segment is excluded (it is the segment's staple, not an
-// offer), and each (driver → candidate) edge is weighted by its actual reach (members owning the driver
-// without the candidate). Deterministic; returns the single best offer or null. Advisory only.
-export function rankSegmentOffer(
+// The SEGMENT-level "top un-bought products" ranking (the ③→① hook + docs/62 Phase 2 offer-level ⑤):
+// aggregate the members' favourites, then rank candidate products exactly like rankNextOffers — driver
+// owned / candidate not — but at segment scale: a candidate already owned by a MAJORITY of the segment is
+// excluded (it is the segment's staple, not an offer), each (driver → candidate) edge is weighted by its
+// actual reach (members owning the driver without the candidate), and per candidate only the STRONGEST
+// driver's score is kept (mirrors rankNextOffers). Deterministic ranked list. Advisory only.
+export function rankSegmentOffers(
   members: { favorites: string[] }[],
   pairs: AffinityPair[],
   marginBySku: Map<string, SkuMargin>,
-  opts?: { majorityPct?: number; minLift?: number },
-): SegmentOffer | null {
+  opts?: { top?: number; majorityPct?: number; minLift?: number },
+): SegmentOffer[] {
   const n = members.length;
-  if (n === 0 || pairs.length === 0) return null;
+  if (n === 0 || pairs.length === 0) return [];
+  const top = Math.min(Math.max(Number(opts?.top ?? 3) || 3, 1), 10);
   const majorityPct = clamp(Number(opts?.majorityPct ?? 50) || 50, 0, 100);
   const minLift = Number(opts?.minLift ?? 1) || 0;
 
@@ -122,7 +124,7 @@ export function rankSegmentOffer(
     }
   });
 
-  let best: SegmentOffer | null = null;
+  const best = new Map<string, SegmentOffer>();
   const consider = (
     driverId: string, driverName: string, candId: string, candName: string, confPct: number, lift: number,
   ): void => {
@@ -137,15 +139,28 @@ export function rankSegmentOffer(
     if (reach === 0) return;
     const m = marginBySku.get(candId);
     const score = r4((confPct / 100) * lift * marginWeight(m) * reach);
-    if (best && (best.score > score || (best.score === score && best.item_id.localeCompare(candId) <= 0))) return;
-    best = { item_id: candId, name: m?.name ?? candName ?? candId, reach, driver_item_id: driverId, driver_name: driverName, score };
+    const prev = best.get(candId);
+    if (prev && prev.score >= score) return; // keep the strongest driver per candidate
+    best.set(candId, { item_id: candId, name: m?.name ?? candName ?? candId, reach, driver_item_id: driverId, driver_name: driverName, score });
   };
 
   for (const p of pairs) {
     consider(p.item_a, p.name_a, p.item_b, p.name_b, p.confidence_a_to_b_pct, p.lift); // A → B
     consider(p.item_b, p.name_b, p.item_a, p.name_a, p.confidence_b_to_a_pct, p.lift); // B → A
   }
-  return best;
+  return Array.from(best.values())
+    .sort((x, y) => y.score - x.score || x.item_id.localeCompare(y.item_id))
+    .slice(0, top);
+}
+
+// The single top un-bought product (the ③→① Studio hook) — the head of the ranked list.
+export function rankSegmentOffer(
+  members: { favorites: string[] }[],
+  pairs: AffinityPair[],
+  marginBySku: Map<string, SkuMargin>,
+  opts?: { majorityPct?: number; minLift?: number },
+): SegmentOffer | null {
+  return rankSegmentOffers(members, pairs, marginBySku, { ...opts, top: 1 })[0] ?? null;
 }
 
 export interface AudienceSegment {

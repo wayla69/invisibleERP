@@ -27,10 +27,13 @@ const OFFERS = {
 const ROI = {
   budget: 100000, basis: 'MMM-1', has_mmm: true, segment_count: 1,
   cells: [
-    { segment: 'At Risk VIPs', channel: 'facebook', channel_roi: 3.2, lift_pct: 900, lift_multiplier: 10, incremental_roi: 32, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 3225792 },
-    { segment: 'At Risk VIPs', channel: 'tiktok', channel_roi: 1.4, lift_pct: null, lift_multiplier: 1, incremental_roi: 1.4, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 141128 },
+    // docs/62 Phase 2: cells carry the segment's top un-bought offers (③) — a within-cell recommendation.
+    { segment: 'At Risk VIPs', channel: 'facebook', channel_roi: 3.2, lift_pct: 900, lift_multiplier: 10, incremental_roi: 32, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 3225792, offer: 'ครัวซองต์เนยสด', top_offers: [{ item_id: 'CROISSANT', name: 'ครัวซองต์เนยสด', score: 3.6, reach: 8 }] },
+    { segment: 'At Risk VIPs', channel: 'tiktok', channel_roi: 1.4, lift_pct: null, lift_multiplier: 1, incremental_roi: 1.4, reach: 12, avg_clv: 8400.5, value_weight: 100806, score: 141128, offer: null, top_offers: [] },
   ],
-  channel_allocation: { facebook: 95000, tiktok: 5000 }, recommendation_basis: 'measured+mmm', note: 'Advisory ranking only (MKT-25).',
+  channel_allocation: { facebook: 95000, tiktok: 5000 }, recommendation_basis: 'measured+mmm',
+  delivery: { since_days: 90, outcomes: [{ campaign: 'CMP-20260701-001', sent: 90, delivered: 5, failed: 5, undelivered: 0, skipped: 10, attempted: 100, delivery_rate: 95 }] },
+  note: 'Advisory ranking only (MKT-25).',
 };
 const NBA_PREVIEW = {
   segment: 'At Risk VIPs', scored: 5, treatment_count: 2, control_count: 1, suppressed_count: 1,
@@ -128,10 +131,13 @@ test('marketing activation (desktop): the five tools render their facts, staging
   await expect(page.getByText('lift 2.4')).toBeVisible();
   await expect(page.getByText(/เพราะซื้อ “กาแฟลาเต้”/).first()).toBeVisible();
 
-  // ⑤ Segment × Channel: the ranking renders (measured lift chip) and staging captures the budget.
+  // ⑤ Segment × Channel: the ranking renders (measured lift chip + docs/62 offer chip + deliverability)
+  // and staging captures the budget.
   await page.getByRole('tab', { name: 'ROI กลุ่ม × ช่องทาง' }).click();
   await expect(page.getByText('At Risk VIPs').first()).toBeVisible();
   await expect(page.getByText(/lift จริง/).first()).toBeVisible();
+  await expect(page.getByText(/แนะนำเสนอ ครัวซองต์เนยสด/)).toBeVisible(); // the ③-sourced offer on the cell
+  await expect(page.getByText(/อัตราส่งถึงล่าสุด/)).toBeVisible();          // message_log deliverability note
   await page.getByRole('button', { name: /จัดเป็นแผนงบ/ }).click();
   await expect.poll(() => (page as any).__getStagedRoiBody()).toEqual({ total_budget: 100000 });
 

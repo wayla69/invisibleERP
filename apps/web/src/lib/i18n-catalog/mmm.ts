@@ -125,6 +125,15 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'mi.bp_self_approve': { th: 'อนุมัติแผนของตัวเองไม่ได้ — ต้องให้คนอื่นอนุมัติ (แบ่งแยกหน้าที่)', en: 'You cannot approve your own plan — a different person must (segregation of duties)' },
   'mi.bp_no_data': { th: 'ยังไม่มีผล MMM — ต้อง push MMM เข้ามาก่อนถึงวางแผนงบได้', en: 'No MMM run yet — push an MMM run before planning a budget' },
   'mi.bp_by': { th: 'โดย', en: 'by' },
+  // docs/62 Phase 2 — MKT-26 plan-vs-actual backtest (detective).
+  'mi.bt_open': { th: 'ตรวจสอบแผน', en: 'Backtest' },
+  'mi.bt_adherence': { th: 'ความตรงตามแผน', en: 'Adherence' },
+  'mi.bt_basis': { th: 'อ้างอิงจ่ายจริงจาก', en: 'Actuals from' },
+  'mi.bt_flagged': { th: 'ผิดปกติ {n} ช่องทาง', en: '{n} flagged' },
+  'mi.bt_planned': { th: 'แผน', en: 'planned' },
+  'mi.bt_actual': { th: 'จ่ายจริง', en: 'actual' },
+  'mi.bt_no_actuals': { th: 'ยังไม่มีข้อมูลการใช้จ่ายจริง (ยังไม่มีผลรัน MMM) — ตรวจสอบไม่ได้', en: 'No actual-spend source yet (no MMM run) — nothing to reconcile' },
+  'mi.bt_note': { th: 'ความต่างคือ "สิ่งที่ต้องดู" — หน้านี้ไม่ขยับเงิน การจัดงบใหม่ยังผ่านแผน + ผู้อนุมัติเสมอ (MKT-26)', en: 'Variances are findings — nothing here moves money; re-allocation stays the maker-checker plan flow (MKT-26)' },
   'mi.bp_note_ph': { th: 'บันทึกช่วย (ไม่บังคับ)', en: 'Note (optional)' },
   // Customer Intelligence (docs/60 Phase 2)
   'mi.tab_customers': { th: 'Customer Intelligence', en: 'Customer Intelligence' },

@@ -126,6 +126,10 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
     en: 'Activation needs a different person than the requester and only creates a consent-gated draft — the control arm is never contacted, so impact stays measurable',
   },
 
+  // ── Offer-level ⑤ (docs/62 Phase 2) ──
+  'ma.roi_offer': { th: 'แนะนำเสนอ', en: 'offer' },
+  'ma.roi_delivery': { th: 'อัตราส่งถึงล่าสุด', en: 'Recent deliverability' },
+
   // ── Action center (docs/62 — what needs me now) ──
   'ma.center_title': { th: 'สิ่งที่รอคุณตอนนี้', en: 'What needs you now' },
   'ma.center_clear': { th: 'ไม่มีอะไรค้าง — ทุกอย่างเดินตามรอบของมันเอง', en: 'Nothing waiting — everything is running on its own cadence' },
