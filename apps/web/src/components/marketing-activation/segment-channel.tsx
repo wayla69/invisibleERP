@@ -73,6 +73,8 @@ export function SegmentChannel() {
                         <span className="text-muted-foreground">×</span>
                         <span className="truncate">{String(c.channel)}</span>
                         {c.lift_pct != null && <Chip hue="var(--chart-4)">{t('ma.roi_measured')} {num(c.lift_pct)}%</Chip>}
+                        {/* docs/62: WHAT to offer in this cell — ③'s top un-bought product for the segment. */}
+                        {c.offer && <Chip hue="var(--chart-1)">{t('ma.roi_offer')} {String(c.offer)}</Chip>}
                       </div>
                       <div className="mt-1.5 flex items-center gap-2">
                         <Meter hue={HUES[i % HUES.length]} pctWidth={(Number(c.score) / maxScore) * 100} />
@@ -109,6 +111,12 @@ export function SegmentChannel() {
             </div>
           ))}
         </StateView>
+        {/* docs/62: recent campaign deliverability from the message_log send audit (advisory). */}
+        {Array.isArray(q.data?.delivery?.outcomes) && q.data.delivery.outcomes.length > 0 && (
+          <p className="text-[11px] tabular-nums text-muted-foreground">
+            {t('ma.roi_delivery')}: {q.data.delivery.outcomes.slice(0, 3).map((o: any) => `${String(o.campaign)} ${o.delivery_rate == null ? '—' : `${num(o.delivery_rate, 1)}%`}`).join(' · ')}
+          </p>
+        )}
         <SoftNote hue="var(--chart-5)">{t('ma.roi_note')}</SoftNote>
       </section>
     </div>
