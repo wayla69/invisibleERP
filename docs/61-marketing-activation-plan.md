@@ -83,8 +83,9 @@ and route each step as a consent-gated scheduled draft. Every step is tagged to 
 **Control.** **MKT-22** — a journey is **staged** and requires maker-checker activation; suppression + consent
 are enforced server-side; nothing auto-sends.
 
-### ③ Propensity & Cross-Sell Targeting — market-basket × CLV
+### ③ Propensity & Cross-Sell Targeting — market-basket × CLV — **DELIVERED** (Phase 1, MKT-23)
 **Goal.** *"Who should we sell what to next?"* — fact-ranked, not guessed.
+**Shipped.** `modules/marketing-activation/propensity.service.ts` + the pure `propensity-scoring.ts` (unit-tested `test/propensity-scoring.test.ts`, 11): `GET /api/marketing-activation/propensity/customer/:code` (next product to offer, excluding owned, confidence × lift × margin) + `GET /propensity/item/:itemId` (best audiences by reach × CLV). Advisory read-only; contact stays the consent-gated draft. ToE `cutover/ext.ts` +6 (367); RCM 307→308.
 **Combines.** Association rules (support / confidence / **lift** — extend the existing menu-affinity engine)
 over real co-purchase (`dine_in_orders`/items via the owning read API) + per-customer `favorite_item_ids`
 + CLV + margin.
@@ -156,5 +157,6 @@ PN-19 (+ PN-29 if a public surface is added) + user manual + UAT + RCM per tool.
 ## Revision history
 | Version | Date | Change |
 |---|---|---|
+| v0.3 | 2026-07-23 | **Phase 1 — ③ Propensity & Cross-Sell DELIVERED (new control MKT-23, no migration).** `modules/marketing-activation`: `propensity.service.ts` (nextBestOffers/bestAudiences composing the analytics menu-affinity engine + the Fact Layer + the menu food-cost margin via their public reads — no cross-domain join) + the pure deterministic `propensity-scoring.ts` (`test/propensity-scoring.test.ts`, 11). `GET /api/marketing-activation/propensity/customer/:code` ranks the next product to offer (excluding what the customer already buys, scored confidence × lift × margin) + `GET /propensity/item/:itemId` ranks the best audiences (reach × CLV). Advisory read-only — never contacts/spends; the sole contact path stays the consent-gated draft. Tenant-scoped (404) + permission-gated (403). PN-19 §7 item 46 + §9 row 46 + rev 1.65; UAT-RPT-065 + traceability v8.15; RCM 307/304 → 308/305. ToE `cutover/ext.ts` **+6** (all 367 pass). |
 | v0.2 | 2026-07-22 | **Phase 0 — Marketing Fact Layer DELIVERED.** New `modules/marketing-activation` (`fact-layer.service.ts` + controller + module, wired into `sales-crm-domain.module.ts`): read-only `GET /api/marketing-activation/facts/customer/:code` + `GET /api/marketing-activation/facts/segment/:segment` (`marketing`/`exec`), composing `customer_profiles` (`mi_*` CLV/churn/NBA) + `pos_members` (identity, tier, `marketing_opt_in`) in separate queries (no cross-domain join) and the pushed MMM channel-ROI via `MarketingIntelService.getSummary`. No migration, no GL, no new RCM control (reuses tenant isolation). ToE: `cutover/ext.ts` **+5** (customer fact sheet, 404 CUSTOMER_NOT_FOUND, segment roll-up with dominant NBA + best channel, tenant-scoped 404, 403 for a non-marketing principal) — all 361 pass. |
 | v0.1 | 2026-07-22 | Initial 5-tool activation roadmap + shared Fact Layer (③ propensity · ⑤ segment-ROI · ② NBA orchestrator · ① AI campaign studio · ④ churn-save), controls MKT-21..25. |

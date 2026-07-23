@@ -2,15 +2,15 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 307,
+    "total": 308,
     "by_status": {
-      "Implemented": 304,
+      "Implemented": 305,
       "Partial": 3
     },
     "by_family": {
       "AI · Governance": 5,
       "Budgeting & Planning": 2,
-      "CRM — Loyalty": 29,
+      "CRM — Loyalty": 30,
       "Cash & Treasury": 7,
       "Consolidation & FX": 6,
       "Entity-Level": 9,
@@ -2543,6 +2543,25 @@
       "tod": "Inspect the per-tenant governance toggle, the Pending-until-approved status + the approver!=pusher maker-checker, the drift flag + block-without-reason, the consumption gates (Approved-only curves, ANALYTICS_NOT_APPROVED activate), the GOV-01 queue, and the audit chain.",
       "toe": "Re-perform (ext harness, 11 MKT-20 checks): governance defaults OFF (back-compat); enabling it makes a push land Pending with its model card + a drift flag; the pending run surfaces in GOV-01; a drifted run can't be approved without a reason; a different user approves it; activating off an unapproved latest RFM run -> ANALYTICS_NOT_APPROVED, and after approval it succeeds; the audit trail links runs->plans->experiments; settings are tenant-scoped.",
       "evidence": "mi_analytics_snapshots status/model_card/quality + approvals; mi_governance_settings; the GOV-01 pending queue; the audit chain",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "MKT-23",
+      "cycle": "CRM — Loyalty",
+      "category": "Application",
+      "fsli": "All",
+      "risk": "A cross-sell / next-best-offer recommendation is turned into an automatic customer contact or offer WITHOUT human review or PDPA consent; or the recommendation is opaque / non-reproducible (no record of the co-purchase evidence and margin behind it); or one tenant's per-customer offer scoring / favourites surface for another tenant.",
+      "assertion": "Accuracy/Authorization/Occurrence",
+      "description": "Propensity & Cross-Sell Targeting (docs/61 Phase 1, MKT-23): the shared Marketing Fact Layer's scoring surface answers 'who should we sell what to next?' from FACT, not guess. It COMBINES three owning-module reads via their public APIs (no cross-domain SQL join): association rules over real co-purchase (the analytics menu-affinity engine — support/confidence/LIFT), per-customer favourites + CLV (the Fact Layer), and per-item margin (the menu food-cost layer). The ranking itself is the PURE, deterministic propensity-scoring.ts (unit-tested test/propensity-scoring.test.ts): per customer, GET /api/marketing-activation/propensity/customer/:code ranks the 'next product to offer' EXCLUDING what they already buy, scored confidence x lift x marginWeight; per product, GET /propensity/item/:itemId ranks the 'best audiences to push it to' by reach x CLV. ADVISORY ONLY — every endpoint is READ-ONLY and returns a ranked list; it NEVER contacts a customer or posts spend. The sole contact path stays the existing consent-gated campaign DRAFT (activateSegment), so a human edits + sends and PDPA consent is honoured at send time. Gated to marketing/exec; tenant-scoped by RLS (customer_profiles read + a separate pos_members read; a cross-tenant member -> 404). A read/scoring model — no GL posting, no migration.",
+      "prev_det": "Prev",
+      "nature": "Automated",
+      "frequency": "Per scoring read",
+      "owner": "Marketing / Exec",
+      "coso": "P10/P29",
+      "code_reference": "marketing-activation/propensity-scoring.ts (pure rankNextOffers/rankBestAudiences/marginWeight — unit-tested test/propensity-scoring.test.ts, 11 checks); propensity.service.ts (nextBestOffers/bestAudiences composing menu-affinity + Fact Layer + food-cost via their public APIs); marketing-activation.controller.ts GET propensity/customer/:code + propensity/item/:itemId (marketing/exec); fact-layer.service.ts (the shared facts, incl. marketing_opt_in consent); cutover/ext.ts (MKT-23 ToE, 6 checks)",
+      "tod": "Inspect the pure deterministic scorer + its unit tests, the read-only advisory endpoints (no contact path), the EXCLUDE-already-owned rule, the consent-gated-draft note, and the tenant_id filter/RLS on the reads.",
+      "toe": "Re-perform (ext harness, 6 MKT-23 checks): a next-best-offer ranks an un-owned cross-sell (AFF-B) driven by an owned item (AFF-A, lift>1); the offers exclude what the customer already buys; the advisory-only note (MKT-23) is present; best-audiences ranks the segments to push a product to (driven by affinity antecedents); a non-marketing principal -> 403; scoring an HQ member from cf2 -> 404 (tenant-scoped).",
+      "evidence": "the pure scorer + its unit tests; the read-only advisory offer/audience lists; the consent-gated-draft-only contact path",
       "status": "Implemented"
     },
     {

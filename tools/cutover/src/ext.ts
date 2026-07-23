@@ -1110,6 +1110,39 @@ async function main() {
   const custForbidden = await inj('GET', '/api/marketing-activation/facts/customer/M-CF2A', token2);
   ok('FactLayer: a non-marketing/exec principal is refused (403)', custForbidden.status === 403, `${custForbidden.status}`);
 
+  // ── Marketing Activation — ③ PROPENSITY & CROSS-SELL (docs/61 Phase 1, control MKT-23). Advisory scoring
+  //    over real co-purchase: seed a cf2 basket where AFF-A ↔ AFF-B co-occur (lift 2, conf 100%) and AFF-C ↔
+  //    AFF-D as noise, give M-CF2A the favourite AFF-A, and confirm the ranked cross-sell + best-audiences. ──
+  const affDay = new Date(Date.now() - 86400000).toISOString().slice(0, 10); // yesterday (safely inside the 90-day window)
+  await db.insert(s.menuItems).values([
+    { tenantId: cf2.id, sku: 'AFF-A', name: 'Coffee', price: '100', cost: '40', active: true },   // margin 60 / 60%
+    { tenantId: cf2.id, sku: 'AFF-B', name: 'Croissant', price: '80', cost: '40', active: true },  // margin 40 / 50%
+    { tenantId: cf2.id, sku: 'AFF-C', name: 'Tea', price: '60', cost: '30', active: true },
+    { tenantId: cf2.id, sku: 'AFF-D', name: 'Muffin', price: '50', cost: '25', active: true },
+  ]).onConflictDoNothing();
+  const mkAffSale = async (no: string, items: string[]): Promise<void> => {
+    const [sale] = await db.insert(s.custPosSales).values({ saleNo: no, saleDate: affDay, tenantId: cf2.id, total: '100', status: 'Completed' }).returning({ id: s.custPosSales.id });
+    for (const it of items) await db.insert(s.custPosItems).values({ saleId: Number(sale!.id), itemId: it, itemDescription: it, qty: '1', unitPrice: '50', amount: '50' });
+  };
+  await mkAffSale('SALE-AFF-1', ['AFF-A', 'AFF-B']);
+  await mkAffSale('SALE-AFF-2', ['AFF-A', 'AFF-B']);
+  await mkAffSale('SALE-AFF-3', ['AFF-C', 'AFF-D']);
+  await mkAffSale('SALE-AFF-4', ['AFF-C', 'AFF-D']);
+  await db.update(s.customerProfiles).set({ favoriteItemIds: ['AFF-A'] }).where(and(eq(s.customerProfiles.tenantId, cf2.id), eq(s.customerProfiles.memberId, Number(cf2Mem.id))));
+
+  const nbo = await inj('GET', '/api/marketing-activation/propensity/customer/M-CF2A', cf2admin);
+  ok('Propensity ③: next-best-offer ranks an un-owned cross-sell (AFF-B) driven by an owned item (AFF-A)', nbo.status === 200 && Array.isArray(nbo.json.offers) && nbo.json.offers.some((o: any) => o.item_id === 'AFF-B' && o.driver_item_id === 'AFF-A' && o.lift > 1) && nbo.json.marketing_opt_in === true, `${nbo.status} ${JSON.stringify(nbo.json.offers?.[0] ?? {})}`);
+  ok('Propensity ③: the ranked offers EXCLUDE what the customer already buys (no AFF-A)', nbo.status === 200 && (nbo.json.offers ?? []).every((o: any) => o.item_id !== 'AFF-A'), `${JSON.stringify((nbo.json.offers ?? []).map((o: any) => o.item_id))}`);
+  ok('Propensity ③: advisory-only (MKT-23) — the response carries no contact, only a ranked list + a consent-gated note', nbo.status === 200 && typeof nbo.json.note === 'string' && /MKT-23/.test(nbo.json.note), `${nbo.json.note ?? ''}`);
+
+  const aud = await inj('GET', '/api/marketing-activation/propensity/item/AFF-B', cf2admin);
+  ok('Propensity ③: best-audiences ranks the segments to push a product to, driven by its affinity antecedents', aud.status === 200 && Array.isArray(aud.json.driver_item_ids) && aud.json.driver_item_ids.includes('AFF-A') && Array.isArray(aud.json.audiences) && aud.json.candidate_members >= 1 && aud.json.audiences.some((a: any) => a.segment === 'GovSeg'), `${aud.status} ${JSON.stringify({ drivers: aud.json.driver_item_ids, n: aud.json.candidate_members, segs: (aud.json.audiences ?? []).map((a: any) => a.segment) })}`);
+
+  const nboForbidden = await inj('GET', '/api/marketing-activation/propensity/customer/M-CF2A', token2);
+  ok('Propensity ③: a non-marketing/exec principal is refused (403)', nboForbidden.status === 403, `${nboForbidden.status}`);
+  const nboHq = await inj('GET', '/api/marketing-activation/propensity/customer/M-HQA', cf2admin);
+  ok('Propensity ③: tenant-scoped — cf2 cannot score HQ member M-HQA (404)', nboHq.status === 404, `${nboHq.status}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
