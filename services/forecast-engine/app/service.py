@@ -29,10 +29,14 @@ from .contracts import (
     ForecastRequest,
     ForecastResponse,
     OptimizeItem,
+    OptimizeNetworkRequest,
+    OptimizeNetworkResponse,
     OptimizeRequest,
     OptimizeResponse,
+    PoolingReport,
 )
 from .forecasting import forecast_series
+from .network import NetworkFailure, run_optimize_network as _run_optimize_network
 from .optimization import EngineItemFailure, solve_item, solve_joint, sample_lead_times, _validated_scenarios
 from .reconcile import ReconcileError, reconcile
 
@@ -200,3 +204,22 @@ def run_optimize(req: OptimizeRequest) -> OptimizeResponse:
     return OptimizeResponse(
         contract_version=CONTRACT_VERSION, request_id=req.request_id, plans=plans, errors=errors
     )
+
+
+def run_optimize_network(req: OptimizeNetworkRequest) -> OptimizeNetworkResponse:
+    """docs/57 Track B (B2) — two-echelon MEIO. A topology-level failure returns a response with an
+    error item + an empty pooling report, mirroring how a bad item never fails the /v1/optimize batch."""
+    try:
+        return _run_optimize_network(req)
+    except NetworkFailure as exc:
+        return OptimizeNetworkResponse(
+            contract_version=CONTRACT_VERSION, request_id=req.request_id, node_plans=[], allocations=[],
+            pooling=PoolingReport(independent_safety_units=0.0, pooled_safety_units=0.0, pooling_benefit_pct=0.0),
+            errors=[EngineItemError(ref=req.item_code, code=exc.code, message=exc.message)],
+        )
+    except Exception as exc:  # noqa: BLE001 — never 500 the caller; surface as an error item
+        return OptimizeNetworkResponse(
+            contract_version=CONTRACT_VERSION, request_id=req.request_id, node_plans=[], allocations=[],
+            pooling=PoolingReport(independent_safety_units=0.0, pooled_safety_units=0.0, pooling_benefit_pct=0.0),
+            errors=[EngineItemError(ref=req.item_code, code="NETWORK_ERROR", message=str(exc))],
+        )

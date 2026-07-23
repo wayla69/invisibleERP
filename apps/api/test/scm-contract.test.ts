@@ -7,6 +7,8 @@ import {
   zForecastRequest,
   zForecastResponse,
   zOptimizeItemPlan,
+  zOptimizeNetworkRequest,
+  zOptimizeNetworkResponse,
   zOptimizeRequest,
   zOptimizeResponse,
 } from '@ierp/shared';
@@ -118,5 +120,56 @@ describe('scm-engine contract — guardrails the API relies on', () => {
       future_field: { anything: true },
     });
     expect(plan.item_code).toBe('ING-CHICKEN');
+  });
+});
+
+describe('scm-engine contract — /v1/optimize-network (docs/57 Track B · B2)', () => {
+  it('optimize-network request', () => {
+    const req = zOptimizeNetworkRequest.parse(fixture('optimize_network_request.json'));
+    expect(req.contract_version).toBe(SCM_ENGINE_CONTRACT_VERSION);
+    // two stocking echelons declared: one DC (echelon 1) + branches (echelon 2), plus a supplier (0)
+    expect(req.nodes.filter((n) => n.echelon === 1)).toHaveLength(1);
+    expect(req.nodes.filter((n) => n.echelon === 2).length).toBeGreaterThan(0);
+    expect(req.demand_paths.length).toBe(req.nodes.filter((n) => n.echelon === 2).length);
+    expect(req.allocation.method).toBe('fair_share');
+  });
+
+  it('optimize-network response', () => {
+    const res = zOptimizeNetworkResponse.parse(fixture('optimize_network_response.json'));
+    // pooled buffer never exceeds the independent buffer; a benefit is reported
+    expect(res.pooling.pooled_safety_units).toBeLessThanOrEqual(res.pooling.independent_safety_units + 1e-6);
+    expect(res.pooling.pooling_benefit_pct).toBeGreaterThan(0);
+    for (const p of res.node_plans) {
+      expect(p.installation_base_stock).toHaveLength(p.base_stock.length);
+      // echelon base-stock dominates installation base-stock at every node/day (coherence)
+      expect(p.base_stock.every((b, t) => b >= p.installation_base_stock[t]! - 1e-6)).toBe(true);
+      expect(p.expected.fill_rate).toBeGreaterThanOrEqual(0);
+      expect(p.expected.fill_rate).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('applies additive defaults (allocation proportional, review 1) and keeps v2', () => {
+    const base = fixture('optimize_network_request.json');
+    const minimal = zOptimizeNetworkRequest.parse({
+      contract_version: '2',
+      request_id: 'n1',
+      start_ds: '2026-07-01',
+      horizon_days: 7,
+      item_code: 'X',
+      shelf_life_days: 30,
+      unit_price: 10,
+      nodes: base.nodes,
+      lanes: base.lanes,
+      demand_paths: base.demand_paths,
+    });
+    expect(minimal.allocation.method).toBe('proportional');
+    expect(minimal.review_period_days).toBe(1);
+    expect(minimal.service_level).toBe(0.95);
+  });
+
+  it('rejects a foreign contract version on the network route', () => {
+    expect(() =>
+      zOptimizeNetworkRequest.parse({ ...fixture('optimize_network_request.json'), contract_version: '1' }),
+    ).toThrow();
   });
 });

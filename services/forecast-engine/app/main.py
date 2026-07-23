@@ -18,9 +18,9 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from . import ENGINE_VERSION
-from .contracts import CONTRACT_VERSION, ForecastRequest, OptimizeRequest
+from .contracts import CONTRACT_VERSION, ForecastRequest, OptimizeNetworkRequest, OptimizeRequest
 from .optimization import solver_selftest
-from .service import cache, run_forecast, run_optimize
+from .service import cache, run_forecast, run_optimize, run_optimize_network
 
 TOLERANCE_S = int(os.getenv("SCM_ENGINE_TOLERANCE_SEC", "300"))
 HDR_TS = "x-engine-timestamp"
@@ -126,3 +126,8 @@ async def forecast(request: Request):
 @app.post("/v1/optimize")
 async def optimize(request: Request):
     return await _handle(request, OptimizeRequest, run_optimize, "optimize")
+
+
+@app.post("/v1/optimize-network")
+async def optimize_network(request: Request):
+    return await _handle(request, OptimizeNetworkRequest, run_optimize_network, "optimize-network")
