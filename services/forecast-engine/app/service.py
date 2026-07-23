@@ -26,6 +26,7 @@ import numpy as np
 
 from .contracts import (
     CONTRACT_VERSION,
+    DemandPoint,
     EngineItemError,
     ForecastRequest,
     ForecastResponse,
@@ -35,11 +36,12 @@ from .contracts import (
     OptimizeRequest,
     OptimizeResponse,
     PoolingReport,
+    SeriesInput,
 )
 from .forecasting import forecast_series
 from .network import NetworkFailure, run_optimize_network as _run_optimize_network
 from .optimization import EngineItemFailure, solve_item, solve_joint, sample_lead_times, _validated_scenarios
-from .reconcile import ReconcileError, reconcile
+from .reconcile import ReconcileError, aggregate_specs, reconcile
 
 CACHE_TTL_S = 900
 CACHE_MAX = 64
@@ -134,6 +136,51 @@ class ResultCache:
 cache = ResultCache(ttl=_ENGINE_CACHE_TTL_S)
 
 
+def _forecast_aggregates(req: ForecastRequest, by_series: dict) -> dict:
+    """docs/58 C3 — forecast each aggregate hierarchy node's summed leaf history INDEPENDENTLY, so MinT
+    has a genuine aggregate signal to blend (without it MinT ≡ bottom-up). The aggregate history is the
+    per-day sum of its descendant leaves' history; it is forecast with the same base pipeline (no
+    per-series promo/price regressors — those are leaf-level), seeded from the node_id for determinism.
+    A leaf whose series failed to forecast (absent from `by_series`) is skipped for that aggregate.
+    Returns {node_id: ForecastSeriesResult}; a failed aggregate is omitted (reconcile then falls back to
+    the coherent leaf sum for it)."""
+    series_by_id = {s.series_id: s for s in req.series}
+    out: dict = {}
+    for node_id, leaf_sids in aggregate_specs(req.reconciliation):
+        by_ds: dict[str, float] = {}
+        for sid in leaf_sids:
+            src = series_by_id.get(sid)
+            if src is None or sid not in by_series:
+                continue  # a leaf that never forecast contributes nothing to this aggregate's history
+            for pt in src.history:
+                by_ds[pt.ds] = by_ds.get(pt.ds, 0.0) + pt.y
+        if not by_ds:
+            continue
+        agg = SeriesInput(
+            series_id=f"__agg__{node_id}",
+            history=[DemandPoint(ds=ds, y=y) for ds, y in sorted(by_ds.items())],
+            class_hint="auto",
+        )
+        try:
+            res = forecast_series(
+                series=agg,
+                holidays=req.holidays,
+                closures=set(req.closures),
+                horizon=req.horizon_days,
+                k=req.scenario_count,
+                quantiles=req.quantiles,
+                payday_regressor=req.payday_regressor,
+                promo_regressor=False,  # aggregate history carries no per-series promo/price regressor
+                price_regressor=False,
+                rng=seeded_rng(req.request_id, f"__agg__{node_id}"),
+                donors=None,
+            )
+            out[node_id] = res
+        except Exception:  # noqa: BLE001 — a failed aggregate forecast ⇒ reconcile uses the coherent leaf sum
+            continue
+    return out
+
+
 def run_forecast(req: ForecastRequest) -> ForecastResponse:
     closures = set(req.closures)
     results, errors = [], []
@@ -178,12 +225,21 @@ def run_forecast(req: ForecastRequest) -> ForecastResponse:
     order = {s.series_id: i for i, s in enumerate(req.series)}
     results.sort(key=lambda r: order.get(r.series_id, 0))
 
-    # docs/58 C2 — coherent hierarchical reconciliation (post-processing over the base results).
+    # docs/58 C2/C3/C4 — coherent hierarchical reconciliation (post-processing over the base results).
     reconciled = []
     if req.reconciliation is not None and req.reconciliation.method != "none":
+        by_series = {r.series_id: r for r in results}
         try:
+            # C3: MinT only differs from bottom-up when the aggregate nodes carry INDEPENDENT base
+            # forecasts. Forecast each aggregate node's summed leaf history independently here (same
+            # base pipeline, deterministic per-node seed) and hand them to reconcile as agg_base_by_node.
+            agg_base = (
+                _forecast_aggregates(req, by_series)
+                if req.reconciliation.method == "mint"
+                else None
+            )
             reconciled = reconcile(
-                req.reconciliation, {r.series_id: r for r in results}, req.quantiles
+                req.reconciliation, by_series, req.quantiles, agg_base_by_node=agg_base
             )
         except ReconcileError as exc:
             errors.append(EngineItemError(ref="reconciliation", code=exc.code, message=str(exc)))

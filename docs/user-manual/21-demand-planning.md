@@ -1,6 +1,6 @@
 # 21 — Supply Chain Planning: Demand Forecasting & Order Plans (วางแผนความต้องการและการสั่งซื้อ)
 
-**Status: DRAFT v0.11 · 2026-07-23**
+**Status: DRAFT v0.12 · 2026-07-23**
 
 **Who this is for:** Planners who decide how much of each ingredient to buy for each branch; approvers who
 release those plans into purchasing; branch managers who want to know why an order looks the way it does
@@ -126,6 +126,13 @@ forecast number on its own — it prepares the coherent multi-level view that re
 > of the branches it is built from — a regional or company total no longer disagrees with the branch plans
 > underneath it. With the default (bottom-up) reconciliation your per-branch order quantities are unchanged;
 > only the roll-up view becomes coherent.
+>
+> **Optimal reconciliation (when the forecast engine is deployed).** Beyond bottom-up, the engine can use
+> an *optimal* method (**MinT**) that forecasts each total independently and blends every level together —
+> so a strong company-wide or regional signal can sharpen the individual branch numbers, not just sum them.
+> The reconciled figures still tie out exactly, point forecasts and uncertainty scenarios alike. This runs
+> only where the forecast engine is provisioned; without it, planning falls back to the coherent bottom-up
+> roll-up automatically — you never see an incoherent total either way.
 
 ### To declare your supply network (optional)
 
@@ -333,6 +340,7 @@ design; ask your administrator.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.12 | 2026-07-23 | Extended the §2 "Totals now add up" callout with **Optimal reconciliation (MinT)** — docs/58 Track C · C3/C4: where the forecast engine is deployed it can forecast each total independently and blend every level with a minimum-trace method so a strong company/regional signal sharpens the branch numbers (not just sums them), with the reconciled figures tying out exactly for point forecasts *and* uncertainty scenarios; without the engine, planning falls back to the coherent bottom-up roll-up automatically. Engine capability — no user action changes, no new control, no order-quantity change. |
 | 0.11 | 2026-07-23 | Added §2 note "You can retrain the models on a schedule so the nightly plan is fast" — docs/59 Track D · D1: a schedulable **batch retrain** trains every item's forecast model ahead of time and saves the fresh forecasts, which the overnight plan then reuses instead of retraining from scratch, so a plan is produced faster on a large catalogue; a missing/too-old retrain simply falls back to training in the plan itself (freshness is an ops setting). Compute-only; changes no order quantity, no new control. |
 | 0.10 | 2026-07-23 | Added §1 note "Brand-new items are forecast by borrowing from similar items" — docs/56 Track A · A4: a newly added item with too little history of its own is forecast by borrowing the demand shape of established similar items at the **same branch** and scaling it to the expected size, marked **`analog`** so a reviewer sees it is a borrowed estimate; the system switches to forecasting the item directly once it has built its own history. Forecast-quality only; no new control. (docs/59 Track D · D3 — a shared engine result cache across replicas — is infrastructure with no user-facing change and needs no manual update.) |
 | 0.9 | 2026-07-23 | Added §2 note "The planner now runs faster on stable catalogs" + a **Refit cadence** settings row — docs/59 Track D · D2: the planner caches each item's fitted forecast model and reuses it when demand history is unchanged, refitting automatically when the history changes or after the refit cadence (default 14 days). Compute-only; changes no order quantity, no new control. |
