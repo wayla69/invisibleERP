@@ -4,8 +4,9 @@ import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { scmSpikeEvents } from '../../database/schema';
 import { ymd } from '../../database/queries';
 import { JobWorkerService, type JobContext } from '../jobs/job-worker.service';
+import { ScmAccuracyService } from './scm-accuracy.service';
 import { ScmPlanningService } from './scm-planning.service';
-import { SCM_BATCH_RETRAIN_JOB, SCM_NIGHTLY_JOB, SCM_REPLAN_JOB, SYSTEM_ACTOR } from './scm-planning.types';
+import { SCM_ACCURACY_REFRESH_JOB, SCM_BATCH_RETRAIN_JOB, SCM_NIGHTLY_JOB, SCM_REPLAN_JOB, SYSTEM_ACTOR } from './scm-planning.types';
 
 // docs/54 §5 — background execution. Both job types ride the EXISTING background_jobs queue
 // (FOR UPDATE SKIP LOCKED claim, exponential backoff, dead-letter + captureOpsAlert), so job
@@ -20,12 +21,26 @@ export class ScmPlanJobsService implements OnModuleInit {
     @Inject(DRIZZLE) private readonly db: DrizzleDb,
     private readonly planning: ScmPlanningService,
     private readonly worker: JobWorkerService,
+    private readonly accuracy: ScmAccuracyService,
   ) {}
 
   onModuleInit(): void {
     this.worker?.register(SCM_NIGHTLY_JOB, (payload, ctx) => this.runNightly(payload, ctx));
     this.worker?.register(SCM_REPLAN_JOB, (payload, ctx) => this.runReplan(payload, ctx));
     this.worker?.register(SCM_BATCH_RETRAIN_JOB, (payload, ctx) => this.runRetrain(payload, ctx));
+    this.worker?.register(SCM_ACCURACY_REFRESH_JOB, (payload, ctx) => this.runAccuracyRefresh(payload, ctx));
+  }
+
+  /**
+   * docs/59 D4 (SCM-07) — reconcile realized forecast accuracy and raise drift alerts. Reconciles every
+   * menu series whose forecast horizon has elapsed, records the realized WAPE/bias in
+   * scm_accuracy_history, and flags + alerts a series whose drift is sustained. Schedulable via the BI
+   * scheduler (the `scm_accuracy_refresh` action-report), mirroring the batch-retrain cadence.
+   */
+  private async runAccuracyRefresh(payload: { as_of?: string }, ctx: JobContext) {
+    const result = await this.accuracy.refreshAccuracy(ctx.tenantId, { asOf: payload.as_of });
+    this.log.log(`accuracy refresh tenant=${ctx.tenantId} ${result.as_of}: scored=${result.scored} degraded=${result.degraded}`);
+    return result;
   }
 
   /**

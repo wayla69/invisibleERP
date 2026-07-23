@@ -2,9 +2,9 @@
   "generated_from": "compliance/build_rcm.py",
   "date": "2026-06-22",
   "census": {
-    "total": 315,
+    "total": 316,
     "by_status": {
-      "Implemented": 312,
+      "Implemented": 313,
       "Partial": 3
     },
     "by_family": {
@@ -21,7 +21,7 @@
       "ITGC · Change": 5,
       "ITGC · Operations": 4,
       "ITGC · SDLC": 3,
-      "Inventory & COGS": 27,
+      "Inventory & COGS": 28,
       "Leases": 2,
       "Manufacturing & Costing": 5,
       "Monitoring": 3,
@@ -6020,6 +6020,25 @@
       "tod": "Inspect that DC-shortage allocations are non-negative and sum to no more than available, that equal-priority equal-demand branches get equal shares, that the allocation policy is set under scm_allocate and approved by a different scm_approve holder, and that an unjustified override is rejected while a justified one is staged for a second approver rather than applied immediately.",
       "toe": "Re-perform: force a DC shortage (branch demand > DC on-hand) -> allocation lines are non-negative, sum <= available, and two equal-priority equal-demand branches receive equal shares; override the computed fair-share WITHOUT a justification -> 403 ALLOCATION_OVERRIDE_UNLOGGED; override WITH a justification -> staged PendingApproval (not applied) until a different scm_approve holder approves; a foreign tenant cannot read or approve the policy/override (404) - re-performed by the scm harness.",
       "evidence": "DC-shortage allocations follow an approved fair-share policy; overrides are justified + second-approved",
+      "status": "Implemented"
+    },
+    {
+      "control_id": "SCM-07",
+      "cycle": "Inventory & COGS",
+      "category": "Application",
+      "fsli": "Supply chain planning; Demand forecasting; Forecast accuracy",
+      "risk": "A demand-forecasting model can silently DRIFT (a recipe change, a new competitor, a demand-regime shift) so that its forecasts - and therefore the perishable order quantities they drive - degrade with no visibility: each run persists only a point-in-time backtest WAPE, not accuracy OVER TIME, so a model that was good at fit but is now systematically wrong keeps mis-sizing orders (waste or stockout) and nobody is told. This is the detective blind spot behind SCM-03's preventive order sizing.",
+      "assertion": "Accuracy/Monitoring",
+      "description": "Forecast accuracy (WAPE and bias) is MONITORED per (branch, item) over time against each series' fit-time baseline. After each planning/retrain run an accuracy refresh computes the REALIZED WAPE/bias by comparing a prior forecast to the actuals that have since arrived (over the elapsed horizon) and records it in scm_accuracy_history. A series whose realized WAPE exceeds its baseline by the configured factor (default 1.5x) for the configured number of CONSECUTIVE as-of dates (default 3, so one bad day is not an alert) is flagged degraded, which raises a captureOpsAlert (scm_forecast_degraded) + publishes a scm_accuracy_degraded event on the SSE bus AND force-refits the series on the next batch (dropping its warm-start, closing the drift loop). The degradation test is governed data (scm_settings.accuracy_degradation_factor / accuracy_sustained_periods). So a silently drifting model that would degrade order quantities is DETECTED and surfaced rather than accepted.",
+      "prev_det": "Det",
+      "nature": "Automated",
+      "frequency": "Per planning/retrain run",
+      "owner": "Planner / Controller",
+      "coso": "P16",
+      "code_reference": "scm-planning/scm-accuracy.service.ts (refreshAccuracy realized WAPE/bias reconciliation from the extract's public actuals + sustained-degradation flagging + captureOpsAlert('scm_forecast_degraded') + SSE publish; degradedItems force-refit trigger; digest for the report); schema/scm-planning.ts scm_accuracy_history + scm_settings.accuracy_degradation_factor/accuracy_sustained_periods (migration 0479, canonical 0232-form RLS); scm-live.service.ts scm_accuracy_degraded event; scm-plan-jobs.service.ts SCM_ACCURACY_REFRESH_JOB; scm-bi-reports.ts scm_forecast_accuracy report + scm_accuracy_refresh action; scm-run.service.ts force-refit of degraded series; cutover/scm.ts (ToE)",
+      "tod": "Inspect that realized forecast accuracy is reconciled per (branch, item) as-of date into scm_accuracy_history against the fit-time baseline, that a sustained degradation (realized WAPE above baseline x factor for the configured consecutive periods) flags the series degraded and raises an ops alert + live event, that a single bad day does NOT alert, and that a degraded series is force-refit on the next batch.",
+      "toe": "Re-perform: seed a series with a good backtest baseline, then feed actuals that diverge for `sustained_periods` consecutive as-of dates -> the series flags degraded, an ops alert + scm_accuracy_degraded SSE event fire, and the next batch force-refits it (drops the warm-start); a single bad day does NOT alert; a foreign tenant sees 0 of another tenant's accuracy rows - re-performed by the scm harness.",
+      "evidence": "Forecast accuracy is monitored over time; sustained drift is detected, alerted, and force-refit",
       "status": "Implemented"
     }
   ]
