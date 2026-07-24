@@ -297,6 +297,17 @@ async function main() {
   ok('W3 governance: global weekly cap 1 — first marketing send delivers, the second (other channel) audits skipped:global cap; transactional stays exempt',
     cap1.json.status === 'sent' && cap2.json.status === 'skipped' && cap2.json.error === 'global cap' && capLog.length === 1,
     `1st=${cap1.json.status} 2nd=${cap2.json.status}/${cap2.json.error} audited=${capLog.length}`);
+  // docs/63 — a BROADCAST CAMPAIGN is a marketing engine like journeys/blasts: with gmId already at the
+  // weekly cap (its one 'blast:all' send above), a campaign targeting them must skip-and-audit 'global cap'
+  // (closing the CampaignsService.deliver path that previously bypassed the W3 cross-channel frequency cap).
+  // Target gmId by a unique tier (the HTTP create's audience enum is all/segment/mi_segment/tier/…).
+  await pg.query(`UPDATE pos_members SET tier='GOVCAP' WHERE id=${gmId}`);
+  const capCamp = await inj('POST', '/api/loyalty/campaigns', token, { name: 'W3 cap camp', channel: 'sms', audience: 'tier', tier: 'GOVCAP', body: 'โปรแคมเปญ' });
+  const capCampSend = await inj('POST', `/api/loyalty/campaigns/${capCamp.json.id}/send`, token);
+  const capCampLog = (await pg.query(`SELECT error FROM message_log WHERE member_id=${gmId} AND campaign='${capCamp.json.campaign_code}'`)).rows as any[];
+  ok('W3 governance: a broadcast CAMPAIGN also honours the global cap — an at-cap member is skipped:global cap, not contacted',
+    capCampSend.json.targeted === 1 && capCampSend.json.sent === 0 && capCampSend.json.skipped === 1 && capCampLog.length === 1 && capCampLog[0].error === 'global cap',
+    `targeted=${capCampSend.json.targeted} sent=${capCampSend.json.sent} skipped=${capCampSend.json.skipped} err=${capCampLog[0]?.error}`);
   const govGet = await inj('GET', '/api/messaging/governance', token);
   ok('W3 governance: config round-trips on GET /api/messaging/governance', govGet.json.governance?.weekly_cap === 1 && govGet.json.governance?.quiet_start === '00:00', JSON.stringify(govGet.json.governance));
   await inj('PUT', '/api/messaging/governance', token, { quiet_start: '21:00', quiet_end: '09:00', weekly_cap: 4 }); // restore defaults

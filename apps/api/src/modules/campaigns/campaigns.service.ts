@@ -1,9 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, Optional, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc, inArray, lte, gte, isNotNull, sql } from 'drizzle-orm';
 import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { resolveMessageGateway, type MessageChannel } from '../messaging/gateways';
+import { isMarketingCampaign, countRecentMarketingSends } from '../messaging/messaging.service';
+import { TenantMessagingService } from '../messaging/tenant-messaging.service';
 import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 import { bucketPct } from '../marketing/marketing-automation.service';
 import type { JwtUser } from '../../common/decorators';
@@ -20,6 +22,9 @@ export class CampaignsService {
     private readonly docNo: DocNumberService,
     // Saved-segment audience resolution (Phase F1) — the whitelisted/bound rule engine stays the only gate.
     private readonly savedSegments: SavedSegmentsService,
+    // W3 (docs/27) — tenant messaging governance for the global cross-channel marketing cap. Optional so
+    // partial harnesses still construct; absent ⇒ no cap (fallback matches getGovernance's own default).
+    @Optional() private readonly tenantMsg?: TenantMessagingService,
   ) {}
 
   private tid(user: JwtUser): number {
@@ -161,12 +166,17 @@ export class CampaignsService {
       throw new ConflictException({ code: 'ALREADY_SENT', message: 'Campaign already sent', messageTh: 'แคมเปญถูกส่งไปแล้ว' });
     }
     const members = await this.resolveAudience(db, tenantId, claimed);
+    // W3 (docs/27) — the tenant's global cross-channel marketing cap (0 = no cap; unconfigured ⇒ default 0),
+    // resolved ONCE for the blast. A broadcast campaign is a marketing engine like any other, so it must
+    // honour the same per-member frequency guard journeys/blasts already do; this closes the one send path
+    // that previously bypassed it.
+    const weeklyCap = Number((await (this.tenantMsg?.getGovernance(tenantId) ?? Promise.resolve({ weekly_cap: 0 }))).weekly_cap) || 0;
     let sent = 0, skipped = 0, failed = 0;
     for (const m of members) {
       // Body-only A/B (G2): deterministic per-member split — same member always gets the same variant.
       const body = claimed.variantBBody && bucketPct(Number(claimed.id), Number(m.id)) < Number(claimed.splitBPct ?? 0)
         ? claimed.variantBBody : claimed.body;
-      const r = await this.deliver(db, tenantId, m, claimed.channel, body, claimed.campaignCode, user.username);
+      const r = await this.deliver(db, tenantId, m, claimed.channel, body, claimed.campaignCode, user.username, weeklyCap);
       if (r === 'sent') sent++; else if (r === 'skipped') skipped++; else failed++;
     }
     await db.update(loyaltyCampaigns).set({ targeted: members.length, sentCount: sent, skippedCount: skipped, failedCount: failed }).where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId)));
@@ -238,11 +248,22 @@ export class CampaignsService {
     return members; // 'all'
   }
 
-  // Deliver one message (PDPA opt-out → skip) and audit it in message_log.
-  private async deliver(tx: any, tenantId: number, member: any, channel: string, body: string, campaignCode: string, createdBy: string): Promise<'sent' | 'skipped' | 'failed'> {
+  // Deliver one message (PDPA opt-out → skip; W3 global cap → skip) and audit it in message_log. Order
+  // mirrors MessagingService.send: consent first, then the cross-channel frequency cap, then delivery.
+  private async deliver(tx: any, tenantId: number, member: any, channel: string, body: string, campaignCode: string, createdBy: string, weeklyCap = 0): Promise<'sent' | 'skipped' | 'failed'> {
     if (member.marketingOptIn === false) {
       await tx.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel, recipient: null, body, campaign: campaignCode, status: 'skipped', provider: null, error: 'opted out', createdBy });
       return 'skipped';
+    }
+    // W3 (docs/27) — global cross-channel marketing cap: a member already at/over the tenant's weekly cap
+    // (counted over ALL sent marketing rows in message_log, any channel/engine) is skipped-and-audited, so a
+    // campaign can no longer push a customer past the healthy contact frequency journeys/blasts respect.
+    if (weeklyCap > 0 && isMarketingCampaign(campaignCode)) {
+      const since = new Date(Date.now() - 7 * 86400_000);
+      if (await countRecentMarketingSends(tx, Number(member.id), tenantId, since) >= weeklyCap) {
+        await tx.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel, recipient: null, body, campaign: campaignCode, status: 'skipped', provider: null, error: 'global cap', createdBy });
+        return 'skipped';
+      }
     }
     const recipient = channel === 'email' ? member.email : member.phone;
     if (!recipient) {
