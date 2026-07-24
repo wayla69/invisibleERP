@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Plus, Tag, Trash2 } from 'lucide-react';
+import { Calculator, Plus, Tag, Trash2, BookOpen } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { baht } from '@/lib/format';
+import { baht, thaiDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { notifySuccess, notifyError } from '@/lib/notify';
 import { PageHeader } from '@/components/page-header';
@@ -18,6 +18,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 const sel = 'h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
@@ -55,6 +57,7 @@ export default function PricingPage() {
       <PageHeader title={t('hx.pr.title')} description={t('hx.pr.desc')} />
       <Tabs tabs={[
         { key: 'rules', label: t('hx.pr.tab_rules'), content: <Rules /> },
+        { key: 'books', label: t('hx.pb.tab'), content: <Books /> },
         { key: 'quote', label: t('hx.pr.tab_quote'), content: <QuotePreview /> },
         { key: 'combo', label: t('hx.pr.tab_combo'), content: <Combos /> },
       ]} />
@@ -66,10 +69,10 @@ function Rules() {
   const { t } = useLang();
   const qc = useQueryClient();
   const q = useQuery<any>({ queryKey: ['price-rules'], queryFn: () => api('/api/pricing/rules') });
-  const [f, setF] = useState<any>({ name: '', type: 'percent', scope: 'item', target_id: '', channel: 'any', dow: '', time_start: '', time_end: '', value: '', min_qty: '1', priority: '100', stackable: false });
+  const [f, setF] = useState<any>({ name: '', type: 'percent', scope: 'item', target_id: '', channel: 'any', dow: '', time_start: '', time_end: '', valid_from: '', valid_to: '', value: '', min_qty: '1', priority: '100', stackable: false });
   const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
   const save = useMutation({
-    mutationFn: () => api('/api/pricing/rules', { method: 'POST', body: JSON.stringify({ name: f.name, type: f.type, scope: f.scope, target_id: f.target_id || undefined, channel: f.channel, dow: f.dow || undefined, time_start: f.time_start || undefined, time_end: f.time_end || undefined, value: f.value ? Number(f.value) : 0, min_qty: Number(f.min_qty) || 1, priority: Number(f.priority) || 100, stackable: f.stackable }) }),
+    mutationFn: () => api('/api/pricing/rules', { method: 'POST', body: JSON.stringify({ name: f.name, type: f.type, scope: f.scope, target_id: f.target_id || undefined, channel: f.channel, dow: f.dow || undefined, time_start: f.time_start || undefined, time_end: f.time_end || undefined, valid_from: f.valid_from || undefined, valid_to: f.valid_to || undefined, value: f.value ? Number(f.value) : 0, min_qty: Number(f.min_qty) || 1, priority: Number(f.priority) || 100, stackable: f.stackable }) }),
     // G6 (SoD R10): a new rule is staged inactive and needs a different user to activate it.
     onSuccess: () => { notifySuccess(t('hx.pr.rule_pending')); setF({ ...f, name: '', target_id: '', value: '' }); qc.invalidateQueries({ queryKey: ['price-rules'] }); },
     onError: (e: any) => notifyError(e.message),
@@ -82,6 +85,15 @@ function Rules() {
   // The "value" field means different things per type — hint accordingly.
   const valueHint = f.type === 'percent' ? t('hx.pr.hint_percent')
     : f.type === 'amount' ? t('hx.pr.hint_amount') : f.type === 'fixed' ? t('hx.pr.hint_fixed') : t('hx.pr.hint_default');
+  // Whether an APPROVED promotion is in effect today vs scheduled for the future or expired — the engine
+  // gates on valid_from/valid_to, so a future-dated active rule isn't live yet.
+  const schedState = (r: any): 'live' | 'scheduled' | 'expired' | null => {
+    if (r.status !== 'Active' || !r.active) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (r.valid_from && r.valid_from > today) return 'scheduled';
+    if (r.valid_to && r.valid_to < today) return 'expired';
+    return 'live';
+  };
   const targetDisabled = f.scope === 'all';
 
   return (
@@ -125,6 +137,12 @@ function Rules() {
             <Field label={t('hx.pr.f_tend')} htmlFor="pr-tend">
               <Input id="pr-tend" type="time" value={f.time_end} onChange={(e) => set({ time_end: e.target.value })} />
             </Field>
+            <Field label={t('hx.pr.f_valid_from')} htmlFor="pr-vf" hint={t('hx.pr.valid_hint')}>
+              <Input id="pr-vf" type="date" value={f.valid_from} onChange={(e) => set({ valid_from: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pr.f_valid_to')} htmlFor="pr-vt">
+              <Input id="pr-vt" type="date" value={f.valid_to} onChange={(e) => set({ valid_to: e.target.value })} />
+            </Field>
             <Field label={t('hx.pr.f_priority')} htmlFor="pr-priority" hint={t('hx.pr.priority_hint')}>
               <Input id="pr-priority" type="number" inputMode="numeric" placeholder="100" value={f.priority} onChange={(e) => set({ priority: e.target.value })} />
             </Field>
@@ -157,12 +175,237 @@ function Rules() {
               { key: 'channel', label: t('hx.pr.col_channel'), render: (r: any) => t(labelOf(CHANNEL_OPTS, r.channel)) },
               { key: 'value', label: t('hx.pr.col_value'), align: 'right', render: (r: any) => <span className="tabular">{r.value ?? '—'}</span> },
               { key: 'window', label: t('hx.pr.col_window'), render: (r: any) => r.time_start ? `${r.time_start}–${r.time_end}` : '—' },
+              { key: 'schedule', label: t('hx.pr.col_schedule'), sortable: false, render: (r: any) => {
+                const w = schedState(r);
+                const range = (r.valid_from || r.valid_to) ? `${r.valid_from ? thaiDate(r.valid_from) : '—'} – ${r.valid_to ? thaiDate(r.valid_to) : '—'}` : null;
+                if (w === 'scheduled') return <div className="flex flex-col gap-0.5"><Badge variant="secondary">{t('hx.pb.st_scheduled')}</Badge><span className="text-xs text-muted-foreground">{range}</span></div>;
+                if (w === 'expired') return <div className="flex flex-col gap-0.5"><Badge variant="secondary">{t('hx.pb.st_expired')}</Badge><span className="text-xs text-muted-foreground">{range}</span></div>;
+                if (w === 'live') return range ? <div className="flex flex-col gap-0.5"><Badge variant="success">{t('hx.pb.st_live')}</Badge><span className="text-xs text-muted-foreground">{range}</span></div> : <Badge variant="success">{t('hx.pb.st_live')}</Badge>;
+                return range ? <span className="text-xs text-muted-foreground">{range}</span> : <span className="text-muted-foreground">{t('hx.pb.always')}</span>;
+              } },
               { key: 'stackable', label: t('hx.pr.col_stack'), align: 'center', render: (r: any) => r.stackable ? <Badge>{t('hx.pr.yes')}</Badge> : <span className="text-muted-foreground">—</span> },
               // G6 (SoD R10): a staged (PendingApproval) rule is inactive until a DIFFERENT user activates it.
               { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => r.status === 'PendingApproval'
                 ? <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>
                 : r.status === 'Rejected' ? <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>
                 : <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('hx.pr.st_active') : t('hx.pr.st_inactive')}</Badge> },
+              { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pr.del_rule_aria', { name: r.name })} disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
+            ]}
+          />
+        )}
+      </StateView>
+    </div>
+  );
+}
+
+// docs/52 Phase 4a — price books: a governed base-price list by customer tier / branch. Maker-checker (staged
+// PendingApproval, activated by a different user — same G6/SoD gate as price rules). The register reads only
+// active, approved books at the till.
+interface PBEntry { item_id: string; unit_price: string; min_qty: string; base?: number }
+interface CatItem { item_id: string; item_description: string | null; uom: string | null; unit_price: number }
+interface BranchRow { id: number; name: string; code: string }
+
+/**
+ * Item typeahead — searches the procurement catalog (debounced) and reports both the chosen code and its
+ * current base price so the caller can show the delta. Prevents typing an item code that doesn't exist.
+ */
+function ItemCombo({ value, onPick, placeholder }: { value: string; onPick: (item: CatItem) => void; placeholder: string }) {
+  const { t } = useLang();
+  const [q, setQ] = useState(value);
+  const [debounced, setDebounced] = useState('');
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setQ(value); }, [value]);
+  useEffect(() => { const id = setTimeout(() => setDebounced(q.trim()), 250); return () => clearTimeout(id); }, [q]);
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+  const search = useQuery<{ items: CatItem[] }>({
+    queryKey: ['pb-item-search', debounced],
+    queryFn: () => api(`/api/procurement/catalog?limit=8&q=${encodeURIComponent(debounced)}`),
+    enabled: open && debounced.length > 0,
+  });
+  const results = search.data?.items ?? [];
+  return (
+    <div ref={boxRef} className="relative">
+      <Input
+        placeholder={placeholder}
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        autoComplete="off"
+      />
+      {open && debounced.length > 0 && (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border bg-popover p-1 shadow-md">
+          {search.isLoading && <p className="px-2 py-1.5 text-xs text-muted-foreground">{t('hx.common.saving')}</p>}
+          {!search.isLoading && results.length === 0 && <p className="px-2 py-1.5 text-xs text-muted-foreground">{t('hx.pb.item_no_match')}</p>}
+          {results.map((it) => (
+            <button
+              key={it.item_id}
+              type="button"
+              className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+              onClick={() => { onPick(it); setQ(it.item_id); setOpen(false); }}
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{it.item_description || it.item_id}</span>
+                <span className="block truncate text-xs text-muted-foreground">{it.item_id}{it.uom ? ` · ${it.uom}` : ''}</span>
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">{t('hx.pb.base_price')} {baht(it.unit_price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function Books() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const q = useQuery<any>({ queryKey: ['price-books'], queryFn: () => api('/api/pricing/books') });
+  const branchesQ = useQuery<{ branches: BranchRow[] }>({ queryKey: ['branches'], queryFn: () => api('/api/branches'), staleTime: 5 * 60_000 });
+  const branchName = (id: number | null | undefined) => branchesQ.data?.branches.find((b) => b.id === id)?.name;
+  // tiers already in use across the tenant's books — offered as autocomplete so the same tier is spelled
+  // consistently (pricing resolution matches the exact string).
+  const knownTiers: string[] = Array.from(new Set((q.data?.books ?? []).map((b: any) => b.tier).filter(Boolean))) as string[];
+  const empty = { name: '', tier: '', branch_id: '', customer_code: '', priority: '100', valid_from: '', valid_to: '' };
+  const [f, setF] = useState<any>(empty);
+  const [dlgOpen, setDlgOpen] = useState(false);
+  // Whether an APPROVED book is actually in effect right now (vs scheduled for the future or expired) — the
+  // status badge alone can't tell them apart, so a future-dated active book looks live when it isn't.
+  const windowState = (r: any): 'live' | 'scheduled' | 'expired' | null => {
+    if (r.status !== 'Active' || !r.active) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (r.valid_from && r.valid_from > today) return 'scheduled';
+    if (r.valid_to && r.valid_to < today) return 'expired';
+    return 'live';
+  };
+  const set = (p: Record<string, unknown>) => setF((cur: any) => ({ ...cur, ...p }));
+  const [entries, setEntries] = useState<PBEntry[]>([{ item_id: '', unit_price: '', min_qty: '1' }]);
+  const setEntry = (i: number, p: Partial<PBEntry>) => setEntries((es) => es.map((e, j) => (j === i ? { ...e, ...p } : e)));
+  const validEntries = () => entries.filter((e) => e.item_id.trim() && e.unit_price !== '').map((e) => ({ item_id: e.item_id.trim(), unit_price: Number(e.unit_price), min_qty: Number(e.min_qty) || 1 }));
+
+  // create the book then set its entries — both stage it PendingApproval (a different user must activate it).
+  const save = useMutation({
+    mutationFn: async () => {
+      const created: any = await api('/api/pricing/books', { method: 'POST', body: JSON.stringify({ name: f.name, tier: f.tier || null, branch_id: f.branch_id ? Number(f.branch_id) : null, customer_code: f.customer_code || null, priority: Number(f.priority) || 100, valid_from: f.valid_from || null, valid_to: f.valid_to || null }) });
+      await api(`/api/pricing/books/${created.id}/entries`, { method: 'POST', body: JSON.stringify({ entries: validEntries() }) });
+    },
+    onSuccess: () => { notifySuccess(t('hx.pb.saved_pending')); setF(empty); setEntries([{ item_id: '', unit_price: '', min_qty: '1' }]); setDlgOpen(false); qc.invalidateQueries({ queryKey: ['price-books'] }); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const del = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}`, { method: 'DELETE' }), onSuccess: () => qc.invalidateQueries({ queryKey: ['price-books'] }) });
+  const approve = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}/approve`, { method: 'POST' }), onSuccess: () => { notifySuccess(t('hx.pb.activated')); qc.invalidateQueries({ queryKey: ['price-books'] }); }, onError: (e: any) => notifyError(e.message) });
+  const reject = useMutation({ mutationFn: (id: number) => api(`/api/pricing/books/${id}/reject`, { method: 'POST', body: JSON.stringify({}) }), onSuccess: () => { notifySuccess(t('hx.pb.rejected')); qc.invalidateQueries({ queryKey: ['price-books'] }); }, onError: (e: any) => notifyError(e.message) });
+  const canSave = !!f.name && validEntries().length > 0 && !save.isPending;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{t('hx.pb.desc')}</p>
+        <Dialog open={dlgOpen} onOpenChange={setDlgOpen}>
+          <DialogTrigger asChild>
+            <Button><Plus className="size-4" /> {t('hx.pb.new_btn')}</Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+            <DialogHeader><DialogTitle>{t('hx.pb.add_title')}</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label={<>{t('hx.pb.f_name')} <span className="text-destructive">*</span></>} htmlFor="pb-name" className="sm:col-span-2 lg:col-span-1">
+              <Input id="pb-name" placeholder={t('hx.pb.name_ph')} value={f.name} onChange={(e) => set({ name: e.target.value })} required />
+            </Field>
+            <Field label={t('hx.pb.f_tier')} htmlFor="pb-tier" hint={t('hx.pb.tier_ph')}>
+              <Input id="pb-tier" list="pb-tier-options" value={f.tier} onChange={(e) => set({ tier: e.target.value })} autoComplete="off" />
+              <datalist id="pb-tier-options">{knownTiers.map((tv) => <option key={tv} value={tv} />)}</datalist>
+            </Field>
+            <Field label={t('hx.pb.f_branch')} htmlFor="pb-branch" hint={t('hx.pb.branch_ph')}>
+              <Select value={f.branch_id || 'all'} onValueChange={(v) => set({ branch_id: v === 'all' ? '' : v })}>
+                <SelectTrigger id="pb-branch" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('hx.pb.any')}</SelectItem>
+                  {(branchesQ.data?.branches ?? []).map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label={t('hx.pb.f_customer')} htmlFor="pb-customer" hint={t('hx.pb.customer_hint')}>
+              <Input id="pb-customer" placeholder={t('hx.pb.customer_ph')} value={f.customer_code} onChange={(e) => set({ customer_code: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_priority')} htmlFor="pb-priority" hint={t('hx.pb.priority_hint')}>
+              <Input id="pb-priority" type="number" inputMode="numeric" placeholder="100" value={f.priority} onChange={(e) => set({ priority: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_valid_from')} htmlFor="pb-vf">
+              <Input id="pb-vf" type="date" value={f.valid_from} onChange={(e) => set({ valid_from: e.target.value })} />
+            </Field>
+            <Field label={t('hx.pb.f_valid_to')} htmlFor="pb-vt">
+              <Input id="pb-vt" type="date" value={f.valid_to} onChange={(e) => set({ valid_to: e.target.value })} />
+            </Field>
+          </div>
+          <div className="space-y-2">
+            <Label>{t('hx.pb.entries_title')}</Label>
+            <div className="hidden grid-cols-[2fr_1fr_1fr_auto] gap-2 px-1 text-xs font-medium text-muted-foreground sm:grid">
+              <span>{t('hx.pb.f_item')}</span><span className="text-right">{t('hx.pb.f_price')}</span><span className="text-right">{t('hx.pb.f_minqty')}</span><span className="w-9" />
+            </div>
+            {entries.map((e, i) => (
+              <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-start">
+                <div className="col-span-2 sm:col-span-1">
+                  <ItemCombo value={e.item_id} placeholder={t('hx.pb.f_item')} onPick={(it) => setEntry(i, { item_id: it.item_id, base: it.unit_price, unit_price: e.unit_price || String(it.unit_price) })} />
+                </div>
+                <div>
+                  <Input type="number" inputMode="decimal" step="0.01" className="text-right" placeholder="0" value={e.unit_price} onChange={(ev) => setEntry(i, { unit_price: ev.target.value })} />
+                  {e.base != null && e.unit_price !== '' && Number(e.unit_price) !== e.base && (
+                    <p className="mt-1 text-right text-xs text-muted-foreground">{t('hx.pb.base_price')} {baht(e.base)}</p>
+                  )}
+                </div>
+                <Input type="number" inputMode="numeric" min={1} className="text-right" placeholder="1" value={e.min_qty} onChange={(ev) => setEntry(i, { min_qty: ev.target.value })} />
+                <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive sm:mt-0.5" aria-label={t('hx.pb.f_item')} disabled={entries.length === 1} onClick={() => setEntries((es) => es.filter((_, j) => j !== i))}><Trash2 className="size-4" /></Button>
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setEntries((es) => [...es, { item_id: '', unit_price: '', min_qty: '1' }])}><Plus className="size-4" /> {t('hx.pb.add_row')}</Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button disabled={!canSave} onClick={() => save.mutate()}>
+              <Plus className="size-4" /> {save.isPending ? t('hx.common.saving') : t('hx.pb.save')}
+            </Button>
+            {!canSave && !save.isPending && <span className="text-xs text-muted-foreground">{t('hx.pb.name_required')}</span>}
+          </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <StateView q={q}>
+        {q.data && (
+          <DataTable
+            rows={q.data.books}
+            rowKey={(r: any) => r.id}
+            emptyState={{ icon: BookOpen, title: t('hx.pb.empty_title'), description: t('hx.pb.empty_desc') }}
+            columns={[
+              { key: 'name', label: t('hx.pb.col_name') },
+              { key: 'tier', label: t('hx.pb.col_tier'), render: (r: any) => r.tier || <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'branch_id', label: t('hx.pb.col_branch'), render: (r: any) => r.branch_id != null ? (branchName(r.branch_id) ?? `#${r.branch_id}`) : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'customer_code', label: t('hx.pb.col_customer'), render: (r: any) => r.customer_code ? <span className="font-mono text-xs">{r.customer_code}</span> : <span className="text-muted-foreground">{t('hx.pb.any')}</span> },
+              { key: 'priority', label: t('hx.pb.f_priority'), align: 'right', render: (r: any) => <span className="tabular">{r.priority}</span> },
+              { key: 'validity', label: t('hx.pb.col_validity'), sortable: false, render: (r: any) => (r.valid_from || r.valid_to)
+                ? <span className="whitespace-nowrap text-sm">{r.valid_from ? thaiDate(r.valid_from) : '—'} – {r.valid_to ? thaiDate(r.valid_to) : '—'}</span>
+                : <span className="text-muted-foreground">{t('hx.pb.always')}</span> },
+              // G6 (SoD R10): a staged (PendingApproval) book is inactive until a DIFFERENT user activates it.
+              // For an Active book we also show whether it's actually in effect NOW vs scheduled/expired.
+              { key: 'status', label: t('hx.pr.col_status'), sortable: false, render: (r: any) => {
+                if (r.status === 'PendingApproval') return <div className="flex items-center gap-1.5"><Badge variant="warning">{t('hx.pr.st_pending')}</Badge><Button size="sm" className="h-7" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('hx.pr.approve')}</Button><Button size="sm" variant="outline" className="h-7" disabled={reject.isPending} onClick={() => reject.mutate(r.id)}>{t('hx.pr.reject')}</Button></div>;
+                if (r.status === 'Rejected') return <Badge variant="secondary">{t('hx.pr.st_rejected')}</Badge>;
+                const w = windowState(r);
+                if (w === 'live') return <Badge variant="success">{t('hx.pb.st_live')}</Badge>;
+                if (w === 'scheduled') return <Badge variant="secondary">{t('hx.pb.st_scheduled')}</Badge>;
+                if (w === 'expired') return <Badge variant="secondary">{t('hx.pb.st_expired')}</Badge>;
+                return <Badge variant={r.active ? 'default' : 'secondary'}>{r.active ? t('hx.pr.st_active') : t('hx.pr.st_inactive')}</Badge>;
+              } },
+              // Maker/checker trail (SoD R10) — who staged it and who approved it, for auditability at a glance.
+              { key: 'trail', label: t('hx.pb.col_trail'), sortable: false, render: (r: any) => (
+                <div className="text-xs leading-tight text-muted-foreground">
+                  <div>{t('hx.pb.maker')}: <span className="text-foreground">{r.created_by || '—'}</span></div>
+                  <div>{t('hx.pb.checker')}: <span className="text-foreground">{r.approved_by || '—'}</span>{r.approved_at ? ` · ${thaiDate(r.approved_at)}` : ''}</div>
+                </div>
+              ) },
               { key: 'act', label: '', sortable: false, render: (r: any) => <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" aria-label={t('hx.pr.del_rule_aria', { name: r.name })} disabled={del.isPending} onClick={() => del.mutate(r.id)}><Trash2 className="size-4" /></Button> },
             ]}
           />

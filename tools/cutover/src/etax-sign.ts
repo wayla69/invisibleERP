@@ -34,7 +34,7 @@ const ok = (name: string, cond: boolean, detail = '') => checks.push({ name, ok:
 function selfSignedPem(): { keyPem: string; certPem: string } {
   const dir = mkdtempSync(join(tmpdir(), 'etax-sign-'));
   const key = join(dir, 'key.pem'), cert = join(dir, 'cert.pem');
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '2', '-subj', '/CN=eTax Test Signer/O=Oshinei ERP/C=TH'], { stdio: 'ignore' });
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '2', '-subj', '/CN=eTax Test Signer/O=Invisible ERP/C=TH'], { stdio: 'ignore' });
   return { keyPem: readFileSync(key, 'utf8'), certPem: readFileSync(cert, 'utf8') };
 }
 

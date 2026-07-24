@@ -2,7 +2,7 @@
   "name": "@ierp/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Invisible ERP V2 — NestJS backend",
+  "description": "Invisible ERP — NestJS backend",
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",

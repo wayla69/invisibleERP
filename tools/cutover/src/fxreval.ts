@@ -107,6 +107,27 @@ async function main() {
   const noRate = await inj('POST', '/api/fx/revalue', admin, { as_of: '2031-12-31', currency: 'GBP' });
   ok('No-rate guard: revalue GBP → 400 NO_RATE', noRate.status === 400 && noRate.json.error?.code === 'NO_RATE', `${noRate.status} ${noRate.json.error?.code}`);
 
+  // ── B3 (docs/50 Wave 2): schedulable GL-18 staging — the job auto-DRAFTS the period's reval run;
+  //    posting stays a maker-checker human act. Idempotent per period; posted period → graceful no-op ──
+  const sub = await inj('POST', '/api/bi/subscriptions', admin, { name: 'FX reval สิ้นงวด', report_type: 'gl_fx_reval_run', frequency: 'monthly', filters: { period: '2031-12' } });
+  ok('B3: gl_fx_reval_run subscription accepted (registered report type)', sub.status < 300 && !!sub.json.id, JSON.stringify(sub.json).slice(0, 80));
+  const jobRun1 = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, admin);
+  ok('B3: scheduled job runs OK', jobRun1.status === 200, `${jobRun1.status}`);
+  const stagedList = await inj('GET', '/api/ledger/fx-reval', admin);
+  const staged = (stagedList.json.runs ?? []).filter((r: any) => r.period === '2031-12');
+  ok('B3: job staged ONE Open reval run for the period', staged.length === 1 && staged[0].status === 'Open', JSON.stringify(staged.map((r: any) => ({ id: r.id, st: r.status }))));
+  await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, admin);
+  const stagedList2 = await inj('GET', '/api/ledger/fx-reval', admin);
+  const staged2 = (stagedList2.json.runs ?? []).filter((r: any) => r.period === '2031-12');
+  ok('B3: re-run refreshes the SAME Open run (idempotent per period — still 1)', staged2.length === 1 && staged2[0].status === 'Open', `n=${staged2.length}`);
+  // Posting stays maker-checker: a DIFFERENT user posts the staged run, then the job no-ops gracefully.
+  const postRun = await inj('POST', `/api/ledger/fx-reval/${staged2[0].id}/post`, fxchk, {});
+  ok('B3: a different user posts the staged run (maker-checker unchanged)', postRun.status < 300, `${postRun.status} ${JSON.stringify(postRun.json).slice(0, 80)}`);
+  const jobRun3 = await inj('POST', `/api/bi/subscriptions/${sub.json.id}/run`, admin);
+  ok('B3: job on a POSTED period is a graceful no-op (no error, no new run)', jobRun3.status === 200, `${jobRun3.status}`);
+  const stagedList3 = await inj('GET', '/api/ledger/fx-reval', admin);
+  ok('B3: still exactly one run for the period after the no-op', (stagedList3.json.runs ?? []).filter((r: any) => r.period === '2031-12').length === 1, '');
+
   await app.close();
   await pg.close();
 

@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { journalEntries, journalLines, postingRules, coaChangeRequests } from '../../database/schema';
-import { n } from '../../database/queries';
+import { journalEntries, journalLines, postingRules, coaChangeRequests, closeRuns, closeRunSteps } from '../../database/schema';
+import { n, ymd } from '../../database/queries';
 import { approvalAgeDays as ageDays, type ApprovalQueue, type ApprovalQueueSource, type PendingApprovalItem } from '../../common/approval-queues';
 
 // docs/46 Phase 2 — the ledger's GOV-01 approval queues (discovered by ApprovalQueueRegistrarService;
@@ -43,6 +43,33 @@ export class LedgerApprovalQueues implements ApprovalQueueSource {
           const items: PendingApprovalItem[] = [];
           for (const r of await db.select().from(postingRules).where(and(eq(postingRules.status, 'PendingApproval'), eq(postingRules.active, true))))
             items.push({ type: 'posting_rule', control: 'GL-24', ref: `PRULE-${Number(r.id)}`, label: `กฎการลงบัญชี ${r.eventType} · ${r.role} → ${r.accountCode}`, amount: 0, requested_by: r.createdBy ?? null, requested_at: r.createdAt ?? null, age_days: ageDays(r.createdAt) });
+          return items;
+        },
+      },
+      {
+        // GL-15 (Close Manager v2, docs/50 follow-up) — OVERDUE close tasks: a checklist step in an ACTIVE
+        // (not Locked) close run that is past its B1 due date and not Done ages in the GOV-01 center, so a
+        // slipping close surfaces where the controller already looks instead of silently drifting. Age is
+        // measured from the DUE date (days overdue), and the owner role rides requested_by so the worklist
+        // shows who the task is waiting on. Detective/read-only — the sign-off itself stays on the
+        // period-close screen (GL-15/GL-16 unchanged).
+        source: 'close_task_overdue',
+        pending: async () => {
+          const items: PendingApprovalItem[] = [];
+          const today = ymd();
+          const rows = await db.select({
+            period: closeRuns.period, stepKey: closeRunSteps.stepKey, title: closeRunSteps.title,
+            ownerRole: closeRunSteps.ownerRole, dueDate: closeRunSteps.dueDate, required: closeRunSteps.required,
+          }).from(closeRunSteps).innerJoin(closeRuns, eq(closeRunSteps.closeRunId, closeRuns.id))
+            .where(and(sql`${closeRunSteps.status} <> 'Done'`, sql`${closeRunSteps.dueDate} IS NOT NULL`,
+              sql`${closeRunSteps.dueDate} < ${today}`, sql`${closeRuns.status} <> 'Locked'`));
+          for (const r of rows) {
+            items.push({
+              type: 'close_task_overdue', control: 'GL-15', ref: `CLOSE-${r.period}:${r.stepKey}`,
+              label: `งานปิดงวด ${r.period} เลยกำหนด: ${r.title}${r.ownerRole ? ` (${r.ownerRole})` : ''}${r.required ? '' : ' [advisory]'}`,
+              amount: 0, requested_by: r.ownerRole ?? null, requested_at: r.dueDate ?? null, age_days: ageDays(r.dueDate),
+            });
+          }
           return items;
         },
       },

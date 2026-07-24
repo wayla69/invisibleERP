@@ -19,7 +19,8 @@ export type AiTask =
   | 'nl_query'          // nl-analytics: natural language → query spec
   | 'config_suggest'    // ai-config: describe → propose a Studio config JSON
   | 'insight'           // analytics insights narrative
-  | 'chat_copilot';     // LINE chat copilot: Thai free text → structured command DRAFT (confirm-first)
+  | 'chat_copilot'      // LINE chat copilot: Thai free text → structured command DRAFT (confirm-first)
+  | 'campaign_studio';  // AI Campaign Studio (MKT-21): fact sheet → bilingual campaign copy DRAFT
 
 const TASK_MODEL: Record<AiTask, string> = {
   agent_reasoning: MODEL.REASONING,
@@ -29,6 +30,7 @@ const TASK_MODEL: Record<AiTask, string> = {
   config_suggest: MODEL.REASONING, // JSON config benefits from stronger structure adherence
   insight: MODEL.REASONING,        // narrative analytics — quality-sensitive
   chat_copilot: MODEL.CHEAP,       // short NL→draft parse; execution is human-confirmed anyway (LP-2)
+  campaign_studio: MODEL.REASONING, // bilingual marketing copy — low volume, quality-sensitive, human-reviewed
 };
 
 // Resolve the model for a task. `ANTHROPIC_MODEL` (when set) pins everything to one model.

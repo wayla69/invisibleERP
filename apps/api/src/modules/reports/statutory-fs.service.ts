@@ -1,9 +1,14 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { fsReportDefinitions } from '../../database/schema';
+import { fsReportDefinitions, accounts, tenants } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { LedgerService } from '../ledger/ledger.service';
+import { resolveBsGroup, resolveIsGroup } from '../ledger/ledger-statement-sections';
+import { THAI_DBD_DEFS } from './thai-dbd-fs';
+import { INDUSTRY_FS_DEFS } from './industry-fs';
+import { fsKpiSpecs } from './industry-fs-kpis';
+import { revenueTiming, disaggPolicy, type RevTiming } from './industry-revenue-disagg';
 
 const round2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
 const dayBefore = (ymd: string) => { const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
@@ -24,8 +29,11 @@ export interface FsGroup {
   accounts?: string[];          // explicit account codes
   prefixes?: string[];          // account-code startsWith
   types?: string[];             // account_type in (Asset|Liability|Equity|Revenue|Expense)
+  bsGroups?: string[];          // resolved balance-sheet section (current_asset|noncurrent_asset|…|equity)
+  isGroups?: string[];          // resolved income-statement section (revenue|cogs|selling_admin|…|tax)
   sumOf?: { key: string; factor: number }[]; // computed subtotal over other group keys
   showAccounts?: boolean;       // emit per-account child rows under the group
+  hidden?: boolean;             // compute the value (so sumOf can reference it) but do NOT emit a row
 }
 export interface FsBuilderConfig { groups?: FsGroup[] }
 export interface FsNoteDef {
@@ -41,7 +49,7 @@ export interface FsNoteDef {
 }
 export interface FsNotesConfig { notes?: FsNoteDef[] }
 
-type NetRow = { account_code: string; account_name: string | null; account_type: string | null; net: number };
+type NetRow = { account_code: string; account_name: string | null; account_type: string | null; net: number; bs_group?: string | null; is_group?: string | null; parent_code?: string | null };
 
 @Injectable()
 export class StatutoryFsService {
@@ -59,13 +67,70 @@ export class StatutoryFsService {
     const rows = await this.db.select().from(fsReportDefinitions)
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(asc(fsReportDefinitions.statementType), asc(fsReportDefinitions.code));
-    return { definitions: rows.map((r: any) => this.shapeDef(r)), count: rows.length };
+    const tenantDefs = rows.map((r: any) => this.shapeDef(r));
+    // Surface the built-in Thai DBD/TFRS defaults too (so they are discoverable + renderable out of the box),
+    // unless the tenant has authored its own definition of the same code (which overrides it).
+    const authored = new Set(tenantDefs.map((d) => d.code));
+    const builtins = Object.values(THAI_DBD_DEFS)
+      .filter((d) => !authored.has(d.code) && (!statementType || d.statementType === statementType))
+      .map((d) => ({ code: d.code, name: d.name, statement_type: d.statementType, config: d.config, active: true, created_by: 'system', is_default: true }));
+    const definitions = [...tenantDefs, ...builtins].sort((a, b) => a.statement_type.localeCompare(b.statement_type) || a.code.localeCompare(b.code));
+    return { definitions, count: definitions.length };
   }
 
-  async getDefinition(code: string) {
+  // The active tenant's industry (drives the per-industry default statutory layout). Null off-tenant.
+  private async tenantIndustry(): Promise<string | null> {
+    const tid = this.tid();
+    if (tid == null) return null;
+    const [row] = await this.db.select({ industry: tenants.industry }).from(tenants).where(eq(tenants.id, tid)).limit(1);
+    return (row?.industry as string | null) ?? null;
+  }
+
+  // `industryOverride` (P6, viewer-selectable) picks WHICH industry's bespoke DBD-PL layout to render,
+  // overriding the tenant's own industry: an explicit industry key → that layout; 'generic' → force the
+  // standard multi-step P&L; empty/undefined → auto-resolve from the tenant's own industry. It only steers
+  // the built-in DBD-PL fallback — the numbers still come from the caller's own GL, so every layout ties out.
+  async getDefinition(code: string, industryOverride?: string | null) {
     const [row] = await this.db.select().from(fsReportDefinitions).where(eq(fsReportDefinitions.code, code)).limit(1);
-    if (!row) throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
-    return this.shapeDef(row);
+    if (row) return this.shapeDef(row);
+    // Fall back to a built-in Thai DBD/TFRS default so the standard statements render out of the box; a
+    // tenant that authors its own definition of the same code (the DB row above) overrides it.
+    const def = THAI_DBD_DEFS[code];
+    if (def) {
+      let name = def.name;
+      let config = def.config;
+      // P6/P7: some industries have a genuinely different statement SHAPE — DBD-PL (nonprofit Statement of
+      // Activities, manufacturing COGS-by-element, construction cost-of-work, hospitality departmental) and
+      // DBD-BS (nonprofit net-assets-by-restriction, agriculture biological assets, construction contract
+      // assets, real-estate property inventory). Resolve the requested industry (or the caller's own) to its
+      // bespoke layout for this statement; everything else keeps the generic DBD default.
+      if (code === 'DBD-PL' || code === 'DBD-BS') {
+        const stmt = code === 'DBD-PL' ? 'pl' : 'bs';
+        const ind = industryOverride === 'generic' ? null
+          : (industryOverride || await this.tenantIndustry());
+        const ic = ind ? INDUSTRY_FS_DEFS[ind]?.[stmt] : undefined;
+        if (ic) { name = ic.name; config = ic.config; }
+      }
+      return { code: def.code, name, statement_type: def.statementType, config, active: true, created_by: 'system', is_default: true };
+    }
+    throw new NotFoundException({ code: 'FS_DEF_NOT_FOUND', message: `FS report definition ${code} not found`, messageTh: `ไม่พบรูปแบบรายงาน ${code}` });
+  }
+
+  // The industry layouts a viewer can pick between for each built-in statement (DBD-PL / DBD-BS), plus the
+  // tenant's own industry (so the UI can default the selector to it). Read-only metadata; no GL access.
+  async industryLayouts() {
+    const own = await this.tenantIndustry();
+    const byStmt = (stmt: 'pl' | 'bs', code: string) => ({
+      generic_name: THAI_DBD_DEFS[code]?.name ?? code,
+      own_has_layout: !!(own && INDUSTRY_FS_DEFS[own]?.[stmt]),
+      layouts: Object.entries(INDUSTRY_FS_DEFS)
+        .filter(([, v]) => v[stmt])
+        .map(([industry, v]) => ({ industry, name: v[stmt]!.name })),
+    });
+    return {
+      own_industry: own,
+      statements: { 'DBD-PL': byStmt('pl', 'DBD-PL'), 'DBD-BS': byStmt('bs', 'DBD-BS') },
+    };
   }
 
   async upsertDefinition(dto: { code: string; name: string; statement_type: string; config: FsBuilderConfig | FsNotesConfig; active?: boolean }, createdBy: string) {
@@ -103,8 +168,8 @@ export class StatutoryFsService {
   // Renders a configured P&L (statement_type 'pl') or balance sheet ('bs') with buyer-defined subtotals /
   // row groups, plus a comparative (prior-period / budget) column — the reusable layout layer the notes,
   // SOCE and DBD exports all ride on. Numbers come from LedgerService.perAccountNet (the canonical engine).
-  async renderStatement(code: string, params: { asOf?: string; from?: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null }) {
-    const def = await this.getDefinition(code);
+  async renderStatement(code: string, params: { asOf?: string; from?: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null; industry?: string | null }) {
+    const def = await this.getDefinition(code, params.industry ?? null);
     if (def.statement_type !== 'pl' && def.statement_type !== 'bs') {
       throw new BadRequestException({ code: 'FS_NOT_RENDERABLE', message: `render supports statement_type pl|bs (got ${def.statement_type})`, messageTh: 'รองรับเฉพาะงบกำไรขาดทุน/งบแสดงฐานะการเงิน' });
     }
@@ -115,20 +180,43 @@ export class StatutoryFsService {
 
     // Presentation over the PRIMARY statement: the builder pulls the same numbers the canonical
     // income-statement / balance-sheet read (no source exclusion) so a rendered subtotal always ties to it.
-    const cur = await this.ledger.perAccountNet(params.asOf, isPl ? params.from : null, ledger);
+    let cur = await this.ledger.perAccountNet(params.asOf, isPl ? params.from : null, ledger) as NetRow[];
     let prior: NetRow[] | null = null;
     let comparative = false;
     if (params.priorAsOf) {
       comparative = true;
-      prior = await this.ledger.perAccountNet(params.priorAsOf, isPl ? (params.priorFrom ?? null) : null, ledger);
+      prior = await this.ledger.perAccountNet(params.priorAsOf, isPl ? (params.priorFrom ?? null) : null, ledger) as NetRow[];
+    }
+    // Enrich each row with its own statement-section binding + parent (P3): a sub-account (own is_group/
+    // bs_group set, or inherited from its canonical parent) then rolls into the correct statutory line
+    // instead of the type fallback — so an industry chart's WIP-by-phase / COGS-by-element groups correctly.
+    const codes = [...new Set([...cur, ...(prior ?? [])].map((r) => r.account_code))];
+    if (codes.length) {
+      const metaRows = await this.db.select({ code: accounts.code, bs: accounts.bsGroup, is: accounts.isGroup, parent: accounts.parentCode })
+        .from(accounts).where(inArray(accounts.code, codes));
+      const metaMap = new Map(metaRows.map((m: any) => [m.code, m]));
+      const enrich = (rows: NetRow[]) => rows.map((r) => { const m = metaMap.get(r.account_code); return m ? { ...r, bs_group: m.bs, is_group: m.is, parent_code: m.parent } : r; });
+      cur = enrich(cur);
+      if (prior) prior = enrich(prior);
     }
     const groups = (def.config as FsBuilderConfig).groups ?? [];
     const built = this.buildGroups(groups, cur, prior);
+    // P8: attach the statement's own KPIs (margins / current ratio / program-expense ratio …), computed from
+    // the already-rendered group values so they inherit the statement's tie-out. Only for the built-in DBD
+    // statements (a buyer-authored layout uses arbitrary group keys the KPI registry can't assume). The KPI
+    // set follows the SAME industry the layout resolved to, so it always matches the shape on screen.
+    const appliedIndustry = (code === 'DBD-PL' || code === 'DBD-BS')
+      ? (params.industry === 'generic' ? null : (params.industry || await this.tenantIndustry()))
+      : null;
+    const kpis = (code === 'DBD-PL' || code === 'DBD-BS')
+      ? this.computeKpis(isPl ? 'pl' : 'bs', appliedIndustry, built, comparative)
+      : [];
     return {
       code: def.code, name: def.name, statement_type: def.statement_type, ledger: ledger ?? 'LEADING',
       as_of: params.asOf, from: isPl ? params.from : null,
+      industry: params.industry ?? null,
       comparative, prior_as_of: params.priorAsOf ?? null, prior_from: isPl ? (params.priorFrom ?? null) : null,
-      rows: built,
+      rows: built, kpis,
     };
   }
 
@@ -145,6 +233,14 @@ export class StatutoryFsService {
     if (g.accounts && g.accounts.includes(r.account_code)) return true;
     if (g.prefixes && g.prefixes.some((p) => r.account_code.startsWith(p))) return true;
     if (g.types && r.account_type && g.types.includes(r.account_type)) return true;
+    // Select by the account's RESOLVED statement section (canonical default map / type fallback) so a
+    // layout can bind whole งบดุล / งบกำไรขาดทุน sections without enumerating every code — the same
+    // classification the quick balanceSheet/incomeStatement use, so the rendered subtotals tie to them.
+    if (g.bsGroups || g.isGroups) {
+      const a = { code: r.account_code, type: r.account_type ?? '', bsGroup: r.bs_group, isGroup: r.is_group, parentCode: r.parent_code };
+      if (g.bsGroups) { const bs = resolveBsGroup(a); if (bs && g.bsGroups.includes(bs)) return true; }
+      if (g.isGroups) { const is = resolveIsGroup(a); if (is && g.isGroups.includes(is)) return true; }
+    }
     return false;
   }
   private accountRows(g: FsGroup, rows: NetRow[], priorRows: NetRow[] | null): any[] {
@@ -174,6 +270,10 @@ export class StatutoryFsService {
     }
     const out: any[] = [];
     for (const g of groups) {
+      // A hidden group is a compute-only helper: its value is available to sumOf references above, but it
+      // (and its account rows) never appear in the statement — e.g. an "all equity" total used to derive the
+      // nonprofit net-assets-without-restrictions line by subtraction.
+      if (g.hidden) continue;
       if (g.showAccounts && !g.sumOf) {
         for (const ar of this.accountRows(g, cur, prior)) out.push({ ...ar, level: (g.level ?? 0) + 1, key: `${g.key}:${ar.account_code}` });
       }
@@ -182,6 +282,35 @@ export class StatutoryFsService {
         is_subtotal: !!g.sumOf,
         current: curVals[g.key] ?? 0,
         ...(prior ? { prior: priorVals[g.key] ?? 0 } : {}),
+      });
+    }
+    return out;
+  }
+
+  // P8: derive the statement's KPIs from its already-built group rows (numerator ÷ denominator by group key).
+  // A KPI is emitted only when both rows are present and the denominator is non-zero, so the set adapts to the
+  // layout that actually rendered. Percentages are returned as a fraction (0.42 = 42%); ratios as a multiple.
+  private computeKpis(statement: 'pl' | 'bs', industry: string | null, built: any[], comparative: boolean) {
+    const cur = new Map<string, number>();
+    const pri = new Map<string, number>();
+    for (const r of built) {
+      if (r.is_account) continue; // group rows only (account child rows share no stable key)
+      cur.set(r.key, r.current);
+      if (comparative && r.prior != null) pri.set(r.key, r.prior);
+    }
+    const ratio = (m: Map<string, number>, num: string, den: string): number | null => {
+      const n = m.get(num); const d = m.get(den);
+      if (n == null || d == null || d === 0) return null;
+      return Math.round((n / d) * 10000) / 10000;
+    };
+    const out: any[] = [];
+    for (const spec of fsKpiSpecs(statement, industry)) {
+      const value = ratio(cur, spec.num, spec.den);
+      if (value == null) continue;
+      out.push({
+        key: spec.key, label: spec.label, label_th: spec.labelTh, format: spec.format, value,
+        numerator: cur.get(spec.num) ?? 0, denominator: cur.get(spec.den) ?? 0,
+        ...(comparative ? { prior: ratio(pri, spec.num, spec.den) } : {}),
       });
     }
     return out;
@@ -232,6 +361,112 @@ export class StatutoryFsService {
       // Self-check that the roll-forward ties to the balance sheet's equity section (opening+moves+profit).
       ties_to_balance_sheet: Math.abs(totals.closing - bsEquity) < 0.01,
       balance_sheet_equity: bsEquity,
+    };
+  }
+
+  // ───────────────────── Statutory statement PACK (P9 — the full FS set for PDF export) ─────────────────────
+  // Assembles the complete annual financial-statement set — company header, Balance Sheet (with the P8 KPIs),
+  // Profit or Loss (with KPIs), Statement of Changes in Equity, and (best-effort) note schedules — over ONE
+  // consistent period + comparative, so a single call feeds the formatted PDF. Pure presentation over the
+  // canonical builders (renderStatement / statementOfChangesInEquity / noteSchedules); every section ties out
+  // exactly as it does standalone. Notes are included only when a valid notes definition is supplied.
+  async statementPack(params: {
+    asOf: string; from: string; priorAsOf?: string; priorFrom?: string;
+    ledger?: string | null; industry?: string | null; notesCode?: string | null;
+  }) {
+    if (!params.asOf || !params.from) {
+      throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'as_of and from are required', messageTh: 'ต้องระบุ as_of และ from' });
+    }
+    const ledger = params.ledger ?? null;
+    const comparative = !!(params.priorAsOf && params.priorFrom);
+    const common = { priorAsOf: params.priorAsOf, priorFrom: params.priorFrom, ledger, industry: params.industry ?? null };
+    const [pl, bs] = await Promise.all([
+      this.renderStatement('DBD-PL', { asOf: params.asOf, from: params.from, ...common }),
+      this.renderStatement('DBD-BS', { asOf: params.asOf, ...common }),
+    ]);
+    const soce = await this.statementOfChangesInEquity({ from: params.from, to: params.asOf, ledger });
+    const revenueDisagg = await this.revenueDisaggregation({
+      asOf: params.asOf, from: params.from, priorAsOf: params.priorAsOf, priorFrom: params.priorFrom,
+      ledger, industry: params.industry ?? null,
+    });
+
+    // Notes are buyer-authored (no built-in defs); include only when a resolvable notes definition is named.
+    let notes: Awaited<ReturnType<typeof this.noteSchedules>> | null = null;
+    if (params.notesCode) {
+      try {
+        notes = await this.noteSchedules(params.notesCode, {
+          asOf: params.asOf, from: params.from, priorAsOf: params.priorAsOf, priorFrom: params.priorFrom, ledger, basis: 'bs',
+        });
+      } catch { notes = null; } // a missing / non-notes code just omits the section rather than failing the pack
+    }
+
+    const tid = this.tid();
+    let company: { name: string; code: string | null; taxId: string | null } | null = null;
+    if (tid != null) {
+      const [t] = await this.db.select().from(tenants).where(eq(tenants.id, tid)).limit(1);
+      if (t) company = { name: t.legalName ?? t.name ?? t.code, code: t.code ?? null, taxId: t.taxId ?? null };
+    }
+
+    return {
+      company,
+      period: { from: params.from, as_of: params.asOf, prior_from: params.priorFrom ?? null, prior_as_of: params.priorAsOf ?? null },
+      ledger: ledger ?? 'LEADING', industry: params.industry ?? null, comparative,
+      balance_sheet: bs, profit_and_loss: pl, changes_in_equity: soce, revenue_disaggregation: revenueDisagg, notes,
+    };
+  }
+
+  // ───────────────────── TFRS 15 revenue disaggregation note (P10) ─────────────────────
+  // Disaggregates the caller's OWN posted revenue into (a) categories — one line per revenue account, the
+  // "by type of good/service" axis — and (b) timing of transfer (point in time vs over time), classified per
+  // industry. The schedule ties to the income statement's revenue, so it is a pure presentation over the GL.
+  async revenueDisaggregation(params: {
+    asOf: string; from: string; priorAsOf?: string; priorFrom?: string; ledger?: string | null; industry?: string | null;
+  }) {
+    if (!params.asOf || !params.from) {
+      throw new BadRequestException({ code: 'FS_RANGE_REQUIRED', message: 'as_of and from are required', messageTh: 'ต้องระบุ as_of และ from' });
+    }
+    const ledger = params.ledger ?? null;
+    const comparative = !!(params.priorAsOf && params.priorFrom);
+    const appliedIndustry = params.industry === 'generic' ? null : (params.industry || await this.tenantIndustry());
+
+    const cur = await this.ledger.perAccountNet(params.asOf, params.from, ledger, ['CLOSE']);
+    const prior = comparative ? await this.ledger.perAccountNet(params.priorAsOf!, params.priorFrom!, ledger, ['CLOSE']) : null;
+    const priorMap = new Map((prior ?? []).map((r) => [r.account_code, r.net]));
+
+    // Revenue is credit-normal, so a positive revenue amount is −net (mirrors the SOCE creditPos convention).
+    const categories = cur
+      .filter((r) => r.account_type === 'Revenue')
+      .map((r) => ({
+        account_code: r.account_code, account_name: r.account_name,
+        current: round2(-r.net),
+        prior: prior ? round2(-(priorMap.get(r.account_code) ?? 0)) : null,
+        timing: revenueTiming(appliedIndustry, r.account_code) as RevTiming,
+      }))
+      .filter((c) => c.current !== 0 || (c.prior ?? 0) !== 0)
+      .sort((a, b) => b.current - a.current);
+
+    const sumTiming = (t: RevTiming) => ({
+      current: round2(categories.filter((c) => c.timing === t).reduce((a, c) => a + c.current, 0)),
+      prior: prior ? round2(categories.filter((c) => c.timing === t).reduce((a, c) => a + (c.prior ?? 0), 0)) : null,
+    });
+    const timing_summary = { over_time: sumTiming('over_time'), point_in_time: sumTiming('point_in_time') };
+    const total = {
+      current: round2(categories.reduce((a, c) => a + c.current, 0)),
+      prior: prior ? round2(categories.reduce((a, c) => a + (c.prior ?? 0), 0)) : null,
+    };
+
+    // Tie-out: the disaggregated total must equal the income statement's revenue for the same period/ledger.
+    const is = await this.ledger.incomeStatement(params.from, params.asOf, undefined, ledger, ['CLOSE']);
+    const isRevenue = round2(is.revenue);
+
+    return {
+      industry: appliedIndustry, from: params.from, as_of: params.asOf,
+      prior_from: params.priorFrom ?? null, prior_as_of: params.priorAsOf ?? null,
+      comparative, ledger: ledger ?? 'LEADING',
+      categories, timing_summary, total,
+      income_statement_revenue: isRevenue,
+      ties_to_income_statement: Math.abs(total.current - isRevenue) < 0.01,
+      policy: disaggPolicy(appliedIndustry),
     };
   }
 

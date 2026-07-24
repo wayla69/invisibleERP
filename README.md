@@ -1,6 +1,6 @@
-# Invisible ERP V2
+# Invisible ERP
 
-ยกเครื่อง Oshinei Enterprise ERP จาก Python (Streamlit + FastAPI + SQLite) → **TypeScript end-to-end**:
+ยกเครื่อง Invisible Enterprise ERP จาก Python (Streamlit + FastAPI + SQLite) → **TypeScript end-to-end**:
 **NestJS · Drizzle · PostgreSQL · Next.js** บน Railway
 
 > 📋 แผนการ migrate ฉบับเต็มอยู่ใน [MIGRATION_PLAN.md](MIGRATION_PLAN.md) และ `docs/`
@@ -32,7 +32,7 @@ pnpm --filter @ierp/shared build
 pnpm --filter @ierp/api db:generate   # สร้าง migration จาก Drizzle schema
 pnpm --filter @ierp/api db:migrate    # apply เข้า DB
 pnpm --filter @ierp/api db:seed       # permissions + role_permissions + admin user
-# (ไม่บังคับ) ข้อมูลตัวอย่างร้านบุฟเฟ่ต์ญี่ปุ่น "Oshinei" — tenant OSHINEI / login oshinei/oshinei123 (idempotent ทุกตัว)
+# (ไม่บังคับ) ข้อมูลตัวอย่างร้านบุฟเฟ่ต์ญี่ปุ่น "Invisible" — tenant INVISIBLE / login invisible/invisible123 (idempotent ทุกตัว)
 pnpm --filter @ierp/api db:seed:demo        # แคตตาล็อก: เมนู 252 + บุฟเฟ่ต์ 4 ระดับ + สูตร/BoM + วัตถุดิบ + ครัว/ผังโต๊ะ + รูปเมนู
 pnpm --filter @ierp/api db:seed:demo:sales  # ขาย POS ~45 วัน + ออเดอร์ dine-in/KDS ย้อนหลัง + ออเดอร์สด/เดลิเวอรี (Grab/LINE MAN)
 pnpm --filter @ierp/api db:seed:demo:loyalty     # สมาชิก ~150 + ระดับ/แต้ม + ของรางวัล + แคมเปญ (CRM/Loyalty)

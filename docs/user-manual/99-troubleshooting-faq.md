@@ -1,6 +1,6 @@
 # 99 · Troubleshooting & FAQ
 
-**Status: DRAFT v0.5** _(2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
+**Status: DRAFT v0.8** _(2026-07-17: FAQ — sign-in + public customer pages (diner QR, tracking, NPS, member app) now follow the selected language (EN coverage round 2); 2026-07-17: FAQ — Customer Portal + system error messages now follow the selected language (EN coverage extension); 2026-07-17: FAQ — language choice no longer reverts to TH on page change (persists on-device when server-side saving is unavailable, e.g. read-only company view); 2026-07-10: added the AR cash-application codes — `OVER_APPLIED`, `APPLY_EXCEEDS_RECEIPT`, `CUSTOMER_MISMATCH`, `INSUFFICIENT_UNAPPLIED`, `CN_OVER_APPLIED`/`CN_NOT_ISSUED`/`CN_NOT_AR_LINKED`, `REASON_REQUIRED`/`ALREADY_REVERSED`; 2026-07-10: added the POS-3 voucher/coupon checkout codes `VOUCHER_*` / `COUPON_*`; 2026-07-09: added `AI_TENANT_OPTED_OUT`; 2026-07-10: added `LINE_NOT_LINKED` / `LINE_NOT_CONFIGURED` / receipt-link `BAD_TOKEN`)_
 
 This chapter explains the **error messages** you may run into, what they mean, and
 how to resolve them — followed by frequently asked questions.
@@ -55,6 +55,14 @@ your code below.
 | `NOT_PENDING_VERIFICATION` (CAPA) | You verified/rejected a CAPA that isn't awaiting verification (or is already closed/cancelled). | Submit the CAPA first; a closed/cancelled CAPA is terminal. |
 | `REASON_REQUIRED` (CAPA reject) | You rejected a CAPA verification without a reason. | Provide a reject reason. |
 | `SOD_SELF_APPROVAL` (standard-cost roll) | You tried to **approve a standard-cost revision you prepared** — COST-02 requires a different approver. | A **different** `exec` user approves it (maker-checker — binds even Admin). Approving rolls the standard forward and posts the revaluation JE. See [Warehouse & Inventory → Standard-cost roll](./04-warehouse-inventory.md) §11a. |
+| `SOD_SELF_APPROVAL` (supply-chain order plan) | You tried to **approve an order plan you submitted** — SCM-01 requires an independent approver (R24), because an approved plan converts straight into committed spend. | A **different** user holding `scm_approve`/`exec` approves it. See [Demand planning](./21-demand-planning.md) §5. |
+| `PLAN_NOT_DRAFT` (order plan, 409) | You edited a line on, or submitted, a plan that is no longer a draft. | Only a **Draft** (or **Rejected**) plan is editable. If it is awaiting approval, ask the approver to reject it first. |
+| `PLAN_NOT_PENDING` (order plan, 409) | You approved or rejected a plan that is not awaiting approval (already approved, or still a draft). | Submit the draft first; an already-approved plan cannot be approved twice. |
+| `PLAN_NOT_APPROVED` (order plan, 409) | You tried to convert a plan to a purchase requisition before it was approved. | Get it approved (§5) — conversion commits spend, so it is gated on approval. |
+| `PLAN_EMPTY` (order plan) | You submitted or converted a plan whose quantities are all zero. | Enter at least one positive quantity, or leave the plan alone — nothing needs ordering. |
+| `REASON_REQUIRED` (order plan reject) | You rejected a plan without saying why. | Give a reason; it goes back to the planner so they can act on it. |
+| `BAD_SHELF_LIFE` / `VALIDATION_ERROR` (shelf life) | You set a shelf life outside 1–3650 days. | Enter a realistic figure, or use the suggestion derived from your own goods-receipt history. |
+| `SCM_ENGINE_DISABLED` (503) | A planning action needed the external forecasting service, which is not configured. | Normal planning still works using the built-in method. Ask your administrator to configure the forecasting service if you expected it. |
 | `STD_ITEM_REQUIRED` (standard-cost roll) | You proposed a new standard for an item that isn't **standard-costed** (its method is FIFO/AVG). | Only STD items carry a standard to roll — set the item's costing method to **STD** on `/costing` first. |
 | `NOT_DRAFT` (standard-cost roll, 409) | You tried to approve a revision that is already **Approved**. | The revaluation already posted — no double posting. Raise a new revision to change the standard again. |
 | `NO_LINES` (standard-cost roll) | You submitted a revision with no item lines. | Add at least one item + new standard before submitting. |
@@ -106,6 +114,7 @@ your code below.
 | `PO_NOT_APPROVED` (on intake map) | You tried to map a scanned invoice to a PO that is still Draft/Pending or was cancelled. | Have Procurement approve the PO first (or pick the correct approved PO). |
 | `INTAKE_AMOUNT_REQUIRED` | The scan didn't yield an invoice amount, so the bill can't be booked. | Re-scan or correct the document text, then post again. For an uploaded photo with AI not configured, map the PO manually and re-key the fields via the text box. |
 | `UNSUPPORTED_FILE_TYPE` | The uploaded invoice file isn't a supported type. | Upload a PNG/JPEG/WebP image or a PDF. |
+| Scanned Thai PDF queues as *NeedsReview* even though it "has text" | The PDF's embedded Thai font (CID/UTF-16) produces garbled text, so the system deliberately refuses to read the garbage and treats it like a photo. With AI configured it is read by vision instead; without AI it queues honestly for a human. | Nothing is wrong — review and key the fields, or configure the AI key so scans are read automatically. |
 | `FILE_TOO_LARGE` | The uploaded invoice file exceeds the size cap (≈5 MB image / ≈9 MB PDF). | Re-export the scan at a lower resolution or split the PDF. |
 | `OVER_RECEIPT` (422) | You keyed a received quantity beyond what the PO ordered (weight items kg/g/ตัน get up to 5% headroom; everything else is capped at the ordered qty). | Recount and key the actual quantity. If the supplier genuinely delivered more, Procurement must amend/raise a PO for the excess first. See [Procurement — Receive goods](./03-procurement.md). |
 | `CLAIM_WINDOW_CLOSED` (422) | You tried to open a goods-receipt claim more than 24 hours (configurable) after the receipt — the claim window auto-closed. | The system will no longer take the claim; pursue it with the supplier commercially. Going forward, check deliveries and claim from the receiving summary on the spot. |
@@ -216,7 +225,9 @@ your code below.
 | `SOD_SELF_APPROVAL` (cycle count) | You tried to **post the variance on a cycle count you counted yourself**. | A **different** `wh_adjust` (InventoryController) user must post the variance — the counter can't approve their own count (SoD R11 / control **INV-17**/INV-04). See [Warehouse & Inventory](./04-warehouse-inventory.md) §7b. |
 | `NO_ITEMS_DUE` / `TASK_CANCELLED` | You generated a cycle count with no items when nothing is due, or entered a count against a cancelled task. | **Recompute ABC** and wait for the class cadence, or pass explicit items to count; for a cancelled task, generate a new one. See [Warehouse & Inventory](./04-warehouse-inventory.md) §7b (control **INV-17**). |
 | `SOD_VIOLATION` (company profile) | You tried to **approve your own** staged change to the **PromptPay ID** or **tax ID** on the company profile. | A **different** authorised user (with **Exec / Approvals**) must approve it — the person who requested the change can't release it. Until approved the old value stays in force; the request can also be rejected. See [Administration](./11-administration.md) §13. |
-| `ADMIN_GRANT_DENIED` | You tried to create or promote a user to the **Admin** role, but you are not the platform owner. | **Only the platform owner may grant the Admin role** (it carries cross-company visibility). A company Admin can manage every **non-Admin** role. Ask the platform owner if a new Admin is genuinely required. See [Administration](./11-administration.md) §1. |
+| `ADMIN_GRANT_DENIED` | You tried to create or promote a user to the **Admin** role, **or reset an existing Admin's password**, but you are not the platform owner. | **Only the platform owner may grant — or reset — the Admin role** (it carries cross-company visibility), so a company Admin cannot mint or seize a peer Admin. A company Admin can still manage and reset every **non-Admin** role. Ask the platform owner if an Admin change is genuinely required. See [Administration](./11-administration.md) §1. |
+| `SSO_ROLE_NOT_ALLOWED` / `BAD_ROLE` (SSO default role) | You set the **SSO sign-in default role** to a privileged role (**Admin** or **Access-Admin**), or a previously-saved config had one. | Self-service SSO cannot auto-provision a privileged role. Choose a non-privileged default role (e.g. *Sales*); grant Admin/Access-Admin deliberately in **Admin → Users** instead. See [Administration](./11-administration.md) §1. |
+| `PLATFORM_ADMIN_REQUIRED` (API key) | You called a **platform-owner** operation with an **API key**. | API keys are never platform-owner credentials, even one created by the platform owner. Use an interactive platform-owner sign-in for platform operations. |
 | `ITEMS_PENDING` | You tried to **certify an access recertification campaign** while one or more users are still undecided. | Finish the worklist — click **Keep** or **Revoke** for every user — then certify. See [Administration](./11-administration.md) §4.1 (control **ITGC-AC-21**). |
 | `CAMPAIGN_CERTIFIED` | You tried to change a keep/revoke line, or re-certify, on a **campaign that is already certified**. | A certified campaign is frozen audit evidence. Open a **new** campaign for the next period. See [Administration](./11-administration.md) §4.1. |
 | `SIGNUP_DISABLED` / request-access | Someone tried to self-open a company. Public self-service signup is **disabled in production**. | The public page now files a **request access** entry instead of creating a company. The platform owner reviews the queue and **approves** it (or provisions/invites directly). No company exists until the platform owner approves. See [Administration](./11-administration.md) §14. |
@@ -241,7 +252,19 @@ your code below.
 **The screen is in Thai — can I change it to English?**
 Yes. Use the language switcher in the top bar / settings. Page addresses and steps
 are the same in either language. This manual lists English wording with the Thai
-label in brackets.
+label in brackets. The Customer Portal, system error messages, the sign-in
+pages, and the public customer pages (diner QR ordering, order tracking, NPS,
+loyalty member app) all follow the selected language (2026-07-17); the customer
+pole display, scanned-QR resolver and privacy policy stay bilingual by design.
+
+**I switched to EN but the screen went back to TH when I opened another page.**
+This was a defect and is fixed (2026-07-17): your language choice now sticks
+across pages and reloads on the device where you picked it, even when the system
+cannot save preferences to the server at that moment (e.g. a platform owner
+browsing a company in **read-only view**, or a brief loss of connection). The
+choice is saved to your account automatically as soon as saving is possible
+again. If you still see it revert, refresh the page once to load the latest
+version of the app.
 
 **Why can't I see a menu item that a colleague has?**
 Menus show only what your role / permissions allow. Ask an administrator to grant
@@ -320,9 +343,12 @@ on a PO, in stock, on a recipe/BoM, … is kept). See [Administration](./11-admi
 From each module's report area — see [Reports & Analytics](./09-reports-and-analytics.md).
 
 **I forgot the admin password and no one can log in.**
-There is no "forgot password" email and no default credential (by design). If
-another admin or an Access Admin can still sign in, they reset it from
-**Admin → Users** (the user is forced to set a new password on next login). If
+There is no "forgot password" email and no default credential (by design). For a
+**non-Admin** account, another admin or an Access Admin who can still sign in resets
+it from **Admin → Users** (the user is forced to set a new password on next login).
+Resetting an **Admin** account, however, is reserved to the **platform owner**
+(`ADMIN_GRANT_DENIED` otherwise — a company Admin cannot reset a peer Admin), so if
+the locked-out account is itself an Admin, ask the platform owner. If
 **nobody** can log in, an operator with server/database access runs the recovery
 tool: `NEW_ADMIN_PASSWORD='…' pnpm --filter @ierp/api db:reset-password <username>`
 (defaults to `admin`; the password comes from the env var, never argv or a log;
@@ -333,7 +359,7 @@ revokes existing sessions.
 **Who do I contact for help?**
 Your organisation's administrator first (for access, passwords, MFA, module
 toggles). For issues they can't resolve, escalate to your support contact:
-`kittipot.c@oshinei.onmicrosoft.com`.
+`kittipot.c@invisible.onmicrosoft.com`.
 
 ---
 

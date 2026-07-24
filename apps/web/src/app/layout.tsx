@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { Inter, Sarabun } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
+import { LanguageProvider } from '@/lib/i18n';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { PwaRegister } from '@/components/pwa-register';
@@ -22,8 +23,8 @@ const sarabun = Sarabun({
 });
 
 export const metadata: Metadata = {
-  title: 'Invisible ERP V2',
-  description: 'Oshinei Enterprise ERP — V2',
+  title: 'Invisible ERP',
+  description: 'Invisible Enterprise ERP',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'Invisible ERP', statusBarStyle: 'default' },
   icons: { icon: '/icon.svg', apple: '/icon.svg' },
@@ -52,7 +53,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange nonce={nonce}>
           <ChunkReloadGuard />
           <PwaRegister />
-          <Providers>{children}</Providers>
+          {/* App-wide locale context: signed-in users resolve user → tenant → th from the server; on
+              signed-out/public pages (login, diner QR, tracking) the localStorage cache alone applies,
+              so the device's last explicit choice still holds. */}
+          <Providers><LanguageProvider>{children}</LanguageProvider></Providers>
           <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>

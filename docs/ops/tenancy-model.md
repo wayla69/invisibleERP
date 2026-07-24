@@ -109,6 +109,54 @@ ever run via the bare CLI. **CI parity (rev 1.27):** the `pg-smoke` harness prov
 role — asserting the full run completes and that `users` visibility flips 0 → 1 with the GUC, so the
 superuser-masked class can no longer ship green.
 
+### 1ter. App-layer belt-and-braces — `STRICT_TENANT_PROXY` (SOX-ICFR audit #2, staged)
+
+The per-request scoping state (`SET LOCAL ROLE app_user` + the `app.*` GUCs, all `set_config(..., true)`) is
+**transaction-local**, so it reverts at `COMMIT`/`ROLLBACK` exactly when postgres-js returns the connection
+to the pool — the classic "context leaks onto a reused pooled connection" bug is **structurally impossible**
+on the request path, and nothing performs (or relies on) an explicit pool-return scrub. The residual gap is
+an app-layer one: `tenantAwareProxy` (`database.module.ts`) routes a query to the request tenant tx when the
+`tenantALS` store is present, and otherwise **falls through to the base pool with no GUCs** — so a query
+issued with *no* tenant context (a service method invoked outside a request / `runInTenantContext`) runs on
+the base connection, safe today only because that role lacks `BYPASSRLS` (the §1bis H-3 backstop).
+
+`STRICT_TENANT_PROXY` has **three modes** (`proxyMode()` in `database.module.ts`):
+- **`1` (enforce)** — a guarded op (`select/insert/update/delete/execute/query/$count`) with no `tenantALS`
+  tx **and** no `runGlobalDb()` context throws `503 TENANT_CONTEXT_MISSING` instead of running on the base
+  pool — a loud failure, not a silent cross-tenant read.
+- **`warn` (audit-only, rollout)** — the same detection, but it logs the call site + a short stack to
+  stderr (`[tenant-proxy] base-pool <op>() with NO tenant context: …`) and then **falls through** to the
+  base pool. Used to enumerate every un-wrapped base-pool read across a full harness run without breaking it.
+- anything else (**off**) — legacy base-pool fallback, no detection.
+
+`transaction` is **deliberately not guarded** (it is how `runInTenantContext` / `RealtimeScope` / the guards
+*open* the scoping tx, before any ALS store exists). Genuinely-global base-pool reads — the cross-tenant
+"which tenant owns this phone / providerRef" lookups (member-auth OTP verify/LINE-login, the PSP + Stripe
+webhooks, the email-to-case / NPS public routes, the journeys/campaigns cron sweeps) and boot seeds (ledger
+COA, billing plan catalogue) — declare themselves with `runGlobalDb('reason', async () => …)`, the
+grep-able escape hatch (sets `globalDbALS`, an `AsyncLocalStorage` that propagates through the whole async
+chain, so wrapping an **entry point** covers every nested service call it makes — each of which still
+filters `WHERE tenant_id = …` explicitly, never relying on RLS).
+
+**Two coverage seams (both landed, so the flag is enforce-ready):**
+1. **`@NoTx` HTTP routes are wrapped at one choke point.** `TenantTxInterceptor` runs `@NoTx` handlers
+   inside `globalDbALS` — `@NoTx` already means "no per-request tenant tx, I scope myself", exactly the
+   `runGlobalDb` contract — so every current and future `@NoTx` route (webhooks, public tokenized routes,
+   cron sweeps, member-auth) is permitted base-pool access without a per-service wrap.
+2. **Direct service entry points are wrapped in the service.** The control harnesses call service methods
+   **directly** (not over HTTP), bypassing the interceptor, so the cross-tenant/base-pool entry points wrap
+   their own bodies too: `member-auth` (verify-otp/login-line/revoke), `service-cases.handleInbound`,
+   `nps.submit`/`getSurvey`, `campaigns.sendCampaign`/`runDueAll`, `journeys.runDueAll`, `billing.seedPlans`/
+   `applyStripeEvent`, `ledger.seedChartOfAccounts`, and the pre-tx guard reads (`module-config.loadConfig`,
+   `plan.guard`). Nested `runGlobalDb` is a harmless no-op, and inside a real request tx the proxy uses the
+   tx regardless — so the wrap never forces base-pool when a tenant context exists.
+
+**Now enforce-ready (default still OFF; flip in staging first).** The `warn`-mode sweep over the full
+harness suite surfaced every base-pool site; all are now wrapped, and the **entire harness suite passes with
+`STRICT_TENANT_PROXY=1`**. Rollout: set `warn` in staging to confirm the log is silent, then `1` in staging,
+then `1` in prod. ToE: `apps/api/test/tenant-proxy.test.ts` (OFF ⇒ base fallback; ON ⇒ throws outside
+context; a `tenantALS` tx or `runGlobalDb` is allowed; `transaction` is never guarded).
+
 ## 2. `TENANCY_MODE`
 
 | Mode | Admin sees | Use when |
@@ -175,7 +223,7 @@ superuser-masked class can no longer ship green.
 >   fixpoint passes with savepoints, atomic: full rollback if any table can't clear), **plus TENANTLESS
 >   FK-child tables** (line-item tables with no `tenant_id` column, e.g. `cust_pos_items`,
 >   `survey_answers` — the engine walks the FK graph at runtime and deletes the rows whose ancestor chain
->   terminates in a wiped tenant row; added after the 2026-07-13 OSHINEI reset was permanently
+>   terminates in a wiped tenant row; added after the 2026-07-13 INVISIBLE reset was permanently
 >   `FACTORY_RESET_BLOCKED` by exactly those two tables), **except** the
 >   preserve-set: `users`/`user_permissions`/`user_prefs` (logins survive), `subscriptions` (plan intact),
 >   **`audit_log` (the ITGC-AC-16 hash chain is never erasable)** and the AI/usage billing meters — then
@@ -246,8 +294,43 @@ role you can log in as that sees *everything*. When you still need one operator 
   visibility** (fail-open). Gating god on an **ops-controlled env var** the in-app user-management cannot
   touch closes that escalation path. It also means god membership is changed by a deploy/redeploy, and is
   the same knob (`PLATFORM_ADMIN_USERNAMES`) that authorises company provisioning/suspension.
-- Every cross-tenant read/write a god makes still runs with `req.__rlsBypass=true`, which the audit
-  interceptor records — so god actions are attributable in `audit_log`.
+- Every cross-tenant read/write a god makes runs with `req.__rlsBypass=true`, which the audit interceptor
+  records as `meta.rls_bypass` — so god actions are attributable in `audit_log`.
+  **Two corrections landed 2026-07-22 (this claim was previously overstated — see §2bis-audit below):** the
+  marker itself was never actually written, and god **reads** were not audited at all.
+
+#### 2bis-audit. What the trail really covers on the god surface
+
+- `AuditInterceptor` audits every **mutation** on any route, and — additionally — **every method** on a
+  `@PlatformAdmin` route (`auditRequired(method, isPlatformRoute)`, resolved from the route's
+  `PLATFORM_ADMIN_KEY` metadata). Rationale: a platform route carries a full cross-tenant RLS bypass, so its
+  *reads* are cross-tenant data accesses — `GET /api/admin/tenants/:id/export` alone streams every row of
+  every tenant-scoped table for one company. Auditing mutations only left **13 of the 38 god routes** (every
+  god read) with no row at all. Non-mutating platform rows are stamped `meta.platform_read`.
+- Ordinary tenant reads stay **unaudited by design** — they are RLS-confined, and logging them would bury the
+  real evidence in the chain.
+- **Refusals are audited too.** `PlatformAdminGuard.deny()` records every rejection on this surface
+  (`meta.platform_denied` + the code: `PLATFORM_ADMIN_REQUIRED` / `PLATFORM_IP_BLOCKED` /
+  `PLATFORM_MFA_REQUIRED`, plus `api_key_prefix` when a machine principal attempted it) before throwing.
+  It needs its own write path because Nest runs **guards before interceptors** — a guard rejection never
+  reaches `AuditInterceptor`, so denied fleet access used to leave no trace. Both writers share
+  `common/audit-writer.ts` so the rows are structurally identical. Query `meta->>'platform_denied'` to see
+  who has been probing the platform surface.
+- The scope markers `meta.rls_bypass` / `meta.rls_org_scope` / `meta.god_act_as_tenant` are read at
+  **response time**. They must not be read eagerly: `AuditInterceptor` is registered first in `app.module.ts`
+  and is therefore the **outermost** interceptor — Nest's `InterceptorsConsumer` calls `interceptors[0]
+  .intercept()` before `interceptors[1]`'s, and `next.handle()` only *defers* the rest of the chain — so an
+  eager read happens before `TenantTxInterceptor` has set them. That was the bug: the markers were silently
+  absent from every row, and no harness asserted them. `cutover/onboarding.ts` now does.
+- The god credential should also carry **mandatory TOTP** in production (`PLATFORM_REQUIRE_MFA`, §2quinquies
+  / `.env.example`) — 38 cross-tenant routes behind one password is not proportionate.
+- **The surface itself is now fenced by CI.** `tools/ci/check-platform-surface.mjs` holds a reviewed
+  inventory of every `@PlatformAdmin` route (`platform-surface-baseline.json`; today **38 — 13 read,
+  25 write, 5 destructive**). A route missing from the inventory fails the `build` job, a stale entry fails
+  too, and `@PlatformAdmin` + `@Public` on one handler fails outright. It does not cap the count — a SaaS
+  fleet surface legitimately grows — it refuses growth nobody reviewed. **Before adding a god route, ask
+  whether it can be a tenant-scoped route with an ordinary `@Permissions` duty:** god authority is for
+  cross-COMPANY operations, not for reading the platform's own config.
 
 ### 2ter. God company-switcher (act-as-one-company)
 A god's whole point is the global bypass — so out of the box it sees **every company's rows combined**, with
@@ -268,7 +351,12 @@ switcher** (only for a god — gated on `is_platform_owner` from `GET /api/auth/
 - **It only ever REDUCES a god's visibility** (a god already sees everything), so trusting a client header
   here is not a privilege-escalation path — a non-god sending it is ignored (`pg-core` asserts this). God
   actions while acting-as are still attributable: the audit interceptor records `god_act_as_tenant` on the
-  mutation's `audit_log` meta.
+  `audit_log` meta (on reads too, since 2026-07-22 — see §2bis-audit).
+- **The read-only rail covers the PLATFORM surface too** (since 2026-07-22). It is keyed on the caller being
+  a god, NOT on act-as scoping having applied — a `@PlatformAdmin` route deliberately suppresses act-as (so
+  the switcher's own directory still lists every company), which had left the rail not covering exactly the
+  routes that can suspend/factory-reset/delete/purge a company. It is an operator SAFETY rail (a god can
+  simply omit the header), not a boundary against an attacker.
 - **Read-only act-as (safe inspection).** Adding **`X-Act-As-Read-Only: 1`** alongside the act-as header makes
   the interceptor **reject any mutating request** (POST/PUT/PATCH/DELETE → `403 READONLY_IMPERSONATION`) while
   GETs still work — a god can enter a company to look/support with zero risk of writing. The web scope banner
@@ -411,7 +499,7 @@ Discovered while investigating why `factoryResetTenant()` reported "0 rows delet
 still showed PO data — the reset was actually correct (no rows had that tenant's id anywhere), the data was
 simply unscoped to begin with. Migration `0387_procurement_tenant_isolation` adds `tenant_id` to all 7
 tables, backfills the ~196 existing rows (verified attributable via `created_by`/`requested_by` → either a
-real login's `users.tenant_id`, or the `procurement-demo` seed-script tag → OSHINEI tenant), adds a leading
+real login's `users.tenant_id`, or the `procurement-demo` seed-script tag → INVISIBLE tenant), adds a leading
 tenant index per table, and applies the canonical org-clause RLS policy (§6). Every writer
 (`procurement-po/pr/grn.service.ts`, `seed-demo-procurement.ts`) now stamps `tenant_id` on insert. ToE:
 `cutover/procurement-tenant-isolation.ts` — T1 raises a PR/PO/GR, T2 (scoped) sees zero of them, T1 still
@@ -420,7 +508,13 @@ sees its own.
 ## 8. Revision history
 | Version | Date | Author | Notes |
 |---|---|---|---|
-| 1.28 | 2026-07-13 | Platform / SRE | **§2 factory-reset: wipe TENANTLESS FK-child tables too (OSHINEI reset outage).** The OSHINEI factory-reset was permanently `FACTORY_RESET_BLOCKED`: `cust_pos_items` (2,417 rows) and `survey_answers` (74) have **no `tenant_id` column**, so the wipe loop never deleted them and they FK-blocked their parents (`cust_pos_sales`, `survey_responses`) forever. `tenant-wipe.ts` now walks the FK graph at runtime (`pg_constraint`, transitively) and deletes tenantless-child rows whose ancestor chain terminates in a wiped tenant row — ownership derived via FK, never guessed; other tenants'/shared rows untouched. Covers factory-reset AND purge (shared engine). Also documents the ordering gotcha: legacy cross-tenant vendor references (Amber POs → OSHINEI vendors) mean the referencing tenant must be reset FIRST. ToE: `cutover/onboarding.ts` seeds a tenantless `cust_pos_items` child and asserts the reset clears it. |
+| 1.34 | 2026-07-22 | Platform / Security | **§2ter — the read-only company view now covers the platform surface (no migration, no new control).** `X-Act-As-Read-Only` was honoured only when act-as scoping applied, and `@PlatformAdmin` routes suppress act-as by design — so a god inspecting a customer in look-only mode could still fire `suspend`/`factory-reset`/`delete`/`purge`/`force-purge`. Now keyed on `isGod`, covering both surfaces (strictly more restrictive; the web only sends the header with a company selected, so no flow changes). **Verified NOT a defect and left alone:** `__platformBypass` being all-or-nothing — `isGod` already grants the global bypass on every route, so it is redundant in the bypass expression and its only live effect is that act-as suppression. Related: `ALLOW_ITEM_FORCE_PURGE` + `expected_ref_rows` now gate the forced shared-catalogue purge (PN-08 rev 3.5). ToE `pg-core` 15→17, `onboarding` 224→227. |
+| 1.33 | 2026-07-22 | Platform / Security | **§2bis-audit — refused god attempts are audited (no migration, no new control).** Guards run BEFORE interceptors in Nest, so a `PlatformAdminGuard` rejection never reached `AuditInterceptor`: all three refusal paths (`PLATFORM_ADMIN_REQUIRED`, `PLATFORM_IP_BLOCKED`, `PLATFORM_MFA_REQUIRED`) left no trace. `deny()` now writes the refusal (`status=fail`, `meta.platform_denied` + code + `api_key_prefix` for a key) through the shared `common/audit-writer.ts`, extracted verbatim from the interceptor so denial and success rows share one hash chain / IP derivation / request id. Scoped to this guard only — auditing every 401/403 would flood the per-tenant chain's `FOR UPDATE` append. ToE `onboarding` 216→224. |
+| 1.32 | 2026-07-22 | Platform / Security | **§2bis-audit — the god surface is fenced by a CI ratchet (no migration, no new control; strengthens ITGC-SD-03/AC-18).** The `@PlatformAdmin` surface had grown **26 → 38 routes (+46%)** unwatched — no existing ratchet measured cross-tenant privilege. New `tools/ci/check-platform-surface.mjs` + `platform-surface-baseline.json` make it a reviewed inventory: an un-inventoried god route fails the `build` job, a stale entry fails (the inventory must stay honest), and `@PlatformAdmin` + `@Public` on one handler fails outright. Destructive routes (5) are flagged and carry written justifications — including `force-purge`, which deletes shared `items` even where a company still uses them. Runs inside the existing `build` job, so no branch-protection change. |
+| 1.31 | 2026-07-22 | Platform / Security | **§2bis — new §2bis-audit: the god surface is audited on READS, and the cross-tenant scope marker now actually lands (no migration, no new control; strengthens ITGC-AC-16/AC-18).** Two defects behind the old "god actions are attributable" claim. (a) `AuditInterceptor` audited only POST/PATCH/PUT/DELETE, so **13 of the 38 `@PlatformAdmin` routes — every god READ — left no audit row**, including `GET /api/admin/tenants/:id/export` (every row of every tenant-scoped table for one company; its own code comment asserted it was audited, and `TenantExportService` writes no row either). It now audits every method on a platform route via the `PLATFORM_ADMIN_KEY` metadata, stamping `meta.platform_read`; ordinary tenant reads stay unaudited by design. (b) `meta.rls_bypass`/`rls_org_scope`/`god_act_as_tenant` were read EAGERLY, before `TenantTxInterceptor` set them — audit is the OUTERMOST interceptor (`InterceptorsConsumer` runs `interceptors[0]` first; `next.handle()` merely defers the rest) — so they were **never written on any row**, and no harness asserted them. Now read at tap-time. Also: `PLATFORM_REQUIRE_MFA` documented as the recommended prod posture with an explicit enrol-first rollout order, and added to the API service's `railway-env-manifest.json` `expected` list (the half-hourly ops probe stays red until TOTP is mandatory on the god login); `PLATFORM_IP_ALLOWLIST` left optional/unlisted (a dynamic egress IP would lock the console out). ToE: `cutover/onboarding.ts` 216→221 (god read audited + marker present + tenant read still unaudited), vitest `platform-admin.test.ts` 5→12. PN-08 rev 3.2; UAT-SEC-073; manual `11-administration.md` §11.1 + §14.3. |
+| 1.30 | 2026-07-17 | Platform / Security | **§1ter — `STRICT_TENANT_PROXY` is now ENFORCE-READY (SOX-ICFR audit #2 follow-up; default still OFF).** Added the `warn` mode (audit-only: log the base-pool call site + short stack, then fall through) and used a full-suite `warn` sweep to enumerate every un-wrapped base-pool read. Closed them with two seams: (1) `TenantTxInterceptor` runs every `@NoTx` HTTP handler inside `globalDbALS` (one choke point — `@NoTx` ≡ the `runGlobalDb` contract), covering all current/future public webhooks + cron sweeps; (2) the direct-call entry points wrap their own bodies (member-auth, `service-cases.handleInbound`, `nps.submit`/`getSurvey`, `campaigns.sendCampaign`/`runDueAll`, `journeys.runDueAll`, `billing.seedPlans`/`applyStripeEvent`, `ledger.seedChartOfAccounts`, and the pre-tx guard reads `module-config.loadConfig` + `plan.guard`) so the harnesses (which call services directly, bypassing the interceptor) pass too. The **entire cutover + parity harness suite passes with `STRICT_TENANT_PROXY=1`**. Rollout unchanged: `warn` → `1` in staging → `1` in prod. No new RCM control. |
+| 1.29 | 2026-07-17 | Platform / Security | **§1ter — `STRICT_TENANT_PROXY` app-layer fail-closed proxy (SOX-ICFR audit #2, staged, default OFF).** Belt-and-braces above the §1bis H-3 base-role backstop: when ON, `tenantAwareProxy` throws `503 TENANT_CONTEXT_MISSING` for a direct `select/insert/update/delete/execute/query` issued with no `tenantALS` tx and no `runGlobalDb()` context, instead of silently falling through to the base pool. `transaction` is never guarded (it opens the scoping tx). New `runGlobalDb('reason', …)` escape hatch for genuinely-global base-pool reads. Staged: default-on is gated on wrapping every `@NoTx`/base-pool read (the flag surfaces them, e.g. member-auth verify-otp). No new RCM control. ToE `apps/api/test/tenant-proxy.test.ts` (5). |
+| 1.28 | 2026-07-13 | Platform / SRE | **§2 factory-reset: wipe TENANTLESS FK-child tables too (INVISIBLE reset outage).** The INVISIBLE factory-reset was permanently `FACTORY_RESET_BLOCKED`: `cust_pos_items` (2,417 rows) and `survey_answers` (74) have **no `tenant_id` column**, so the wipe loop never deleted them and they FK-blocked their parents (`cust_pos_sales`, `survey_responses`) forever. `tenant-wipe.ts` now walks the FK graph at runtime (`pg_constraint`, transitively) and deletes tenantless-child rows whose ancestor chain terminates in a wiped tenant row — ownership derived via FK, never guessed; other tenants'/shared rows untouched. Covers factory-reset AND purge (shared engine). Also documents the ordering gotcha: legacy cross-tenant vendor references (Amber POs → INVISIBLE vendors) mean the referencing tenant must be reset FIRST. ToE: `cutover/onboarding.ts` seeds a tenantless `cust_pos_items` child and asserts the reset clears it. |
 | 1.27 | 2026-07-13 | Platform / SRE | **§1bis: pg-smoke now applies migrations as prod does — closing the CI gap that shipped 0387 twice — and `migrate.ts` applies one transaction per migration.** CI's `pg-smoke` used to apply migrations as the postgres service container's superuser (bypasses RLS unconditionally), which is why the 0387 class stayed green in CI while failing every prod deploy. Now the harness provisions a throwaway §1bis-shaped role (`ierp_smoke`: `LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE` + grants + `GRANT app_user` + `GRANT CREATE ON DATABASE` + table/sequence/view/enum-TYPE ownership transfer) and applies ALL migrations via `pnpm --filter @ierp/api db:migrate` as that role, asserting: the role posture, the full run completes, every journaled migration is recorded applied, and the incident mechanism itself (a seeded `users` row is invisible to a bare role session — FORCE RLS binds the owner — and visible under the GUC; needed because an empty fresh-CI DB lets a 0387-style backfill pass trivially). Doing this surfaced a second bug: drizzle-orm's built-in `migrate()` runs ALL pending migrations in ONE transaction, overflowing the lock table on a fresh DB (53200 "out of shared memory" at 372 migrations) — `migrate.ts` therefore applies one transaction per migration (drizzle-kit semantics), keeping the same journal bookkeeping. Verified on real PostgreSQL: fresh DB 372/372 applied under `ierp_smoke` + re-run 0 applied, 10/10 pg-smoke checks both times. |
 | 1.26 | 2026-07-13 | Platform / SRE | **§1bis: migrations run under RLS — GUC-setting migration runner (0387 deploy outage, root cause 3rd attempt).** Two deploys of 0387 failed with "196 rows unattributed": the backfill's `FROM users` join saw ZERO rows because prod migrations run as `ierp_app` (NOBYPASSRLS), `users` is FORCE RLS, and `drizzle-kit migrate` sets no `app.bypass_rls` GUC. Every local test masked it (superuser connections bypass RLS unconditionally). Fix: (a) 0387 sets the transaction-local GUC inline as its first statement; (b) **permanently**, `db:migrate` is now `src/database/migrate.ts` — sets the session GUC on a dedicated `max:1` connection, then runs drizzle-orm's programmatic `migrate()` (drizzle-kit-compatible bookkeeping; `db:migrate:kit` = bare-CLI fallback). Rule: test migration behaviour under `SET ROLE app_user`, never the superuser. |
 | 1.25 | 2026-07-13 | Platform / SRE | **§7: legacy P2P pipeline had no tenant scoping at all (migration 0387).** `purchase_requests`/`pr_items`/`purchase_orders`/`po_items`/`po_deliveries`/`goods_receipts`/`gr_items` predated multi-tenancy and never got a `tenant_id` column — every company on the platform could see every other company's requisitions/POs/goods-receipts, unfiltered. Fixed: `tenant_id` added + backfilled (~196 rows, all attributable) + leading index + canonical org-clause RLS on all 7 tables; every writer now stamps `tenant_id`. ToE: `cutover/procurement-tenant-isolation.ts`. |

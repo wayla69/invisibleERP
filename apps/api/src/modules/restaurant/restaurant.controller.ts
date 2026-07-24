@@ -13,6 +13,9 @@ import { RestaurantOfflineSyncService, type RegisterOfflineSyncBatchDto, type Di
 import { ReservationService, type CreateReservationDto, type ListReservationsDto } from './reservation.service';
 import { GuestProfileService, type UpsertDiningProfileDto, type AddCompanionDto } from './guest-profile.service';
 import { TipService, type DistributeTipsDto } from './tip.service';
+import { QrService } from './qr.service';
+import { ServiceRequestService } from './service-request.service';
+import { mintRotatingTableToken } from './qr-token.util';
 import {
   CreateOrderBody, AddItemsBody, KdsActionBody, CheckoutBody, CreateTableBody, UpdateTableBody,
   TableStatusBody, ZoneBody, ZoneUpdateBody, StationBody, BuffetPackageBody, BuffetPackageUpdateBody, StartBuffetBody, MoveTableBody, TransferItemsBody, MergeTablesBody, AssignSeatBody,
@@ -98,7 +101,34 @@ export class RestaurantController {
     private readonly reservations: ReservationService,
     private readonly guests: GuestProfileService,
     private readonly tips: TipService,
+    private readonly qr: QrService,
+    private readonly serviceReq: ServiceRequestService,
   ) {}
+
+  // ── Diner service requests (F1): the floor board lists/acknowledges/clears "call staff" pings. ──
+  @Get('service-requests') @Permissions('pos', 'order_mgt', 'exec')
+  listServiceRequests(@CurrentUser() u: JwtUser) { return this.serviceReq.list(u); }
+  @Post('service-requests/:id/ack') @Permissions('pos', 'order_mgt', 'exec')
+  ackServiceRequest(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.serviceReq.ack(+id, u); }
+  @Post('service-requests/:id/done') @Permissions('pos', 'order_mgt', 'exec')
+  doneServiceRequest(@Param('id') id: string, @CurrentUser() u: JwtUser) { return this.serviceReq.done(+id, u); }
+
+  // ── Public-QR-ordering controls (SOX-ICFR #3). Staff-managed; the diner endpoints live in QrController. ──
+  @Get('qr-settings') @Permissions('order_mgt', 'exec', 'pos')
+  qrSettings(@CurrentUser() u: JwtUser) { return this.qr.getSettings(u.tenantId as number); }
+
+  @Put('qr-settings') @Permissions('order_mgt', 'exec')
+  setQrSettings(@Body(new ZodValidationPipe(z.object({ require_staff_fire: z.boolean().optional(), dynamic_mode: z.boolean().optional(), auto_close_on_paid: z.boolean().optional(), recommend_mode: z.enum(['manual', 'behavior', 'popular_low_cost']).optional(), recommend_count: z.number().int().min(1).max(20).optional() }))) b: { require_staff_fire?: boolean; dynamic_mode?: boolean; auto_close_on_paid?: boolean; recommend_mode?: 'manual' | 'behavior' | 'popular_low_cost'; recommend_count?: number }, @CurrentUser() u: JwtUser) {
+    return this.qr.setSettings(u.tenantId as number, b, u.username);
+  }
+
+  // A per-table display fetches the current SHORT-TTL rotating QR token to render (refreshes each window);
+  // a diner scans it and POSTs to /api/qr/rstart/:token. Presence-bound alternative to the static placard.
+  @Get('tables/:id/rotating-qr') @Permissions('order_mgt', 'exec', 'pos')
+  rotatingQr(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    const token = mintRotatingTableToken(u.tenantId as number, parseInt(id, 10));
+    return { token, start_url: `/api/qr/rstart/${token}`, window_sec: Number(process.env.QR_ROTATING_WINDOW_MS ?? 30000) / 1000 };
+  }
 
   // ── Tip pooling / distribution (TIP-01). SoD: distributing tips is a manager/finance duty (order_mgt /
   //    exec / hr), separate from the cashier who rings sales (pos_sell) — a cashier can't pay tips to self. ──
@@ -207,6 +237,14 @@ export class RestaurantController {
   @Get('kds/expo') kdsExpo(@CurrentUser() u: JwtUser) { return this.kds.expo(u); }            // order-ready pass (POS-4)
   @Get('kds/load') kdsLoad(@CurrentUser() u: JwtUser) { return this.kds.stationLoad(u); }     // per-station load + bump/recall counts (POS-4)
   @Patch('kds/items/:id') itemAction(@Param('id') id: string, @Body(new ZodValidationPipe(KdsActionBody)) b: KdsActionDto, @CurrentUser() u: JwtUser) { return this.dineIn.itemTransition(+id, b.action, b.reason, u); }
+  // Serve a whole ticket: scan the order QR (or tap "Served" on the expo card) → every ready line flips to
+  // served in one go, so a finished ticket never lingers on the pass.
+  @Post('kds/serve') serveOrder(@Body(new ZodValidationPipe(z.object({ order_no: z.string().min(1) }))) b: { order_no: string }, @CurrentUser() u: JwtUser) { return this.dineIn.serveOrder(b.order_no, u); }
+  // Start a whole ticket: accept every queued line of an order at once (queued → preparing) so a station
+  // can take a table's order in one tap instead of card-by-card.
+  @Post('kds/start') startOrder(@Body(new ZodValidationPipe(z.object({ order_no: z.string().min(1) }))) b: { order_no: string }, @CurrentUser() u: JwtUser) { return this.dineIn.startOrder(b.order_no, u); }
+  @Get('kds/prep-times') @Permissions('pos', 'order_mgt', 'exec') kdsPrepTimes(@CurrentUser() u: JwtUser) { return this.kds.prepTimes(u); }   // F5: learned avg completion per dish
+  @Get('kds/pacing') kdsPacing(@CurrentUser() u: JwtUser) { return this.kds.pacing(u); }                                                     // F8: fire-next-course nudges
   @Get('kds/stations') stations(@CurrentUser() u: JwtUser) { return this.kds.listStations(u); }
 
   // ── buffet packages / tiers (Phase 2) — read for POS/floor, manage for master-data roles (SoD) ──

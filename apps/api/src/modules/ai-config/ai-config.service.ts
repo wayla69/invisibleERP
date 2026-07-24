@@ -39,7 +39,7 @@ export class AiConfigService {
   }
 
   async suggest(target: string, description: string, _user: JwtUser) {
-    if (!TARGETS.includes(target as any)) throw new BadRequestException({ code: 'BAD_TARGET', message: `target must be one of ${TARGETS.join(', ')}`, messageTh: 'ประเภทคอนฟิกไม่ถูกต้อง' });
+    if (!(TARGETS as readonly string[]).includes(target)) throw new BadRequestException({ code: 'BAD_TARGET', message: `target must be one of ${TARGETS.join(', ')}`, messageTh: 'ประเภทคอนฟิกไม่ถูกต้อง' });
     if (!this.apiKey || (await aiTenantOptedOut(this.db, _user?.tenantId)))
       return { target, proposal: this.template(target, description), source: 'template', note: 'ตรวจทานก่อนนำไปใช้งานจริง' };
     try {

@@ -1,10 +1,11 @@
 import { Inject, Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { eq, and, desc, gte, lte, sql, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { glPeriodBalances, closeRuns, closeRunSteps, fiscalPeriods, journalEntries, journalLines } from '../../database/schema';
+import { glPeriodBalances, closeRuns, closeRunSteps, closeTaskTemplates, fiscalPeriods, journalEntries, journalLines, reconPeriods, recurringJournals, prepaidSchedules, fxRevalRuns, deferredTaxRuns } from '../../database/schema';
 import { currentTenantStore } from '../../common/tenant-context';
 import { assertMakerChecker } from '../../common/control-profile';
 import type { JwtUser } from '../../common/decorators';
+import { CASH_ACCOUNTS } from './ledger-constants';
 
 // GL-16/GL-16b SoD gates historically reply HTTP 400 (SELF_LOCK/SELF_REOPEN — the basics harness asserts the
 // status), while assertMakerChecker's enterprise block is a 403. Remap, keeping the body byte-identical.
@@ -15,6 +16,10 @@ const r2 = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
 // Suspense / clearing accounts whose balance should normally be ~zero at close (advisory): the WIP "applied"
 // contra accounts (2380 mfg labor+OH, 2390 project applied) and conventional suspense codes.
 const SUSPENSE_ACCOUNTS = ['2380', '2390', '1999', '9999'];
+// The sub-ledger tie-out control accounts (AR / AP / inventory / fixed assets) — the account set whose
+// REC-01 certifications evidence the subledger_tieout close step (v2b). Cash uses the canonical
+// CASH_ACCOUNTS from ledger-constants.
+const TIEOUT_ACCOUNTS = ['1100', '2000', '1200', '1500'];
 
 // WS2.1 (GL-15/GL-16) — Hard period close + close checklist.
 // Lifecycle: Open → InProgress (startClose seeds the checklist) → ReadyToLock (all required steps Done)
@@ -66,14 +71,37 @@ export class CloseService {
       status: 'InProgress',
       startedBy: dto.startedBy,
     }).returning();
-    await db.insert(closeRunSteps).values(CHECKLIST.map((c, i) => ({
+    // B1 (docs/50 Wave 3) — Close Manager: compose the standard checklist with the tenant's ACTIVE task
+    // templates. A template reusing a standard step_key OVERRIDES that step's title/required/owner/due/
+    // dependency; a new step_key appends a custom task. No templates ⇒ byte-identical to the fixed list.
+    const templates = tenantId != null
+      ? await db.select().from(closeTaskTemplates).where(and(eq(closeTaskTemplates.tenantId, tenantId), eq(closeTaskTemplates.active, true)))
+      : [];
+    const byKey = new Map(templates.map((t: any) => [t.stepKey, t]));
+    const periodEnd = this.periodEndDate(dto.period);
+    const dueFor = (offset: number | null | undefined): string | null => {
+      if (offset == null) return null;
+      const d = new Date(`${periodEnd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + Number(offset));
+      return d.toISOString().slice(0, 10);
+    };
+    const seeded = CHECKLIST.map((c, i) => {
+      const t: any = byKey.get(c.stepKey);
+      return { stepKey: c.stepKey, title: t?.title ?? c.title, required: t?.required ?? c.required, seq: i + 1, ownerRole: t?.ownerRole ?? null, dueDate: dueFor(t?.dueDayOffset), dependsOnKey: t?.dependsOnKey ?? null };
+    });
+    const custom = templates.filter((t: any) => !CHECKLIST.some((c) => c.stepKey === t.stepKey))
+      .sort((a: any, b: any) => Number(a.seq) - Number(b.seq))
+      .map((t: any, i: number) => ({ stepKey: t.stepKey, title: t.title, required: !!t.required, seq: CHECKLIST.length + i + 1, ownerRole: t.ownerRole ?? null, dueDate: dueFor(t.dueDayOffset), dependsOnKey: t.dependsOnKey ?? null }));
+    await db.insert(closeRunSteps).values([...seeded, ...custom].map((c) => ({
       closeRunId: Number(run!.id),
       tenantId: tenantId as number,
       stepKey: c.stepKey,
       title: c.title,
-      seq: i + 1,
+      seq: c.seq,
       required: c.required,
       status: 'Pending',
+      ownerRole: c.ownerRole,
+      dueDate: c.dueDate,
+      dependsOnKey: c.dependsOnKey,
     })));
     return this.shape(run, await this.stepsFor(Number(run!.id)));
   }
@@ -90,6 +118,14 @@ export class CloseService {
     const [step] = await db.select().from(closeRunSteps)
       .where(and(eq(closeRunSteps.closeRunId, dto.closeRunId), eq(closeRunSteps.stepKey, dto.stepKey))).limit(1);
     if (!step) throw new NotFoundException({ code: 'STEP_NOT_FOUND', message: `Step ${dto.stepKey} not found on close run ${dto.closeRunId}`, messageTh: 'ไม่พบขั้นตอนการปิดงวด' });
+    // B1 (docs/50 Wave 3): a task with a predecessor cannot be signed off before that predecessor is Done.
+    if (step.dependsOnKey) {
+      const [dep] = await db.select().from(closeRunSteps)
+        .where(and(eq(closeRunSteps.closeRunId, dto.closeRunId), eq(closeRunSteps.stepKey, String(step.dependsOnKey)))).limit(1);
+      if (dep && dep.status !== 'Done') {
+        throw new BadRequestException({ code: 'DEPENDENCY_NOT_DONE', message: `Step ${dto.stepKey} depends on ${step.dependsOnKey}, which is not Done yet`, messageTh: `ต้องทำขั้นตอน ${step.dependsOnKey} ให้เสร็จก่อน`, depends_on: step.dependsOnKey });
+      }
+    }
 
     await db.update(closeRunSteps).set({
       status: 'Done',
@@ -105,6 +141,95 @@ export class CloseService {
       await db.update(closeRuns).set({ status: 'ReadyToLock' }).where(eq(closeRuns.id, dto.closeRunId));
     }
     return this.shape(await this.getRun(dto.closeRunId), steps);
+  }
+
+  // ───────────────────── Close Manager v2 — evidence-driven auto-complete (docs/50 follow-up) ─────────
+  // Marks a checklist step Done ONLY when the system can VERIFY its completion from its own records —
+  // never from judgment. The auto-mappable steps and their evidence:
+  //   recurring     ← zero active recurring templates AND zero active prepaid schedules still due on/before
+  //                   period end (the GL-08/GL-09 sweeps have nothing left to run for the period)
+  //   fx_reval      ← a POSTED GL-18 revaluation run exists for the period
+  //   deferred_tax  ← a POSTED deferred-tax run exists for the period
+  //   depreciation  ← ≥1 POSTED depreciation JE (source 'DEP') dated in the period
+  //   bank_rec / subledger_tieout (v2b) ← every recon workspace the tenant OPENED for the period on the
+  //                   step's account set (bank_rec: the canonical CASH_ACCOUNTS; tie-out: the AR/AP/INV/FA
+  //                   control accounts) is CERTIFIED in the REC-01 register. The human act is the
+  //                   certification itself (preparer ≠ certifier, or B4's provably-safe auto-certify) —
+  //                   the tick only REFLECTS that recorded sign-off. Fail-closed both ways: zero
+  //                   workspaces on the set = no evidence (absence never ticks), and one un-certified
+  //                   workspace blocks.
+  // Human judgments with no system register (trial_balance_review, flux_review, disclosure_review —
+  // REC-04/CLS-01/CLS-02) and custom tenant tasks NEVER auto-complete. Attribution mirrors B4's
+  // auto-certify: completedBy "<user> (auto)", detail { auto: true, evidence } — so the GL-15 sign-off
+  // trail always shows which steps a human asserted vs the system proved. Dependencies still gate
+  // (a step whose predecessor is not Done is skipped, never forced). Idempotent: Done steps skip.
+  async autoComplete(closeRunId: number, user: JwtUser) {
+    const db = this.db;
+    const tenantId = this.tenantId();
+    const run = await this.getRun(closeRunId);
+    if (run.status === 'Locked') {
+      throw new BadRequestException({ code: 'PERIOD_ALREADY_LOCKED', message: `Period ${run.period} is already locked`, messageTh: `งวดบัญชี ${run.period} ถูกล็อกแล้ว` });
+    }
+    const period = run.period as string;
+    const end = this.periodEndDate(period);
+    const tconds = (col: any) => (tenantId != null ? [eq(col, tenantId)] : []);
+
+    const evidenceOf: Record<string, () => Promise<{ ok: boolean; evidence: Record<string, unknown> }>> = {
+      recurring: async () => {
+        const [rec] = await db.select({ c: sql<string>`count(*)` }).from(recurringJournals)
+          .where(and(eq(recurringJournals.active, 'true'), lte(recurringJournals.nextRunDate, end), ...tconds(recurringJournals.tenantId)));
+        const [pre] = await db.select({ c: sql<string>`count(*)` }).from(prepaidSchedules)
+          .where(and(eq(prepaidSchedules.status, 'active'), lte(prepaidSchedules.nextRunDate, end), ...tconds(prepaidSchedules.tenantId)));
+        const due = num(rec?.c) + num(pre?.c);
+        return { ok: due === 0, evidence: { due_recurring: num(rec?.c), due_prepaid: num(pre?.c) } };
+      },
+      fx_reval: async () => {
+        const [row] = await db.select({ id: fxRevalRuns.id }).from(fxRevalRuns)
+          .where(and(eq(fxRevalRuns.period, period), eq(fxRevalRuns.status, 'Posted'), ...tconds(fxRevalRuns.tenantId))).limit(1);
+        return { ok: !!row, evidence: { posted_reval_run: row ? Number(row.id) : null } };
+      },
+      deferred_tax: async () => {
+        const [row] = await db.select({ id: deferredTaxRuns.id }).from(deferredTaxRuns)
+          .where(and(eq(deferredTaxRuns.period, period), eq(deferredTaxRuns.status, 'Posted'), ...tconds(deferredTaxRuns.tenantId))).limit(1);
+        return { ok: !!row, evidence: { posted_deferred_tax_run: row ? Number(row.id) : null } };
+      },
+      depreciation: async () => {
+        const [row] = await db.select({ c: sql<string>`count(*)` }).from(journalEntries)
+          .where(and(eq(journalEntries.source, 'DEP'), eq(journalEntries.status, 'Posted'),
+            gte(journalEntries.entryDate, `${period}-01`), lte(journalEntries.entryDate, end), ...tconds(journalEntries.tenantId)));
+        return { ok: num(row?.c) > 0, evidence: { posted_dep_entries: num(row?.c) } };
+      },
+      bank_rec: () => this.certifiedReconEvidence([...CASH_ACCOUNTS], period, tenantId),
+      subledger_tieout: () => this.certifiedReconEvidence(TIEOUT_ACCOUNTS, period, tenantId),
+    };
+
+    const steps = await this.stepsFor(closeRunId);
+    const byKey = new Map(steps.map((s: any) => [s.step_key, s]));
+    const completed: { step_key: string; evidence: Record<string, unknown> }[] = [];
+    const skipped: { step_key: string; reason: string }[] = [];
+    for (const s of steps) {
+      const evaluate = evidenceOf[s.step_key];
+      if (!evaluate) continue; // human/custom steps are not auto-mappable — not even reported
+      if (s.status === 'Done') { skipped.push({ step_key: s.step_key, reason: 'already_done' }); continue; }
+      if (s.depends_on_key) {
+        const dep: any = byKey.get(s.depends_on_key);
+        if (dep && dep.status !== 'Done') { skipped.push({ step_key: s.step_key, reason: `dependency_not_done:${s.depends_on_key}` }); continue; }
+      }
+      const { ok, evidence } = await evaluate();
+      if (!ok) { skipped.push({ step_key: s.step_key, reason: 'evidence_not_met' }); continue; }
+      await db.update(closeRunSteps).set({
+        status: 'Done', completedBy: `${user.username} (auto)`, completedAt: new Date(),
+        detail: { auto: true, evidence },
+      }).where(eq(closeRunSteps.id, s.id));
+      completed.push({ step_key: s.step_key, evidence });
+    }
+    // Re-evaluate ReadyToLock exactly as completeStep does.
+    const after = await this.stepsFor(closeRunId);
+    const allReqDone = after.filter((s: any) => s.required).every((s: any) => s.status === 'Done');
+    if (allReqDone && run.status !== 'ReadyToLock') {
+      await db.update(closeRuns).set({ status: 'ReadyToLock' }).where(eq(closeRuns.id, closeRunId));
+    }
+    return { close_run_id: closeRunId, period, completed, skipped, run: this.shape(await this.getRun(closeRunId), after) };
   }
 
   // ───────────────────── Lock the period (maker-checker) ─────────────────────
@@ -272,7 +397,24 @@ export class CloseService {
     }
     const snapshotRecon = { key: 'gl_snapshot_drift', title: 'Period-balance snapshot reconciles to the raw ledger (GL-20)', ok: driftAccts.length === 0, count: driftAccts.length, accounts: driftAccts.slice(0, 20) };
 
-    const checks = [drafts, periodBalanced, entriesBalanced, suspense, snapshotRecon];
+    // B4 (docs/50 Wave 4) — recon_completeness (advisory): every account reconciliation OPENED for this
+    // period should be certified (manually via REC-01 or auto-certified for the safe class) before lock.
+    // Advisory like suspense — the workspace is opt-in per account, so an uncertified recon warns, never
+    // hard-blocks (the hard gates stay drafts/balance/snapshot).
+    const reconTenantId = this.tenantId();
+    const reconRows = reconTenantId != null
+      ? await db.select().from(reconPeriods).where(and(eq(reconPeriods.tenantId, reconTenantId), eq(reconPeriods.period, period)))
+      : [];
+    const uncertified = reconRows.filter((r: any) => r.status !== 'Certified');
+    const reconCompleteness = {
+      key: 'recon_completeness',
+      title: 'Account reconciliations certified (REC-01)',
+      ok: uncertified.length === 0,
+      advisory: true as const,
+      opened: reconRows.length,
+      uncertified: uncertified.map((r: any) => ({ account_code: r.accountCode, status: r.status, risk_rating: r.riskRating })),
+    };
+    const checks = [drafts, periodBalanced, entriesBalanced, suspense, snapshotRecon, reconCompleteness];
     const blockers = checks.filter((c: any) => !c.ok && !c.advisory).map((c) => c.key);
     const warnings = checks.filter((c: any) => !c.ok && c.advisory).map((c) => c.key);
     return { period, ready: blockers.length === 0, blockers, warnings, checks };
@@ -286,12 +428,64 @@ export class CloseService {
     return run;
   }
 
+  // v2b evidence: the REC-01 register for this period over an account set. Fail-closed both ways —
+  // zero workspaces opened on the set is NO evidence (absence never ticks), and any workspace not yet
+  // Certified blocks. The evidence pins each account's status + certifier so the sign-off trail shows
+  // exactly which human certifications the tick rests on.
+  private async certifiedReconEvidence(accounts: string[], period: string, tenantId: number | null) {
+    const conds = [eq(reconPeriods.period, period), inArray(reconPeriods.accountCode, accounts)];
+    if (tenantId != null) conds.push(eq(reconPeriods.tenantId, tenantId));
+    const rows = await this.db.select({
+      code: reconPeriods.accountCode, status: reconPeriods.status, by: reconPeriods.certifiedBy,
+    }).from(reconPeriods).where(and(...conds));
+    const uncertified = rows.filter((r) => r.status !== 'Certified');
+    return {
+      ok: rows.length > 0 && uncertified.length === 0,
+      evidence: {
+        recon_workspaces: rows.length,
+        certified: rows.length - uncertified.length,
+        uncertified: uncertified.map((r) => r.code),
+        certifications: rows.filter((r) => r.status === 'Certified').map((r) => ({ account: r.code, certified_by: r.by })),
+      },
+    };
+  }
+
   private async findRunByPeriod(period: string, tenantId: number | null) {
     const db = this.db;
     const conds = [eq(closeRuns.period, period)];
     if (tenantId != null) conds.push(eq(closeRuns.tenantId, tenantId));
     const [run] = await db.select().from(closeRuns).where(and(...conds)).limit(1);
     return run ?? null;
+  }
+
+  // ── B1 (docs/50 Wave 3) — Close Manager task templates (per tenant) ──
+  // GET returns the tenant's templates; PUT replaces the set atomically (gl_close/exec at the route). A
+  // template may not depend on itself; a dependency must reference a standard step or another template.
+  async listTaskTemplates() {
+    const tenantId = this.tenantId();
+    const rows = tenantId != null
+      ? await this.db.select().from(closeTaskTemplates).where(eq(closeTaskTemplates.tenantId, tenantId)).orderBy(closeTaskTemplates.seq)
+      : [];
+    return { templates: rows.map((t: any) => ({ id: Number(t.id), step_key: t.stepKey, title: t.title, required: t.required, seq: Number(t.seq), owner_role: t.ownerRole ?? null, due_day_offset: t.dueDayOffset ?? null, depends_on_key: t.dependsOnKey ?? null, active: t.active })), count: rows.length, standard_steps: CHECKLIST.map((c) => ({ step_key: c.stepKey, title: c.title, required: c.required })) };
+  }
+
+  async putTaskTemplates(dto: { templates: { step_key: string; title: string; required?: boolean; seq?: number; owner_role?: string; due_day_offset?: number; depends_on_key?: string; active?: boolean }[] }, user: JwtUser) {
+    const tenantId = this.tenantId();
+    if (tenantId == null) throw new BadRequestException({ code: 'TENANT_REQUIRED', message: 'Close task templates are per-tenant', messageTh: 'ต้องอยู่ในบริบทบริษัท' });
+    const keys = new Set([...CHECKLIST.map((c) => c.stepKey), ...dto.templates.map((t) => t.step_key)]);
+    for (const t of dto.templates) {
+      if (t.depends_on_key && t.depends_on_key === t.step_key) throw new BadRequestException({ code: 'SELF_DEPENDENCY', message: `Step ${t.step_key} cannot depend on itself`, messageTh: 'ขั้นตอนพึ่งพาตัวเองไม่ได้' });
+      if (t.depends_on_key && !keys.has(t.depends_on_key)) throw new BadRequestException({ code: 'UNKNOWN_DEPENDENCY', message: `Step ${t.step_key} depends on unknown step ${t.depends_on_key}`, messageTh: 'อ้างถึงขั้นตอนที่ไม่มีอยู่' });
+    }
+    await this.db.delete(closeTaskTemplates).where(eq(closeTaskTemplates.tenantId, tenantId));
+    if (dto.templates.length) {
+      await this.db.insert(closeTaskTemplates).values(dto.templates.map((t, i) => ({
+        tenantId, stepKey: t.step_key, title: t.title, required: t.required ?? true, seq: t.seq ?? 100 + i,
+        ownerRole: t.owner_role ?? null, dueDayOffset: t.due_day_offset ?? null, dependsOnKey: t.depends_on_key ?? null,
+        active: t.active ?? true, updatedBy: user.username, updatedAt: new Date(),
+      })));
+    }
+    return this.listTaskTemplates();
   }
 
   private async stepsFor(closeRunId: number) {
@@ -306,6 +500,9 @@ export class CloseService {
       seq: s.seq,
       required: s.required,
       status: s.status,
+      owner_role: s.ownerRole ?? null,
+      due_date: s.dueDate ?? null,
+      depends_on_key: s.dependsOnKey ?? null,
       completed_by: s.completedBy ?? null,
       completed_at: s.completedAt ?? null,
       detail: s.detail ?? null,

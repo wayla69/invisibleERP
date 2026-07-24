@@ -7,6 +7,11 @@ export const PERMISSIONS = [
   'pr_raise', // company-wide purchase-requisition raising (low-risk; PR ≠ PO. Implied by 'procurement'.)
   'creditors', 'ar', 'delivery', 'returns', 'pricelist', 'lots', 'locations', 'promos', 'mobile',
   'images', 'masterdata', 'bom_master', 'planner', 'exec', 'order_cust', 'cust_dash',
+  // docs/54 supply-chain planning: 'scm_plan' builds/edits demand plans, 'scm_approve' is the CHECKER
+  // duty (a sub-permission, so no coarse module key silently confers it — see SoD R24).
+  // docs/57 B3: 'scm_allocate' sets/overrides the DC-shortage allocation policy — a distinct maker duty
+  // (sub-permission), segregated from 'scm_approve' by SoD R25 (control SCM-06).
+  'scm_plan', 'scm_approve', 'scm_allocate',
   'cust_inventory', 'cust_pos', 'cust_bom', 'cust_variance', 'loyalty', 'survey',
   'cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'marketing', 'track', 'ai_chat',
   'approvals', // Phase 15 — approval-workflow actions (my-approvals / act / delegations)
@@ -90,6 +95,8 @@ export const SUB_PERMISSIONS: Permission[] = [
   'cpq', 'cpq_approve',
   'quality_approve',
   'treasury_approve',
+  'scm_approve',
+  'scm_allocate',
   'sme_review',
 ];
 
@@ -105,7 +112,7 @@ export const PERM_GROUPS: Record<string, Permission[]> = {
   'Customer Portal': ['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track'],
   'My Business': ['cust_my_crm', 'cust_my_suppliers', 'cust_my_pos', 'cust_my_users', 'branch'],
   'Sales & Orders': ['pos', 'order_mgt', 'claim_mgt', 'crm', 'delivery', 'returns', 'pricelist', 'promos'],
-  'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender'],
+  'Dashboard & Analytics': ['dashboard', 'exec', 'planner', 'marketing', 'proj_tender', 'scm_plan', 'scm_approve', 'scm_allocate'],
   'Warehouse': ['warehouse', 'lots', 'locations', 'mobile', 'images'],
   'Finance & AR/AP': ['ar', 'creditors', 'gl_coa', 'gl_posting_rules', 'proj_billing', 'proj_billing_certify', 'proj_subcon_certify', 'treasury', 'treasury_approve'],
   'Procurement': ['procurement', 'pr_raise', 'proj_subcon', 'quality', 'quality_approve'],
@@ -133,7 +140,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // (procurement), view stock (wh_count/wh_custody/lots/locations), read financial reports (fin_report)
   // — but cannot approve workflow items (approvals), post/close GL (exec → R05), adjust stock
   // (wh_adjust → R11), receive goods (wh_receive → R04), or maintain master data (masterdata → R13).
-  Planner: ['planner', 'dashboard', 'procurement', 'pr_raise', 'fin_report', 'wh_count', 'wh_custody', 'lots', 'locations'],
+  Planner: ['planner', 'dashboard', 'procurement', 'pr_raise', 'fin_report', 'wh_count', 'wh_custody', 'lots', 'locations', 'scm_plan'],
   // ── SoD-clean single-duty roles (the remediated design — each verified to produce 0 SoD conflicts) ──
   Cashier: ['pos_sell', 'pr_raise'],
   PosSupervisor: ['pos_refund', 'pos_till', 'pos_close', 'pr_raise'],
@@ -271,6 +278,17 @@ export const SOD_RULES: SodRule[] = [
   //    permissions held; this rule flags the role-design combination. ──
   { id: 'R23', dutyA: 'Maintain debt facility / drawdown', dutyB: 'Approve facility & run EIR accrual',
     a: ['treasury'], b: ['treasury_approve'], severity: 'High', risk: 'Originate and maintain a debt facility, draw down borrowings (Dr Bank), AND approve the facility and run its interest accrual — draw down and self-approve borrowings, booking cash with no independent check.', mitigation: 'Separate debt-facility maintenance/drawdown from facility approval + interest accrual; maker-checker enforced in-app (creator ≠ approver → 403 SOD_SELF_APPROVAL, TRE-01).' },
+  // ── Supply-chain planning (docs/54, SCM-01) — building a perishable order plan is segregated from
+  //    approving it. An approved plan converts straight into a purchase requisition, so a planner who
+  //    could also approve would hold an unchecked path from "I decided we need this" to committed spend.
+  { id: 'R24', dutyA: 'Build/edit demand & order plans', dutyB: 'Approve order plans',
+    a: ['scm_plan'], b: ['scm_approve'], severity: 'High', risk: 'Build a supply-chain order plan AND approve it — over-order to a favoured vendor, or inflate quantities and mask the resulting spoilage, with the approved plan converting directly into a purchase requisition unchecked.', mitigation: 'Separate plan preparation from approval; maker-checker enforced in-app (maker ≠ approver → 403 SOD_SELF_APPROVAL, SCM-01).' },
+  // ── Multi-echelon allocation (docs/57 B3, SCM-06) — setting or overriding the DC-shortage fair-share
+  //    allocation policy is segregated from approving it. On a shortage the DC rations scarce stock
+  //    across branches by the approved policy; a person who could both set/override the policy AND
+  //    approve it could quietly favour a branch (divert scarce stock) with no independent check. ──
+  { id: 'R25', dutyA: 'Set/override DC-shortage allocation policy', dutyB: 'Approve allocation policy / override',
+    a: ['scm_allocate'], b: ['scm_approve'], severity: 'High', risk: 'Set or override the DC-shortage allocation policy AND approve it — ration scarce stock to a favoured branch (starving others) with no independent check, then approve the deviation oneself.', mitigation: 'Separate allocation-policy build/override from approval; maker-checker enforced in-app (maker ≠ approver → 403 SOD_SELF_APPROVAL; unjustified override → 403 ALLOCATION_OVERRIDE_UNLOGGED, SCM-06).' },
 ];
 
 export interface SodConflict { ruleId: string; dutyA: string; dutyB: string; severity: 'High' | 'Medium'; permsHeld: Permission[]; }
@@ -312,6 +330,7 @@ export function requiresMfa(role: Role, userOverride?: Permission[] | null): boo
 export const PERM_TO_ROUTE: Partial<Record<Permission, string>> = {
   pos: '/pos', order_mgt: '/orders', claim_mgt: '/claims', crm: '/customers',
   dashboard: '/dashboard', exec: '/executive', planner: '/planner',
+  scm_plan: '/demand', // docs/54 — the demand-planning workspace (branch plans / order plans / scenario)
   warehouse: '/warehouse', lots: '/lots', locations: '/locations', mobile: '/mobile-scan',
   images: '/images', masterdata: '/master-data', bom_master: '/bom-master',
   procurement: '/procurement', pr_raise: '/requisitions', wh_receive: '/receiving',

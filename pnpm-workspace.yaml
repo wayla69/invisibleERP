@@ -18,8 +18,21 @@ overrides:
   # Step 7 (fastify-5 / Nest-11): clear the remaining transitive runtime advisories the major bump alone
   # doesn't — a stale fast-uri@2.x copy lingers, and @nestjs/platform-fastify still pulls @fastify/middie@8.
   # middie 9 peers fastify 5 (now satisfied) and we use Nest guards (not middie middleware), so forcing it is safe.
-  "fast-uri@<3.1.2": ">=3.1.2"
+  # 2026-07-21: two new fast-uri high advisories (GHSA-4c8g-83qw-93j6 host confusion, patched 3.1.3;
+  # GHSA-v2hh-gcrm-f6hx backslash authority delimiter, patched 3.1.4) — bump the floor from 3.1.2 to 3.1.4
+  # so both are remediated (not ignored). Still transitive via @nestjs/platform-fastify>fastify>ajv.
+  "fast-uri@<3.1.4": ">=3.1.4"
   "@fastify/middie@<9.3.2": ">=9.3.2"
+  # 2026-07-20 (GHSA-3jxr-9vmj-r5cp, GHSA-52cp-r559-cp3m): brace-expansion exponential-expansion DoS across
+  # all three major lines (transitive via exceljs→archiver/unzipper→glob, @nestjs/cli, @vitest/coverage-v8)
+  # and js-yaml 4.x merge-key quadratic CPU (via @nestjs/swagger — runtime — and @nestjs/cli). Patch-level
+  # forces to the fixed releases; see compliance/vulnerability-triage.md.
+  # NB caret-bounded values: an unbounded ">=x" here lets the resolver jump a legacy consumer (e.g.
+  # minimatch@3, CJS) onto the newest MAJOR (ESM-only) — each line must stay within its own major.
+  "brace-expansion@<1.1.16": "^1.1.16"
+  "brace-expansion@>=2.0.0 <2.1.2": "^2.1.2"
+  "brace-expansion@5": "^5.0.7"
+  "js-yaml@>=4.0.0 <4.3.0": "^4.3.0"
 
 # Known, triaged advisories accepted under documented remediation (see compliance/vulnerability-triage.md).
 # Each is either a dev/build-only dependency or gated behind a major upgrade (fastify-5 / Nest-11 / drizzle-0.45).
@@ -32,10 +45,13 @@ auditConfig:
     - GHSA-fx2h-pf6j-xcff # vite — dev server (build/test only)
     - GHSA-5j98-mcp5-4vw2 # glob CLI command injection (via @nestjs/cli; build tool)
     - GHSA-c2c7-rcm5-vvqj # picomatch ReDoS (via @angular-devkit/@nestjs/cli; build tool)
+    - GHSA-6g55-p6wh-862q # postcss<=8.5.11 arbitrary file read via attacker-controlled sourceMappingURL in CSS comments — BUILD-TIME transitive of next (compiles OUR authored CSS at build; never processes attacker-controlled CSS at runtime), so not exploitable in prod. Track the Next bump that pulls postcss≥8.5.12.
     # --- runtime: REMEDIATED by Step 7 (fastify-5 / Nest-11 + fast-uri/middie overrides) — entries removed:
     #     middie (GHSA-72c6/cxrg/8p85/v9ww — no longer a dependency under platform-fastify 11),
     #     @nestjs/platform-fastify (GHSA-r4wm/wf42/6v32 — now 11.1.27),
     #     fastify (GHSA-jx2c — now 5.x), fast-uri (GHSA-q3j6/v39h — override ≥3.1.2).
     # --- runtime: still accepted under documented remediation ---
     - GHSA-q7rr-3cgh-j5r3 # @opentelemetry/sdk-node Prometheus exporter crash (metrics endpoint not public; OTel optional)
+    - GHSA-45rx-2jwx-cxfr # @opentelemetry/propagator-jaeger<2.9.0 DoS via malformed Jaeger trace header (transitive via @opentelemetry/sdk-node>sdk-trace-node). OTel is optional (ALLOW_NO_OBSERVABILITY) and the Jaeger propagator is only active if Jaeger propagation is configured — not enabled in prod; DoS not RCE. Accept under remediation; track the OTel SDK bump to propagator-jaeger≥2.9.0.
+    - GHSA-f88m-g3jw-g9cj # sharp<0.35 inherited libvips CVEs (CVE-2026-33327/33328/35590/35591) — transitive via next>sharp (image optimizer). Malicious-image parsing; our image pipeline routes through the SSRF/isSafeObjectKey guards and sizes are bounded. Forcing sharp≥0.35 via override risks the Next build (native binary + optionalDependency), so accept under remediation and track the Next upgrade that bundles sharp≥0.35.
     # (GHSA-gpj5-g38j-94v9 drizzle-orm — REMEDIATED: upgraded to 0.45.2; removed from ignore-list. See vulnerability-triage.md.)

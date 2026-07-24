@@ -26,7 +26,7 @@ To define and control the issuance, redemption, and reconciliation of gift cards
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 8.2 (customer communication), cl. 8.5 (control of provision), cl. 8.6 (release).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — GC-01, GC-02, GC-03, GL-01.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — GC-01, GC-02, GC-03, GL-01.
 - `compliance/policies/03-delegation-of-authority.md`, `11-financial-close-policy.md` (liability tie-out at close).
 - Code: `apps/api/src/modules/giftcards/giftcards.service.ts`, `apps/api/src/modules/pos/pos.service.ts`, `apps/api/src/modules/returns/returns.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`.
 

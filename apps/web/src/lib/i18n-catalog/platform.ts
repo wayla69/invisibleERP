@@ -108,6 +108,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // ── Onboarding tab ──
   'plt.onb_requests_title': { th: 'คำขอเปิดบริษัท (รออนุมัติ)', en: 'Company requests (pending approval)' },
   'plt.onb_requested_at': { th: 'ขอเมื่อ', en: 'Requested' },
+  'plt.onb_requested_plan': { th: 'แพ็กเกจที่ขอ', en: 'Requested plan' },
+  'plt.onb_annual': { th: 'รายปี', en: 'annual' },
   'plt.onb_approve': { th: 'อนุมัติ', en: 'Approve' },
   'plt.onb_reject': { th: 'ปฏิเสธ', en: 'Reject' },
   'plt.onb_empty_title': { th: 'ไม่มีคำขอค้าง', en: 'No pending requests' },
@@ -200,7 +202,7 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.prov_new_company_btn': { th: 'เปิดบริษัทใหม่', en: 'New company' },
   'plt.prov_dialog_desc': { th: 'สร้าง tenant + ผู้ดูแล (Admin) + ผังบัญชีตามอุตสาหกรรม ให้บริษัทใหม่ทันที', en: 'Instantly create a tenant + Admin user + an industry-tailored chart of accounts for the new company' },
   'plt.prov_company_name': { th: 'ชื่อกิจการ', en: 'Company name' },
-  'plt.prov_company_name_ph': { th: 'ร้านโอชิเนอิ', en: 'Oshinei Shop' },
+  'plt.prov_company_name_ph': { th: 'ร้านอินวิซิเบิล', en: 'Invisible Shop' },
   'plt.prov_tenant_code': { th: 'รหัส tenant', en: 'Tenant code' },
   'plt.prov_industry': { th: 'อุตสาหกรรม', en: 'Industry' },
   'plt.prov_admin_username': { th: 'ชื่อผู้ใช้ Admin', en: 'Admin username' },
@@ -331,4 +333,50 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'plt.sw_recent': { th: 'เพิ่งดู', en: 'Recent' },
   'plt.sw_search_results': { th: 'ผลค้นหา ({n})', en: 'Search results ({n})' },
   'plt.sw_no_company_found': { th: 'ไม่พบบริษัท', en: 'No company found' },
+
+  // ── Plans & modules review + per-tenant add-on management (0451) ──────────
+  'plt.tab_plans': { th: 'แพ็กเกจ & โมดูล', en: 'Plans & Modules' },
+  'plt.plans_sub': { th: 'โมดูลที่รวมในแต่ละแพ็กเกจ (อ่านจากตารางแพ็กเกจจริงที่ใช้ตอนเปิดบริษัท) — โมดูลเสริมแสดงเป็นสีเหลือง', en: 'Modules included in each sellable plan (read from the live plan rows provisioning assigns) — add-on modules render amber.' },
+  'plt.plans_modules_count': { th: 'โมดูลที่รวม ({n})', en: 'Included modules ({n})' },
+  'plt.plans_included_addons': { th: 'โมดูลเสริมที่รวมในแพ็กเกจ', en: 'Add-ons included in this plan' },
+  'plt.plans_addons_purchasable': { th: 'ไม่มีในแพ็กเกจ — ซื้อเพิ่มเป็นรายโมดูลได้', en: 'None included — purchasable à la carte.' },
+  'plt.plans_unlimited': { th: 'ไม่จำกัด', en: 'Unlimited' },
+  'plt.plans_custom_price': { th: 'ราคาตามตกลง', en: 'Custom pricing' },
+  'plt.plans_per_month': { th: '/เดือน', en: '/mo' },
+  'plt.plans_per_year': { th: '/ปี', en: '/yr' },
+  'plt.plans_seats_locations': { th: 'ผู้ใช้ {users} คน · {locations} สาขา', en: '{users} users · {locations} locations' },
+  'plt.col_addons_n': { th: '+ โมดูลเสริม {n} รายการ', en: '+ {n} add-on(s)' },
+  'plt.drawer_addons_title': { th: 'โมดูลเสริม (ซื้อเพิ่ม)', en: 'Purchased add-ons' },
+  'plt.drawer_addon_in_plan': { th: 'รวมในแพ็กเกจแล้ว', en: 'Included in plan' },
+  'plt.drawer_addons_save': { th: 'บันทึกโมดูลเสริม', en: 'Save add-ons' },
+  'plt.drawer_addons_saved': { th: 'บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: 'Add-ons saved — entitlements apply immediately' },
+  'plt.drawer_modules_title': { th: 'โมดูลที่เปิดใช้ทั้งหมด (แพ็กเกจ + โมดูลเสริม)', en: 'Effective modules (plan + add-ons)' },
+
+  // ── Entitlement enforcement rollout (wave B) — observation ledger triage ──
+  'plt.obs_title': { th: 'ผลกระทบการบังคับใช้แพ็กเกจ (ใครจะติดบล็อก)', en: 'Entitlement enforcement impact (who would break)' },
+  'plt.obs_sub': { th: 'บันทึกจาก PlanGuard: shadow = จะถูกบล็อกถ้าบังคับใช้ / enforce = ถูกบล็อกแล้วจริง — ตรวจรายบริษัทให้เคลียร์ก่อนย้ายเข้ากลุ่มบังคับใช้ (ENTITLEMENTS_ENFORCE_TENANTS)', en: 'Recorded by the PlanGuard: shadow = would be blocked if enforced / enforce = actually blocked — clear a company here before moving it into the enforcement cohort (ENTITLEMENTS_ENFORCE_TENANTS).' },
+  'plt.obs_col_company': { th: 'บริษัท', en: 'Company' },
+  'plt.obs_col_total': { th: 'จำนวนเหตุการณ์', en: 'Events' },
+  'plt.obs_col_codes': { th: 'รหัสที่ติด', en: 'Deny codes' },
+  'plt.obs_col_modes': { th: 'โหมด', en: 'Modes' },
+  'plt.obs_col_last': { th: 'ล่าสุด', en: 'Last seen' },
+  'plt.obs_empty': { th: 'ยังไม่มีเหตุการณ์ใน {days} วันที่ผ่านมา — ทุกบริษัทผ่านเงื่อนไขแพ็กเกจ', en: 'No observations in the last {days} days — every company is clean under its plan.' },
+
+  // ── Payment-claim verify queue (wave C: bank-transfer/PromptPay slips) ────
+  'plt.tab_payments': { th: 'การชำระเงิน', en: 'Payments' },
+  'plt.pay_sub': { th: 'รายการแจ้งโอนค่าบริการจากลูกค้า — ตรวจกับยอดเงินเข้าบัญชีจริงก่อนอนุมัติ (อนุมัติ = ออกใบเสร็จ + เปิดใช้งานทันที)', en: 'Customer-filed transfer claims — verify against the real bank statement before approving (approve = issue the receipt + re-activate).' },
+  'plt.pay_col_amount': { th: 'จำนวนเงิน', en: 'Amount' },
+  'plt.pay_col_note': { th: 'หมายเหตุ', en: 'Note' },
+  'plt.pay_approve': { th: 'อนุมัติ', en: 'Approve' },
+  'plt.pay_reject': { th: 'ปฏิเสธ', en: 'Reject' },
+  'plt.pay_approved': { th: 'อนุมัติแล้ว — ออกใบเสร็จ {receipt}', en: 'Approved — receipt {receipt} issued' },
+  'plt.pay_rejected': { th: 'ปฏิเสธแล้ว — ส่งอีเมลแจ้งลูกค้าแล้ว', en: 'Rejected — the customer has been emailed' },
+  'plt.pay_reject_title': { th: 'ปฏิเสธรายการแจ้งโอน', en: 'Reject payment claim' },
+  'plt.pay_reject_ph': { th: 'เหตุผล เช่น ไม่พบยอดเงินเข้าตามอ้างอิงนี้…', en: 'Reason, e.g. no matching transfer found for this reference…' },
+  'plt.pay_filter_all': { th: 'ทั้งหมด', en: 'All' },
+  'plt.pay_empty': { th: 'ไม่มีรายการในสถานะนี้', en: 'No claims in this state.' },
+
+  // ── Console ops depth (wave D) ────────────────────────────────────────────
+  'plt.ov_health_alerts': { th: 'เกินเกณฑ์แจ้งเตือน — ต้องตรวจสอบ', en: 'Alert thresholds breached — action needed' },
+  'plt.drawer_export': { th: 'ส่งออกข้อมูลทั้งหมด (JSON)', en: 'Export all data (JSON)' },
 };

@@ -2,7 +2,7 @@
   "name": "@ierp/web",
   "version": "0.1.0",
   "private": true,
-  "description": "Invisible ERP V2 — Next.js frontend",
+  "description": "Invisible ERP — Next.js frontend",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
@@ -32,7 +32,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.0.4",
     "lucide-react": "^0.468.0",
-    "next": "^15.0.3",
+    "next": "^15.5.21",
     "next-themes": "^0.4.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -48,6 +48,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.170.0",
+    "@zxing/library": "^0.22.0",
     "tailwindcss": "^4.0.0",
     "tw-animate-css": "^1.2.0",
     "typescript": "^5.6.3"

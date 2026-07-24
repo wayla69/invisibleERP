@@ -73,19 +73,31 @@ export class FinanceApService {
     const selfVat = reverseCharge ? round2(net * 0.07) : 0; // ภ.พ.36 self-assessed output VAT (= recoverable input VAT)
     const paid = n(dto.paid_amount);
     const status = paid >= apGross ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
+    // Multi-currency (C1 parity with POs/GRs): `amount` is in the document currency; the booked rate
+    // (caller-supplied, default 1 like PO creation) converts the GL legs to functional THB. THB stays
+    // byte-identical (rate forced to 1).
+    const currency = (dto.currency ?? 'THB').trim().toUpperCase() || 'THB';
+    const fxRate = currency === 'THB' ? 1 : n(dto.fx_rate) > 0 ? n(dto.fx_rate) : 1;
     await db.insert(apTransactions).values({
       txnNo, tenantId, vendorId: dto.vendor_id ?? null, vendorName: dto.vendor_name ?? null, txnType: dto.txn_type ?? 'Invoice',
       invoiceNo: dto.invoice_no ?? null, invoiceDate: dto.invoice_date ?? null, dueDate: dto.due_date ?? null,
       amount: String(apGross), vatAmount: fx(vat, 2), reverseCharge, paidAmount: String(paid), status, remarks: dto.remarks ?? null, idempotencyKey: dto.idempotency_key ?? null, createdBy: user.username,
+      currency, fxRate: String(fxRate),
     });
     // GL: record expense + input VAT + payable (Dr 5100/1200/override net / Dr <input-vat> vat / Cr 2000 gross). Zero VAT leg auto-drops.
     // For reverse-charge, append the ภ.พ.36 self-assessment pair (Dr 1300 / Cr 2120) — the whole entry stays balanced.
+    // Foreign currency: each leg posts at the THB-converted value; gross = net + vat by construction so the
+    // entry balances after per-leg rounding.
     if (this.ledger && apGross > 0) {
       const expenseAccount = dto.expense_account ?? ((dto.txn_type === 'Goods' || dto.txn_type === 'Inventory') ? '1200' : '5100');
-      const lines = [{ account_code: expenseAccount, debit: net }, { account_code: vatAccount, debit: vat }, { account_code: '2000', credit: apGross }];
+      const glNet = round2(net * fxRate);
+      const glVat = round2(vat * fxRate);
+      const glGross = glNet + glVat;
+      const lines = [{ account_code: expenseAccount, debit: glNet }, { account_code: vatAccount, debit: glVat }, { account_code: '2000', credit: glGross }];
       if (selfVat > 0) {
         const rcOvr = await this.ledger.postingOverrides('RCVAT.SELF', tenantId);
-        lines.push({ account_code: rcOvr.input_vat ?? postingDefault('RCVAT.SELF', 'input_vat'), debit: selfVat }, { account_code: rcOvr.pp36_payable ?? postingDefault('RCVAT.SELF', 'pp36_payable'), credit: selfVat });
+        const glSelfVat = round2(selfVat * fxRate); // ภ.พ.36 pair in functional THB, like the other legs
+        lines.push({ account_code: rcOvr.input_vat ?? postingDefault('RCVAT.SELF', 'input_vat'), debit: glSelfVat }, { account_code: rcOvr.pp36_payable ?? postingDefault('RCVAT.SELF', 'pp36_payable'), credit: glSelfVat });
       }
       await this.ledger.postEntry({
         date: dto.invoice_date ?? ymd(), source: 'AP', sourceRef: txnNo, tenantId,

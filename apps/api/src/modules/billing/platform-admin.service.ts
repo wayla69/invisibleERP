@@ -114,7 +114,9 @@ export class PlatformAdminService {
       ? Array.from(new Set(b.hidden_nav_groups.map((s) => String(s).trim()).filter(Boolean))).slice(0, 50)
       : (Array.isArray(cur.hidden_nav_groups) ? cur.hidden_nav_groups : []);
     const email = b.accountant_email !== undefined ? b.accountant_email : (cur.accountant_email ?? null);
-    const prefs = { hidden_nav_groups: hidden, accountant_email: email };
+    // spread cur first: the B1 industry-nav keys (open_nav_groups / nav_industry) stamped at provisioning
+    // must survive a god prefs edit — this endpoint only owns hidden_nav_groups + accountant_email.
+    const prefs = { ...cur, hidden_nav_groups: hidden, accountant_email: email };
     await this.db.update(tenants).set({ smePrefs: prefs }).where(eq(tenants.id, id));
     if (b.accountant_email !== undefined) {
       await this.db.update(reportSubscriptions)
@@ -201,7 +203,9 @@ export class PlatformAdminService {
       tags: Array.isArray(t.tags) ? (t.tags as string[]) : [],
       control_profile: t.controlProfile === 'sme' ? 'sme' : 'enterprise',
       sme_prefs: t.controlProfile === 'sme' ? ((t.smePrefs ?? {}) as Record<string, unknown>) : null,
-      subscription: sub ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null } : null,
+      subscription: sub
+        ? { plan_code: sub.planCode, status: sub.status, trial_ends_at: sub.trialEndsAt ?? null, addons: Array.isArray(sub.addons) ? (sub.addons as string[]) : [] }
+        : null,
       counts: { users: Number(uc?.n ?? 0), branches: Number(bc?.n ?? 0) },
       ai_usage: { input_tokens: Number(ai?.input ?? 0), output_tokens: Number(ai?.output ?? 0), overage_tokens: Number(ai?.overage ?? 0) },
       recent_activity: recent.map((r) => ({ ts: r.ts, actor: r.actor, action: r.action, status: r.status })),

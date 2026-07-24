@@ -26,7 +26,7 @@ To control the parallel-ledger architecture (TFRS, TAX, IFRS) so that GAAP-diver
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.5 (documented information), cl. 8.5.1 (controlled provision), cl. 9.1 (monitoring/measurement).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — GAAP-01..04, GL-01, GL-02, GL-05.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — GAAP-01..04, GL-01, GL-02, GL-05.
 - `compliance/policies/11-financial-close-policy.md` (close calendar), `13-segregation-of-duties-policy.md` (R05, R07).
 - Code: `apps/api/src/modules/ledger/ledger.service.ts` + `ledger.controller.ts` (parallel-ledger seed, adjustment, approve, `gaap-comparison`), `apps/api/src/common/doc-number.service.ts`.
 

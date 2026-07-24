@@ -1,10 +1,16 @@
-import { Controller, Get, Post, Body, Query, Param, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, HttpCode, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Public, Permissions, PlatformAdmin, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BillingService, type SignupDto } from './billing.service';
 import { TenantLifecycleService } from './tenant-lifecycle.service';
 import { SaasMetricsService } from './saas-metrics.service';
+import { SaasLifecycleService } from './saas-lifecycle.service';
+import { SaasReceiptsService } from './saas-receipts.service';
+import { EntitlementObservationsService } from './entitlement-observations.service';
+import { SaasPaymentClaimsService } from './saas-payment-claims.service';
+import { TenantExportService } from './tenant-export.service';
 
 const SignupBody = z.object({
   company_name: z.string().min(1),
@@ -13,7 +19,11 @@ const SignupBody = z.object({
   admin_password: z.string().min(8),
   email: z.string().email(),
   plan_code: z.string().optional(),
-  industry: z.enum(['restaurant', 'retail', 'distribution', 'services', 'general']).optional(),
+  industry: z.enum([
+    'restaurant', 'retail', 'distribution', 'services', 'manufacturing', 'construction', 'ecommerce',
+    'hospitality', 'healthcare', 'professional', 'agriculture', 'automotive', 'logistics', 'education',
+    'nonprofit', 'realestate', 'general',
+  ]).optional(),
   // SME single-user edition (docs/49) — the control environment chosen AT CREATION. Default 'enterprise'.
   // Only the @PlatformAdmin create-company path may set 'sme' (enforced in provisionTenant, not here,
   // because this body is shared with the public signup/request forms).
@@ -23,6 +33,11 @@ const SignupBody = z.object({
   vat_registered: z.boolean().optional(),
   vat_rate: z.number().optional(),
   invite_token: z.string().optional(),
+  // Pack selection carried over from the public /plans configurator (0451). Advisory (shown to the
+  // approving platform owner + honoured at provisioning); unknown values are dropped server-side.
+  requested_plan: z.string().max(30).optional(),
+  requested_billing: z.enum(['monthly', 'annual']).optional(),
+  requested_addons: z.array(z.string().max(30)).max(10).optional(),
 });
 
 const InviteBody = z.object({
@@ -40,8 +55,15 @@ const FactoryResetBody = z.object({ confirm: z.string().min(1).max(100) });
 const DeleteTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 const PurgeTenantBody = z.object({ confirm: z.string().min(1).max(100) });
 
-const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional() }); // 1.7 — annual billing + multi-currency
+const CheckoutBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional(), currency: z.string().length(3).optional(), branches: z.number().int().min(1).max(500).optional(), addons: z.array(z.string().max(30)).max(10).optional() }); // 1.7 — annual billing + multi-currency · 0457 — POS-line per-branch quantity · A3 — add-on line items
 const ChangePlanBody = z.object({ plan_code: z.string().min(1), interval: z.enum(['monthly', 'annual']).optional() });
+// 0451 — per-tenant à-la-carte add-ons (ADDON_KEYS in @ierp/shared); the full desired set, not a delta.
+const AddonsBody = z.object({ addons: z.array(z.string().max(30)).max(10) });
+// A4 — god-recorded offline payment (bank transfer): VAT-inclusive THB amount + optional period/note.
+const ManualReceiptBody = z.object({ amount: z.number().positive().max(10_000_000), period: z.string().regex(/^\d{4}-\d{2}$/).optional(), note: z.string().max(300).optional() });
+// Wave C — tenant-filed bank-transfer/PromptPay slip claim (god verifies before any receipt exists).
+const PaymentClaimBody = z.object({ amount: z.number().positive().max(10_000_000), period: z.string().regex(/^\d{4}-\d{2}$/).optional(), slip_ref: z.string().min(1).max(100), note: z.string().max(300).optional() });
+const ClaimRejectBody = z.object({ reason: z.string().max(500).optional() });
 const ExtendTrialBody = z.object({ days: z.number().int().min(1).max(365) });
 const TagsBody = z.object({ tags: z.array(z.string()).max(20) });
 // docs/49 — control-profile transition is UPGRADE-ONLY, so the only accepted target is 'enterprise'.
@@ -57,6 +79,11 @@ export class BillingController {
     private readonly svc: BillingService,
     private readonly metrics: SaasMetricsService,
     private readonly lifecycle: TenantLifecycleService,
+    private readonly saasLifecycle: SaasLifecycleService,
+    private readonly saasReceipts: SaasReceiptsService,
+    private readonly entitlementObs: EntitlementObservationsService,
+    private readonly paymentClaims: SaasPaymentClaimsService,
+    private readonly tenantExport: TenantExportService,
   ) {}
 
   // SaaS business metrics for the platform operator (MRR/ARR, plan mix, churn, DAU/MAU). Cross-tenant —
@@ -127,6 +154,102 @@ export class BillingController {
     return this.svc.aiUsageByTenant();
   }
 
+  // A2 — run the SaaS lifecycle sweep on demand (the BI scheduler runs the same sweep daily; idempotent
+  // via saas_lifecycle_events dedup keys, so a manual run alongside the schedule is always safe).
+  @Post('admin/saas-lifecycle/run') @PlatformAdmin() @HttpCode(200)
+  runSaasLifecycle() {
+    return this.saasLifecycle.runDaily();
+  }
+
+  // A4 — own-SaaS receipts. Tenant side: list + printable receipt, hard-scoped to the caller's own
+  // tenant (an unknown/foreign receipt number is a 404, never a 403). God side: record an offline
+  // bank-transfer payment (creates the receipt + emails the customer) and print any receipt.
+  @Get('billing/receipts') @Permissions('users')
+  async myReceipts(@CurrentUser() u: JwtUser) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    return this.saasReceipts.listForTenant(tenantId);
+  }
+
+  @Get('billing/receipts/:receiptNo/pdf') @Permissions('users')
+  async myReceiptPdf(@Param('receiptNo') receiptNo: string, @CurrentUser() u: JwtUser, @Res() reply: FastifyReply) {
+    const tenantId = await this.svc.resolveTenantId(u);
+    const html = await this.saasReceipts.receiptHtml(receiptNo, tenantId);
+    const buf = await this.saasReceipts.renderPdf(html);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${receiptNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  @Post('admin/tenants/:id/receipts') @PlatformAdmin() @HttpCode(201)
+  recordManualReceipt(@Param('id') id: string, @Body(new ZodValidationPipe(ManualReceiptBody)) b: { amount: number; period?: string; note?: string }, @CurrentUser() u: JwtUser) {
+    return this.saasReceipts.record({ tenantId: Number(id), source: 'manual', amount: b.amount, period: b.period ?? null, note: b.note ?? null, createdBy: u.username });
+  }
+
+  @Get('admin/receipts/:receiptNo/pdf') @PlatformAdmin()
+  async adminReceiptPdf(@Param('receiptNo') receiptNo: string, @Res() reply: FastifyReply) {
+    const html = await this.saasReceipts.receiptHtml(receiptNo, null);
+    const buf = await this.saasReceipts.renderPdf(html);
+    if (buf) reply.header('Content-Type', 'application/pdf').header('Content-Disposition', `inline; filename="${receiptNo}.pdf"`).header('Content-Length', buf.length).send(buf);
+    else reply.header('Content-Type', 'text/html; charset=utf-8').send(html);
+  }
+
+  @Get('admin/saas-lifecycle/events') @PlatformAdmin()
+  saasLifecycleEvents(@Query('limit') limit?: string) {
+    return this.saasLifecycle.listEvents(limit ? Number(limit) : undefined);
+  }
+
+  // B1 — entitlement-enforcement observations: who would break (shadow) / did break (enforce), on what,
+  // per tenant. The triage read before moving a tenant into the ENTITLEMENTS_ENFORCE_TENANTS cohort.
+  @Get('admin/entitlement-observations') @PlatformAdmin()
+  entitlementObservations(@Query('days') days?: string) {
+    return this.entitlementObs.list(days ? Number(days) : undefined);
+  }
+
+  // Wave C — Thai payment rails. Tenant side: where/how much to pay (platform PromptPay QR + bank
+  // account) + file/list slip claims, hard-scoped to the caller's own tenant. God side: the verify
+  // queue — approve records the A4 receipt + re-activates; reject emails the reason.
+  @Get('billing/payment-info') @Permissions('users')
+  async paymentInfo(@CurrentUser() u: JwtUser) {
+    return this.paymentClaims.paymentInfo(await this.svc.resolveTenantId(u));
+  }
+
+  @Post('billing/payment-claims') @Permissions('users') @HttpCode(201)
+  async submitPaymentClaim(@Body(new ZodValidationPipe(PaymentClaimBody)) b: { amount: number; period?: string; slip_ref: string; note?: string }, @CurrentUser() u: JwtUser) {
+    return this.paymentClaims.submitClaim(await this.svc.resolveTenantId(u), b, u.username);
+  }
+
+  @Get('billing/payment-claims') @Permissions('users')
+  async myPaymentClaims(@CurrentUser() u: JwtUser) {
+    return this.paymentClaims.myClaims(await this.svc.resolveTenantId(u));
+  }
+
+  @Get('admin/payment-claims') @PlatformAdmin()
+  adminPaymentClaims(@Query('status') status?: string) {
+    return this.paymentClaims.listClaims(status || undefined);
+  }
+
+  @Post('admin/payment-claims/:id/approve') @PlatformAdmin() @HttpCode(200)
+  approvePaymentClaim(@Param('id') id: string, @CurrentUser() u: JwtUser) {
+    return this.paymentClaims.approve(Number(id), u.username);
+  }
+
+  @Post('admin/payment-claims/:id/reject') @PlatformAdmin() @HttpCode(200)
+  rejectPaymentClaim(@Param('id') id: string, @Body(new ZodValidationPipe(ClaimRejectBody)) b: { reason?: string }, @CurrentUser() u: JwtUser) {
+    return this.paymentClaims.reject(Number(id), b.reason, u.username);
+  }
+
+  // D2 — full tenant data export (offboarding / PDPA portability): the tenant row + every row in every
+  // tenant-scoped table, as one downloadable JSON document. God-only; the download IS the audited act —
+  // AuditInterceptor records every method on a @PlatformAdmin route, so this read leaves a hash-chained
+  // audit_log row (meta.platform_read + meta.rls_bypass) naming the operator and the company.
+  @Get('admin/tenants/:id/export') @PlatformAdmin()
+  async exportTenant(@Param('id') id: string, @Res() reply: FastifyReply) {
+    const doc = await this.tenantExport.exportTenant(Number(id));
+    reply
+      .header('Content-Type', 'application/json; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="tenant-${id}-export.json"`)
+      .send(JSON.stringify(doc, null, 1));
+  }
+
   // Full detail for one company (Platform Console drawer) — profile + subscription + counts + recent activity.
   @Get('admin/tenants/:id') @PlatformAdmin()
   tenantDetail(@Param('id') id: string) {
@@ -142,6 +265,13 @@ export class BillingController {
   @Post('admin/tenants/:id/extend-trial') @PlatformAdmin() @HttpCode(200)
   extendTrial(@Param('id') id: string, @Body(new ZodValidationPipe(ExtendTrialBody)) b: { days: number }) {
     return this.svc.extendTrial(Number(id), b.days);
+  }
+
+  // 0451 — set a company's à-la-carte add-ons (replaces the whole set). Add-on suite keys union into the
+  // tenant's entitled suites on top of its plan (resolveEntitledSuites); unknown keys are rejected.
+  @Post('admin/tenants/:id/addons') @PlatformAdmin() @HttpCode(200)
+  setTenantAddons(@Param('id') id: string, @Body(new ZodValidationPipe(AddonsBody)) b: { addons: string[] }) {
+    return this.svc.setTenantAddons(Number(id), b.addons);
   }
 
   @Post('admin/tenants/:id/tags') @PlatformAdmin() @HttpCode(200)
@@ -288,9 +418,17 @@ export class BillingController {
   }
 
   @Post('billing/checkout') @Permissions('users')
-  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string }, @CurrentUser() u: JwtUser) {
+  async checkout(@Body(new ZodValidationPipe(CheckoutBody)) b: { plan_code: string; interval?: 'monthly' | 'annual'; currency?: string; branches?: number; addons?: string[] }, @CurrentUser() u: JwtUser) {
     const tenantId = await this.svc.resolveTenantId(u);
-    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB');
+    return this.svc.createCheckoutSession(tenantId, b.plan_code, b.interval ?? 'monthly', b.currency ?? 'THB', b.branches, b.addons ?? []);
+  }
+
+  // A3 — tenant self-serve add-on purchase/removal (the god path is POST /api/admin/tenants/:id/addons).
+  // Always the CALLER'S OWN tenant; entitlement applies immediately, a live Stripe subscription gets its
+  // add-on line items reconciled with mid-cycle proration.
+  @Post('billing/addons') @Permissions('users') @HttpCode(200)
+  setOwnAddons(@Body(new ZodValidationPipe(AddonsBody)) b: { addons: string[] }, @CurrentUser() u: JwtUser) {
+    return this.svc.setOwnAddons(u, b.addons);
   }
 
   @Post('billing/change-plan') @Permissions('users')

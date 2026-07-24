@@ -45,6 +45,7 @@ export class MenuService {
       type: dto.type, price: fx(dto.price, 2), cost: dto.cost != null ? fx(dto.cost, 2) : null, stationCode: dto.station_code ?? 'main',
       prepMinutes: dto.prep_minutes ?? 10, taxType: dto.tax_type, trackStock: dto.track_stock ?? false, imageUrl: dto.image_url ?? null,
       description: dto.description ?? null, sort: dto.sort ?? 0,
+      isRecommended: dto.is_recommended ?? false, kdsPriority: dto.kds_priority ?? 0,
       availDays: dto.avail_days ?? null, availStartMin: dto.avail_start_min ?? null, availEndMin: dto.avail_end_min ?? null,
     }).onConflictDoNothing().returning();
     if (!it) throw new BadRequestException({ code: 'SKU_EXISTS', message: 'SKU already exists', messageTh: 'รหัสสินค้าซ้ำ' });
@@ -69,6 +70,8 @@ export class MenuService {
     if (dto.description != null) set.description = dto.description;
     if (dto.sort != null) set.sort = dto.sort;
     if (dto.active != null) set.active = dto.active;
+    if (dto.is_recommended != null) set.isRecommended = dto.is_recommended;
+    if (dto.kds_priority != null) set.kdsPriority = dto.kds_priority;
     if (dto.avail_days !== undefined) set.availDays = dto.avail_days;
     if (dto.avail_start_min !== undefined) set.availStartMin = dto.avail_start_min;
     if (dto.avail_end_min !== undefined) set.availEndMin = dto.avail_end_min;
@@ -112,9 +115,17 @@ export class MenuService {
 
   // full menu for the diner self-order UI: same as listMenu but each item carries its modifier groups +
   // options inlined, so the phone can render the modifier picker without a second (permissioned) round-trip.
-  async listMenuForOrder(user: JwtUser) {
+  // opts.recommendedSkus (0435): when the tenant's recommend_mode is dynamic (behavior / popular_low_cost),
+  // the QR layer computes the highlighted set and passes it here to OVERRIDE the per-item manual flag; when
+  // omitted (manual mode) the stored is_recommended flags stand.
+  async listMenuForOrder(user: JwtUser, opts?: { recommendedSkus?: Set<string> | null }) {
     const base = await this.listMenu(user);
-    const augment = async (it: any) => ({ ...it, modifier_groups: it.has_modifiers ? await this.itemGroups(Number(it.id)) : [] });
+    const rec = opts?.recommendedSkus ?? null;
+    const augment = async (it: any) => ({
+      ...it,
+      is_recommended: rec ? rec.has(it.sku) : it.is_recommended,
+      modifier_groups: it.has_modifiers ? await this.itemGroups(Number(it.id)) : [],
+    });
     const categories = [];
     for (const c of base.categories) categories.push({ ...c, items: await Promise.all(c.items.map(augment)) });
     const uncategorized = await Promise.all(base.uncategorized.map(augment));
@@ -190,7 +201,7 @@ export class MenuService {
     const modifierUnitCogs = round2(chosen.reduce((a, c) => a + n(c.cogs_delta), 0));
     return {
       item_id: Number(it.id), sku: it.sku, name: it.name, qty, unit_price: unitPrice, amount,
-      station_code: it.stationCode, prep_minutes: it.prepMinutes, tax_type: it.taxType, notes: dto.notes ?? null,
+      station_code: it.stationCode, prep_minutes: it.prepMinutes, kds_priority: it.kdsPriority ?? 0, tax_type: it.taxType, notes: dto.notes ?? null,
       modifier_option_ids: chosen.map((c) => c.option_id),
       modifier_cogs: modifierUnitCogs,
       modifiers: chosen.map((c) => ({ group_id: c.group_id, group_name: c.group_name, option_id: c.option_id, option_name: c.name, price_delta: n(c.price_delta), cogs_delta: n(c.cogs_delta) })),
@@ -227,5 +238,5 @@ export class MenuService {
 
 function shapeCat(c: any) { return { id: Number(c.id), code: c.code, name: c.name, name_en: c.nameEn, color: c.color, sort: c.sort }; }
 function shapeItem(it: any) {
-  return { id: Number(it.id), sku: it.sku, name: it.name, name_en: it.nameEn, category_id: it.categoryId != null ? Number(it.categoryId) : null, type: it.type, price: n(it.price), cost: it.cost != null ? n(it.cost) : null, station_code: it.stationCode, prep_minutes: it.prepMinutes, tax_type: it.taxType, track_stock: it.trackStock, is_available: it.isAvailable, avail_days: it.availDays ?? null, avail_start_min: it.availStartMin ?? null, avail_end_min: it.availEndMin ?? null, available_now: availableNow(it), image_url: it.imageUrl, description: it.description, sort: it.sort };
+  return { id: Number(it.id), sku: it.sku, name: it.name, name_en: it.nameEn, category_id: it.categoryId != null ? Number(it.categoryId) : null, type: it.type, price: n(it.price), cost: it.cost != null ? n(it.cost) : null, station_code: it.stationCode, prep_minutes: it.prepMinutes, tax_type: it.taxType, track_stock: it.trackStock, is_available: it.isAvailable, is_recommended: !!it.isRecommended, kds_priority: it.kdsPriority ?? 0, avail_days: it.availDays ?? null, avail_start_min: it.availStartMin ?? null, avail_end_min: it.availEndMin ?? null, available_now: availableNow(it), image_url: it.imageUrl, description: it.description, sort: it.sort };
 }

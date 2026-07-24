@@ -10,6 +10,7 @@ import { WmsModule } from '../modules/wms/wms.module';
 import { StockOpsModule } from '../modules/stock-ops/stock-ops.module';
 import { ClaimsModule } from '../modules/claims/claims.module';
 import { LotsModule } from '../modules/lots/lots.module';
+import { SerialsModule } from '../modules/serials/serials.module';
 import { ScanModule } from '../modules/scan/scan.module';
 import { MasterDataModule } from '../modules/masterdata/masterdata.module';
 import { ItemSetupModule } from '../modules/item-setup/item-setup.module';
@@ -18,6 +19,8 @@ import { ManufacturingModule } from '../modules/manufacturing/manufacturing.modu
 import { MfgDepthModule } from '../modules/mfg-depth/mfg-depth.module';
 import { QualityModule } from '../modules/quality/quality.module';
 import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
+import { ScmPlanningModule } from '../modules/scm-planning/scm-planning.module';
+import { ScmNetworkModule } from '../modules/scm-network/scm-network.module';
 
 // docs/46 Phase 5 — procure-to-pay & make-to-stock (inventory · procurement · sourcing · costing · WMS · lots · manufacturing · quality · master data) aggregate.
 // Pure WIRING: no providers/controllers of its own — it only groups the domain's feature modules so
@@ -38,6 +41,7 @@ import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
     StockOpsModule,
     ClaimsModule,
     LotsModule,
+    SerialsModule,
     ScanModule,
     MasterDataModule,
     ItemSetupModule,
@@ -46,6 +50,8 @@ import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
     MfgDepthModule,
     QualityModule,
     QualityCapaModule,
+    ScmPlanningModule,
+    ScmNetworkModule,
   ],
   // Re-export every member so providers the feature modules export stay visible to AppModule's own
   // injector context (the APP_GUARD/APP_INTERCEPTOR providers resolve there — e.g. JwtAuthGuard's
@@ -62,6 +68,7 @@ import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
     StockOpsModule,
     ClaimsModule,
     LotsModule,
+    SerialsModule,
     ScanModule,
     MasterDataModule,
     ItemSetupModule,
@@ -70,6 +77,8 @@ import { QualityCapaModule } from '../modules/quality-capa/quality-capa.module';
     MfgDepthModule,
     QualityModule,
     QualityCapaModule,
+    ScmPlanningModule,
+    ScmNetworkModule,
   ],
 })
 export class SupplyChainDomainModule {}

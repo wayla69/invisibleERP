@@ -1,9 +1,9 @@
 /**
- * Demo seed — "Oshinei Japanese Buffet" restaurant tenant.
+ * Demo seed — "Invisible Japanese Buffet" restaurant tenant.
  *
- * Builds a full, self-contained demo tenant from the OSHINEI BoM workbook
- * (apps/api/src/database/demo/oshinei-buffet.json — generated from
- * OSHINEI_BOM_Workbook.xlsx): menu catalogue, buffet tiers + eligibility,
+ * Builds a full, self-contained demo tenant from the INVISIBLE BoM workbook
+ * (apps/api/src/database/demo/invisible-buffet.json — generated from
+ * INVISIBLE_BOM_Workbook.xlsx): menu catalogue, buffet tiers + eligibility,
  * recipes/BoM, ingredient master + opening stock, kitchen stations and a
  * floor plan. Idempotent (delete-by-tenant then insert) so it can be re-run.
  *
@@ -12,7 +12,7 @@
  *
  * The demo login is a NON-Admin, tenant-scoped user (Admin bypasses RLS and
  * would see every tenant) with a broad per-user permission override, so it
- * sees only the Oshinei data across all the restaurant modules.
+ * sees only the Invisible data across all the restaurant modules.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -53,9 +53,9 @@ type Dataset = {
 
 function loadDataset(): Dataset {
   const candidates = [
-    resolve(process.cwd(), 'src/database/demo/oshinei-buffet.json'),
-    resolve(__dirname, 'demo/oshinei-buffet.json'),
-    resolve(process.cwd(), 'apps/api/src/database/demo/oshinei-buffet.json'),
+    resolve(process.cwd(), 'src/database/demo/invisible-buffet.json'),
+    resolve(__dirname, 'demo/invisible-buffet.json'),
+    resolve(process.cwd(), 'apps/api/src/database/demo/invisible-buffet.json'),
   ];
   for (const c of candidates) {
     try {
@@ -64,7 +64,7 @@ function loadDataset(): Dataset {
       /* try next */
     }
   }
-  throw new Error('demo dataset not found (oshinei-buffet.json)');
+  throw new Error('demo dataset not found (invisible-buffet.json)');
 }
 
 // numeric → string (preserve precision for drizzle numeric columns)
@@ -113,7 +113,7 @@ async function main() {
   const db = drizzle(client, { schema });
   const pw = new PasswordService();
 
-  const passwordHash = await pw.hash('oshinei123');
+  const passwordHash = await pw.hash('invisible123');
 
   await db.transaction(async (tx) => {
     // run as a bypass-RLS session so we can write any tenant's rows even when the
@@ -147,12 +147,12 @@ async function main() {
     // ── 2. demo user (non-Admin, tenant-scoped) + broad permission override ──
     await tx
       .insert(schema.users)
-      .values({ username: 'oshinei', passwordHash, role: 'Sales', tenantId: T, mustChangePassword: false })
+      .values({ username: 'invisible', passwordHash, role: 'Sales', tenantId: T, mustChangePassword: false })
       .onConflictDoUpdate({
         target: schema.users.username,
         set: { passwordHash, role: 'Sales', tenantId: T, mustChangePassword: false, isActive: true },
       });
-    const demoUser = (await tx.select().from(schema.users).where(eq(schema.users.username, 'oshinei')))[0];
+    const demoUser = (await tx.select().from(schema.users).where(eq(schema.users.username, 'invisible')))[0];
     const DEMO_PERMS = [
       'pos', 'dashboard', 'exec', 'order_mgt', 'claim_mgt', 'crm', 'ar', 'creditors', 'delivery',
       'returns', 'pricelist', 'promos', 'warehouse', 'lots', 'locations', 'mobile', 'images',
@@ -196,6 +196,9 @@ async function main() {
         price: n(m.price), cost: n(m.cost), stationCode: m.station,
         prepMinutes: STATIONS.find((s) => s.code === m.station)?.prep ?? 10,
         trackStock: false, isAvailable: true, sort: m.sort, active: true,
+        // "เมนูแนะนำ" + KDS food-priority (0434): optional per-item fixture flags (default off / normal).
+        isRecommended: !!(m as { recommended?: boolean }).recommended,
+        kdsPriority: (m as { priority?: number }).priority ?? 0,
         imageUrl: menuImageDataUri(m.catCode, m.nameEn || m.nameTh),
       })),
     );
@@ -233,7 +236,7 @@ async function main() {
         .insert(schema.menuRecipes)
         .values({
           tenantId: T, menuItemId: mid, sku: m.sku, yieldQty: '1', postCogs: false,
-          active: true, notes: 'Imported from OSHINEI BoM workbook', createdBy: 'demo-seed',
+          active: true, notes: 'Imported from INVISIBLE BoM workbook', createdBy: 'demo-seed',
         })
         .returning({ id: schema.menuRecipes.id });
       await tx.insert(schema.menuRecipeLines).values(
@@ -312,11 +315,11 @@ async function main() {
       })),
     );
 
-    console.log(`✅ Oshinei demo seeded into tenant ${T}:`);
+    console.log(`✅ Invisible demo seeded into tenant ${T}:`);
     console.log(`   ${data.categories.length} categories · ${data.menuItems.length} menu items · ${pkgItems.length} buffet-tier links`);
     console.log(`   ${Object.keys(data.recipes).length} recipes (${lineCount} BoM lines) · ${data.ingredients.length} ingredients`);
     console.log(`   ${STATIONS.length} kitchen stations · ${zoneDefs.length} zones · ${tableDefs.length} tables`);
-    console.log(`   login: oshinei / oshinei123  (tenant ${data.tenant.code})`);
+    console.log(`   login: invisible / invisible123  (tenant ${data.tenant.code})`);
   });
 
   await client.end();

@@ -1,4 +1,4 @@
-# Service Level Agreement (SLA) — Oshinei Enterprise ERP
+# Service Level Agreement (SLA) — Invisible Enterprise ERP
 
 > **Status: DRAFT v0.1 — requires review and execution by qualified legal counsel before use.**
 > Targets below are proposed defaults to be confirmed against the production deployment

@@ -151,7 +151,7 @@ Legend: **(E)** existing key · **(N)** new key · tier per role. Defaults shown
 | LEASE.COMMENCE (N) | rou 1600 (C) · liability 2600 (C) — visibility only | leases `createLease` |
 | LEASE.MODIFY (N) | remeasure_gain 1510 (A); 1600/2600 (C) | leases `modifyLease` |
 | LEASE.LESSOR_COMMENCE (N) | selling_pl 1510 (A); 1610/1500 (C) | lessor |
-| LEASE.LESSOR_FINANCE (N) | interest_income 4600 (A); 1610/1000 (C) | lessor run |
+| LEASE.LESSOR_FINANCE (N) | interest_income 4620 (A); 1610/1000 (C) | lessor run |
 | LEASE.LESSOR_OPERATING (N) | rental_income 4610 (A) · dep 5200/1590 (A/C) | lessor run |
 | PAYROLL.REMIT (N) | liability leg (B — same widened set as PAY-02) · cash (C) | payroll `remitLiability` |
 | PAYROLL.GROSS net_pay_cash role (add) | 1000 (C — visibility) | payroll cash leg |

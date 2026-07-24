@@ -625,13 +625,18 @@ payable is an accounting act).
 1. Go to **Procurement** → **สแกนใบแจ้งหนี้จับคู่ PO** (`/procurement/ap-intake`).
 2. Either **attach the invoice file directly** — press **แนบรูป / PDF** and pick a
    photo (PNG/JPEG/WebP) or a PDF — or paste the invoice text into the box.
-   A digital PDF is read from its text layer immediately; a photo/scan is read by
-   AI (if AI is not configured, the intake queues for review with the file attached
-   so you can map and key it manually). The uploaded file is kept on the intake —
-   open it any time from the **เอกสารต้นฉบับ** link on the result card.
+   A digital PDF is read from its text layer immediately — but only when that text
+   layer is actually **readable**: a PDF whose embedded Thai font produces garbled
+   text (common with older CID fonts) is treated like a photo instead of
+   mis-reading the garbage. A photo/scan is read by AI (if AI is not configured,
+   the intake queues for review with the file attached so you can map and key it
+   manually). The uploaded file is kept on the intake — open it any time from the
+   **เอกสารต้นฉบับ** link on the result card.
 3. Choose one of two buttons:
    - **ดึงข้อมูล + จับคู่ PO** — extracts the vendor, tax ID, invoice number, date,
-     amount and any **PO number printed on the document**, then auto-maps the PO.
+     amount, **currency** (a foreign-currency invoice such as USD is recognized —
+     no marker means THB; dates printed in พ.ศ. are converted automatically) and
+     any **PO number printed on the document**, then auto-maps the PO.
      You review the result before booking.
    - **อัตโนมัติทั้งหมด** — does all of the above **and** books the AP bill and runs
      the 3-way match in one step (needs `creditors`). It only auto-books a document
@@ -642,7 +647,15 @@ payable is an accounting act).
    **dropdown** next to the map button (choose **พิมพ์เลขเอกสารเอง…** to key one), to map it —
    then press **บันทึกบิล + จับคู่ 3 ทาง**.
 5. Check the result: the intake shows the booked bill number (AP-), the match
-   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked).
+   verdict and **พร้อมจ่าย / ระงับ** (payable / blocked). When AI read the
+   document, the **line items** it found (description, qty, unit price, amount)
+   are listed on the result card for your review — if the sum of the lines
+   doesn't match the bill total, a warning asks you to check the source document.
+   When every line can be identified against the PO's own lines, the 3-way match
+   runs **per line** (a wrong unit price blocks payment even if the bill total
+   looks fine); lines that can't be identified keep the bill-total match as before.
+   A foreign-currency invoice (e.g. USD) books in its own currency at the latest
+   approved exchange rate, and the vendor statement reports it accordingly.
 
 **Expected result:** a *matched* intake is immediately **payment-ready** — AP can
 request payment as usual. Payment itself is **never** automated: it still goes
@@ -759,9 +772,11 @@ A vendor can carry more than one address (billing / shipping / registered /
 other, one marked **หลัก — primary**) and more than one contact (name, title,
 phone, email), instead of the single scalar address/contact of before. Add or
 delete either from this panel — both save immediately, with no second
-approval (same reasoning as the direct-edit fields above). The **จังหวัด
-(province)** field suggests from the standard 77-province list and is saved in
-its official spelling; the **รหัสไปรษณีย์ (postal code)** must be 5 digits.
+approval (same reasoning as the direct-edit fields above). **Type the 5-digit
+รหัสไปรษณีย์ (postal code) first** and pick the **ตำบล/แขวง** from the dropdown —
+**อำเภอ/เขต** and **จังหวัด** fill in automatically from the full Thailand address
+dataset; **กรอกเอง** falls back to free text (the **จังหวัด** field still suggests
+from the 77-province list and saves the official spelling).
 
 The same panel has a **ความสัมพันธ์ (relationships)** section — record links to
 other vendors by type (**บุคคลที่เกี่ยวข้องกัน (related party)**, **บริษัทลูก

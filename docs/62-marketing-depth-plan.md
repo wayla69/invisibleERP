@@ -1,0 +1,95 @@
+# docs/62 — Marketing Depth: make the loop run itself, get smarter per cell, and be statistically honest
+
+**Status: ALL PHASES (1–3) DELIVERED** · Owner: Platform · Builds on docs/47 (reputation), docs/48 (MMM), docs/60
+(marketing-intel, MKT-17..20), docs/61 (activation, MKT-21..25 + realized measurement).
+
+## Why
+
+docs/61 closed the loop *decide → offer → orchestrate → write → retain → measure → re-allocate*: every lift
+claim is backed by a holdout measured on real POS revenue. The remaining depth is operational and analytical:
+the loop is hand-cranked (someone must remember to stage sweeps and measure elapsed windows), the budget
+ranking stops at segment×channel (not the offer), an approved budget plan is never reconciled against what
+was actually spent/returned, and a measured lift is a point estimate (n=2 reads like n=2,000). Three phases,
+each independently shippable and doc-synced, none adding a new money/contact path.
+
+## Phase 1 — Autopilot cadence + marketing action center — **DELIVERED**
+
+**Goal.** The loop runs on a schedule; humans do only the human parts (activate, approve, review).
+
+**Delivered.**
+- **Three scheduled action jobs** riding the BI report scheduler (registry-first, `BiReportSource` provider
+  `marketing-activation-bi-reports.ts`; discovered at boot — no bi-generate dispatcher/ctor change; failures
+  alert via ITGC-OP-04 like every scheduled job):
+  - `mkt_nba_autostage` — auto-STAGES an NBA journey (MKT-22). **One-in-flight idempotency**: while an
+    auto-staged journey is Pending or Active-unmeasured, a re-run stages nothing and says why. `NO_TARGETS`
+    is a graceful no-op. Filters: `segment`/`control_pct`/`channel`.
+  - `mkt_save_autostage` — auto-STAGES a churn-save sweep (MKT-24) under the APPROVED policy; same
+    one-in-flight rule over unmeasured auto runs; `NO_ACTIVE_POLICY`/`NO_AT_RISK_TARGETS` are reported as
+    human nudges, never errors. Filters: `segment`/`control_pct`/`window_days`.
+  - `mkt_measure_windows` — measures every journey/save run whose `measure_after` elapsed (control arm
+    present), via the MKT-19-discipline measure paths; idempotent by construction (measured rows are
+    filtered out). Realized lift keeps feeding ⑤ automatically.
+  - **The jobs only ever act as the MAKER** — attribution `"<actor> (auto)"` (the B4 precedent) on
+    `requested_by`/`measured_by`; activation (MKT-22) and approval (MKT-24/17) remain human maker-checker
+    (`assertMakerChecker` compares exact usernames, so the scheduler can never satisfy its own approval).
+- **GOV-01 queues** (auto-append to `GET /api/finance/approvals/pending`; no finance.service change):
+  `marketing-activation-approval-queues.ts` — `mi_nba_journey` (MKT-22 awaiting activation), `mi_save_policy`
+  (MKT-24 awaiting approval), `mkt_measure_due` (elapsed-unmeasured windows, the close_task_overdue shape);
+  plus `mi_budget_plan` (MKT-17, Pending plans with their amount) added to the owning
+  `marketing-intel-approval-queues.ts`.
+- **Action center** — `GET /api/marketing-activation/action-center` (`marketing`/`exec`): the PMO-shaped
+  "what needs me now" worklist (kind/severity/bilingual title/href) over measure-due (high), awaiting
+  activation/approval incl. budget plans via the owning `MarketingIntelService.listBudgetPlans` read
+  (medium), and a no-active-save-policy nudge (low). Surfaced as the **สิ่งที่รอคุณตอนนี้** card on the
+  `/marketing-activation` overview (severity dots, deep-links to the owning tab; read-only — every act stays
+  on its maker-checker route).
+- **No new control, no migration, census unchanged.** ToE: `cutover/ext.ts` +13 (GOV-01 surface-then-clear,
+  action-center content + 403, autostage attribution + one-in-flight idempotency ×2, human activation with
+  no SOD trip, scheduled measurement + measure-exactly-once).
+
+## Phase 2 — Money-loop depth — **DELIVERED**
+
+- **⑤ offer-level cells — delivered**: each segment×channel cell carries the segment's top un-bought
+  offers from ③ (`rankSegmentOffers` top-3, batched `topOffersForSegments`; a within-cell recommendation —
+  the allocation math is untouched) and the ⑤ response carries recent campaign deliverability from the
+  `message_log` send audit via the new owning `CampaignsService.outcomeSummary` read.
+- **Plan-vs-actual reconciliation — delivered (NEW detective control MKT-26)**: every APPROVED
+  `mi_budget_plans` allocation reconciles against actual per-channel spend (MMM-run actuals via the owning
+  `MmmModelService.latestSummary`; pushed-snapshot fallback; basis recorded) through the pure
+  `plan-backtest.ts` — variance/flags/adherence, fail-honest `PLAN_NOT_APPROVED`/`NO_ACTUALS` — surfaced as
+  `GET /budget-plan/:planNo/backtest`, the schedulable `mkt_plan_backtest` detective report, and the Budget
+  Planner's ตรวจสอบแผน expander.
+
+## Phase 3 — Statistical honesty + creative A/B — DELIVERED
+
+- **Honest lift — delivered (migration 0480)**: `measureLiftDetailed` in `common/lift-math.ts` (pure; 95% CI
+  via the delta method over the per-member revenues; `weak_evidence` = arm < 30 ∨ CI uncomputable ∨ CI spans 0)
+  now backs every realized measurement — MKT-19 experiments, ② journeys, ④ save runs store + expose
+  `lift_ci_low/high_pct` + `weak_evidence`, and every realized-lift chip (experiments / journeys / save runs /
+  ⑤ cells via `lift_weak`) shows the CI and flags weak samples. DISPLAY-ONLY: point estimates and ⑤'s
+  multiplier math unchanged.
+- **Creative A/B — delivered**: the Studio generates a variant B (deterministic offer-first `draftVariantB`,
+  or the LLM's schema-validated optional `variant_b`; both on the logged model card) and stages a REAL A/B
+  (`variant_b_body` + `split_b_pct` 50 on the campaign's deterministic per-member split);
+  `GET /studio/ab/:campaignId` measures per creative arm — audit-recomputed arms
+  (`CampaignsService.recipientsByVariant`) × real POS revenue × the same CI/weak math — fail-honest
+  `NO_VARIANT_B`/`NO_RECIPIENTS`.
+
+## Standing gap noted — CLOSED (Phase 3)
+
+docs/61 §①'s "sentiment tone from TOWS" is wired: `toneFromTows` (pure) maps the pushed TOWS matrix's
+dominant quadrant to a copy tone (SO confident-growth / ST reassuring-strength / WO candid-improvement /
+WT cautious-care) on the Studio fact sheet + grounded prompt; no TOWS → "(neutral)".
+
+## Non-goals (inherited from docs/61)
+
+No new contact channel or send path; no auto-send/auto-spend (staging ≠ acting); no cross-domain DB joins;
+AI drafts, humans send.
+
+## Revision history
+
+| Rev | Date | Notes |
+|---|---|---|
+| v0.3 | 2026-07-23 | **Phase 3 DELIVERED — statistical honesty + creative A/B (NO new control, census unchanged; migration 0480) + the standing TOWS-tone gap CLOSED.** `measureLiftDetailed` (95% CI + weak_evidence, pure, 12 unit tests) behind every realized measurement — experiments/journeys/save-runs store + display CI/weak; ⑤ cells carry display-only `lift_weak`. Studio: TOWS-dominant-quadrant tone on the fact sheet + prompt (`toneFromTows`); variant B generated (deterministic `draftVariantB` or LLM optional `variant_b`), staged as a real 50/50 A/B, measured per creative arm via `recipientsByVariant` + `GET /studio/ab/:campaignId` (fail-honest NO_VARIANT_B/NO_RECIPIENTS). ToE ext +8 (437). PN-19 §7 item 52 + rev 1.75; manual 09 v0.19; UAT-MA-27 + UAT 09 v3.11. |
+| v0.2 | 2026-07-23 | **Phase 2 DELIVERED — offer-level ⑤ + plan-vs-actual backtest (NEW detective control MKT-26; census +1 (315/312 after main's concurrent SCM-06); no migration).** ⑤ cells carry ③'s per-segment top offers + message_log deliverability (`CampaignsService.outcomeSummary`); MKT-26 backtest endpoint + schedulable `mkt_plan_backtest` (marketing-intel imports MmmModule for run actuals; pushed fallback; pure `plan-backtest.ts`, 8 unit tests). Web: offer chips + Budget Planner backtest expander. ToE ext +6 / mmm +3. PN-19 §7 item 51 + §9 row 51 + rev 1.74; manual 09 v0.18; UAT-MA-26 + UAT 09 v3.10; RCM regenerated. |
+| v0.1 | 2026-07-23 | Roadmap created; **Phase 1 (autopilot cadence + action center) DELIVERED** — 3 scheduled action jobs (`mkt_nba_autostage`/`mkt_save_autostage`/`mkt_measure_windows`, one-in-flight idempotency, "(auto)" maker attribution, human maker-checker unchanged), 4 GOV-01 queues (MKT-17/22/24 + measure-due), `GET /api/marketing-activation/action-center` + the สิ่งที่รอคุณตอนนี้ overview card. No new control/migration; census unchanged. ToE `ext.ts` +13 (423). PN-19 rev 1.73; manual 09 v0.17; UAT-MA-AUTO-01/02 + UAT 09 v3.9; traceability bumped. |

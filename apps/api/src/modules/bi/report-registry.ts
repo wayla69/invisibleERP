@@ -44,6 +44,22 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   ar_collections_dunning: { label: 'ทวงถามหนี้อัตโนมัติ', labelEn: 'Automated AR dunning' },
   // Likewise: each run raises preventive-maintenance work orders for every due PM schedule (idempotent).
   eam_pm_generate: { label: 'สร้างใบสั่งงานซ่อมตามแผน (PM)', labelEn: 'Generate due preventive maintenance' },
+  // docs/54 — supply-chain planning. The nightly plan is ENQUEUED (a 33-branch run is minutes of
+  // solver time); the spike scan runs inline and is watermarked, so any cadence is idempotent.
+  scm_nightly_plan: { label: 'วางแผนซัพพลายเชนประจำคืน', labelEn: 'Nightly supply-chain plan' },
+  // docs/59 D1 — scheduled batch retrain: forecasts + persists sample paths off the request path.
+  scm_batch_retrain: { label: 'เทรนโมเดลซัพพลายเชนใหม่ (แบตช์)', labelEn: 'Supply-chain batch retrain' },
+  scm_spike_scan: { label: 'ตรวจจับดีมานด์พุ่ง', labelEn: 'Demand-spike scan' },
+  scm_plan_summary: { label: 'สรุปแผนสั่งซื้อรออนุมัติ', labelEn: 'Supply-chain plan summary' },
+  scm_accuracy_refresh: { label: 'ตรวจสอบความแม่นยำพยากรณ์', labelEn: 'Forecast-accuracy refresh' },
+  scm_forecast_accuracy: { label: 'แนวโน้มความแม่นยำพยากรณ์', labelEn: 'Forecast-accuracy trend' },
+  // docs/50 Wave 1 A2 — release stock reservations held past their TTL (filters: { max_age_days }, default 30).
+  reservation_stale_release: { label: 'ปล่อยการจองสต๊อกที่ค้างเกินกำหนด', labelEn: 'Release stale stock reservations' },
+  // docs/50 Wave 2 B3 — period-end STAGING jobs (auto-Draft; posting stays maker-checker).
+  // filters: { period? 'YYYY-MM' } (default = the just-ended business month); consolidation_run also { group_id? }.
+  gl_fx_reval_run: { label: 'เตรียมปรับปรุงอัตราแลกเปลี่ยนสิ้นงวด (GL-18)', labelEn: 'Stage period-end FX revaluation' },
+  je_exceptions: { label: 'ตรวจจับรายการบัญชีผิดปกติ (GL-28)', labelEn: 'JE anomaly / exception sweep' },
+  consolidation_run: { label: 'เตรียมงบการเงินรวมสิ้นงวด (CON-01)', labelEn: 'Stage period-end consolidation' },
   // Asset audit results (FA-11): recent audits + their found/missing/misplaced/unknown tallies + the
   // outstanding custody-change requests awaiting approval. Read-only aggregate.
   asset_audit: { label: 'ผลการตรวจนับทรัพย์สิน', labelEn: 'Asset audit results' },
@@ -119,6 +135,7 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   project_governance_pack: { label: 'รายงานสถานะโครงการ (ธรรมาภิบาล)', labelEn: 'Project governance / status pack' },
   // Action job (monthly): each run bills every tenant's metered AI overage for the just-closed month as a
   // Stripe invoice item (idempotent per tenant+month). Connects the AI-COGS meter to actual collection.
+  saas_lifecycle: { label: 'วงจรสถานะลูกค้า SaaS (เตือนทดลองใช้/ติดตามค้างชำระ/ระงับอัตโนมัติ)', labelEn: 'SaaS lifecycle sweep (trial reminders / dunning / auto-suspend)' },
   ai_overage_billing: { label: 'เรียกเก็บค่า AI ส่วนเกิน (รายเดือน)', labelEn: 'Bill AI usage overage (monthly)' },
   usage_overage_billing: { label: 'เรียกเก็บค่าใช้งานส่วนเกิน (e-Tax/POS รายเดือน)', labelEn: 'Bill usage overage (e-Tax/POS, monthly)' },
   pii_retention_sweep: { label: 'ลบล้างข้อมูลส่วนบุคคลที่พ้นระยะเก็บรักษา (PDPA)', labelEn: 'Anonymize PII past retention (PDPA)' },
@@ -155,6 +172,15 @@ export const REPORT_TYPES: Record<string, { label: string; labelEn: string }> = 
   // GET /api/bi/mmm-summary.
   mmm_run: { label: 'รันโมเดล Marketing Mix (MMM)', labelEn: 'Run Marketing Mix Model (MMM)' },
   mmm_summary: { label: 'สรุปผล Marketing Mix (ROI ต่อช่องทาง)', labelEn: 'Marketing Mix summary (channel ROI)' },
+  // docs/62 Phase 1 — marketing autopilot cadence. Scheduled "action" jobs over the docs/61 activation
+  // tools: auto-STAGE only (activation/approval stays the human maker-checker act — SoD unchanged) and
+  // auto-MEASURE (a read). Idempotent: one auto-staged item in flight per job; elapsed windows measure once.
+  mkt_nba_autostage: { label: 'จัดแผน NBA อัตโนมัติ (รอเปิดใช้งาน)', labelEn: 'Auto-stage NBA journey (awaits activation)' },
+  mkt_save_autostage: { label: 'จัดรอบรักษาลูกค้าอัตโนมัติ (ตามนโยบาย)', labelEn: 'Auto-stage churn-save sweep (per policy)' },
+  mkt_measure_windows: { label: 'วัดผลการตลาดเมื่อครบกำหนด (lift จริง)', labelEn: 'Measure elapsed marketing windows (realized lift)' },
+  // docs/62 Phase 2 — MKT-26 (detective): reconcile every APPROVED marketing budget plan against actual
+  // per-channel spend (MMM run / pushed snapshot); flags variances. Read-only, idempotent.
+  mkt_plan_backtest: { label: 'ตรวจสอบแผนงบเทียบจ่ายจริง (MKT-26)', labelEn: 'Budget plan vs actual backtest' },
 };
 export const FREQUENCIES = ['daily', 'weekly', 'monthly'] as const;
 

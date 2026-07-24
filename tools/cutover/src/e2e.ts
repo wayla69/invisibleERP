@@ -84,6 +84,7 @@ async function main() {
 
   const me = await inj('GET', '/api/auth/me', token);
   ok('/auth/me 200 + permissions', me.status === 200 && Array.isArray(me.json.permissions) && me.json.permissions.length > 0);
+  ok('/auth/me carries company_name (active tenant display name for the sidebar header)', me.json.company_name === 'HQ', `company_name=${me.json.company_name}`);
 
   const dash = await inj('GET', '/api/dashboard', token);
   ok('dashboard today.sales = 107', dash.status === 200 && dash.json.today?.sales === 107, `sales=${dash.json.today?.sales}`);

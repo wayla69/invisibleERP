@@ -82,9 +82,12 @@ async function main() {
   const anon = await app.inject({ method: 'GET', url: '/api/auth/me' });
   ok('AC-07: no cookie / no bearer → 401', anon.statusCode === 401, `status=${anon.statusCode}`);
 
-  // 8. default cookie attributes are single-origin safe: SameSite=Lax, no Domain (regression guard).
+  // 8. Audit #4 — an INTERNAL staff session (role Admin) defaults to SameSite=Strict (closes CSRF
+  //    structurally for the internal app), no Domain (single-origin). Portal/member sessions get Lax (below).
   const defCookie = String((Array.isArray(login.headers['set-cookie']) ? login.headers['set-cookie'] : [login.headers['set-cookie']]).find((c) => typeof c === 'string' && c.startsWith('ierp_token=')));
-  ok('AC-07: default cookie is SameSite=Lax with no Domain (single-origin)', /SameSite=Lax/i.test(defCookie) && !/Domain=/i.test(defCookie), defCookie);
+  ok('AC-07/#4: internal session cookie is SameSite=Strict, no Domain (single-origin)', /SameSite=Strict/i.test(defCookie) && !/Domain=/i.test(defCookie), defCookie);
+  // The signed CSRF token is bound to the session (HMAC(jti)) — deterministic, still a valid double-submit.
+  ok('#4: CSRF token is a 48-hex signed value bound to the session', /^[a-f0-9]{48}$/.test(csrf?.value ?? ''), `csrf=${csrf?.value}`);
 
   // 8b. ITGC-AC-07 refresh-token rotation: login set an httpOnly refresh cookie scoped to /api/auth; POST
   //     /api/auth/refresh mints a fresh access token AND rotates the refresh token (one-time use); replaying
@@ -117,6 +120,10 @@ async function main() {
   const mTok = getCookie(verify.headers['set-cookie'], 'ierp_token');
   const mCsrf = getCookie(verify.headers['set-cookie'], 'ierp_csrf');
   ok('AC-07(member): verify-otp sets httpOnly ierp_token + readable ierp_csrf', (verify.statusCode === 200 || verify.statusCode === 201) && !!mTok?.httpOnly && !!mCsrf && !mCsrf.httpOnly, `status=${verify.statusCode} otp=${devOtp} tokHttpOnly=${mTok?.httpOnly}`);
+  // Audit #4 — a PORTAL/member session gets SameSite=Lax (external links must carry it on top-level nav),
+  // unlike the internal Strict cookie above.
+  const mTokCookie = String((Array.isArray(verify.headers['set-cookie']) ? verify.headers['set-cookie'] : [verify.headers['set-cookie']]).find((c) => typeof c === 'string' && c.startsWith('ierp_token=')));
+  ok('AC-07/#4: portal/member session cookie is SameSite=Lax', /SameSite=Lax/i.test(mTokCookie), mTokCookie);
   const mCookieHdr = `ierp_token=${mTok?.value}; ierp_csrf=${mCsrf?.value}`;
 
   // 11. cookie alone authenticates a member route (no Authorization header)

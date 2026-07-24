@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Query, Body, Res, BadRequestException } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ItemSetupService, type CategoryDto, type TaxCodeDto, type ItemProfileDto, type WarehouseAccountsDto } from './item-setup.service';
 import { MasterDataService } from '../masterdata/masterdata.service';
@@ -34,11 +34,15 @@ const ItemProfileBody = z.object({
   barcode: z.string().trim().max(64).nullish(), uom: z.string().trim().max(20).nullish(), base_uom: z.string().trim().max(20).nullish(),
   conversion_factor: z.number().positive().nullish(), unit_price: z.number().nonnegative().nullish(),
   temperature_type: z.string().trim().max(30).nullish(), bu_id: z.string().trim().max(30).nullish(),
+  supply_type: z.enum(['goods', 'service', 'non_inventory']).nullish(), // docs/52 Phase 2a/2c — service & non-inventory sell with no stock move / no COGS
   min_stock: z.number().nonnegative().nullish(), max_stock: z.number().nonnegative().nullish(),
   avg_daily_usage: z.number().nonnegative().nullish(), lead_time_days: z.number().nonnegative().nullish(),
   min_order_qty: z.number().nonnegative().nullish(), order_multiple: z.number().nonnegative().nullish(),
   order_cost: z.number().nonnegative().nullish(), holding_cost: z.number().nonnegative().nullish(),
   is_fixed_asset: z.boolean().optional(), default_asset_category_id: z.number().int().nullish(),
+  is_lot_tracked: z.boolean().optional(), // docs/52 Phase 3a — FEFO lot capture at the POS for this item
+  is_serial_tracked: z.boolean().optional(), // docs/52 Phase 3b — serial/IMEI capture at the POS for this item
+  min_age: z.number().int().min(0).max(120).nullish(), // docs/52 Phase 3c — minimum buyer age (0 = unrestricted)
 });
 const WarehouseBody = z.object({
   location_name: z.string().trim().max(200).nullish(), zone: z.string().trim().max(50).nullish(),
@@ -48,7 +52,13 @@ const WarehouseBody = z.object({
 });
 // Item relationships + lifecycle (master-data audit Phase 10).
 const ITEM_REL_TYPES = ['substitute', 'complement', 'supersedes', 'kit_component', 'accessory'] as const;
-const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), note: z.string().optional() });
+// qty (docs/52 Phase 2c) — components consumed per kit sold; only meaningful for rel_type='kit_component'.
+const ItemRelBody = z.object({ to_item_id: z.string().min(1), rel_type: z.enum(ITEM_REL_TYPES).default('substitute'), qty: z.number().positive().max(100000).optional(), note: z.string().optional() });
+// docs/52 Phase 2b — generate a variant matrix under a parent item from axes (Size, Color, …).
+const GenerateVariantsBody = z.object({
+  axes: z.array(z.object({ axis: z.string().trim().min(1).max(40), values: z.array(z.string().trim().min(1).max(40)).min(1).max(50) })).min(1).max(4),
+  barcodes: z.record(z.string(), z.string().trim().max(64)).optional(),
+});
 const ItemStatusBody = z.object({ status: z.enum(['active', 'inactive', 'discontinued']), superseded_by: z.string().nullish() });
 // Match-merge / DQM (master-data audit Phase 11).
 const ItemMergeBody = z.object({ survivor_item_id: z.string().min(1), duplicate_item_id: z.string().min(1) });
@@ -75,6 +85,7 @@ export class ItemSetupController {
     return { entities: this.md.entities().entities.filter((e) => IO_ENTITIES.has(e.key)) };
   }
 
+  @AuditRead('item_setup_export')
   @Get('io/:entity/export')
   async ioExport(@Param('entity') entity: string, @Query('format') format: string | undefined, @Res() reply: FastifyReply) {
     this.ioEntityOrThrow(entity);
@@ -122,6 +133,9 @@ export class ItemSetupController {
   @Patch('items/:itemId/status') setItemStatus(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemStatusBody)) b: z.infer<typeof ItemStatusBody>, @CurrentUser() u: JwtUser) { return this.svc.setItemStatus(itemId, b, u); }
   @Post('items/:itemId/relationships') addItemRelationship(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(ItemRelBody)) b: z.infer<typeof ItemRelBody>, @CurrentUser() u: JwtUser) { return this.svc.addItemRelationship(itemId, b, u); }
   @Get('items/:itemId/relationships') listItemRelationships(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.listItemRelationships(itemId, u); }
+  // docs/52 Phase 2b — product variants / matrix items.
+  @Post('items/:itemId/variants') generateVariants(@Param('itemId') itemId: string, @Body(new ZodValidationPipe(GenerateVariantsBody)) b: z.infer<typeof GenerateVariantsBody>, @CurrentUser() u: JwtUser) { return this.svc.generateVariants(itemId, b, u); }
+  @Get('items/:itemId/variants') listVariants(@Param('itemId') itemId: string, @CurrentUser() u: JwtUser) { return this.svc.listVariants(itemId, u); }
   @Delete('items/:itemId/relationships/:relId') deleteItemRelationship(@Param('itemId') itemId: string, @Param('relId') relId: string, @CurrentUser() u: JwtUser) { return this.svc.deleteItemRelationship(itemId, +relId, u); }
   // Match-merge / DQM (master-data audit Phase 11) — detect is a read-only review queue for the setup duties;
   // merge is gated in the service to the platform owner (god) because items are a shared cross-tenant master.

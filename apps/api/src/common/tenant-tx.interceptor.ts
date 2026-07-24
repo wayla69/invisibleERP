@@ -2,15 +2,28 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Inject, Log
 import { Reflector } from '@nestjs/core';
 import { from, firstValueFrom, finalize } from 'rxjs';
 import { sql } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../database/database.module';
+import { DRIZZLE, globalDbALS, type DrizzleDb } from '../database/database.module';
 import { tenantALS } from './tenant-context';
-import { NO_TX_KEY, isPlatformAdmin } from './decorators';
+import { AUDIT_READ_KEY, NO_TX_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin } from './decorators';
+import { auditRequired } from './audit.interceptor';
 import { txStart, txEnd } from '../observability/runtime-metrics';
 import { logger as pino } from '../observability/logger';
 
 // A request whose tenant DB transaction is held longer than this is logged as a slow path (operational
 // visibility — a p95 regression or a missing index surfaces here without an external APM). Env-tunable.
 const SLOW_TX_MS = Number(process.env.SLOW_TX_MS ?? 1000);
+
+// ITGC-AC-16 completeness (migration 0465). AuditInterceptor writes the trail OUTSIDE the business
+// transaction so a logging failure can never roll back a posted journal — the right trade-off, but it means
+// a dropped row is invisible: `audit_log.seq` comes from the last SUCCESSFULLY written row, so an omission
+// leaves no gap to find. The counter below is the missing half: bumped INSIDE the business transaction, it
+// is durable exactly when the mutation committed, so `written >= expected` becomes a checkable invariant and
+// a shortfall is provable loss (reconciled by GET /api/admin/audit/verify).
+//
+// Sharded because one row per tenant would hold a row lock for the whole business transaction and serialise
+// that tenant's concurrent writes. The shard is picked per request; reconciliation sums the shards.
+const AUDIT_EXPECT_SHARDS = 16;
+let auditShardCursor = 0;
 
 // Wraps each (non-SSE) request in a tenant-scoped transaction:
 //   SET LOCAL ROLE app_user  +  set_config('app.tenant_id'|'app.bypass_rls')
@@ -34,9 +47,20 @@ export class TenantTxInterceptor implements NestInterceptor {
     // do not wrap SSE/streaming endpoints in a single transaction
     const isSse = this.reflector.get<boolean>('sse', ctx.getHandler());
     if (isSse) return next.handle();
-    // @NoTx() — opt out for handlers that touch no tenant-scoped data (health/config).
+    // @NoTx() — opt out for handlers that touch no tenant-scoped data (health/config) or that resolve and
+    // scope the tenant themselves (public webhooks, cross-tenant cron sweeps, member-auth). @NoTx is an
+    // explicit "no per-request tenant tx — I manage scoping myself" contract, which is exactly what
+    // runGlobalDb declares: run the handler inside globalDbALS so the fail-closed proxy (STRICT_TENANT_PROXY)
+    // permits its intentional base-pool access instead of throwing TENANT_CONTEXT_MISSING. This covers every
+    // @NoTx route at one choke point (harnesses that call the service directly still wrap at the method).
     const noTx = this.reflector.get<boolean>(NO_TX_KEY, ctx.getHandler());
-    if (noTx) return next.handle();
+    if (noTx) {
+      const r = ctx.switchToHttp().getRequest();
+      return from(globalDbALS.run(
+        { reason: `@NoTx ${r?.method ?? ''} ${r?.url ?? ''}` },
+        () => firstValueFrom(next.handle(), { defaultValue: undefined }),
+      ));
+    }
 
     const req = ctx.switchToHttp().getRequest();
     const user = req?.user;
@@ -73,7 +97,17 @@ export class TenantTxInterceptor implements NestInterceptor {
       : null;
     // Read-only inspection — a god can enter a company to look without any risk of writing. When set, we
     // reject mutating requests (safe support view). GETs (incl. their incidental pref writes) still work.
-    const actAsReadOnly = actAsTenant != null && req.headers?.['x-act-as-read-only'] === '1';
+    //
+    // Keyed on `isGod`, NOT on `actAsTenant != null`. A @PlatformAdmin route deliberately keeps its full
+    // bypass (so the switcher's own company directory still lists every company), which left actAsTenant
+    // null there — so the read-only rail silently did NOT apply to the platform surface, and a god who had
+    // entered "read-only company view" to inspect a customer could still fire POST /api/admin/tenants/:id/
+    // purge or item-maintenance/force-purge. Since the flag is a client header a god can simply omit, this
+    // is a SAFETY rail for the operator rather than a boundary against an attacker — but an operator firing
+    // a destructive fleet action while believing they are in look-only mode is exactly the accident it
+    // exists to prevent. Widening it is strictly more restrictive and the web only sends the header when a
+    // company is selected read-only, so no existing flow changes.
+    const actAsReadOnly = isGod && req.headers?.['x-act-as-read-only'] === '1';
     if (actAsReadOnly) {
       const method = String(req.method ?? '').toUpperCase();
       if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
@@ -102,6 +136,14 @@ export class TenantTxInterceptor implements NestInterceptor {
     req.__rlsBypass = bypass;
     req.__rlsOrgScope = orgScope;
     req.__actAsTenant = actAsTenant; // audit: which company a god narrowed its view to (null = global)
+
+    // Will AuditInterceptor write a row for this request? Same predicate, same metadata keys — read here so
+    // the expectation is counted for exactly the set of requests the trail is supposed to contain.
+    const auditOwed = auditRequired(
+      String(req?.method ?? ''),
+      this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]) === true,
+      !!this.reflector.getAllAndOverride<string>(AUDIT_READ_KEY, [ctx.getHandler(), ctx.getClass()]),
+    );
 
     // Bracket the request's DB transaction for ops metrics + slow-path logging (operational visibility).
     const started = Date.now();
@@ -132,6 +174,22 @@ export class TenantTxInterceptor implements NestInterceptor {
           set_config('app.tenant_id', ${effectiveTenantId != null ? String(effectiveTenantId) : ''}, true),
           set_config('app.org_id', ${orgScope != null ? String(orgScope) : ''}, true),
           set_config('app.actor', ${user?.username ?? ''}, true)`);
+        // Record that this request OWES an audit row — atomically with the business change it describes.
+        // Best-effort in the same sense as the trail itself: if the counter cannot be bumped we do NOT fail
+        // the business request (that would make an integrity ledger an availability risk); the reconciliation
+        // then simply under-counts, which is the SAFE direction — it can only hide a loss, never invent one.
+        if (auditOwed) {
+          try {
+            const shard = (auditShardCursor = (auditShardCursor + 1) % AUDIT_EXPECT_SHARDS);
+            // Keyed on the tenant the AUDIT ROW will carry — AuditInterceptor snapshots req.user.tenantId
+            // before this interceptor repoints it for act-as, so use the pre-repoint value, not the
+            // effective one, or a god acting-as would bump a different tenant than it credits.
+            await tx.execute(sql`insert into audit_expectations (tenant_id, shard, expected) values (${tenantId ?? 0}, ${shard}, 1)
+              on conflict (tenant_id, shard) do update set expected = audit_expectations.expected + 1, updated_at = now()`);
+          } catch (e) {
+            pino.warn({ err: (e as Error)?.message }, 'audit expectation bump failed — reconciliation will under-count');
+          }
+        }
         // NB: we intentionally do NOT force the tx READ ONLY for GETs — several GET handlers perform
         // legitimate writes (dashboard auto-reorder, lazy loyalty-config seed), and Postgres rejects
         // changing access mode after the first query anyway (25001). @NoTx is the opt-out for non-tenant

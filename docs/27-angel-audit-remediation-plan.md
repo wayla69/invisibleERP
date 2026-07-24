@@ -32,7 +32,7 @@ Every remediation item below traces to one of these findings. IDs are stable; us
 | AUD-LGL-01 | Employee Thai national IDs, bank accounts, salaries stored **plaintext** while customer tax IDs are encrypted — inconsistent PDPA posture | `apps/api/src/database/schema/payroll.ts:12,21,63` vs `customer-master.ts:16` (`encryptedText`); same gap for vendor `tax_id`/`bank_account` in `procurement.ts:23,28` |
 | AUD-LGL-02 | All customer-facing legal docs are unexecuted drafts with `<<placeholders>>`; **no standalone privacy policy**; Anthropic data addendum unsigned (AI legally OFF in prod via `aiDpaBlocked()`) | `docs/legal/terms-of-service.md` (DRAFT v0.1), `data-processing-agreement.md` (DRAFT v0.2), SOC2 CC2.3 gap |
 | AUD-CMP-01 | Control population does not reconcile: `build_rcm.py` = **169** controls, `CONTROL_STATUS_HONEST.md` = 154, COSO plan cites **both 66 and 153**, pre-prod audit says 57 then 68 — fails an auditor's first PBC step | `compliance/build_rcm.py` vs every narrative compliance doc |
-| AUD-BIZ-01 | No proven business: one anchor tenant (Oshinei), zero external-revenue evidence, NASDAQ framing unsupported | repo-wide; `compliance/PRE_PRODUCTION_AUDIT_2026Q2.md:1` |
+| AUD-BIZ-01 | No proven business: one anchor tenant (Invisible), zero external-revenue evidence, NASDAQ framing unsupported | repo-wide; `compliance/PRE_PRODUCTION_AUDIT_2026Q2.md:1` |
 
 ### Severity: HIGH (falls over under enterprise load / first prod fire)
 

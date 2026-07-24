@@ -201,6 +201,50 @@ async function main() {
   const zt = await inj('POST', '/api/payments/till/close', sales1, { session_no: tillT.json.session_no, closing_count: 127 });
   ok('Tip: counting the real drawer (127) closes with variance 0 — no phantom "over"', near(zt.json.variance, 0) && zt.json.variance_status === 'NotRequired', JSON.stringify({ v: zt.json.variance, st: zt.json.variance_status }));
 
+  // ── P1c blind drawer close (0426, docs/50 Wave 1) — count FIRST, reveal AFTER ──
+  // PosSupervisor holds pos_till but neither 'ar' nor 'exec' → the redaction target; Sales (ar/exec)
+  // is the manager view and the only one who may change the tenant policy.
+  await db.insert(s.users).values({ username: 'super1', passwordHash: await pw.hash('ps1'), role: 'PosSupervisor', tenantId: t1 }).onConflictDoNothing();
+  const super1 = await login('super1', 'ps1');
+  const bs0 = await inj('GET', '/api/payments/till/settings', super1);
+  ok('Blind: policy readable by till duty, default OFF', bs0.status === 200 && bs0.json.blind_close === false, JSON.stringify(bs0.json));
+  const bDeny = await inj('PUT', '/api/payments/till/settings', super1, { blind_close: true });
+  ok('Blind: till-duty user cannot change the policy (403)', bDeny.status === 403, `${bDeny.status}`);
+  const bOn = await inj('PUT', '/api/payments/till/settings', sales1, { blind_close: true });
+  ok('Blind: manager (ar) turns the policy on', bOn.status === 200 && bOn.json.blind_close === true, JSON.stringify(bOn.json));
+
+  const tillBl = await inj('POST', '/api/payments/till/open', super1, { opening_float: 300 });
+  const tillBlId = Number((await db.select().from(s.tillSessions).where(eq(s.tillSessions.sessionNo, tillBl.json.session_no)))[0].id);
+  await cashSale(); // 107 cash on the open blind till → expected 407
+  const bx = await inj('GET', `/api/payments/till/${tillBlId}/x-report`, super1);
+  ok('Blind: X-report redacts expected/cash aggregates for till duty (blind=true)',
+    bx.json.blind === true && bx.json.expected_cash === null && bx.json.cash_sales === null && bx.json.cash_refunds === null && bx.json.paid_out === null,
+    JSON.stringify({ b: bx.json.blind, e: bx.json.expected_cash, cs: bx.json.cash_sales }));
+  ok('Blind: Cash tender amount redacted (count kept) while sales totals stay visible',
+    (bx.json.by_method ?? []).some((m: any) => m.method === 'Cash' && m.amount === null && m.count === 1) && typeof bx.json.gross_sales === 'number',
+    JSON.stringify(bx.json.by_method));
+  const bxMgr = await inj('GET', `/api/payments/till/${tillBlId}/x-report`, sales1);
+  ok('Blind: manager (ar) still sees expected on the open session', near(bxMgr.json.expected_cash, 407) && bxMgr.json.blind !== true, `exp=${bxMgr.json.expected_cash}`);
+  const bz = await inj('GET', `/api/payments/till/${tillBlId}/z-report`, super1);
+  ok('Blind: Z on an OPEN session is redacted the same way', bz.json.expected_cash === null && bz.json.counted_cash === null, JSON.stringify({ e: bz.json.expected_cash }));
+
+  const bClose = await inj('POST', '/api/payments/till/close', super1, { session_no: tillBl.json.session_no, closing_count: 400 });
+  ok('Blind: close reveals expected/variance only AFTER the count (407 / −7) + blind_close on the response',
+    near(bClose.json.expected_cash, 407) && near(bClose.json.variance, -7) && bClose.json.blind_close === true, JSON.stringify(bClose.json).slice(0, 120));
+  const bRow = (await pg.query(`SELECT blind_close FROM till_sessions WHERE session_no='${tillBl.json.session_no}'`)).rows as any[];
+  ok('Blind: session row carries the blind_close evidence stamp', bRow[0]?.blind_close === true, JSON.stringify(bRow[0]));
+  const bzClosed = await inj('GET', `/api/payments/till/${tillBlId}/z-report`, super1);
+  ok('Blind: closed Z shows the full reconciliation + blind_close flag',
+    near(bzClosed.json.expected_cash, 407) && near(bzClosed.json.variance, -7) && bzClosed.json.blind_close === true,
+    JSON.stringify({ e: bzClosed.json.expected_cash, v: bzClosed.json.variance }));
+
+  await inj('PUT', '/api/payments/till/settings', sales1, { blind_close: false });
+  const tillB3 = await inj('POST', '/api/payments/till/open', super1, { opening_float: 50 });
+  const tillB3Id = Number((await db.select().from(s.tillSessions).where(eq(s.tillSessions.sessionNo, tillB3.json.session_no)))[0].id);
+  const bx3 = await inj('GET', `/api/payments/till/${tillB3Id}/x-report`, super1);
+  ok('Blind: policy off → X-report unredacted again (expected 50)', near(bx3.json.expected_cash, 50) && bx3.json.blind !== true, `exp=${bx3.json.expected_cash}`);
+  await inj('POST', '/api/payments/till/close', super1, { session_no: tillB3.json.session_no, closing_count: 50 });
+
   await app.close();
   await pg.close();
 

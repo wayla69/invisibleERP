@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
-import { CheckCircle2, Clock, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Timer, Utensils } from 'lucide-react';
+import { BellRing, CheckCircle2, Clock, LayoutGrid, List, Minus, Plus, QrCode, ReceiptText, ShoppingCart, Smartphone, Sparkles, Split, Star, Timer, UserRound, Users, Utensils, X, ZoomIn } from 'lucide-react';
 import { publicApi } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,31 +14,36 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { baht } from '@/lib/format';
 
 // ── types (mirror the public QR endpoints) ──
-type Item = { item_id: number; name: string; qty: number; kds_status: string; status_th: string; amount: number; is_buffet: boolean; charge: boolean };
+type Item = { item_id: number; name: string; qty: number; kds_status: string; status_th: string; amount: number; is_buffet: boolean; charge: boolean; fired_at?: string | null; served_at?: string | null; wait_min?: number; course?: number };
 type Buffet = { package_name: string | null; pax: number | null; expires_at: string | null; minutes_left: number | null; expired: boolean };
 type Status = {
   table_no: string | null; session_status: string; order_mode: 'a_la_carte' | 'buffet'; buffet: Buffet | null;
+  member?: { name: string | null; member_code: string | null } | null;
   order: { order_no: string; status: string; waited_min: number; ready_in_min: number; items: Item[] } | null;
   bill: { subtotal: number; vat: number; total: number; settled: boolean } | null;
 };
+type SplitStatus = { total: number; paid_so_far: number; remaining: number; settled: boolean };
 type Option = { option_id: number; name: string; price_delta: number; is_default: boolean };
 type Group = { group_id: number; code: string; name: string; min_select: number; max_select: number; required: boolean; options: Option[] };
-type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
+type MenuItem = { id: number; sku: string; name: string; name_en: string | null; price: number; is_available: boolean; available_now?: boolean; is_recommended?: boolean; description: string | null; image_url?: string | null; has_modifiers: boolean; modifier_groups: Group[] };
 type Category = { id: number; code: string; name: string; items: MenuItem[] };
 type Menu = { categories: Category[]; uncategorized: MenuItem[]; item_count: number };
 type Tier = { id: number; code: string; name: string; name_en: string | null; price_per_pax: number; time_limit_min: number; overtime_fee_per_pax: number };
 type CartLine = { key: string; sku: string; name: string; qty: number; unitPrice: number; optionIds: number[]; optionLabels: string[] };
 
+// keyed on the server's kds_status codes (stable), not the Thai display text
 const ITEM_COLOR: Record<string, string> = {
-  'รับออเดอร์': 'text-muted-foreground',
-  'รอคิว': 'text-info',
-  'กำลังปรุง': 'text-warning-foreground dark:text-warning',
-  'พร้อมเสิร์ฟ': 'text-success',
-  'เสิร์ฟแล้ว': 'text-success',
+  new: 'text-muted-foreground',
+  queued: 'text-info',
+  preparing: 'text-warning-foreground dark:text-warning',
+  ready: 'text-success',
+  served: 'text-success',
 };
 
 
 export default function DinerPage() {
+  // Global locale context (persisted per device) — the diner's th/en toggle drives the app-wide setting.
+  const { lang, setLang, t } = useLang();
   const token = String(useParams().token ?? '');
   const [tab, setTab] = useState<'menu' | 'order'>('order');
   const [st, setSt] = useState<Status | null>(null);
@@ -45,22 +51,35 @@ export default function DinerPage() {
   const [tiers, setTiers] = useState<Tier[] | null>(null);
   const [err, setErr] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [catFilter, setCatFilter] = useState<number | 'all' | 'rec'>('all');   // diner menu category filter (0434)
+  const [menuView, setMenuView] = useState<'list' | 'grid'>('list');           // list / grid ordering layout
+  const [zoomImg, setZoomImg] = useState<{ src: string; name: string } | null>(null); // image lightbox
   const [picker, setPicker] = useState<MenuItem | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [buffetOpen, setBuffetOpen] = useState(false);
-  const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean } | null>(null);
+  const [pay, setPay] = useState<{ payment_no: string; gateway_ref: string; total: number; qr_image: string | null; mock_settle: boolean; share?: number } | null>(null);
   const [paid, setPaid] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [lang, setLang] = useState<'th' | 'en'>('th');
+  const [callOpen, setCallOpen] = useState(false);          // F1 call-staff sheet
+  const [called, setCalled] = useState('');                 // last call confirmation
+  const [memberOpen, setMemberOpen] = useState(false);      // F3 member-link sheet
+  const [memberCode, setMemberCode] = useState('');
+  const [splitMode, setSplitMode] = useState(false);        // F2 split pay-your-share
+  const [split, setSplit] = useState<SplitStatus | null>(null);
+  const [shareAmt, setShareAmt] = useState('');
+  const [suggestSkus, setSuggestSkus] = useState<string[]>([]); // F6 upsell co-purchase SKUs
   // show the English name when the diner picks EN (falls back to the Thai name)
   const nm = useCallback((o: { name: string; name_en?: string | null }) => (lang === 'en' ? (o.name_en || o.name) : o.name), [lang]);
+  // item status: translate via the stable kds_status code; fall back to the server's Thai label
+  const stLabel = useCallback((it: { kds_status: string; status_th: string }) => t(`pub.qr.st_${it.kds_status}`, undefined) === `pub.qr.st_${it.kds_status}` ? it.status_th : t(`pub.qr.st_${it.kds_status}`), [t]);
 
   const isBuffet = st?.order_mode === 'buffet';
   const hasOrder = !!st?.order;
 
   const load = useCallback(async () => {
     try { setSt(await publicApi<Status>(`/api/qr/t/${token}`)); setErr(''); }
-    catch (e) { setErr(e instanceof Error ? e.message : 'โหลดไม่สำเร็จ'); }
+    catch (e) { setErr(e instanceof Error ? e.message : t('pub.qr.load_failed')); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => { load(); const i = setInterval(load, 5000); return () => clearInterval(i); }, [load]);
@@ -81,6 +100,15 @@ export default function DinerPage() {
     if (!tiers) publicApi<{ tiers: Tier[] }>(`/api/qr/t/${token}/buffet/tiers`).then((r) => setTiers(r.tiers)).catch(() => setTiers([]));
   }, [tab, menu, tiers, token]);
 
+  // F6: when the basket changes (and the cart is open), fetch "สั่งคู่กับ…" co-purchase SKUs
+  useEffect(() => {
+    if (!cartOpen || cart.length === 0) { setSuggestSkus([]); return; }
+    let cancelled = false;
+    publicApi<{ skus: string[] }>(`/api/qr/t/${token}/suggestions`, { method: 'POST', body: JSON.stringify({ skus: cart.map((c) => c.sku) }) })
+      .then((r) => { if (!cancelled) setSuggestSkus(r.skus ?? []); }).catch(() => { if (!cancelled) setSuggestSkus([]); });
+    return () => { cancelled = true; };
+  }, [cartOpen, cart, token]);
+
   const cartCount = cart.reduce((a, c) => a + c.qty, 0);
   const cartTotal = cart.reduce((a, c) => a + c.unitPrice * c.qty, 0);
 
@@ -97,6 +125,69 @@ export default function DinerPage() {
     if (it.modifier_groups.length) { setPicker(it); return; }
     addToCart({ key: `${it.sku}`, sku: it.sku, name: it.name, qty: 1, unitPrice: isBuffet ? 0 : it.price, optionIds: [], optionLabels: [] });
   };
+  // tap the thumbnail → open the zoom lightbox (without triggering the card's add-to-cart)
+  const openZoom = (e: React.MouseEvent, it: MenuItem) => { e.stopPropagation(); if (it.image_url) setZoomImg({ src: it.image_url, name: nm(it) }); };
+
+  // one tappable LIST card — shared by the recommended row and the per-category lists
+  const renderItem = (it: MenuItem) => (
+    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
+      className={cn('flex items-center justify-between rounded-xl border bg-card p-3 text-left transition active:scale-[0.99]', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
+      <div className="flex min-w-0 items-center gap-3">
+        {it.image_url && (
+          <span role="button" tabIndex={-1} onClick={(e) => openZoom(e, it)} className="group relative size-16 shrink-0 overflow-hidden rounded-lg" aria-label={t('pub.qr.zoom')}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={it.image_url} alt="" className="size-16 object-cover" />
+            <span className="absolute inset-0 grid place-items-center bg-black/0 text-white/0 transition group-active:bg-black/30 group-active:text-white"><ZoomIn className="size-5" /></span>
+          </span>
+        )}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            {it.is_recommended && <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label={t('pub.qr.recommended')} />}
+            <span className="truncate">{nm(it)}</span>
+            {!it.is_available && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.sold_out')}</Badge>}
+            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">{t('pub.qr.not_selling')}</Badge>}
+          </div>
+          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
+        </div>
+      </div>
+      <div className="ml-3 flex shrink-0 items-center gap-2">
+        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
+        {orderable(it) && <span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
+      </div>
+    </button>
+  );
+
+  // one GRID tile — image-forward, two per row on the phone; tap the tile to add, tap the ⛶ to zoom
+  const renderTile = (it: MenuItem) => (
+    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
+      className={cn('flex flex-col overflow-hidden rounded-xl border bg-card text-left transition active:scale-[0.99]', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
+      <div className="relative aspect-square w-full bg-muted">
+        {it.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={it.image_url} alt="" className="size-full object-cover" />
+        ) : (
+          <span className="grid size-full place-items-center text-muted-foreground"><Utensils className="size-8" /></span>
+        )}
+        {it.is_recommended && <span className="absolute left-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-amber-400 text-white shadow"><Star className="size-3.5 fill-current" /></span>}
+        {it.image_url && (
+          <span role="button" tabIndex={-1} onClick={(e) => openZoom(e, it)} aria-label={t('pub.qr.zoom')}
+            className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm active:bg-black/70"><ZoomIn className="size-4" /></span>
+        )}
+        {!it.is_available && <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[11px] font-medium text-white">{t('pub.qr.sold_out')}</span>}
+        {it.is_available && it.available_now === false && <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[11px] font-medium text-white">{t('pub.qr.not_selling')}</span>}
+      </div>
+      <div className="flex items-center justify-between gap-1 p-2">
+        <span className="min-w-0 truncate text-sm font-medium">{nm(it)}</span>
+        <span className="shrink-0 text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">{t('pub.qr.buffet')}</span> : baht(it.price)}</span>
+      </div>
+    </button>
+  );
+
+  // render a list of dishes in the current layout
+  const renderDishes = (items: MenuItem[]) =>
+    menuView === 'grid'
+      ? <div className="grid grid-cols-2 gap-2">{items.map(renderTile)}</div>
+      : <div className="grid gap-2">{items.map(renderItem)}</div>;
 
   const submitOrder = async () => {
     if (!cart.length) return;
@@ -117,22 +208,44 @@ export default function DinerPage() {
 
   const doBill = async () => { setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/bill`, { method: 'POST' }); await load(); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
   const doPay = async () => { setBusy(true); try { setPay(await publicApi(`/api/qr/t/${token}/pay`, { method: 'POST' })); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
-  const doConfirm = async () => { if (!pay) return; setBusy(true); try { await publicApi(`/api/qr/t/${token}/confirm`, { method: 'POST', body: JSON.stringify({ payment_no: pay.payment_no }) }); setPaid(true); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+  // confirm a (mock) payment. For split shares the server reports paid:false until the bill is covered.
+  const doConfirm = async () => { if (!pay) return; setBusy(true); try { const r = await publicApi<{ paid?: boolean }>(`/api/qr/t/${token}/confirm`, { method: 'POST', body: JSON.stringify({ payment_no: pay.payment_no }) }); if (r.paid !== false) setPaid(true); else { setPay(null); await loadSplit(); } } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+
+  // F1 — call staff / request service
+  const doCall = async (type: string) => { setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/call`, { method: 'POST', body: JSON.stringify({ type }) }); setCalled(type); setCallOpen(false); setTimeout(() => setCalled(''), 4000); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+  // F3 — link a loyalty member to the table
+  const doLinkMember = async () => { if (!memberCode.trim()) return; setBusy(true); setErr(''); try { await publicApi(`/api/qr/t/${token}/member`, { method: 'POST', body: JSON.stringify({ code: memberCode.trim() }) }); setMemberOpen(false); setMemberCode(''); await load(); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
+  // F2 — split pay-your-share
+  const loadSplit = useCallback(async () => { try { setSplit(await publicApi<SplitStatus>(`/api/qr/t/${token}/split`)); } catch { /* ignore */ } }, [token]);
+  const doPayShare = async (amount?: number) => { setBusy(true); setErr(''); try { const r = await publicApi<{ payment_no: string; gateway_ref: string; qr_image: string | null; mock_settle: boolean; total: number; share: number; remaining: number; fully_paid?: boolean }>(`/api/qr/t/${token}/split/pay`, { method: 'POST', body: amount ? JSON.stringify({ amount }) : '{}' }); if (r.fully_paid) { setPaid(true); return; } setPay({ payment_no: r.payment_no, gateway_ref: r.gateway_ref, total: r.total, qr_image: r.qr_image, mock_settle: r.mock_settle, share: r.share }); } catch (e) { setErr(String((e as Error).message)); } finally { setBusy(false); } };
 
   if (paid)
     return (
       <main className="mx-auto grid min-h-svh max-w-md place-items-center bg-muted/30 p-4">
         <Card className="w-full items-center gap-2 p-8 text-center">
           <CheckCircle2 className="size-14 text-success" />
-          <h2 className="text-xl font-semibold">ชำระเงินสำเร็จ</h2>
-          <p className="text-sm text-muted-foreground">ขอบคุณที่ใช้บริการ 🙏</p>
+          <h2 className="text-xl font-semibold">{t('pub.qr.paid_title')}</h2>
+          <p className="text-sm text-muted-foreground">{t('pub.qr.paid_thanks')}</p>
         </Card>
       </main>
     );
 
   const allItems = menu ? [...menu.categories.flatMap((c) => c.items), ...menu.uncategorized] : [];
+  const menuCats = menu ? menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: t('pub.qr.cat_other'), items: menu.uncategorized }] : []) : [];
+  const recommended = allItems.filter((it) => it.is_recommended && orderable(it));
+  const cartSkus = new Set(cart.map((c) => c.sku));
+  const suggestions = allItems.filter((it) => suggestSkus.includes(it.sku) && orderable(it) && !cartSkus.has(it.sku)).slice(0, 4);
+  const shownCats = catFilter === 'all' ? menuCats : catFilter === 'rec' ? [] : menuCats.filter((c) => c.id === catFilter);
   const dishes = st?.order?.items.filter((i) => !i.charge) ?? [];
   const chargeLines = st?.order?.items.filter((i) => i.charge) ?? [];
+  // group the diner's dishes into fire "lots" (one lot = items sent to the kitchen together), oldest first;
+  // un-fired lines fall into a trailing "pending" lot.
+  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok' });
+  const lots: [string, Item[]][] = (() => {
+    const map = new Map<string, Item[]>();
+    for (const it of dishes) { const k = it.fired_at ?? '__pending'; (map.get(k) ?? map.set(k, []).get(k)!).push(it); }
+    return [...map.entries()].sort((a, b) => (a[0] === '__pending' ? 1 : b[0] === '__pending' ? -1 : a[0].localeCompare(b[0])));
+  })();
   const canStartBuffet = !isBuffet && !hasOrder && (tiers?.length ?? 0) > 0;
 
   return (
@@ -141,73 +254,92 @@ export default function DinerPage() {
         <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Utensils className="size-5" />
         </div>
-        <h2 className="text-lg font-semibold">{lang === 'en' ? 'Table' : 'โต๊ะ'} {st?.table_no ?? '…'}</h2>
+        <h2 className="text-lg font-semibold">{t('pub.qr.table')} {st?.table_no ?? '…'}</h2>
         {isBuffet && st?.buffet && <BuffetChip b={st.buffet} />}
-        <button type="button" onClick={() => setLang((l) => (l === 'th' ? 'en' : 'th'))}
+        <button type="button" onClick={() => setLang(lang === 'th' ? 'en' : 'th')}
           className="ml-auto rounded-md border px-2 py-1 text-xs font-semibold uppercase" aria-label="language">
           {lang === 'th' ? 'EN' : 'ไทย'}
         </button>
       </div>
       {err && <p className="mb-3 text-sm text-destructive">{err}</p>}
 
+      {/* service row: call staff (F1) + member link (F3) */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => setCallOpen(true)}><BellRing className="size-4" /> {t('pub.qr.call_staff')}</Button>
+        {st?.member ? (
+          <Badge variant="secondary" className="gap-1"><UserRound className="size-3.5" /> {st.member.name || st.member.member_code}</Badge>
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => setMemberOpen(true)}><UserRound className="size-4" /> {t('pub.qr.link_member')}</Button>
+        )}
+        {called && <span className="text-xs text-success">✓ {t('pub.qr.called')}</span>}
+      </div>
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'menu' | 'order')}>
         <TabsList className="mb-3 grid w-full grid-cols-2">
-          <TabsTrigger value="menu"><Utensils className="mr-1.5 size-4" /> เมนู</TabsTrigger>
-          <TabsTrigger value="order"><ReceiptText className="mr-1.5 size-4" /> ออเดอร์ของฉัน</TabsTrigger>
+          <TabsTrigger value="menu"><Utensils className="mr-1.5 size-4" /> {t('pub.qr.tab_menu')}</TabsTrigger>
+          <TabsTrigger value="order"><ReceiptText className="mr-1.5 size-4" /> {t('pub.qr.tab_order')}</TabsTrigger>
         </TabsList>
 
         {/* ── เมนู ── */}
         <TabsContent value="menu">
           {canStartBuffet && (
             <Card className="mb-4 gap-2 border-primary/40 bg-primary/5 p-4">
-              <strong className="text-sm">เลือกบุฟเฟต์ (ทานได้ไม่อั้นตามเวลา)</strong>
-              <p className="text-xs text-muted-foreground">เลือกแพ็กเกจบุฟเฟต์ก่อนเริ่มสั่งอาหาร หรือเลื่อนลงเพื่อสั่งแบบรายจาน</p>
-              <Button onClick={() => setBuffetOpen(true)} className="mt-1 h-11 w-full"><Timer className="size-4" /> เริ่มบุฟเฟต์</Button>
+              <strong className="text-sm">{t('pub.qr.buffet_pick_title')}</strong>
+              <p className="text-xs text-muted-foreground">{t('pub.qr.buffet_pick_desc')}</p>
+              <Button onClick={() => setBuffetOpen(true)} className="mt-1 h-11 w-full"><Timer className="size-4" /> {t('pub.qr.buffet_start')}</Button>
             </Card>
           )}
           {isBuffet && st?.buffet && (
             <Card className="mb-4 gap-1 border-primary/40 bg-primary/5 p-3 text-sm">
               <div className="flex items-center justify-between">
-                <strong>{st.buffet.package_name} · {st.buffet.pax} ท่าน</strong>
+                <strong>{st.buffet.package_name} · {t('pub.qr.pax_n', { n: st.buffet.pax ?? 0 })}</strong>
                 <BuffetChip b={st.buffet} />
               </div>
-              <p className="text-xs text-muted-foreground">เลือกอาหารได้ไม่อั้นภายในเวลาที่กำหนด · ทุกจานรวมในบุฟเฟต์แล้ว</p>
+              <p className="text-xs text-muted-foreground">{t('pub.qr.buffet_note')}</p>
             </Card>
           )}
           {!menu ? (
-            <p className="text-sm text-muted-foreground">กำลังโหลดเมนู…</p>
+            <p className="text-sm text-muted-foreground">{t('pub.qr.menu_loading')}</p>
           ) : allItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">ยังไม่มีเมนู</p>
+            <p className="text-sm text-muted-foreground">{t('pub.qr.menu_empty')}</p>
           ) : (
-            menu.categories.filter((c) => c.items.length).concat(menu.uncategorized.length ? [{ id: 0, code: '_', name: 'อื่น ๆ', items: menu.uncategorized }] : []).map((c) => (
-              <section key={c.id} className="mb-4">
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
-                <div className="grid gap-2">
-                  {c.items.map((it) => (
-                    <button key={it.id} type="button" onClick={() => onItemTap(it)} disabled={!orderable(it)}
-                      className={cn('flex items-center justify-between rounded-lg border bg-card p-3 text-left transition', orderable(it) ? 'hover:border-primary/60' : 'opacity-50')}>
-                      <div className="flex min-w-0 items-center gap-3">
-                        {it.image_url && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={it.image_url} alt="" className="size-14 shrink-0 rounded-lg object-cover" />
-                        )}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm font-medium">{nm(it)}
-                            {!it.is_available && <Badge variant="secondary" className="text-[10px]">หมด</Badge>}
-                            {it.is_available && it.available_now === false && <Badge variant="secondary" className="text-[10px]">ยังไม่ถึงเวลาขาย</Badge>}
-                          </div>
-                          {it.description && <p className="truncate text-xs text-muted-foreground">{it.description}</p>}
-                        </div>
-                      </div>
-                      <div className="ml-3 flex shrink-0 items-center gap-2">
-                        <span className="text-sm font-semibold tabular">{isBuffet ? <span className="text-primary">บุฟเฟต์</span> : baht(it.price)}</span>
-                        {orderable(it) && <span className="grid size-6 place-items-center rounded-full bg-primary/10 text-primary"><Plus className="size-4" /></span>}
-                      </div>
-                    </button>
+            <>
+              {/* sticky toolbar — scrollable category chips + a list/grid layout toggle */}
+              <div className="sticky top-0 z-10 -mx-4 mb-3 flex items-center gap-2 bg-muted/30 px-4 py-2">
+                <div className="flex flex-1 gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <FilterChip active={catFilter === 'all'} onClick={() => setCatFilter('all')}>{t('pub.qr.cat_all')}</FilterChip>
+                  {recommended.length > 0 && (
+                    <FilterChip active={catFilter === 'rec'} onClick={() => setCatFilter('rec')}>
+                      <Star className="size-3.5 fill-current" /> {t('pub.qr.recommended')}
+                    </FilterChip>
+                  )}
+                  {menuCats.map((c) => (
+                    <FilterChip key={c.id} active={catFilter === c.id} onClick={() => setCatFilter(c.id)}>{c.name}</FilterChip>
                   ))}
                 </div>
-              </section>
-            ))
+                <button type="button" onClick={() => setMenuView((v) => (v === 'list' ? 'grid' : 'list'))}
+                  className="grid size-9 shrink-0 place-items-center rounded-full border bg-card active:scale-95" aria-label={t('pub.qr.view_toggle')}>
+                  {menuView === 'list' ? <LayoutGrid className="size-4" /> : <List className="size-4" />}
+                </button>
+              </div>
+
+              {/* recommended row — surfaced first when viewing all, or as the sole list when filtered to it */}
+              {recommended.length > 0 && (catFilter === 'all' || catFilter === 'rec') && (
+                <section className="mb-4">
+                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400">
+                    <Sparkles className="size-4" /> {t('pub.qr.recommended_section')}
+                  </h3>
+                  {renderDishes(recommended)}
+                </section>
+              )}
+
+              {shownCats.map((c) => (
+                <section key={c.id} className="mb-4">
+                  <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{c.name}</h3>
+                  {renderDishes(c.items)}
+                </section>
+              ))}
+            </>
           )}
         </TabsContent>
 
@@ -217,26 +349,49 @@ export default function DinerPage() {
             <>
               <Card className="mb-3 gap-3 p-4">
                 <div className="flex items-center justify-between">
-                  <strong className="text-sm">สถานะออเดอร์</strong>
+                  <strong className="text-sm">{t('pub.qr.order_status')}</strong>
                   <span className="text-xs text-muted-foreground">
-                    {st.order.waited_min > 0 ? `รอมาแล้ว ${st.order.waited_min} นาที` : 'เพิ่งสั่ง'}
+                    {st.order.waited_min > 0 ? t('pub.qr.waited', { n: st.order.waited_min }) : t('pub.qr.just_ordered')}
                   </span>
                 </div>
                 {st.order.ready_in_min > 0 && (
                   <div className="flex items-center gap-1.5 text-sm text-warning-foreground dark:text-warning">
-                    <Clock className="size-4" /> อาหารพร้อมในอีกประมาณ {st.order.ready_in_min} นาที
+                    <Clock className="size-4" /> {t('pub.qr.ready_in', { n: st.order.ready_in_min })}
                   </div>
                 )}
-                {dishes.length === 0 && <p className="text-sm text-muted-foreground">ยังไม่ได้สั่งอาหาร — เปิดแท็บเมนูเพื่อสั่ง</p>}
-                <div className="divide-y">
-                  {dishes.map((it) => (
-                    <div key={it.item_id} className="flex items-center justify-between py-1.5">
-                      <span className="text-sm">{it.qty}× {it.name}</span>
-                      <span className={cn('text-xs font-semibold', ITEM_COLOR[it.status_th] ?? 'text-muted-foreground')}>
-                        {it.status_th}
-                      </span>
-                    </div>
-                  ))}
+                {dishes.length === 0 && <p className="text-sm text-muted-foreground">{t('pub.qr.no_dishes')}</p>}
+                <div className="space-y-2.5">
+                  {lots.map(([key, items]) => {
+                    const pending = key === '__pending';
+                    const allServed = !pending && items.every((i) => i.kds_status === 'served');
+                    const wait = Math.max(0, ...items.filter((i) => i.kds_status !== 'served').map((i) => i.wait_min ?? 0), 0);
+                    return (
+                      <div key={key} className="rounded-lg border bg-muted/20 p-2.5">
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="flex items-center gap-1 font-medium text-muted-foreground">
+                            <Clock className="size-3.5" /> {pending ? t('pub.qr.lot_pending') : t('pub.qr.lot_at', { time: fmtTime(key) })}
+                          </span>
+                          {!pending && (
+                            <span className={cn('font-semibold', allServed ? 'text-success' : 'text-warning-foreground dark:text-warning')}>
+                              {allServed ? t('pub.qr.lot_all_served') : t('pub.qr.lot_waiting', { n: wait })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="divide-y">
+                          {items.map((it) => (
+                            <div key={it.item_id} className="flex items-center justify-between py-1.5">
+                              <span className="text-sm">{it.qty}× {it.name}</span>
+                              {it.kds_status === 'served' ? (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-success"><CheckCircle2 className="size-3.5" /> {t('pub.qr.st_served')}</span>
+                              ) : (
+                                <span className={cn('text-xs font-semibold', ITEM_COLOR[it.kds_status] ?? 'text-muted-foreground')}>{stLabel(it)}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </Card>
 
@@ -245,9 +400,9 @@ export default function DinerPage() {
                   {chargeLines.map((c) => (
                     <div key={c.item_id} className="flex justify-between text-muted-foreground"><span>{c.name}</span><span className="tabular">{baht(c.amount)}</span></div>
                   ))}
-                  <div className="flex justify-between text-muted-foreground"><span>มูลค่าสินค้า</span><span className="tabular">{baht(st.bill.subtotal)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>{t('pub.qr.subtotal')}</span><span className="tabular">{baht(st.bill.subtotal)}</span></div>
                   <div className="flex justify-between text-muted-foreground"><span>VAT 7%</span><span className="tabular">{baht(st.bill.vat)}</span></div>
-                  <div className="mt-1 flex justify-between border-t pt-2 text-lg font-bold text-primary"><span>รวมทั้งสิ้น</span><span className="tabular">{baht(st.bill.total)}</span></div>
+                  <div className="mt-1 flex justify-between border-t pt-2 text-lg font-bold text-primary"><span>{t('pub.qr.grand_total')}</span><span className="tabular">{baht(st.bill.total)}</span></div>
                 </Card>
               )}
 
@@ -255,19 +410,44 @@ export default function DinerPage() {
                 <>
                   {st.session_status === 'open' && (
                     <Button onClick={doBill} disabled={busy} variant="outline" className="h-12 w-full text-base">
-                      <ReceiptText className="size-5" /> เรียกเก็บเงิน
+                      <ReceiptText className="size-5" /> {t('pub.qr.request_bill')}
                     </Button>
                   )}
-                  {st.session_status === 'bill_requested' && (
-                    <Button onClick={doPay} disabled={busy} className="h-12 w-full text-base">
-                      <Smartphone className="size-5" /> ชำระด้วย PromptPay
-                    </Button>
+                  {st.session_status === 'bill_requested' && !splitMode && (
+                    <div className="grid gap-2">
+                      <Button onClick={doPay} disabled={busy} className="h-12 w-full text-base">
+                        <Smartphone className="size-5" /> {t('pub.qr.pay_promptpay')}
+                      </Button>
+                      <Button onClick={() => { setSplitMode(true); loadSplit(); }} disabled={busy} variant="outline" className="h-12 w-full text-base">
+                        <Split className="size-5" /> {t('pub.qr.split_pay')}
+                      </Button>
+                    </div>
+                  )}
+                  {st.session_status === 'bill_requested' && splitMode && (
+                    <Card className="gap-3 p-4">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-1.5 font-medium"><Users className="size-4" /> {t('pub.qr.split_pay')}</span>
+                        <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setSplitMode(false)}>{t('pub.qr.split_back')}</button>
+                      </div>
+                      {split && (
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>{t('pub.qr.split_paid', { amt: baht(split.paid_so_far) })}</span>
+                          <span className="font-semibold text-primary">{t('pub.qr.split_remaining', { amt: baht(split.remaining) })}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <input type="number" inputMode="decimal" min={1} value={shareAmt} onChange={(e) => setShareAmt(e.target.value)}
+                          placeholder={t('pub.qr.split_amount_ph')} className="h-11 w-full rounded-lg border bg-background px-3 text-sm" />
+                        <Button onClick={() => doPayShare(Number(shareAmt) || undefined)} disabled={busy || !shareAmt} className="h-11 shrink-0">{t('pub.qr.split_pay_this')}</Button>
+                      </div>
+                      <Button onClick={() => doPayShare()} disabled={busy} variant="outline" className="h-11 w-full">{t('pub.qr.split_pay_rest')}</Button>
+                    </Card>
                   )}
                 </>
               )}
               {pay && (
                 <Card className="items-center gap-3 p-5 text-center">
-                  <div className="font-medium">สแกนเพื่อชำระ {baht(pay.total)}</div>
+                  <div className="font-medium">{t('pub.qr.scan_to_pay', { amt: baht(pay.share ?? pay.total) })}{pay.share ? <span className="ml-1 text-xs text-muted-foreground">({t('pub.qr.split_your_share')})</span> : null}</div>
                   {pay.qr_image ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={pay.qr_image} alt="PromptPay QR" className="size-48 rounded-xl border bg-white p-2" />
@@ -277,21 +457,21 @@ export default function DinerPage() {
                       PromptPay QR<br />({pay.gateway_ref})
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">เปิดแอปธนาคารแล้วสแกน QR เพื่อชำระด้วย PromptPay</p>
+                  <p className="text-xs text-muted-foreground">{t('pub.qr.scan_hint')}</p>
                   {pay.mock_settle ? (
                     <Button onClick={doConfirm} disabled={busy} className="h-12 w-full bg-success text-base text-success-foreground hover:bg-success/90">
-                      ยืนยันการชำระเงิน (จำลอง)
+                      {t('pub.qr.confirm_mock')}
                     </Button>
                   ) : (
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-4" /> กำลังรอยืนยันการชำระเงินอัตโนมัติ…</p>
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-4" /> {t('pub.qr.waiting_confirm')}</p>
                   )}
                 </Card>
               )}
             </>
           ) : (
             <div className="grid place-items-center gap-3 py-10 text-center">
-              <p className="text-sm text-muted-foreground">ยังไม่มีรายการอาหาร</p>
-              <Button onClick={() => setTab('menu')} variant="outline"><Utensils className="size-4" /> เปิดเมนูเพื่อสั่งอาหาร</Button>
+              <p className="text-sm text-muted-foreground">{t('pub.qr.no_order')}</p>
+              <Button onClick={() => setTab('menu')} variant="outline"><Utensils className="size-4" /> {t('pub.qr.open_menu')}</Button>
             </div>
           )}
         </TabsContent>
@@ -301,26 +481,84 @@ export default function DinerPage() {
       {cartCount > 0 && (
         <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md p-4">
           <Button onClick={() => setCartOpen(true)} className="h-14 w-full justify-between text-base shadow-lg">
-            <span className="flex items-center gap-2"><ShoppingCart className="size-5" /> ตะกร้า ({cartCount})</span>
-            <span className="tabular">{isBuffet ? 'บุฟเฟต์' : baht(cartTotal)}</span>
+            <span className="flex items-center gap-2"><ShoppingCart className="size-5" /> {t('pub.qr.cart')} ({cartCount})</span>
+            <span className="tabular">{isBuffet ? t('pub.qr.buffet') : baht(cartTotal)}</span>
           </Button>
         </div>
       )}
 
+      {/* F1 call-staff sheet */}
+      <Dialog open={callOpen} onOpenChange={setCallOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{t('pub.qr.call_staff')}</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-2">
+            {(['waiter', 'water', 'cutlery', 'bill'] as const).map((ty) => (
+              <Button key={ty} variant="outline" className="h-14" disabled={busy} onClick={() => doCall(ty)}>{t(`pub.qr.call_${ty}`)}</Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* F3 member-link sheet */}
+      <Dialog open={memberOpen} onOpenChange={setMemberOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{t('pub.qr.link_member')}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('pub.qr.link_member_hint')}</p>
+          <input value={memberCode} onChange={(e) => setMemberCode(e.target.value)} placeholder={t('pub.qr.member_code_ph')}
+            className="h-12 w-full rounded-lg border bg-background px-3 text-base" />
+          <DialogFooter>
+            <Button onClick={doLinkMember} disabled={busy || !memberCode.trim()} className="h-12 w-full">{t('pub.qr.link_member')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {zoomImg && <Lightbox img={zoomImg} onClose={() => setZoomImg(null)} />}
       {picker && <ModifierPicker item={picker} buffet={isBuffet} onClose={() => setPicker(null)} onAdd={(line) => { addToCart(line); setPicker(null); }} />}
-      <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder} />
+      <CartDialog open={cartOpen} onOpenChange={setCartOpen} cart={cart} setCart={setCart} total={cartTotal} buffet={isBuffet} busy={busy} onSubmit={submitOrder}
+        suggestions={suggestions} nm={nm} onAddSuggestion={(it) => onItemTap(it)} />
       {buffetOpen && tiers && <BuffetStartDialog tiers={tiers} defaultPax={2} busy={busy} onClose={() => setBuffetOpen(false)} onStart={startBuffet} />}
     </main>
   );
 }
 
+// full-screen image lightbox — tap to toggle 1× / 2.5× zoom, tap ✕ (or backdrop) to close
+function Lightbox({ img, onClose }: { img: { src: string; name: string }; onClose: () => void }) {
+  const [zoom, setZoom] = useState(false);
+  return (
+    <div role="dialog" aria-modal="true" onClick={onClose}
+      className="fixed inset-0 z-50 flex flex-col bg-black/90 p-3">
+      <div className="flex items-center justify-between text-white">
+        <span className="truncate text-sm font-medium">{img.name}</span>
+        <button type="button" onClick={onClose} aria-label="close" className="grid size-9 place-items-center rounded-full bg-white/10 active:bg-white/20"><X className="size-5" /></button>
+      </div>
+      <div className="flex flex-1 items-center justify-center overflow-auto">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img.src} alt={img.name} onClick={(e) => { e.stopPropagation(); setZoom((z) => !z); }}
+          className={cn('max-h-full max-w-full rounded-lg object-contain transition-transform duration-200', zoom ? 'scale-[2.5] cursor-zoom-out' : 'cursor-zoom-in')} />
+      </div>
+    </div>
+  );
+}
+
+// diner menu category filter chip
+function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={cn('inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition', active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:border-primary/50')}>
+      {children}
+    </button>
+  );
+}
+
 function BuffetChip({ b }: { b: Buffet }) {
-  if (b.expired) return <Badge variant="destructive" className="text-[10px]">หมดเวลา</Badge>;
-  return <Badge variant="secondary" className="gap-1 text-[10px]"><Timer className="size-3" /> เหลือ {b.minutes_left} นาที</Badge>;
+  const { t } = useLang();
+  if (b.expired) return <Badge variant="destructive" className="text-[10px]">{t('pub.qr.expired')}</Badge>;
+  return <Badge variant="secondary" className="gap-1 text-[10px]"><Timer className="size-3" /> {t('pub.qr.mins_left', { n: b.minutes_left ?? 0 })}</Badge>;
 }
 
 // ── modifier picker (one item) ──
 function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buffet: boolean; onClose: () => void; onAdd: (l: CartLine) => void }) {
+  const { t } = useLang();
   const [sel, setSel] = useState<Record<number, number[]>>(() => {
     const init: Record<number, number[]> = {};
     for (const g of item.modifier_groups) { const d = g.options.find((o) => o.is_default); init[g.group_id] = d ? [d.option_id] : []; }
@@ -358,7 +596,7 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
             <div key={g.group_id}>
               <div className="mb-1.5 flex items-center gap-2 text-sm font-medium">
                 {g.name}
-                {g.required ? <Badge variant="destructive" className="text-[10px]">จำเป็น</Badge> : <span className="text-xs text-muted-foreground">เลือกได้สูงสุด {g.max_select}</span>}
+                {g.required ? <Badge variant="destructive" className="text-[10px]">{t('pub.qr.required')}</Badge> : <span className="text-xs text-muted-foreground">{t('pub.qr.max_select', { n: g.max_select })}</span>}
               </div>
               <div className="grid gap-1.5">
                 {g.options.map((o) => {
@@ -382,7 +620,7 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
         </div>
         <DialogFooter>
           <Button onClick={confirm} disabled={!!missing} className="h-12 w-full justify-between text-base">
-            <span>เพิ่มลงตะกร้า</span><span className="tabular">{buffet ? 'บุฟเฟต์' : baht(unitPrice)}</span>
+            <span>{t('pub.qr.add_to_cart')}</span><span className="tabular">{buffet ? t('pub.qr.buffet') : baht(unitPrice)}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -391,18 +629,20 @@ function ModifierPicker({ item, buffet, onClose, onAdd }: { item: MenuItem; buff
 }
 
 // ── cart review + submit ──
-function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, onSubmit }: {
+function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, onSubmit, suggestions, nm, onAddSuggestion }: {
   open: boolean; onOpenChange: (o: boolean) => void; cart: CartLine[]; setCart: (f: (c: CartLine[]) => CartLine[]) => void; total: number; buffet: boolean; busy: boolean; onSubmit: () => void;
+  suggestions: MenuItem[]; nm: (o: { name: string; name_en?: string | null }) => string; onAddSuggestion: (it: MenuItem) => void;
 }) {
+  const { t } = useLang();
   const setQty = (key: string, delta: number) =>
     setCart((cur) => cur.flatMap((c) => (c.key === key ? (c.qty + delta <= 0 ? [] : [{ ...c, qty: c.qty + delta }]) : [c])));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>ตะกร้าของฉัน</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('pub.qr.my_cart')}</DialogTitle></DialogHeader>
         {cart.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">ตะกร้าว่าง</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">{t('pub.qr.cart_empty')}</p>
         ) : (
           <div className="max-h-[55svh] space-y-3 overflow-y-auto">
             {cart.map((c) => (
@@ -410,7 +650,7 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
                 <div className="min-w-0">
                   <div className="text-sm font-medium">{c.name}</div>
                   {c.optionLabels.length > 0 && <p className="text-xs text-muted-foreground">{c.optionLabels.join(' · ')}</p>}
-                  <p className="text-xs text-muted-foreground tabular">{buffet ? 'บุฟเฟต์' : baht(c.unitPrice)}</p>
+                  <p className="text-xs text-muted-foreground tabular">{buffet ? t('pub.qr.buffet') : baht(c.unitPrice)}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Button size="icon" variant="outline" className="size-7" onClick={() => setQty(c.key, -1)}><Minus className="size-3.5" /></Button>
@@ -421,9 +661,23 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
             ))}
           </div>
         )}
+        {/* F6 upsell: "สั่งคู่กับ…" co-purchase suggestions */}
+        {suggestions.length > 0 && (
+          <div className="border-t pt-2">
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Sparkles className="size-3.5" /> {t('pub.qr.upsell_title')}</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {suggestions.map((it) => (
+                <button key={it.id} type="button" onClick={() => onAddSuggestion(it)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-sm active:scale-95">
+                  <Plus className="size-3.5 text-primary" /> {nm(it)} <span className="text-xs text-muted-foreground tabular">{buffet ? '' : baht(it.price)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <DialogFooter>
           <Button onClick={onSubmit} disabled={busy || cart.length === 0} className="h-12 w-full justify-between text-base">
-            <span>ส่งออเดอร์เข้าครัว</span><span className="tabular">{buffet ? 'บุฟเฟต์' : baht(total)}</span>
+            <span>{t('pub.qr.send_order')}</span><span className="tabular">{buffet ? t('pub.qr.buffet') : baht(total)}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -435,17 +689,18 @@ function CartDialog({ open, onOpenChange, cart, setCart, total, buffet, busy, on
 function BuffetStartDialog({ tiers, defaultPax, busy, onClose, onStart }: {
   tiers: Tier[]; defaultPax: number; busy: boolean; onClose: () => void; onStart: (packageId: number, pax: number) => void;
 }) {
+  const { t } = useLang();
   const [pax, setPax] = useState(defaultPax);
   const [sel, setSel] = useState<number | null>(tiers[0]?.id ?? null);
-  const tier = tiers.find((t) => t.id === sel);
+  const tier = tiers.find((x) => x.id === sel);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>เริ่มบุฟเฟต์</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t('pub.qr.buffet_start')}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border p-3">
-            <span className="text-sm font-medium">จำนวนคน</span>
+            <span className="text-sm font-medium">{t('pub.qr.pax_label')}</span>
             <div className="flex items-center gap-2">
               <Button size="icon" variant="outline" className="size-8" onClick={() => setPax((p) => Math.max(1, p - 1))}><Minus className="size-4" /></Button>
               <span className="w-6 text-center text-base tabular">{pax}</span>
@@ -453,21 +708,21 @@ function BuffetStartDialog({ tiers, defaultPax, busy, onClose, onStart }: {
             </div>
           </div>
           <div className="grid gap-2">
-            {tiers.map((t) => (
-              <button key={t.id} type="button" onClick={() => setSel(t.id)}
-                className={cn('flex items-center justify-between rounded-lg border p-3 text-left transition', t.id === sel ? 'border-primary bg-primary/5' : 'hover:border-primary/40')}>
+            {tiers.map((x) => (
+              <button key={x.id} type="button" onClick={() => setSel(x.id)}
+                className={cn('flex items-center justify-between rounded-lg border p-3 text-left transition', x.id === sel ? 'border-primary bg-primary/5' : 'hover:border-primary/40')}>
                 <div>
-                  <div className="text-sm font-medium">{t.name}</div>
-                  <p className="text-xs text-muted-foreground">{t.time_limit_min} นาที{t.overtime_fee_per_pax > 0 ? ` · เกินเวลา +${baht(t.overtime_fee_per_pax)}/ท่าน` : ''}</p>
+                  <div className="text-sm font-medium">{x.name}</div>
+                  <p className="text-xs text-muted-foreground">{t('pub.qr.tier_mins', { n: x.time_limit_min })}{x.overtime_fee_per_pax > 0 ? t('pub.qr.overtime', { amt: baht(x.overtime_fee_per_pax) }) : ''}</p>
                 </div>
-                <span className="text-sm font-semibold tabular">{baht(t.price_per_pax)}/ท่าน</span>
+                <span className="text-sm font-semibold tabular">{t('pub.qr.per_pax', { amt: baht(x.price_per_pax) })}</span>
               </button>
             ))}
           </div>
         </div>
         <DialogFooter>
           <Button onClick={() => sel && onStart(sel, pax)} disabled={busy || !sel} className="h-12 w-full justify-between text-base">
-            <span>เริ่มบุฟเฟต์</span><span className="tabular">{tier ? baht(tier.price_per_pax * pax) : ''}</span>
+            <span>{t('pub.qr.buffet_start')}</span><span className="tabular">{tier ? baht(tier.price_per_pax * pax) : ''}</span>
           </Button>
         </DialogFooter>
       </DialogContent>

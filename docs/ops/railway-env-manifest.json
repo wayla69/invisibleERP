@@ -1,5 +1,5 @@
 {
-  "$comment": "Config-of-record for Railway service environment VARIABLE NAMES (never values) — incident 2026-07-10 follow-up (AUTH_COOKIE_SAMESITE was silently lost in a hand-rebuild of the service env; docs/ops/incident-2026-07-10-login-bounce-cross-site-cookie.md). The scheduled ops-synthetic-probe.yml workflow diffs each service's LIVE variable names against this manifest: a name listed in `expected` but missing live FAILS the probe (a var was lost — the July-10 class); a live name not listed here warns (update this manifest in the same change that adds the variable). RAILWAY_*-prefixed names are Railway-managed and ignored. `transitional` names are expected to disappear (warn while present, never fail): AUTH_COOKIE_SAMESITE is deleted by the ops-proxy-cutover.yml remove-samesite action once the same-origin proxy is live. Snapshot basis: live listing 2026-07-10 (ops-railway-diag runs 29072390863 / 29072395860). PROBE_USERNAME/PROBE_PASSWORD are the synthetic-probe login credentials provisioned + rotated by ops-provision-probe-user.yml (stored on the API service purely as the automation-reachable credential store — the API itself never reads them).",
+  "$comment": "Config-of-record for Railway service environment VARIABLE NAMES (never values) — incident 2026-07-10 follow-up (AUTH_COOKIE_SAMESITE was silently lost in a hand-rebuild of the service env; docs/ops/incident-2026-07-10-login-bounce-cross-site-cookie.md). The scheduled ops-synthetic-probe.yml workflow diffs each service's LIVE variable names against this manifest: a name listed in `expected` but missing live FAILS the probe (a var was lost — the July-10 class); a live name not listed here warns (update this manifest in the same change that adds the variable). RAILWAY_*-prefixed names are Railway-managed and ignored. `transitional` names are expected to disappear (warn while present, never fail): AUTH_COOKIE_SAMESITE is deleted by the ops-proxy-cutover.yml remove-samesite action once the same-origin proxy is live. Snapshot basis: live listing 2026-07-10 (ops-railway-diag runs 29072390863 / 29072395860). PROBE_USERNAME/PROBE_PASSWORD are the synthetic-probe login credentials provisioned + rotated by ops-provision-probe-user.yml (stored on the API service purely as the automation-reachable credential store — the API itself never reads them). PLATFORM_REQUIRE_MFA is listed on the API service DELIBERATELY as a forcing function: the god surface carries a full cross-tenant RLS bypass, so the probe should stay red until TOTP is mandatory on it (set it to true on invisibleERP after the platform owner enrols — rollout order in .env.example). PLATFORM_IP_ALLOWLIST is intentionally NOT listed: it is optional and only correct behind a fixed egress IP.",
   "services": {
     "invisibleERP": {
       "expected": [
@@ -13,6 +13,7 @@
         "JWT_SECRET",
         "NIXPACKS_NODE_VERSION",
         "PLATFORM_ADMIN_USERNAMES",
+        "PLATFORM_REQUIRE_MFA",
         "PORT",
         "PROBE_PASSWORD",
         "PROBE_USERNAME",
@@ -22,7 +23,11 @@
         "SENTRY_DSN",
         "TENANCY_MODE"
       ],
-      "transitional": ["AUTH_COOKIE_SAMESITE"]
+      "transitional": [
+        "AUTH_COOKIE_SAMESITE",
+        "ENTITLEMENTS_SHADOW",
+        "ENTITLEMENTS_ENFORCE"
+      ]
     },
     "invisiblePOSERP": {
       "expected": [

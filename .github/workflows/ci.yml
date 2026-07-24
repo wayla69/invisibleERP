@@ -54,6 +54,19 @@ jobs:
         # that touch journalEntries/journalLines are grandfathered and the set may only shrink: read GL
         # state via LedgerReadService (accountNet/cashPosition/entryRefNo), post via LedgerService.postEntry.
         run: node tools/ci/check-import-boundaries.mjs
+      - name: maker-checker coverage ratchet (SoD self-approval by omission)
+        # SOX-ICFR #6 — every state-mutating approve/override/authorize/certify/reverse/release route must be
+        # maker-checker-covered: its module wires assertMakerChecker/assertActionAllowed, or it is listed in
+        # tools/ci/maker-checker-baseline.json "exempt" with a reason. A new sensitive route in a non-enforcing
+        # module fails the build; add the check (common/control-profile.ts) or justify an exemption.
+        run: node tools/ci/check-maker-checker.mjs
+      - name: platform-owner surface ratchet (cross-tenant privilege may not grow unreviewed)
+        # A @PlatformAdmin route runs under a FULL cross-tenant RLS bypass — one credential reads/writes
+        # EVERY company's data. That surface grew 26 → 38 unnoticed because nothing watched it. The reviewed
+        # inventory lives in tools/ci/platform-surface-baseline.json: a route missing from it fails, a stale
+        # entry fails, and @PlatformAdmin + @Public fails outright. Prefer a tenant-scoped @Permissions duty;
+        # if god authority is genuinely required, run --update and add a "reason" in the same PR.
+        run: node tools/ci/check-platform-surface.mjs
       # Hand the compiled output to the harness shards so they don't each rebuild.
       - name: Upload dist
         uses: actions/upload-artifact@v4
@@ -64,6 +77,31 @@ jobs:
             packages/shared/dist
           retention-days: 1
           if-no-files-found: error
+
+  # docs/54 — the SCM forecast/optimization engine is a Python microservice (services/forecast-engine),
+  # deliberately OUTSIDE the pnpm workspace, so `pnpm -r` never sees it and the build job can't gate it.
+  # This job is its gate: unit tests for the maths (newsvendor critical-ratio quantile, MILP⇄newsvendor
+  # equivalence in the single-period limit, FEFO consumption property, Croston-SBA intermittency) plus
+  # the HMAC auth boundary. It also parses the SHARED contract fixtures with the pydantic mirror — the
+  # TS half of that parity check runs in `build` (apps/api/test/scm-contract.test.ts), so a one-sided
+  # contract change fails whichever side went stale.
+  engine-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/forecast-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # matches the Dockerfile base image
+          cache: pip
+          cache-dependency-path: services/forecast-engine/pyproject.toml
+      - name: Install engine + dev deps
+        # prophet ships manylinux wheels with the compiled cmdstan model — no toolchain build here.
+        run: pip install -e ".[dev]"
+      - name: Unit + contract tests
+        run: pytest -q
 
   # The integration harnesses boot the real Nest app over PGlite (a real Postgres),
   # run the Drizzle migrations and assert behaviour — green means "it works", not
@@ -105,11 +143,12 @@ jobs:
           - shard: platform-a
             run: >-
               cutover:e2e cutover:ext cutover:tenant-isolation cutover:tenant-idx
-              cutover:module-qr cutover:gaps
+              cutover:rls-coverage cutover:module-qr cutover:gaps
           - shard: platform-b
             run: >-
               cutover:worldclass cutover:migration-parity cutover:ai-eval
               cutover:onboarding cutover:opening-balances cutover:sme
+              cutover:plan-gating cutover:proration
           # ── COSO/ICFR controls (GL-05 maker-checker, SoD block, access review, audit-log immutability) ──
           - shard: controls
             run: >-
@@ -120,8 +159,8 @@ jobs:
           - shard: pos
             run: >-
               cutover:pos-p0 cutover:pos-p1 cutover:pos-p2 cutover:pos-wiring
-              cutover:pos-discount cutover:pricing cutover:splitbill cutover:cashreport
-              cutover:returns
+              cutover:pos-discount cutover:pricing cutover:pos-pricebook cutover:splitbill
+              cutover:cashreport cutover:returns cutover:pos-exchange
           # ── restaurant ──
           - shard: restaurant
             run: >-
@@ -138,7 +177,7 @@ jobs:
           - shard: scm-mfg
             run: >-
               cutover:stock-ops cutover:match cutover:costing cutover:landed-cost cutover:wms cutover:scm17c cutover:cycle-counts cutover:transfer-orders cutover:std-cost-roll cutover:lot-trace
-              cutover:manufacturing cutover:mfg-depth cutover:mrp
+              cutover:manufacturing cutover:mfg-depth cutover:mrp cutover:scm
           # ── CRM / billing / projects / loyalty ──
           - shard: crm
             run: >-
@@ -176,11 +215,20 @@ jobs:
             # docs/27 R3-3 — the compliance ToE run writes structured evidence for retention (below).
             ev=""
             if [ "$script" = "compliance" ]; then ev="${GITHUB_WORKSPACE}/compliance-evidence.json"; fi
-            if EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script"; then
-              echo "::endgroup::"
-            else
-              echo "::endgroup::"
-              echo "::error::harness FAILED: ${pkg} → ${script}"
+            # `&& rc=0 || rc=$?` captures the exit code without tripping the step's `set -e` (errexit).
+            EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script" && rc=0 || rc=$?
+            # Retry ONCE on a native CRASH SIGNAL (exit >=128, e.g. 139 SIGSEGV / 134 SIGABRT) — a rare,
+            # non-deterministic PGlite / node:sqlite (--experimental-sqlite) segfault at boot, before any
+            # check runs. A real assertion failure (exit 1) is NOT retried: it fails fast, so this can never
+            # mask a logic regression, only self-heal an infrastructure flake (previously needed a manual
+            # re-run of the whole shard). The harnesses are deterministic, so a genuine failure fails twice.
+            if [ "$rc" -ge 128 ]; then
+              echo "::warning::${pkg} → ${script} crashed (exit ${rc}, signal) — retrying once (native flake)"
+              EVIDENCE_OUT="$ev" pnpm --filter "@ierp/${pkg}" "$script" && rc=0 || rc=$?
+            fi
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::harness FAILED: ${pkg} → ${script} (exit ${rc})"
               failed="$failed ${pkg}:${script}"
             fi
           done

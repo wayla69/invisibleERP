@@ -152,3 +152,67 @@ def sentiment_weighted_rfm(
         "r_score", "f_score", "m_score", "base_rfm_score",
         "sentiment_score", "sentiment_multiplier", "weighted_rfm_score", "segment", "category",
     ]]
+
+
+# ── Customer Intelligence (docs/60 Phase 2) ──────────────────────────────────────────────────────────
+# Forward-looking per-customer scores derived from the scored RFM frame. Kept INTERPRETABLE (no black-box
+# model, no extra deps) as a first cut — a BG/NBD + Gamma-Gamma CLV and a gradient-boosted churn classifier
+# are governed under Phase 4. The ERP stores these as ADVISORY columns (mi_clv / mi_churn_risk / mi_nba),
+# separate from its own explainable churn/LTV; any contact stays consent-gated + draft.
+
+# next-best-action per segment (refined by churn below). Codes match the ERP NBA_CODES allow-list.
+_SEGMENT_NBA = {
+    "Loyal Promoters": "UPSELL",
+    "Steady Loyal": "CROSS_SELL",
+    "New / Growing": "NURTURE",
+    "At Risk VIPs": "VIP_CARE",
+    "Churn Risk": "REACTIVATE",
+    "Needs Attention": "RETAIN",
+}
+
+
+def _churn_probability(r_score: int, f_score: int, m_score: int, sentiment: float) -> float:
+    """Interpretable churn probability in [0,1]. Engagement is a weighted blend of the 1..5 RFM quantile
+    scores (recency weighs most); positive sentiment lowers churn. Monotone in every input."""
+    eng = (0.50 * (r_score - 1) + 0.30 * (f_score - 1) + 0.20 * (m_score - 1)) / 4.0  # [0,1]
+    return float(np.clip(1.0 - eng - 0.10 * sentiment, 0.02, 0.98))
+
+
+def _next_best_action(segment: str, churn: float, high_value: bool) -> str:
+    """Pick the action code from segment, escalated by churn/value."""
+    if churn >= 0.6 and high_value:
+        return "WINBACK"                        # valuable + likely to leave — top priority
+    return _SEGMENT_NBA.get(segment, "RETAIN")
+
+
+def customer_intelligence(scored_rfm: pd.DataFrame) -> pd.DataFrame:
+    """Per-customer CLV / churn probability / next-best-action from a ``sentiment_weighted_rfm`` frame.
+
+    Returns ``customer_no, predicted_clv, churn_probability, next_best_action`` — ready to merge onto the
+    persisted RFM row and push to the ERP as ``members[].{clv, churn_risk, nba}``.
+    """
+    if scored_rfm.empty:
+        return pd.DataFrame(columns=["customer_no", "predicted_clv", "churn_probability", "next_best_action"])
+    df = scored_rfm.copy()
+    churn = df.apply(
+        lambda x: _churn_probability(int(x["r_score"]), int(x["f_score"]), int(x["m_score"]), float(x["sentiment_score"])),
+        axis=1,
+    )
+    freq = df["frequency"].clip(lower=1).astype(float)
+    aov = (df["monetary"].astype(float) / freq)                       # average order value
+    high_value = (df["f_score"] >= 4) & (df["m_score"] >= 4)
+    # 12-month forward-value proxy: retained share of the customer's historical order value projected one
+    # cycle forward (retention = 1 - churn). Bounded, interpretable; Phase 4 upgrades to BG/NBD.
+    predicted_clv = (aov * freq * (1.0 - churn)).round(2)
+    nba = [
+        _next_best_action(str(seg), float(c), bool(hv))
+        for seg, c, hv in zip(df["segment"], churn, high_value)
+    ]
+    out = pd.DataFrame({
+        "customer_no": df["customer_no"].values,
+        "predicted_clv": predicted_clv.values,
+        "churn_probability": churn.round(4).values,
+        "next_best_action": nba,
+    })
+    logger.info("CustomerIntelligence: scored %d customers; NBA mix: %s", len(out), out["next_best_action"].value_counts().to_dict())
+    return out

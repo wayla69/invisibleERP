@@ -1,9 +1,11 @@
-import { Inject, Injectable, Module, Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { Inject, Injectable, Module, Controller, Get, Post, Param, Query, Optional } from '@nestjs/common';
 import { sql, eq, and, asc, desc, isNull } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import { platformNotifications, platformNotificationReads } from '../../database/schema';
 import { PlatformAdmin, CurrentUser, type JwtUser } from '../../common/decorators';
 import { logger } from '../../observability/logger';
+import { MailerModule } from '../mailer/mailer.module';
+import { MailerService } from '../mailer/mailer.service';
 
 export interface EmitInput {
   type: string;
@@ -20,7 +22,10 @@ export interface EmitInput {
 // event LOG with read/unread, so a request that was since handled still shows in history.
 @Injectable()
 export class PlatformNotificationsService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+    @Optional() private readonly mailer?: MailerService, // D1 — optional: partial harnesses run without it
+  ) {}
 
   // Best-effort emit — a notification must never break the business action that triggered it.
   async emit(input: EmitInput): Promise<void> {
@@ -29,6 +34,16 @@ export class PlatformNotificationsService {
         type: input.type, title: input.title, body: input.body ?? null,
         aboutTenantId: input.tenantId ?? null, refType: input.refType ?? null, refId: input.refId ?? null,
       });
+      // D1 — push the inbox event to the platform owner's mailbox (PLATFORM_ALERT_EMAIL; unset = inbox
+      // only). Rides the A1 outbox, so delivery/retry semantics match every other transactional mail.
+      const alertTo = (process.env.PLATFORM_ALERT_EMAIL ?? '').trim();
+      if (alertTo && this.mailer) {
+        const base = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+        await this.mailer.send({
+          template: 'platform_alert', to: alertTo, aboutTenantId: input.tenantId ?? null,
+          vars: { title: input.title, body: input.body ?? '', type: input.type, console_url: `${base}/platform` },
+        });
+      }
     } catch (e) {
       logger.warn({ err: (e as Error)?.message, type: input.type }, 'platform notification emit failed');
     }
@@ -108,6 +123,7 @@ export class PlatformNotificationsController {
 }
 
 @Module({
+  imports: [MailerModule], // D1 — the god-inbox email push rides the A1 outbox
   controllers: [PlatformNotificationsController],
   providers: [PlatformNotificationsService],
   exports: [PlatformNotificationsService],

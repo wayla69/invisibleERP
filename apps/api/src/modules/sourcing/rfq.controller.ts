@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Body, HttpCode, Res } from '@nestjs/commo
 import { z } from 'zod';
 import type { FastifyReply } from 'fastify';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { RfqService } from './rfq.service';
 
@@ -10,6 +11,10 @@ const DocEmailBody = z.object({ to_email: z.string().email() });
 const QuoteBody = z.object({ vendor_id: z.number().int().optional(), vendor_name: z.string().optional(), valid_until: z.string().optional(), lead_time_days: z.number().int().optional(), items: z.array(z.object({ item_id: z.string().min(1), item_description: z.string().optional(), qty: z.number().positive(), unit_price: z.number().nonnegative(), uom: z.string().optional() })).min(1) });
 const AwardBody = z.object({ quote_no: z.string().min(1) });
 
+// 0451 — RFQ sourcing is the 'Advanced Supply Chain & Procurement Routing' add-on suite. Grandfathered
+// into business/pro/franchise/enterprise (they had the procurement token before the add-on existed);
+// other plans buy it à la carte (subscriptions.addons). Inert unless ENTITLEMENTS_ENFORCE is on.
+@RequiresSuite('scm_advanced')
 @Controller('api/procurement/rfqs')
 export class RfqController {
   constructor(private readonly svc: RfqService) {}

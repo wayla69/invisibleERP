@@ -18,9 +18,10 @@ from sqlalchemy import text
 # Support both `python run.py` (flat) and package import.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from shared import connection, ensure_schema, fetch_df, get_engine, write_df  # noqa: E402
+from shared import ErpApiError, ErpClient  # noqa: E402
 
 from mmm_model import ChannelSpec, MarketingMixModel  # noqa: E402
-from rfm_model import rfm_from_facts, sentiment_weighted_rfm  # noqa: E402
+from rfm_model import rfm_from_facts, sentiment_weighted_rfm, customer_intelligence  # noqa: E402
 from tows_analyzer import TowsAnalyzer  # noqa: E402
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -98,6 +99,10 @@ def _run_rfm() -> Optional[pd.DataFrame]:
     base = rfm_from_facts(facts)
     result = sentiment_weighted_rfm(base, sentiment)
 
+    # docs/60 Phase 2 — attach forward-looking CLV / churn / next-best-action per customer.
+    intel = customer_intelligence(result)
+    result = result.merge(intel, on="customer_no", how="left")
+
     persist = result.drop(columns=["category"])  # category is derived; the table stores the segment label
     with get_engine().begin() as conn:
         conn.exec_driver_sql("TRUNCATE analytics.customer_rfm_segments")
@@ -124,11 +129,80 @@ def _run_tows(mmm: Optional[pd.DataFrame], rfm: Optional[pd.DataFrame]) -> None:
     logger.info("TOWS persisted (%d recommendations).", len(tows))
 
 
+# ── Push-back to the ERP ───────────────────────────────────────────────────────────────────────────
+def _push_to_erp() -> None:
+    """POST the computed MMM / RFM / TOWS back into the ERP (scope analytics:write) so it owns what it
+    renders at /marketing-intel. Reads the persisted ``analytics.*`` tables (the canonical result) and
+    upserts one snapshot per kind. Opt-in via ERP_PUSH_ENABLED — off by default so a read-only key or an
+    unconfigured ERP never turns a clean analytics run red."""
+    if os.environ.get("ERP_PUSH_ENABLED", "0") != "1" or not os.environ.get("ERP_API_URL"):
+        logger.info("ERP push-back disabled (set ERP_PUSH_ENABLED=1 + an analytics:write key to enable).")
+        return
+
+    snapshots: List[Dict] = []
+
+    run = fetch_df("SELECT run_id, r2, total_spend, ridge_alpha, window_from, window_to, created_at FROM analytics.mmm_runs ORDER BY run_id DESC LIMIT 1")
+    if not run.empty:
+        rid = int(run.iloc[0]["run_id"])
+        channels = fetch_df(
+            "SELECT channel, spend, attributed_revenue, contribution_pct, roi FROM analytics.mmm_results "
+            "WHERE run_id = :rid ORDER BY contribution_pct DESC", {"rid": rid}
+        )
+        r2 = float(run.iloc[0]["r2"]) if run.iloc[0]["r2"] is not None else None
+        # docs/60 Phase 4 — a MODEL CARD accompanies the run so the ERP's governance surface has the
+        # auditable "what produced this recommendation" (version / training window / features / metrics).
+        model_card = {
+            "model_version": f"mmm-ridge-r{rid}",
+            "model_type": "GeometricAdstock→Hill→Ridge",
+            "training_window": f"{run.iloc[0]['window_from']}..{run.iloc[0]['window_to']}",
+            "features": [str(c) for c in channels["channel"].tolist()],
+            "metrics": {"r2": r2, "ridge_alpha": float(run.iloc[0]["ridge_alpha"]) if run.iloc[0]["ridge_alpha"] is not None else None},
+            "trained_at": str(run.iloc[0]["created_at"]),
+        }
+        snapshots.append({"kind": "mmm", "model_run_ref": str(rid), "model_card": model_card, "payload": {
+            "r2": r2,
+            "total_spend": float(run.iloc[0]["total_spend"] or 0),
+            "channels": channels.to_dict(orient="records"),
+        }})
+
+    rfm = fetch_df("SELECT segment, COUNT(*) AS customers, SUM(monetary) AS monetary FROM analytics.customer_rfm_segments GROUP BY segment ORDER BY customers DESC")
+    if not rfm.empty:
+        # Per-customer assignments so the ERP can ACT on the segments (campaign targeting via mi_segment).
+        # docs/60 Phase 2 also carries CLV / churn / next-best-action → the ERP mi_clv / mi_churn_risk / mi_nba.
+        members = fetch_df(
+            "SELECT customer_no, segment, predicted_clv AS clv, churn_probability AS churn_risk, "
+            "next_best_action AS nba FROM analytics.customer_rfm_segments WHERE customer_no IS NOT NULL"
+        )
+        # Drop null score fields so a segment-only run doesn't wipe the ERP's existing scores (its push
+        # contract leaves scores untouched when none are present).
+        member_records = [{k: v for k, v in rec.items() if v is not None} for rec in members.to_dict(orient="records")]
+        snapshots.append({
+            "kind": "rfm",
+            "payload": {"segments": rfm.to_dict(orient="records")},
+            "members": member_records,
+        })
+
+    tows = fetch_df("SELECT quadrant, factor, recommendation, priority FROM analytics.tows_matrix ORDER BY priority ASC, quadrant ASC")
+    if not tows.empty:
+        snapshots.append({"kind": "tows", "payload": {"items": tows.to_dict(orient="records")}})
+
+    if not snapshots:
+        logger.warning("ERP push-back skipped — no analytics results to push yet.")
+        return
+    try:
+        with ErpClient() as erp:
+            res = erp.push_analytics_snapshots(snapshots)
+        logger.info("Pushed %s analytics snapshots to the ERP: %s", res.get("pushed"), res.get("kinds"))
+    except ErpApiError:
+        logger.exception("ERP push-back failed (check the key has the analytics:write scope).")
+
+
 def run_all() -> None:
     ensure_schema()
     mmm = _safe("MMM", _run_mmm)
     rfm = _safe("RFM", _run_rfm)
     _safe("TOWS", lambda: _run_tows(mmm, rfm))
+    _safe("push-back", _push_to_erp)
     logger.info("Analytics run complete.")
 
 

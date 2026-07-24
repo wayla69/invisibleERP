@@ -27,7 +27,7 @@ export class PortalUsersService {
 
   async create(dto: SubUserDto, u: JwtUser) {
     const tenantId = this.requireTenant(u);
-    if (!dto.password || dto.password.length < 6) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥6 chars', messageTh: 'รหัสผ่านอย่างน้อย 6 ตัว' });
+    if (!dto.password || dto.password.length < 8) throw new BadRequestException({ code: 'WEAK_PASSWORD', message: 'Password must be ≥8 chars', messageTh: 'รหัสผ่านอย่างน้อย 8 ตัว' });
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException({ code: 'BAD_USERNAME', message: 'Username is required', messageTh: 'ต้องระบุชื่อผู้ใช้' });
     const db = this.db;
@@ -35,8 +35,10 @@ export class PortalUsersService {
     if (exists) throw new ConflictException({ code: 'USER_EXISTS', message: `User ${username} already exists`, messageTh: 'มีผู้ใช้นี้แล้ว' });
     const hash = await this.passwords.hash(dto.password);
     const [created] = await db.insert(users).values({ username, passwordHash: hash, role: 'Customer', tenantId, mustChangePassword: true }).returning({ id: users.id });
-    // Limit sub-account permissions to customer-portal scopes only.
-    const allowed = new Set(['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'loyalty', 'survey', 'track']);
+    // Limit sub-account permissions to customer-portal scopes only. PE-9 — `loyalty` is a BACK-OFFICE duty
+    // (it satisfies the OR-gated staff loyalty routes, incl. member points-transfer, sidestepping the
+    // `crm_points_adjust` SoD split), so a portal customer must NOT be able to grant it to a sub-user.
+    const allowed = new Set(['order_cust', 'cust_pos', 'cust_dash', 'cust_inventory', 'cust_bom', 'cust_variance', 'survey', 'track']);
     const perms = (dto.permissions ?? []).filter((p) => allowed.has(p));
     if (perms.length) await db.insert(userPermissions).values(perms.map((p) => ({ userId: Number(created!.id), perm: p }))).onConflictDoNothing();
     return { username, role: 'Customer', created: true };

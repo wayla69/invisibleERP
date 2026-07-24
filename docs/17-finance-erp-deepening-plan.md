@@ -359,7 +359,7 @@ idx, ascending when).
 `gl_coa`, `gl_posting_rules` (Admin/Controller, maker-checker). Reuse existing `gl_post`, `gl_close`,
 `approvals`, `creditors`, `ar`, `exec` elsewhere.
 
-## New/changed RCM controls (regenerate Oshinei_ERP_SOX_RCM_v1.xlsx via build_rcm.py)
+## New/changed RCM controls (regenerate Invisible_ERP_SOX_RCM_v1.xlsx via build_rcm.py)
 GL-11 CoA change · GL-12 posting-rule change · GL-13 dimension completeness · GL-14 sub-ledger tie-out ·
 GL-15 period-close SoD · GL-16 closed-period prevention · GL-17 immutable audit trail · GL-18 FX reval ·
 AP-03 3-way-match payment gate · TAX-05 VAT/WHT filing · TAX-06 deferred tax · CON-02 IC elimination ·

@@ -1,6 +1,6 @@
 # 00 · Getting Started
 
-**Status: DRAFT v0.1**
+**Status: DRAFT v1.2 · 2026-07-21** · *v1.2: Plans & pricing — the แพ็กเกจและราคา page now offers three product lines: แพ็กรวม (Complete packs), POS อย่างเดียว (คิดราคาต่อสาขา — เลือกจำนวนสาขาได้), และ ERP อย่างเดียว (หลังบ้านไม่มีหน้าร้าน); เลือกไลน์ เลือกแพ็กเกจ แล้วราคารวมคำนวณสดเหมือนเดิม (§8).* · *v1.1: Plans & pricing — your pack selection (แพ็กเกจ · รอบชำระ · โมดูลเสริม) now travels with you to the sign-up form and is provisioned automatically when the platform administrator approves your request (§8 step 6).* · *v1.0: Plans & pricing — a public แพ็กเกจและราคา page at `/plans` (linked from the sign-in and sign-up screens) lets a prospect compare the five starter packs and add-on modules with a live cost calculator before signing up (§8).* · *v0.9: Starter data — every one of the 17 business types now gets a sample starter kit + a matching one-click industry pack, and the chart of accounts ships six everyday expense accounts (ค่าเดินทาง, ค่าสาธารณูปโภค, ค่าเช่า, ค่าการตลาด, ค่าธรรมเนียมวิชาชีพ, ค่าวัสดุสำนักงาน) you can also hang sub-accounts under.* · *v0.8: Business type — the Sign-up business-type list expanded from 5 to 17 (added manufacturing, construction, e-commerce, hospitality, healthcare, professional services, agriculture, automotive, logistics, education, non-profit, real estate); each still tailors your chart of accounts and starting menu.* · *v0.7: Navigation — the side-menu header and the account menu now show the **name of the company you are signed into**, so multi-company users always know which company they are working in.* · *v0.6: Switching language — the sign-in pages and the public customer pages (diner QR ordering, order tracking, NPS, loyalty member app) now follow the selected language too; a language picker appears on the sign-in page.* · *v0.5: Switching language — the Customer Portal screens and system error messages now follow the selected language too (previously Thai-only).* · *v0.4: Switching language — documented that the language choice persists across pages/reloads and devices, including when server-side saving is unavailable (e.g. read-only company view).* · *v0.3: SME industry starter kit — the first-run "สร้างสำนักงานใหญ่" step now also seeds sample content matching your business type (docs/51 B3).* · *v0.2: SME industry menu — documented the industry-trimmed sidebar a new SME company starts with (docs/51 B1) and the "แสดงเมนูที่ซ่อนไว้" self-service reveal toggle (docs/51 B2).*
 
 This chapter covers everything you need for your very first login: signing in,
 changing your starter password, setting up two-factor authentication (MFA),
@@ -31,7 +31,10 @@ finding your way around, and logging out.
 [screenshot: login page with username and password fields]
 
 > **Creating a brand-new company?** On the self-serve **Sign up** page you choose your
-> **business type** (restaurant, retail, distribution, services, or general). Your
+> **business type** from a full list — restaurant, retail, wholesale/distribution, services,
+> manufacturing, construction, e-commerce, hospitality (hotel), healthcare/clinic, professional
+> services, agriculture, automotive/service, logistics/transport, education, non-profit, real
+> estate, or general (full chart). Your
 > company starts with a **chart of accounts tailored to that industry** — the right
 > accounts switched on and named in your industry's language — so your books are
 > meaningful from day one. You can change or extend it later under **Onboarding →
@@ -131,6 +134,10 @@ If MFA is required for your account, you will be prompted to enrol after login
 After login you see the **app shell**: a side navigation menu, a top bar, and the
 main content area.
 
+- The **side-menu header** shows the app name with the **name of the company you
+  are signed into** underneath it, so you always know which company's data you
+  are working in. The same company name appears next to your role in the account
+  menu (top-right avatar) and at the bottom of the side menu.
 - The **side menu** lists only the modules **you have permission for**. If you
   cannot see a menu item, you do not have access to it — this is normal.
 - The **command palette** (press the search/keyboard shortcut, or click the
@@ -198,6 +205,24 @@ appear in **both** workspaces.
   by default — the **การควบคุม & ตรวจสอบ** (Controls) domain and the *ปรับแต่ง*, *เชื่อมต่อ & ขยาย* and
   *ระหว่างบริษัท & สกุลเงิน* sub-sections. Turn it on to reveal them. (Anything you've pinned to Favourites or
   can find via search stays reachable regardless of this toggle.)
+- **"แสดงเมนูที่ซ่อนไว้" (Show hidden menus — SME companies only):** an SME company's menu is trimmed to its
+  **business type** at creation (e.g. a restaurant doesn't see โครงการ; a wholesaler doesn't see the POS
+  domains) and only its daily-work groups start open — so your first login shows the ~15 items you actually
+  use. If your business grows into a hidden area, flip this toggle (bottom of the side menu, next to
+  แสดงเมนูขั้นสูง) to reveal every hidden domain yourself — no administrator needed. Search (⌘K) and
+  Favourites always reach hidden items, and any group you open/close yourself stays the way you left it,
+  synced across your devices.
+- **Industry starter kit (SME companies only):** the setup wizard's **สร้างสำนักงานใหญ่** step (or
+  `POST /api/tenant/starter-pack`) also drops in a little sample content matching your business type so
+  the first screens aren't empty. Every one of the 17 business types now gets a kit: food service
+  (restaurant, hotel) gets a sample menu + dining tables; counter/online sellers (retail, e-commerce,
+  automotive, healthcare, education) get a sample POS catalog; stock-heavy operations (wholesale,
+  manufacturing, agriculture, logistics) get a **คลังสินค้า 1** warehouse branch; and project-driven work
+  (services, construction, professional, real estate, non-profit) gets a demo project. On top of that,
+  **Onboarding → Industry packs** offers one-click sample objects tuned to each type (e.g. a BOM + work
+  centre for manufacturing, a BoQ + subcontractor for construction, a room type + recipe for a hotel).
+  Everything is plainly marked (DEMO/ตัวอย่าง), belongs only to your company, is safe to edit or delete,
+  and is never re-created once the area has real data.
 - **"เริ่มต้นใช้งาน" (Getting started) on the dashboard:** while your company is still being set up, the ERP
   home (*แดชบอร์ด*) shows a **first-run panel** at the top with your onboarding checklist and a completion
   bar. Each unfinished step (*set up branding*, *pick a theme*, *choose your language*, *add your first
@@ -230,6 +255,22 @@ appear in **both** workspaces.
 The interface defaults to **Thai**. English text exists for most labels. Use the
 language switcher in the top bar / settings to change the display language. Page
 addresses and the steps in this manual stay the same in either language.
+
+Your choice is **remembered**: it is saved to your account (so it follows you to
+other devices) and kept on the device you chose it on — moving to another screen
+or reloading the page does **not** change it back. Even in situations where the
+system cannot save preferences to the server (for example a platform owner
+browsing a company in **read-only view**, or a brief loss of connection), the
+language you picked stays in effect on that device and is saved to your account
+automatically as soon as saving is possible again.
+
+The back office, the **Customer Portal**, the **sign-in pages**, the public
+customer pages (**diner QR ordering, order tracking, NPS, the loyalty member
+app**), and system messages (connection errors, form validation, action toasts)
+all follow your selected language — on public pages your device remembers the
+last language you picked, and the sign-in page and diner pages have their own
+language pickers. A few shared screens stay bilingual by design (the customer
+pole display, the scanned-QR resolver, and the privacy policy).
 
 > **Note:** This manual shows English wording first with the Thai label in
 > brackets so you can match it on screen regardless of the current language.
@@ -272,3 +313,43 @@ can also fine-tune your permissions individually.
 
 **Next:** Go to the chapter for your role — for example
 [Sales & POS](./01-sales-and-pos.md) or [Customer Portal](./02-customer-portal.md).
+---
+
+## 8. Viewing plans & pricing before you sign up (แพ็กเกจและราคา)
+
+> **Product lines (2026-07-21).** The page opens on **แพ็กรวม (Complete packs)** — the five packs
+> below. Two more lines sit in the switcher above the pack cards:
+> **POS อย่างเดียว** — the point-of-sale by itself, priced **per branch** (POS Lite ฿590 ·
+> POS Pro ฿1,190 ต่อสาขา/เดือน); pick the number of branches with the stepper in the summary card
+> and the total updates live. **ERP อย่างเดียว** — the back office without a register
+> (ERP Essentials ฿1,900 · ERP Growth ฿3,900 ต่อเดือน). Whichever line you choose, your selection
+> travels into the sign-up form the same way, and upgrading between lines later is a plan change on
+> the same company — your data never moves.
+
+**Screen:** `/plans` · **Required role:** none (public — no sign-in needed)
+
+If you do not have an account yet, you can compare packages and estimate your cost first:
+
+1. Open `/plans` directly, or click **ดูแพ็กเกจและราคา** (**View plans & pricing**) on the
+   **Sign in** or **Sign up** page. The page is in Thai by default; use the **ไทย / EN** toggle
+   at the top to switch language.
+2. Pick a billing interval with the **รายเดือน / รายปี** (**Monthly / Annual**) toggle. Annual
+   billing charges 10 of 12 months — **2 months free** — and the cards show the discounted
+   per-month price with the yearly amount.
+3. Choose one of the five **starter packs** (Essential · Growth · Scale · Franchise · Enterprise)
+   by clicking its card. Icons distinguish store-front POS modules from back-office ERP modules;
+   each pack includes everything in the pack before it.
+4. Toggle any **advanced add-on modules** (supply chain & procurement routing, inbound chat/CRM
+   webhook, ad-audience export, dedicated sandbox) on or off and watch the estimate update.
+5. Read your itemized **ค่าบริการโดยประมาณ** (**total estimated cost**) in the summary — the
+   panel on the right on a computer, or the expandable bar at the bottom of the screen on a
+   phone (tap **ดูรายละเอียด**).
+6. Click **สมัครใช้งาน** (**Start free trial**) — or **ติดต่อฝ่ายขาย** (**Contact sales**) on the
+   Enterprise pack — to continue to the sign-up request page. Your selection (pack, billing
+   interval, add-ons) travels with you: the sign-up form shows it back as **แพ็กเกจที่เลือกจากหน้าราคา**,
+   the platform administrator sees it on your request, and approval activates your company on that
+   pack automatically (company accounts are activated by the platform administrator).
+
+> **Note:** prices on this page are indicative, in Thai Baht, excluding VAT. Your actual
+> subscription is set when your company account is provisioned (see chapter 11 for billing
+> administration).

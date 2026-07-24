@@ -7,12 +7,24 @@ import { IS_PUBLIC_KEY, PERMISSIONS_KEY, PLATFORM_ADMIN_KEY, isPlatformAdmin, ty
 import { ApiKeyService } from '../modules/platform/api-key.service';
 import { DRIZZLE, type DrizzleDb } from '../database/database.module';
 import { users, revokedTokens, posMembers, tenants } from '../database/schema';
-import { resolvePermissions, type Role } from '@ierp/shared';
+import { type Role } from '@ierp/shared';
 import { requiresMfaEnrollment, enforcePrivilegedMfa } from './mfa-gate';
-import { AUTH_COOKIE, CSRF_COOKIE, readCookie } from './cookies';
+import { AUTH_COOKIE, CSRF_COOKIE, readCookie, signedCsrf } from './cookies';
+import { scopesToPermissions } from './api-scopes';
+import { auditAction, auditClientIp, auditRequestId, writeAuditRow } from './audit-writer';
 
 // State-changing methods that require a CSRF double-submit check when authenticated via cookie.
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Best-effort decode of a JWT's `jti` (unverified — the token is verified later; used only to check the
+// CSRF token was bound to this same session).
+function jwtJti(token: string): string | undefined {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return undefined;
+    return JSON.parse(Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'))?.jti;
+  } catch { return undefined; }
+}
 
 // Constant-time CSRF token comparison — never compare a secret with `===`/`!==` (timing oracle, CWE-208).
 function csrfMatches(header: unknown, cookie: string | undefined): boolean {
@@ -21,13 +33,6 @@ function csrfMatches(header: unknown, cookie: string | undefined): boolean {
   const b = Buffer.from(cookie);
   return a.length === b.length && timingSafeEqual(a, b);
 }
-
-// Map api_keys.scopes (csv) → JwtUser.permissions. A scope is either a known alias,
-// a wildcard ('*'/'admin' → full role-default set), or a literal permission key.
-const SCOPE_ALIASES: Record<string, string[]> = {
-  read: ['dashboard', 'exec', 'cust_dash', 'cust_inventory'],
-  write: ['pos', 'order_mgt', 'warehouse', 'procurement'],
-};
 
 // Global guard: ทุก endpoint ต้องมี JWT (หรือ API key) ยกเว้น @Public (แก้ช่องโหว่ V1 ที่ data endpoints เปิดโล่ง)
 @Injectable()
@@ -72,8 +77,19 @@ export class JwtAuthGuard implements CanActivate {
     // cookie (double-submit). Header/Bearer-authenticated requests (harnesses, API keys, mobile) are exempt
     // because they don't ride an ambient cookie and so aren't forgeable cross-site.
     if (fromCookie && MUTATING.has((req.method ?? '').toUpperCase())) {
-      if (!csrfMatches(req.headers?.['x-csrf-token'], readCookie(req, CSRF_COOKIE))) {
+      const csrfCookie = readCookie(req, CSRF_COOKIE);
+      if (!csrfMatches(req.headers?.['x-csrf-token'], csrfCookie)) {
         throw new ForbiddenException({ code: 'CSRF', message: 'Missing or invalid CSRF token', messageTh: 'CSRF token ไม่ถูกต้อง' });
+      }
+      // SOX-ICFR #4 (staged) — additionally bind the CSRF token to THIS session: it must equal
+      // HMAC(secret, jti) of the auth cookie, so a token minted for another session can't be replayed.
+      // Enabled via CSRF_SIGNED_ENFORCE=1 after a >TTL rollout window (in-flight sessions minted before the
+      // rollout carry a random token that predates the binding).
+      if (process.env.CSRF_SIGNED_ENFORCE === '1') {
+        const jti = jwtJti(token);
+        if (!jti || !csrfMatches(csrfCookie, signedCsrf(jti))) {
+          throw new ForbiddenException({ code: 'CSRF', message: 'CSRF token not bound to this session', messageTh: 'CSRF token ไม่ผูกกับเซสชันนี้' });
+        }
       }
     }
 
@@ -88,13 +104,9 @@ export class JwtAuthGuard implements CanActivate {
       // A key is a machine principal — NEVER 'Admin' (no HQ bypass via key). role='Sales' + the key's
       // own tenantId keeps it RLS-scoped to its tenant.
       const role = 'Sales';
-      let permissions: string[];
-      if (scopes.includes('*') || scopes.includes('admin')) {
-        permissions = resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
-      } else {
-        const expanded = scopes.flatMap((s) => SCOPE_ALIASES[s] ?? [s]);
-        permissions = expanded.length ? expanded : resolvePermissions(role as Parameters<typeof resolvePermissions>[0]);
-      }
+      // Expand the granted scopes to permissions via the shared map (same definition ApiKeyService.issue
+      // bounds against at mint time, PE-1) — a key can never resolve to more than issuance allowed.
+      const permissions: string[] = scopesToPermissions(scopes);
       // SoD (security review H-2): the key acts AS its minting human for maker-checker/SoD identity, so a
       // person can't launder a self-approval through their own key(s). Legacy keys (no created_by) keep the
       // `apikey:<prefix>` machine identity. The prefix is carried separately (apiKeyPrefix) for the machine
@@ -227,17 +239,111 @@ export class PermissionsGuard implements CanActivate {
 // and BEFORE the TenantTxInterceptor, so on success it sets the server-only req.__platformBypass flag the
 // interceptor honours to grant an RLS bypass (needed to provision a brand-new tenant). Empty config ⇒ every
 // such route 403s (secure by default). The flag is set server-side here, never read from client input.
+// D3 hardening knobs (both default OFF = behaviour unchanged):
+//  • PLATFORM_REQUIRE_MFA — a god without TOTP enrolled is refused on every @PlatformAdmin route
+//    (403 PLATFORM_MFA_REQUIRED) until they enrol; the strongest credential gets the strongest factor.
+//  • PLATFORM_IP_ALLOWLIST — comma-separated IPv4 addresses / CIDR prefixes; a platform-admin request
+//    from outside the list is refused (403 PLATFORM_IP_BLOCKED). Pair with TRUSTED_PROXY_HOPS behind a
+//    proxy so req.ip is the real client. IPv6 or unparsable peers fail CLOSED when a list is set.
+const PLATFORM_TRUTHY = new Set(['1', 'true', 'on', 'yes']);
+export function platformRequireMfa(env: NodeJS.ProcessEnv = process.env): boolean {
+  return PLATFORM_TRUTHY.has(String(env.PLATFORM_REQUIRE_MFA ?? '').trim().toLowerCase());
+}
+export function ipv4InAllowlist(ip: string, rawList: string): boolean {
+  const entries = rawList.split(',').map((s) => s.trim()).filter(Boolean);
+  const toInt = (addr: string): number | null => {
+    const parts = addr.split('.');
+    if (parts.length !== 4) return null;
+    let n = 0;
+    for (const p of parts) {
+      const b = Number(p);
+      if (!Number.isInteger(b) || b < 0 || b > 255 || p !== String(b)) return null;
+      n = (n * 256) + b;
+    }
+    return n;
+  };
+  const ipInt = toInt(ip.replace(/^::ffff:/, '')); // Fastify may present IPv4-mapped IPv6
+  if (ipInt == null) return false; // fail closed on anything unparsable/IPv6
+  for (const entry of entries) {
+    const [addr, bitsRaw] = entry.split('/');
+    const base = toInt(addr ?? '');
+    if (base == null) continue;
+    const bits = bitsRaw == null ? 32 : Number(bitsRaw);
+    if (!Number.isInteger(bits) || bits < 0 || bits > 32) continue;
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    if (((ipInt & mask) >>> 0) === ((base & mask) >>> 0)) return true;
+  }
+  return false;
+}
+
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    @Inject(DRIZZLE) private readonly db: DrizzleDb,
+  ) {}
 
-  canActivate(ctx: ExecutionContext): boolean {
+  // Record a REFUSAL on the platform surface, then throw it. Nest runs guards BEFORE interceptors, so a
+  // guard rejection never reaches AuditInterceptor — which is why denied god access previously left no trace
+  // at all. On a fleet-wide surface an ATTEMPT is as much signal as a success: a non-owner (or a leaked API
+  // key, or an off-network/TOTP-less owner) probing /api/admin/* is exactly what a detective control should
+  // surface. Scoped deliberately to this guard: auditing every 401/403 app-wide would flood the per-tenant
+  // hash chain (each append takes a FOR UPDATE lock), whereas the god surface is low-volume by construction.
+  // Fire-and-forget, like every other audit write — logging must never change the response.
+  private deny(req: any, code: string, message: string, messageTh: string): never {
+    void writeAuditRow(this.db, {
+      action: auditAction(req),
+      actor: req.user?.username ?? null,
+      tenantId: req.user?.tenantId ?? null,
+      ip: auditClientIp(req),
+      requestId: auditRequestId(req),
+      status: 'fail',
+      // `platform_denied` is the queryable marker for "someone tried to use god authority and was refused";
+      // `api_key_prefix` names the machine principal when a key was the one attempting it (pentest P3).
+      meta: {
+        platform_denied: true,
+        error: code,
+        ...(req.user?.apiKeyPrefix ? { api_key_prefix: req.user.apiKeyPrefix } : {}),
+      },
+    });
+    throw new ForbiddenException({ code, message, messageTh });
+  }
+
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const needs = this.reflector.getAllAndOverride<boolean>(PLATFORM_ADMIN_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (!needs) return true;
     const req = ctx.switchToHttp().getRequest();
     const user: JwtUser | undefined = req.user;
-    if (!isPlatformAdmin(user?.username)) {
-      throw new ForbiddenException({ code: 'PLATFORM_ADMIN_REQUIRED', message: 'Platform-admin access required', messageTh: 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น' });
+    // A machine principal (API key) must NEVER hold platform authority — even when its `created_by` (adopted as
+    // the maker-checker username per security review H-2) is a platform owner. Otherwise a god-minted key would
+    // be an MFA-free "god" credential granting full fleet control if leaked (pentest P3). Only an interactive
+    // god session (no apiKeyPrefix) may pass; the key's machine identity is carried on `apiKeyPrefix`.
+    if (user?.apiKeyPrefix || !isPlatformAdmin(user?.username)) {
+      this.deny(req, 'PLATFORM_ADMIN_REQUIRED', 'Platform-admin access required', 'ต้องเป็นผู้ดูแลแพลตฟอร์มเท่านั้น');
+    }
+    // D3 — optional IP allowlist on the platform surface (403 from outside; unset = unrestricted).
+    const allowlist = (process.env.PLATFORM_IP_ALLOWLIST ?? '').trim();
+    if (allowlist && !ipv4InAllowlist(String(req.ip ?? ''), allowlist)) {
+      this.deny(req, 'PLATFORM_IP_BLOCKED', 'Platform-admin access is not allowed from this network', 'ไม่อนุญาตให้เข้าถึงส่วนผู้ดูแลแพลตฟอร์มจากเครือข่ายนี้');
+    }
+    // D3 — optional mandatory MFA for gods: read the live enrolment flag (never trust a stale token claim).
+    // `users` is under FORCE RLS, so this pre-tenant identity read uses the same bypass-tx pattern as
+    // JwtAuthGuard.authRead. Fail CLOSED on a missing row; an infra error also refuses (the platform
+    // surface prefers a rare 403 over an unverified god session).
+    if (platformRequireMfa()) {
+      let enrolled = false;
+      try {
+        const [row] = await this.db.transaction(async (tx: any) => {
+          await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
+          return tx.select({ mfa: users.mfaEnabled }).from(users).where(eq(users.username, user!.username)).limit(1);
+        });
+        enrolled = row?.mfa === true;
+      } catch {
+        enrolled = false;
+      }
+      if (!enrolled) {
+        this.deny(req, 'PLATFORM_MFA_REQUIRED', 'Platform admins must enrol MFA before using the platform console', 'ผู้ดูแลแพลตฟอร์มต้องเปิดใช้ MFA ก่อนใช้งานศูนย์ควบคุม');
+      }
     }
     req.__platformBypass = true; // honoured by TenantTxInterceptor to bypass RLS for tenant provisioning
     return true;

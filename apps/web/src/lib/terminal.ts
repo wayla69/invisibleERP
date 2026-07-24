@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE, api } from './api';
+import { ts } from './i18n-static';
 import { connectUsbPrinter, printReceiptRaw, kickDrawer as pulseDrawer, isWebUsbSupported } from './peripherals';
 
 const TERMINAL_KEY = 'ierp_pos_terminal';
@@ -49,7 +50,7 @@ export function getTerminalCode(): string { return lsGet(TERMINAL_KEY, 'T01'); }
 /** Print the 80mm HTML slip via the OS driver: fetch (cookie-auth) → hidden iframe → window.print(). */
 async function printHtmlSlip(saleNo: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/pos/sales/${encodeURIComponent(saleNo)}/receipt?format=html`, { credentials: 'include' });
-  if (!res.ok) throw new Error('โหลดใบเสร็จไม่สำเร็จ');
+  if (!res.ok) throw new Error(ts('err.receipt_load'));
   const html = await res.text();
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
@@ -66,7 +67,7 @@ async function printHtmlSlip(saleNo: string): Promise<void> {
     setTimeout(resolve, 1500); // fallback if the load event doesn't fire
   });
   const win = iframe.contentWindow;
-  if (!win) { iframe.remove(); throw new Error('เปิดหน้าต่างพิมพ์ไม่ได้'); }
+  if (!win) { iframe.remove(); throw new Error(ts('err.print_window')); }
   // Give the webfont/layout a moment, then print and clean up.
   await new Promise((r) => setTimeout(r, 250));
   win.focus(); win.print();
@@ -76,7 +77,7 @@ async function printHtmlSlip(saleNo: string): Promise<void> {
 /** Push raw ESC/POS bytes to a connected USB printer. */
 async function printUsbSlip(device: any, saleNo: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/pos/sales/${encodeURIComponent(saleNo)}/receipt?format=escpos`, { credentials: 'include' });
-  if (!res.ok) throw new Error('โหลดใบเสร็จไม่สำเร็จ');
+  if (!res.ok) throw new Error(ts('err.receipt_load'));
   const bytes = new Uint8Array(await res.arrayBuffer());
   await printReceiptRaw(device, bytes);
 }
@@ -188,7 +189,7 @@ export function useTerminal(): Terminal {
       return;
     }
     const w = window.open('', '_blank', 'width=380,height=500');
-    if (!w) throw new Error('เปิดหน้าต่างพิมพ์ไม่ได้ (โปรดอนุญาต pop-up)');
+    if (!w) throw new Error(ts('err.print_window_popup'));
     w.document.write('<pre style="font-family:Sarabun,monospace;font-size:13px">*** POS TEST ***\nInvisible ERP\nทดสอบพิมพ์ภาษาไทย\n' + new Date().toLocaleString('th-TH') + '</pre>');
     w.document.close(); w.focus(); w.print();
     setTimeout(() => w.close(), 1500);

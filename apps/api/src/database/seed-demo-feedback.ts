@@ -1,5 +1,5 @@
 /**
- * Demo customer feedback for the Oshinei tenant: an NPS + a CSAT survey with
+ * Demo customer feedback for the Invisible tenant: an NPS + a CSAT survey with
  * ~70 responses (skewed to promoters, realistic detractor tail) and structured
  * answers. Idempotent (responses/answers wiped by tenant; survey templates upserted).
  *
@@ -26,8 +26,8 @@ const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
 const between = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
 
 const SURVEYS = [
-  { surveyId: 'SVY-OSHINEI-NPS', surveyName: 'แบบสอบถามความพึงพอใจหลังรับประทาน (NPS)', surveyType: 'NPS', trigger: 'Post-Dining' },
-  { surveyId: 'SVY-OSHINEI-CSAT', surveyName: 'ประเมินคุณภาพอาหารและบริการ (CSAT)', surveyType: 'CSAT', trigger: 'Post-Dining' },
+  { surveyId: 'SVY-INVISIBLE-NPS', surveyName: 'แบบสอบถามความพึงพอใจหลังรับประทาน (NPS)', surveyType: 'NPS', trigger: 'Post-Dining' },
+  { surveyId: 'SVY-INVISIBLE-CSAT', surveyName: 'ประเมินคุณภาพอาหารและบริการ (CSAT)', surveyType: 'CSAT', trigger: 'Post-Dining' },
 ];
 const PROMOTER = ['อาหารสดมาก ปลาแซลมอนละลายในปาก! 🍣', 'บุฟเฟ่ต์คุ้มค่ามาก จะกลับมาอีกแน่นอน', 'บริการดีเยี่ยม พนักงานยิ้มแย้ม', 'Best Japanese buffet in town!', 'ซูชิสดใหม่ ราคาเป็นกันเอง'];
 const PASSIVE = ['โดยรวมโอเค แต่รอคิวนานหน่อย', 'อาหารอร่อยดี แต่ร้านค่อนข้างแน่น', 'Good value, a bit noisy though'];
@@ -41,8 +41,8 @@ async function main() {
 
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     // ── survey templates (global; upsert) ──
@@ -64,7 +64,7 @@ async function main() {
       const nps = roll < 0.6 ? between(9, 10) : roll < 0.85 ? between(7, 8) : between(2, 6);
       const comment = nps >= 9 ? pick(PROMOTER) : nps >= 7 ? pick(PASSIVE) : pick(DETRACTOR);
       const [resp] = await tx.insert(schema.surveyResponses).values({
-        surveyId: 'SVY-OSHINEI-NPS', tenantId: T, orderNo: saleNos.length ? pick(saleNos) : null,
+        surveyId: 'SVY-INVISIBLE-NPS', tenantId: T, orderNo: saleNos.length ? pick(saleNos) : null,
         responseDate: new Date(now - between(0, 45) * 86400000).toISOString().slice(0, 10), npsScore: nps, comments: comment,
       }).returning({ id: schema.surveyResponses.id });
       if (rnd() < 0.6) {

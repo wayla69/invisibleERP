@@ -1,4 +1,4 @@
-# Invisible ERP V2 — Web (Next.js 15 App Router) production image.
+# Invisible ERP — Web (Next.js 15 App Router) production image.
 # Mirrors apps/web/railway.json: build @ierp/shared then @ierp/web, serve with `next start`.
 # (next.config has no `output: 'standalone'`, so the runtime keeps node_modules + .next.)
 

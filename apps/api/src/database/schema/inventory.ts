@@ -9,6 +9,9 @@ export const items = pgTable('items', {
   itemDescription: text('item_description'),
   barcode: text('barcode'),                                     // GTIN/EAN/UPC for hardware scan-to-add (exact match)
   supplyType: text('supply_type').notNull().default('goods'),   // 'goods' | 'service' — VAT tax-point class (5.1, ม.78 vs 78/1). Inert until 5.1b.
+  isLotTracked: boolean('is_lot_tracked').notNull().default(false), // docs/52 Phase 3a — sells only from a real, non-expired, non-held lot (FEFO at POS); shared master, no RLS loop
+  isSerialTracked: boolean('is_serial_tracked').notNull().default(false), // docs/52 Phase 3b — sold as a specific serial/IMEI unit (InStock → Sold); shared master, no RLS loop
+  minAge: integer('min_age').notNull().default(0), // docs/52 Phase 3c — minimum buyer age (alcohol/tobacco 20; 0 = unrestricted); shared master, no RLS loop
   uom: text('uom'),
   baseUom: text('base_uom'),
   conversionFactor: numeric('conversion_factor').default('1'),
@@ -25,6 +28,9 @@ export const items = pgTable('items', {
   orderMultiple: numeric('order_multiple', { precision: 14, scale: 3 }).default('0'),
   orderCost: numeric('order_cost', { precision: 14, scale: 2 }).default('0'),   // S: per-PO cost
   holdingCost: numeric('holding_cost', { precision: 14, scale: 4 }).default('0'), // H: per unit/yr
+  // docs/54 (0459): sellable days from receipt — a PHYSICAL property, so it lives on the shared master.
+  // A tenant that disagrees overrides it per (branch,item) in scm_item_policies.shelf_life_days.
+  shelfLifeDays: integer('shelf_life_days'),
   imageKey: text('image_key'),
   // Capital goods (FA-10): items flagged as fixed assets are routed to the asset register on receipt
   // (Dr 1500) rather than capitalised into inventory (Dr 1200). default_asset_category_id seeds the
@@ -53,8 +59,26 @@ export const items = pgTable('items', {
   mergedInto: bigint('merged_into', { mode: 'number' }),
   mergedBy: text('merged_by'),
   mergedAt: timestamp('merged_at', { withTimezone: true }),
+  // Variants / matrix items (docs/52 Phase 2b) — a matrix PARENT (is_matrix_parent) owns child variant rows
+  // (e.g. a T-shirt → Size×Color SKUs). Each variant is a real `items` row with its own item_id / barcode /
+  // unit_price / stock, pointing at its parent via parent_item_id (→ items.id). `items` is a SHARED master
+  // (no tenant_id) so these stay tenant-neutral (no RLS loop). NULL parent = a plain item (unchanged).
+  parentItemId: bigint('parent_item_id', { mode: 'number' }),
+  isMatrixParent: boolean('is_matrix_parent').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+
+// docs/52 Phase 2b — the attribute values (Size=M, Color=Red) of a variant SKU. One row per (variant, axis).
+// Shared master (no tenant_id), mirroring `items`; the variant's own item_id is the natural link.
+export const itemVariantAttributes = pgTable('item_variant_attributes', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  itemId: text('item_id').notNull(),   // the variant's item_id (→ items.item_id)
+  axis: text('axis').notNull(),        // e.g. 'Size', 'Color'
+  value: text('value').notNull(),      // e.g. 'M', 'Red'
+}, (t) => ({
+  byItem: index('idx_item_variant_attrs_item').on(t.itemId),
+  uqAxis: unique('uq_item_variant_attr').on(t.itemId, t.axis),
+}));
 
 // Stock fact — append-only snapshots (tbl_raw_inventory, 1.48M rows). current = latest generate_date.
 // Phase 1.5: แปลงเป็น PARTITION BY RANGE(generate_date) ผ่าน custom SQL.
@@ -150,6 +174,26 @@ export const lotHolds = pgTable('lot_holds', {
   byTenantStatus: index('idx_lot_holds_tenant').on(t.tenantId, t.status),   // R1-1 tenant-leading index
   byTenantLot: index('idx_lot_holds_lot').on(t.tenantId, t.lotNo),
   uqHoldNo: unique('uq_lot_holds_no').on(t.tenantId, t.holdNo),
+}));
+
+// docs/52 Phase 3b — serial/IMEI unit register. A serial-tracked item is sold as a SPECIFIC physical unit:
+// the exact serial leaves stock (InStock → Sold, stamped with the sale) so warranty / returns / theft-recovery
+// key on it. TENANT-SCOPED (a serialised unit belongs to one shop) — canonical 0232 RLS + leading index
+// (migration 0445), unlike the shared `lot_ledger`.
+export const itemSerials = pgTable('item_serials', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  tenantId: bigint('tenant_id', { mode: 'number' }).references(() => tenants.id),
+  itemId: text('item_id').notNull(),
+  serialNo: text('serial_no').notNull(),
+  status: text('status').notNull().default('InStock'),   // InStock | Sold | Returned | Void
+  receivedRef: text('received_ref'),
+  saleNo: text('sale_no'),
+  soldAt: timestamp('sold_at', { withTimezone: true }),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => ({
+  byTenantItem: index('idx_item_serials_tenant').on(t.tenantId, t.itemId, t.status), // R1-1 tenant-leading
+  uqSerial: unique('uq_item_serials_no').on(t.tenantId, t.itemId, t.serialNo),
 }));
 
 export const stockMovements = pgTable('stock_movements', {
@@ -296,12 +340,20 @@ export const stockReservations = pgTable('stock_reservations', {
   qtyReserved: numeric('qty_reserved', { precision: 18, scale: 4 }).notNull().default('0'),
   status: text('status').notNull().default('held'),                 // held | released | consumed
   issueNo: text('issue_no'),                                        // the INV move / JE that consumed it
+  // Free-issue custody (PROJ-28, migration 0427): a reservation issued FOR A SUBCONTRACTOR carries the
+  // subcontract, and the material stays "in custody" until returned (MRET) or its consumption is
+  // acknowledged (custody_ack_qty) — final subcontract certification is gated on cleared custody.
+  subcontractId: bigint('subcontract_id', { mode: 'number' }),
+  custodyAckQty: numeric('custody_ack_qty', { precision: 18, scale: 4 }).default('0'),
+  custodyAckBy: text('custody_ack_by'),
+  custodyAckAt: timestamp('custody_ack_at', { withTimezone: true }),
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (t) => ({
   byItemLoc: index('idx_stock_res_item').on(t.tenantId, t.itemId, t.locationId),
   byProject: index('idx_stock_res_project').on(t.projectId),
+  bySubcontract: index('idx_stock_res_subcontract').on(t.tenantId, t.subcontractId),
 }));
 export type StockReservation = typeof stockReservations.$inferSelect;
 

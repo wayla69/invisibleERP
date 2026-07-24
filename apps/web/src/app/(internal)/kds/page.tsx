@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChefHat, Smartphone, Utensils, Wifi, WifiOff, Undo2, BellRing, Gauge } from 'lucide-react';
+import { AlarmClock, Ban, ChefHat, Maximize, ScanLine, Smartphone, Timer, Utensils, Volume2, VolumeX, Wifi, WifiOff, Undo2, BellRing, Gauge, X, ZoomIn } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
+import { notifySuccess, notifyError } from '@/lib/notify';
 import { useRealtime } from '@/hooks/use-realtime';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -12,14 +13,21 @@ import { StateView } from '@/components/state-view';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type Sla = 'ok' | 'warn' | 'late';
-type KdsItem = { item_id: number; order_no: string; table_label: string | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; elapsed_min: number; prep_min: number; sla?: Sla; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
+type KdsItem = { item_id: number; sku?: string | null; station_code?: string; station_name?: string; order_no: string; table_label: string | null; table_id: number | null; name: string; qty: number; modifiers: { label: string }[]; notes: string | null; kds_status: string; fired_at?: string | null; elapsed_min: number; prep_min: number; sla?: Sla; stuck?: boolean; priority?: number; is_buffet?: boolean; from_diner?: boolean; course?: number; guest_allergies?: string[]; guest_dietary?: string | null };
 type Station = { station_id: number; station_code: string; station_name: string; items: KdsItem[] };
+type Summary = { active_count: number; avg_wait_min: number; served_today: number; avg_prep_today_min: number };
+type Feed = { stations: Station[]; stuck_count?: number; stuck_minutes?: number; summary?: Summary };
+type Pacing = { nudges: { order_no: string; table_label: string | null; next_course: number; current_course: number }[] };
+type Group = 'station' | 'table' | 'time' | 'priority';
 type ExpoItem = { item_id: number; name: string; qty: number; station_name: string; course: number; ready_min: number };
 type ExpoTicket = { order_id: number; order_no: string; table_label: string | null; ready_items: ExpoItem[]; ready_count: number; pending_count: number; all_ready: boolean; oldest_ready_min: number };
 type LoadStation = { station_id: number; station_code: string; station_name: string; active: number; queued: number; preparing: number; ready: number; overdue: number; avg_elapsed_min: number; oldest_min: number; bumped_today: number; recalls_today: number; all_day: { name: string; qty: number }[] };
+type PrepDish = { sku: string; name: string; avg_prep_min: number; samples: number };
+type PrepTimes = { dishes: PrepDish[]; generated_at: string };
 
 const NEXT: Record<string, { action: string; label: string }> = {
   queued: { action: 'start', label: 'mx.kds_start' },
@@ -41,30 +49,121 @@ const slaOf = (it: { sla?: Sla; elapsed_min: number; prep_min: number }): Sla =>
 export default function KdsPage() {
   const { t } = useLang();
   const qc = useQueryClient();
-  const [view, setView] = useState<'board' | 'expo' | 'load'>('board');
+  const [view, setView] = useState<'board' | 'expo' | 'load' | 'prep'>('board');
+  const [group, setGroup] = useState<Group>('station');   // board grouping: station / table / time / priority
+  const [scan, setScan] = useState('');
+  const [stationFilter, setStationFilter] = useState<string>('all'); // F4: station-scoped terminal (per device)
   // Live via SSE: another terminal advancing an item refreshes every view instantly. Polling stays as a
   // 15s fallback for when the stream is down (vs 3s before — the realtime push carries the load now).
   const { connected } = useRealtime((e) => {
     if (e.type === 'kds_item') qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('kds') });
   });
   const poll = connected ? 15000 : 3000;
-  const feed = useQuery<{ stations: Station[] }>({ queryKey: ['kds'], queryFn: () => api('/api/restaurant/kds/feed'), refetchInterval: poll, enabled: view === 'board' });
+  const feed = useQuery<Feed>({ queryKey: ['kds'], queryFn: () => api('/api/restaurant/kds/feed'), refetchInterval: poll, enabled: view === 'board' });
   const expo = useQuery<{ tickets: ExpoTicket[]; ready_orders: number }>({ queryKey: ['kds-expo'], queryFn: () => api('/api/restaurant/kds/expo'), refetchInterval: poll, enabled: view === 'expo' });
   const load = useQuery<{ stations: LoadStation[] }>({ queryKey: ['kds-load'], queryFn: () => api('/api/restaurant/kds/load'), refetchInterval: poll, enabled: view === 'load' });
+  const pacing = useQuery<Pacing>({ queryKey: ['kds-pacing'], queryFn: () => api('/api/restaurant/kds/pacing'), refetchInterval: poll, enabled: view === 'board' }); // F8
+  // F5: learned average cook time per dish — a manager report, refreshed on view (no need to poll a 14-day rollup).
+  const prep = useQuery<PrepTimes>({ queryKey: ['kds-prep'], queryFn: () => api('/api/restaurant/kds/prep-times'), enabled: view === 'prep' });
+  // F4: persist the station-scoped filter per device
+  useEffect(() => { const s = typeof window !== 'undefined' ? localStorage.getItem('kds.station') : null; if (s) setStationFilter(s); }, []);
+  useEffect(() => { if (typeof window !== 'undefined') localStorage.setItem('kds.station', stationFilter); }, [stationFilter]);
+  const invalidate = () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('kds') });
   const act = useMutation({
     mutationFn: ({ id, action }: { id: number; action: string }) => api(`/api/restaurant/kds/items/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) }),
-    onSuccess: () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('kds') }),
+    onSuccess: invalidate,
   });
+  // Serve a whole ticket — scan the order QR, or tap "Serve order" on a card. Clears every ready line at once.
+  const serve = useMutation({
+    mutationFn: (orderNo: string) => api<{ served: number }>('/api/restaurant/kds/serve', { method: 'POST', body: JSON.stringify({ order_no: orderNo.trim() }) }),
+    onSuccess: (r, orderNo) => { notifySuccess(r.served > 0 ? t('mx.kds_serve_ok', { no: orderNo.trim(), n: r.served }) : t('mx.kds_serve_none', { no: orderNo.trim() })); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  // Start a whole ticket — accept every queued line of an order in one tap (queued → preparing).
+  const start = useMutation({
+    mutationFn: (orderNo: string) => api<{ started: number }>('/api/restaurant/kds/start', { method: 'POST', body: JSON.stringify({ order_no: orderNo.trim() }) }),
+    onSuccess: invalidate,
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const onScan = () => { const c = scan.trim(); if (c) { serve.mutate(c); setScan(''); } };
+
+  // ── kitchen ergonomics: sound cue, 86-from-KDS, big/fullscreen display ──
+  const [soundOn, setSoundOn] = useState(false);
+  const [big, setBig] = useState(false);
+  const audioRef = useRef<AudioContext | null>(null);
+  const prevIdsRef = useRef<Set<number>>(new Set());
+  const prevStuckRef = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // short Web-Audio chime (no asset, CSP-safe): a single tone for a new ticket, a two-tone alarm for stuck.
+  const beep = useCallback((kind: 'new' | 'alarm') => {
+    try {
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AC) return;
+      const ctx = audioRef.current ?? (audioRef.current = new AC());
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      const t = ctx.currentTime;
+      if (kind === 'alarm') { osc.frequency.setValueAtTime(880, t); osc.frequency.setValueAtTime(620, t + 0.16); } else osc.frequency.setValueAtTime(760, t);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + (kind === 'alarm' ? 0.5 : 0.18));
+      osc.start(t); osc.stop(t + (kind === 'alarm' ? 0.52 : 0.2));
+    } catch { /* audio is best-effort */ }
+  }, []);
+  // 86 a dish straight from the kitchen (out of stock) — flips availability everywhere the catalog is read
+  const eightySix = useMutation({
+    mutationFn: (sku: string) => api(`/api/menu/items/${encodeURIComponent(sku)}/availability`, { method: 'PATCH', body: JSON.stringify({ available: false }) }),
+    onSuccess: () => { notifySuccess(t('mx.kds_86_ok')); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const toggleFull = () => { const el = rootRef.current; if (!el) return; if (document.fullscreenElement) document.exitFullscreen?.(); else el.requestFullscreen?.().catch(() => {}); };
+  // F7: void a line from the KDS with a reason (dropped/spoiled), audited
+  const voidItem = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => api(`/api/restaurant/kds/items/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'void', reason }) }),
+    onSuccess: () => { notifySuccess(t('mx.kds_voided_ok')); invalidate(); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const onVoid = (it: KdsItem) => { const reason = window.prompt(t('mx.kds_void_reason')); if (reason !== null) voidItem.mutate({ id: it.item_id, reason: reason || undefined }); };
+
+  // F4: station-scoped view — the available stations come from the feed; filter the board to one station.
+  const allStations = feed.data?.stations ?? [];
+  const stationOptions = allStations.map((s) => ({ code: s.station_code, name: s.station_name }));
+  const shownStations = stationFilter === 'all' ? allStations : allStations.filter((s) => s.station_code === stationFilter);
+  const allItems: KdsItem[] = shownStations.flatMap((s) => s.items);
+  const stuckCount = feed.data?.stuck_count ?? 0;
+  const stuckMin = feed.data?.stuck_minutes ?? 10;
+  const summary = feed.data?.summary;
+
+  // new-ticket + rising-stuck chime (only when sound is on and the board is the active view)
+  useEffect(() => {
+    if (view !== 'board') return;
+    const ids = new Set(allItems.map((i) => i.item_id));
+    if (soundOn) {
+      let hasNew = false; for (const id of ids) if (!prevIdsRef.current.has(id)) { hasNew = true; break; }
+      if (stuckCount > prevStuckRef.current) beep('alarm');
+      else if (hasNew && prevIdsRef.current.size > 0) beep('new');
+    }
+    prevIdsRef.current = ids;
+    prevStuckRef.current = stuckCount;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed.data, soundOn, view]);
 
   return (
-    <div>
+    <div ref={rootRef} className="bg-background">
       <PageHeader
         title={t('mx.kds_title')}
-        description={view === 'expo' ? t('mx.kds_expo_desc') : view === 'load' ? t('mx.kds_load_desc') : t('mx.kds_desc')}
+        description={view === 'expo' ? t('mx.kds_expo_desc') : view === 'load' ? t('mx.kds_load_desc') : view === 'prep' ? t('mx.kds_prep_desc') : t('mx.kds_desc')}
         actions={
-          <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
-            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('mx.kds_realtime') : t('mx.kds_connecting')}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button variant={soundOn ? 'default' : 'outline'} size="icon" onClick={() => setSoundOn((s) => { if (!s) beep('new'); return !s; })} aria-label={t('mx.kds_sound')} title={t('mx.kds_sound')}>
+              {soundOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+            </Button>
+            <Button variant={big ? 'default' : 'outline'} size="icon" onClick={() => setBig((b) => !b)} aria-label={t('mx.kds_big')} title={t('mx.kds_big')}><ZoomIn className="size-4" /></Button>
+            <Button variant="outline" size="icon" onClick={toggleFull} aria-label={t('mx.kds_fullscreen')} title={t('mx.kds_fullscreen')}><Maximize className="size-4" /></Button>
+            <Badge variant={connected ? 'success' : 'muted'} className="gap-1">
+              {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />} {connected ? t('mx.kds_realtime') : t('mx.kds_connecting')}
+            </Badge>
+          </div>
         }
       />
 
@@ -73,76 +172,115 @@ export default function KdsPage() {
           <TabsTrigger value="board"><ChefHat className="size-4" /> {t('mx.kds_view_board')}</TabsTrigger>
           <TabsTrigger value="expo"><BellRing className="size-4" /> {t('mx.kds_view_expo')}</TabsTrigger>
           <TabsTrigger value="load"><Gauge className="size-4" /> {t('mx.kds_view_load')}</TabsTrigger>
+          <TabsTrigger value="prep"><Timer className="size-4" /> {t('mx.kds_view_prep')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {/* ── Board: active tickets grouped by station, aging by SLA colour ── */}
+      {/* ── Board: active kitchen lines, aging by SLA colour, grouped as chosen ── */}
       {view === 'board' && (
-        <StateView q={feed}>
-          {feed.data && (
-            <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-              {feed.data.stations.length === 0 && <p className="text-sm text-muted-foreground">{t('mx.kds_no_orders')}</p>}
-              {feed.data.stations.map((st) => (
-                <Card key={st.station_id} className="gap-3 p-3">
-                  <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
-                    <ChefHat className="size-5 text-primary" />
-                    {st.station_name}
-                    <span className="text-sm font-normal text-muted-foreground">({st.items.length})</span>
-                  </h3>
-                  <div className="grid gap-2">
-                    {st.items.map((it) => {
-                      const nxt = NEXT[it.kds_status];
-                      const u = URGENCY[slaOf(it)];
-                      const canRecall = it.kds_status === 'preparing' || it.kds_status === 'ready';
-                      return (
-                        <div key={it.item_id} className={cn('rounded-lg border-2 bg-card p-2', u.border)}>
-                          <div className="flex items-baseline justify-between gap-2">
-                            <strong className="text-base">{it.qty}× {it.name}</strong>
-                            <span className={cn('text-base font-bold tabular', u.text)}>{it.elapsed_min}′</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs text-muted-foreground">{it.table_label ? t('mx.kds_table', { label: it.table_label }) : t('mx.kds_takeaway')} · {it.order_no}</div>
-                            <div className="flex gap-1">
-                              {(it.course ?? 1) > 1 && <Badge variant="outline" className="px-1.5 text-[10px]">{t('mx.kds_course', { course: it.course ?? 1 })}</Badge>}
-                              {it.is_buffet && <Badge variant="secondary" className="gap-0.5 px-1.5 text-[10px]"><Utensils className="size-2.5" /> {t('mx.kds_buffet')}</Badge>}
-                              {it.from_diner && <Badge variant="outline" className="gap-0.5 px-1.5 text-[10px]"><Smartphone className="size-2.5" /> {t('mx.kds_diner_order')}</Badge>}
-                            </div>
-                          </div>
-                          {(it.modifiers?.length > 0 || it.notes) && (
-                            <div className="mt-0.5 text-xs font-medium text-warning-foreground dark:text-warning">
-                              {(it.modifiers ?? []).map((m) => m.label).join(', ')}{it.notes ? ` · ${it.notes}` : ''}
-                            </div>
-                          )}
-                          {/* consent-gated guest dining cautions (computed live — never stored on the ticket) */}
-                          {((it.guest_allergies?.length ?? 0) > 0 || it.guest_dietary) && (
-                            <div className="mt-0.5 text-xs font-bold text-destructive">
-                              ⚠️ {(it.guest_allergies?.length ?? 0) > 0 ? `${t('px.gp_allergies')}: ${(it.guest_allergies ?? []).join(', ')}` : ''}{(it.guest_allergies?.length ?? 0) > 0 && it.guest_dietary ? ' · ' : ''}{it.guest_dietary ?? ''}
-                            </div>
-                          )}
-                          {(nxt || canRecall) && (
-                            <div className="mt-1.5 flex gap-1.5">
-                              {nxt && (
-                                <Button className="flex-1" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
-                                  {t(nxt.label)}
-                                </Button>
-                              )}
-                              {canRecall && (
-                                <Button variant="outline" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: 'recall' })} aria-label={t('mx.kds_recall')} title={t('mx.kds_recall')}>
-                                  <Undo2 className="size-4" />
-                                </Button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {st.items.length === 0 && <span className="text-sm text-muted-foreground">{t('mx.kds_empty_station')}</span>}
-                  </div>
-                </Card>
+        <>
+          {/* control bar: grouping + scan-to-serve */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Tabs value={group} onValueChange={(v) => setGroup(v as Group)}>
+              <TabsList>
+                <TabsTrigger value="station"><ChefHat className="size-4" /> {t('mx.kds_group_station')}</TabsTrigger>
+                <TabsTrigger value="table"><Utensils className="size-4" /> {t('mx.kds_group_table')}</TabsTrigger>
+                <TabsTrigger value="time"><AlarmClock className="size-4" /> {t('mx.kds_group_time')}</TabsTrigger>
+                <TabsTrigger value="priority"><BellRing className="size-4" /> {t('mx.kds_group_priority')}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {/* F4: station-scoped terminal picker (persisted per device) */}
+            {stationOptions.length > 1 && (
+              <select value={stationFilter} onChange={(e) => setStationFilter(e.target.value)} aria-label={t('mx.kds_station_filter')}
+                className="h-9 rounded-md border bg-card px-2 text-sm">
+                <option value="all">{t('mx.kds_station_all')}</option>
+                {stationOptions.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </select>
+            )}
+            <form className="ml-auto flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); onScan(); }}>
+              <div className="relative">
+                <ScanLine className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={scan} onChange={(e) => setScan(e.target.value)} placeholder={t('mx.kds_scan_ph')} className="w-44 pl-8" aria-label={t('mx.kds_scan_ph')} />
+              </div>
+              <Button type="submit" variant="outline" size="sm" disabled={!scan.trim() || serve.isPending}>{t('mx.kds_scan_serve')}</Button>
+            </form>
+          </div>
+
+          {/* F8: course-pacing nudges — fire the next held course once the current is plated */}
+          {(pacing.data?.nudges?.length ?? 0) > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border-2 border-primary bg-primary/10 px-3 py-2 text-sm text-primary">
+              <BellRing className="size-4 shrink-0" />
+              {(pacing.data?.nudges ?? []).map((nd) => (
+                <span key={nd.order_no} className="rounded-md bg-card px-2 py-0.5 font-medium">
+                  {t('mx.kds_pace_fire', { table: nd.table_label ?? nd.order_no, course: nd.next_course })}
+                </span>
               ))}
             </div>
           )}
-        </StateView>
+
+          {/* live throughput summary (real-time, recomputed each poll) */}
+          {summary && (
+            <div className="mb-3 flex flex-wrap gap-2 text-sm">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><ChefHat className="size-4 text-primary" /> {t('mx.kds_sum_active', { n: summary.active_count })}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><Timer className="size-4 text-muted-foreground" /> {t('mx.kds_sum_avg_wait', { n: summary.avg_wait_min })}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><Timer className="size-4 text-success" /> {t('mx.kds_sum_avg_prep', { n: summary.avg_prep_today_min })}</span>
+              <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5"><BellRing className="size-4 text-success" /> {t('mx.kds_sum_served', { n: summary.served_today })}</span>
+            </div>
+          )}
+
+          {/* hard "stuck" alarm: lines hung past the threshold need a human */}
+          {stuckCount > 0 && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive">
+              <AlarmClock className="size-4 animate-pulse" /> {t('mx.kds_stuck_banner', { count: stuckCount, min: stuckMin })}
+            </div>
+          )}
+
+          <div style={big ? { zoom: 1.25 } : undefined}>
+          <StateView q={feed}>
+            {feed.data && (allItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('mx.kds_no_orders')}</p>
+            ) : group === 'station' ? (
+              <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+                {shownStations.map((st) => (
+                  <Card key={st.station_id} className="gap-3 p-3">
+                    <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
+                      <ChefHat className="size-5 text-primary" /> {st.station_name}
+                      <span className="text-sm font-normal text-muted-foreground">({st.items.length})</span>
+                    </h3>
+                    <div className="grid gap-2">
+                      {st.items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} onVoid={onVoid} />)}
+                      {st.items.length === 0 && <span className="text-sm text-muted-foreground">{t('mx.kds_empty_station')}</span>}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : group === 'table' ? (
+              <div className="grid items-start gap-4 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+                {groupByTable(allItems).map(([label, items]) => (
+                  <Card key={label} className="gap-3 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
+                        <Utensils className="size-5 text-primary" /> {label === '__ta' ? t('mx.kds_takeaway') : t('mx.kds_table', { label })}
+                        <span className="text-sm font-normal text-muted-foreground">({items.length})</span>
+                      </h3>
+                      <div className="flex shrink-0 flex-col gap-1">
+                        <Button variant="outline" size="sm" disabled={start.isPending || !items.some((i) => i.kds_status === 'queued')} onClick={() => start.mutate(items[0].order_no)}>{t('mx.kds_start_ticket')}</Button>
+                        <Button variant="outline" size="sm" disabled={serve.isPending || !items.some((i) => i.kds_status === 'ready')} onClick={() => serve.mutate(items[0].order_no)}>{t('mx.kds_serve_ticket')}</Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">{items.map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} onVoid={onVoid} />)}</div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              // time (oldest lot first) or priority (highest first) — one flat, wrapping grid
+              <div className="grid items-start gap-2 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+                {[...allItems].sort(group === 'time' ? byTime : byPriority).map((it) => <ItemCard key={it.item_id} it={it} t={t} act={act} onEightySix={(sku) => eightySix.mutate(sku)} onVoid={onVoid} />)}
+              </div>
+            ))}
+          </StateView>
+          </div>
+        </>
       )}
 
       {/* ── Expo / order-ready pass: ready lines aggregated by order, ready-to-run first ── */}
@@ -172,6 +310,10 @@ export default function KdsPage() {
                       </li>
                     ))}
                   </ul>
+                  {/* scan or tap to clear the whole ticket off the pass */}
+                  <Button size="sm" variant={tk.all_ready ? 'default' : 'outline'} disabled={serve.isPending} onClick={() => serve.mutate(tk.order_no)}>
+                    {t('mx.kds_serve_ticket')}
+                  </Button>
                 </Card>
               ))}
             </div>
@@ -250,6 +392,140 @@ export default function KdsPage() {
             </>
           ))}
         </StateView>
+      )}
+
+      {/* ── Prep times (F5): learned average cook time per dish — feeds the KDS ETA/SLA ── */}
+      {view === 'prep' && (
+        <StateView q={prep}>
+          {prep.data && (prep.data.dishes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('mx.kds_prep_none')}</p>
+          ) : (
+            <>
+              <div className="space-y-2 sm:hidden">
+                {prep.data.dishes.map((d) => (
+                  <Card key={d.sku} className="flex-row items-center justify-between gap-2 p-3">
+                    <span className="min-w-0 truncate font-medium">{d.name}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <Badge variant="secondary" className="tabular text-[11px]">{d.samples}×</Badge>
+                      <span className="tabular font-bold">{d.avg_prep_min}′</span>
+                    </span>
+                  </Card>
+                ))}
+              </div>
+              <div className="hidden sm:block">
+                <Card className="overflow-hidden p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">{t('mx.kds_prep_dish')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('mx.kds_prep_avg')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('mx.kds_prep_samples')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prep.data.dishes.map((d) => (
+                          <tr key={d.sku} className="border-b last:border-0">
+                            <td className="px-3 py-2 font-medium">{d.name}</td>
+                            <td className="px-3 py-2 text-right tabular font-semibold">{d.avg_prep_min}′</td>
+                            <td className="px-3 py-2 text-right tabular text-muted-foreground">{d.samples}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">{t('mx.kds_prep_updated', { time: fmtTime(prep.data.generated_at) })}</p>
+            </>
+          ))}
+        </StateView>
+      )}
+    </div>
+  );
+}
+
+// local hh:mm for the report's "updated at" stamp (business locale rendering left to the browser)
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// same-lot rule: oldest fire time first; within one lot the higher food-priority plates out first.
+const byTime = (a: KdsItem, b: KdsItem) => (a.fired_at ?? '').localeCompare(b.fired_at ?? '') || (b.priority ?? 0) - (a.priority ?? 0) || (a.course ?? 1) - (b.course ?? 1);
+// priority-first view: highest food-priority first, then oldest fire time.
+const byPriority = (a: KdsItem, b: KdsItem) => (b.priority ?? 0) - (a.priority ?? 0) || (a.fired_at ?? '').localeCompare(b.fired_at ?? '');
+
+// group the flat feed by table (takeaway → '__ta'), tables in first-fired order, lines within by same-lot rule
+function groupByTable(items: KdsItem[]): [string, KdsItem[]][] {
+  const map = new Map<string, KdsItem[]>();
+  for (const it of items) {
+    const key = it.table_label ?? '__ta';
+    (map.get(key) ?? map.set(key, []).get(key)!).push(it);
+  }
+  return [...map.entries()]
+    .map(([k, v]) => [k, v.sort(byTime)] as [string, KdsItem[]])
+    .sort((a, b) => (a[1][0]?.fired_at ?? '').localeCompare(b[1][0]?.fired_at ?? ''));
+}
+
+// one kitchen line card — SLA aging colour, stuck alarm, food-priority + course/buffet/diner badges, actions.
+function ItemCard({ it, t, act, onEightySix, onVoid }: { it: KdsItem; t: (k: string, v?: Record<string, string | number>) => string; act: { isPending: boolean; mutate: (v: { id: number; action: string }) => void }; onEightySix?: (sku: string) => void; onVoid?: (it: KdsItem) => void }) {
+  const nxt = NEXT[it.kds_status];
+  const u = URGENCY[slaOf(it)];
+  const canRecall = it.kds_status === 'preparing' || it.kds_status === 'ready';
+  const canEightySix = !!it.sku && !!onEightySix;
+  const canVoid = !!onVoid && it.kds_status !== 'served';
+  return (
+    <div className={cn('rounded-lg border-2 bg-card p-2', it.stuck ? 'border-destructive ring-2 ring-destructive/40' : u.border)}>
+      <div className="flex items-baseline justify-between gap-2">
+        <strong className="text-base">{it.qty}× {it.name}</strong>
+        <span className={cn('flex items-center gap-1 text-base font-bold tabular', it.stuck ? 'text-destructive' : u.text)}>
+          {it.stuck && <AlarmClock className="size-4 animate-pulse" />}{it.elapsed_min}′
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-muted-foreground">{it.table_label ? t('mx.kds_table', { label: it.table_label }) : t('mx.kds_takeaway')} · {it.order_no}</div>
+        <div className="flex flex-wrap justify-end gap-1">
+          {it.kds_status === 'queued' && it.elapsed_min < 2 && <Badge variant="success" className="px-1.5 text-[10px]">{t('mx.kds_new')}</Badge>}
+          {(it.priority ?? 0) > 0 && <Badge variant="warning" className="px-1.5 text-[10px]">{t('mx.kds_priority_badge', { n: it.priority ?? 0 })}</Badge>}
+          {(it.course ?? 1) > 1 && <Badge variant="outline" className="px-1.5 text-[10px]">{t('mx.kds_course', { course: it.course ?? 1 })}</Badge>}
+          {it.is_buffet && <Badge variant="secondary" className="gap-0.5 px-1.5 text-[10px]"><Utensils className="size-2.5" /> {t('mx.kds_buffet')}</Badge>}
+          {it.from_diner && <Badge variant="outline" className="gap-0.5 px-1.5 text-[10px]"><Smartphone className="size-2.5" /> {t('mx.kds_diner_order')}</Badge>}
+        </div>
+      </div>
+      {(it.modifiers?.length > 0 || it.notes) && (
+        <div className="mt-0.5 text-xs font-medium text-warning-foreground dark:text-warning">
+          {(it.modifiers ?? []).map((m) => m.label).join(', ')}{it.notes ? ` · ${it.notes}` : ''}
+        </div>
+      )}
+      {((it.guest_allergies?.length ?? 0) > 0 || it.guest_dietary) && (
+        <div className="mt-0.5 text-xs font-bold text-destructive">
+          ⚠️ {(it.guest_allergies?.length ?? 0) > 0 ? `${t('px.gp_allergies')}: ${(it.guest_allergies ?? []).join(', ')}` : ''}{(it.guest_allergies?.length ?? 0) > 0 && it.guest_dietary ? ' · ' : ''}{it.guest_dietary ?? ''}
+        </div>
+      )}
+      {(nxt || canRecall || canEightySix || canVoid) && (
+        <div className="mt-1.5 flex gap-1.5">
+          {nxt && (
+            <Button className="flex-1" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: nxt.action })}>
+              {t(nxt.label)}
+            </Button>
+          )}
+          {canRecall && (
+            <Button variant="outline" size="sm" disabled={act.isPending} onClick={() => act.mutate({ id: it.item_id, action: 'recall' })} aria-label={t('mx.kds_recall')} title={t('mx.kds_recall')}>
+              <Undo2 className="size-4" />
+            </Button>
+          )}
+          {canEightySix && (
+            <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => onEightySix!(it.sku!)} aria-label={t('mx.kds_86')} title={t('mx.kds_86')}>
+              <Ban className="size-4" />
+            </Button>
+          )}
+          {canVoid && (
+            <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => onVoid!(it)} aria-label={t('mx.kds_void')} title={t('mx.kds_void')}>
+              <X className="size-4" />
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

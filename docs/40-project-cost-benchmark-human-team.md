@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-This document estimates what it would cost to build Invisible ERP V2 from scratch with a
+This document estimates what it would cost to build Invisible ERP from scratch with a
 conventional human software team. It is a benchmark for build-vs-buy discussions, investor
 material, and internal capitalization analysis. It does not change any application behavior.
 

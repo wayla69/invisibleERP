@@ -2,6 +2,11 @@
 // paired with a readable double-submit CSRF token cookie (`ierp_csrf`) that we echo in the X-CSRF-Token
 // header on mutating requests. Every call sends credentials so the browser attaches the auth cookie.
 import { requestSmeReason } from './sme-reason';
+import { currentLang, ts } from './i18n-static';
+
+// Server errors carry both `message` (EN) and `messageTh`; surface the one matching the active UI locale.
+const localizedErr = (err: { message?: string; messageTh?: string } | undefined): string | undefined =>
+  currentLang() === 'th' ? err?.messageTh ?? err?.message : err?.message ?? err?.messageTh;
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 /** API origin (or same-origin proxy base). Exported for non-JSON fetches — e.g. the POS terminal bridge
@@ -74,7 +79,7 @@ export async function logout(): Promise<void> {
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 // Wrap a fetch with an AbortController timeout so a hung request rejects instead of leaving a button
-// spinning forever. Honours a caller-supplied signal too. Throws a Thai, actionable message on timeout.
+// spinning forever. Honours a caller-supplied signal too. Throws a locale-aware, actionable message on timeout.
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -82,8 +87,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFA
   try {
     return await fetch(url, { ...init, credentials: 'include', signal: ctrl.signal });
   } catch (e) {
-    if (ctrl.signal.aborted) throw new Error('การเชื่อมต่อหมดเวลา — กรุณาลองอีกครั้ง (เครือข่ายอาจขัดข้อง)');
-    throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจสอบเครือข่ายแล้วลองใหม่');
+    if (ctrl.signal.aborted) throw new Error(ts('err.timeout'));
+    throw new Error(ts('err.network'));
   } finally {
     clearTimeout(timer);
   }
@@ -151,7 +156,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
   }
   let body = await res.json().catch(() => ({}));
   if (res.status === 400 && body?.error?.code === 'SELF_APPROVAL_REASON_REQUIRED') {
-    const reason = await requestSmeReason(body.error.messageTh ?? body.error.message ?? '');
+    const reason = await requestSmeReason(localizedErr(body.error) ?? '');
     if (reason) {
       let merged: Record<string, unknown> = {};
       try { merged = init.body ? JSON.parse(String(init.body)) : {}; } catch { merged = {}; }
@@ -164,11 +169,11 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     if (handleUnauthorized(res.status)) {
       // Carry the HTTP status here too: callers that treat a status-less Error as a NETWORK failure
       // (e.g. the register's offline-queue fallback) must not mistake an expired session for a dead link.
-      const sessionErr = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่') as Error & { status?: number };
+      const sessionErr = new Error(ts('err.session_expired')) as Error & { status?: number };
       sessionErr.status = res.status;
       throw sessionErr;
     }
-    const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
+    const msg = localizedErr(body?.error) ?? `HTTP ${res.status}`;
     // Preserve the machine-readable error `code` and HTTP status on the thrown Error so callers can branch
     // on a specific failure (e.g. map COA_ADMIN_ONLY to a tailored toast) instead of matching message text.
     // `details` carries the endpoint-defined payload (e.g. DUPLICATE_SUSPECT's match list — CRM merge dialog).
@@ -176,10 +181,19 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     err.code = body?.error?.code;
     err.status = res.status;
     err.details = body?.error?.details;
+    // Wave B2 — a plan-level denial also raises an app-wide event so the AppShell can show the upsell
+    // dialog (upgrade / add-on CTA) instead of each caller rendering a bare error toast. The error still
+    // throws unchanged, so existing per-caller handling keeps working.
+    if (typeof window !== 'undefined' && err.code && PLAN_DENY_CODES.has(err.code)) {
+      window.dispatchEvent(new CustomEvent('ierp:plan-denied', { detail: { code: err.code, message: msg } }));
+    }
     throw err;
   }
   return body as T;
 }
+
+// Deny codes the PlanGuard emits (apps/api modules/billing/plan.guard.ts) — keep the two lists in sync.
+const PLAN_DENY_CODES = new Set(['SUITE_NOT_ENTITLED', 'PLAN_FEATURE_REQUIRED', 'TRIAL_EXPIRED', 'SUBSCRIPTION_INACTIVE', 'SUBSCRIPTION_PASTDUE_READONLY']);
 
 
 // Download a file (xlsx/csv/pdf export, QR labels) with auth → save via a blob anchor.
@@ -189,11 +203,11 @@ export async function apiDownload(path: string, filename: string, init: RequestI
     headers: { ...csrfHeader(init.method), ...actingTenantHeader(), ...(init.headers ?? {}) },
   }, 60_000); // exports/PDF generation can be slow — allow longer
   if (!res.ok) {
-    if (handleUnauthorized(res.status)) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+    if (handleUnauthorized(res.status)) throw new Error(ts('err.session_expired'));
     let msg = `HTTP ${res.status}`;
     try {
       const j = await res.json();
-      msg = j?.error?.messageTh ?? j?.error?.message ?? msg;
+      msg = localizedErr(j?.error) ?? msg;
     } catch { /* non-json */ }
     throw new Error(msg);
   }
@@ -218,7 +232,7 @@ export async function publicApi<T = unknown>(path: string, init: RequestInit = {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = body?.error?.messageTh ?? body?.error?.message ?? `HTTP ${res.status}`;
+    const msg = localizedErr(body?.error) ?? `HTTP ${res.status}`;
     // Preserve the machine-readable `code` + HTTP status (mirrors api()), so pre-auth callers can branch on
     // a specific failure — e.g. the login form revealing the OTP field on MFA_REQUIRED / MFA_INVALID.
     const err = new Error(msg) as Error & { code?: string; status?: number };

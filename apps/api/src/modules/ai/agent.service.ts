@@ -16,6 +16,7 @@ import { MenuEngineeringService } from '../analytics/menu-engineering.service';
 import { ProductionPlanService } from '../menu/production-plan.service';
 import { RecipeService } from '../menu/recipe.service';
 import { MarketingAutomationService } from '../marketing/marketing-automation.service';
+import { applyAiAddonFeatures } from '@ierp/shared';
 import { PG_CLIENT, type PgClient, DRIZZLE, type DrizzleDb } from '../../database/database.module';
 import type { JwtUser } from '../../common/decorators';
 import { redactPii, PII_REDACTION_ENABLED } from '../../common/pii-redact';
@@ -44,7 +45,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
     if (timer) clearTimeout(timer);
   }
 }
-const SYSTEM_TH = `คุณคือ AI Assistant ของ Invisible ERP สำหรับ Oshinei Enterprise
+const SYSTEM_TH = `คุณคือ AI Assistant ของ Invisible ERP สำหรับ Invisible Enterprise
 - ตอบเป็นภาษาเดียวกับผู้ใช้ (ไทยหรืออังกฤษ)
 - แสดงตัวเลขพร้อมคอมมาคั่นหลักพัน และหน่วยเป็น THB
 - ใช้ tool ดึงข้อมูลจริงก่อนตอบเสมอ
@@ -160,12 +161,17 @@ export class AgentService {
     if (tenantId == null || !this.sql) return null; // HQ Admin / no sql — exempt, unmetered
     try {
       const enterpriseCap = Number(process.env.AI_ENTERPRISE_DAILY_CAP ?? 2_000_000);
-      const [plan] = await this.sql<{ included: number | null; hardmax: number | null }[]>`
+      const [row] = await this.sql<{ included: number | null; hardmax: number | null; addons: unknown }[]>`
         SELECT (p.features->>'ai_tokens_daily')::int AS included,
-               (p.features->>'ai_tokens_daily_max')::int AS hardmax
+               (p.features->>'ai_tokens_daily_max')::int AS hardmax,
+               s.addons AS addons
         FROM subscriptions s JOIN plans p ON p.code = s.plan_code
         WHERE s.tenant_id = ${tenantId} AND s.status IN ('Active', 'Trialing')
         LIMIT 1`;
+      // A purchased 'ai' add-on confers its own token band (the plan's numbers are 0 on non-AI plans) —
+      // overlay before the cap math so the buyer is metered on the add-on band, not blocked at token one.
+      const eff = row ? applyAiAddonFeatures({ ai_tokens_daily: row.included, ai_tokens_daily_max: row.hardmax }, row.addons) : undefined;
+      const plan = eff ? { included: eff.ai_tokens_daily as number | null, hardmax: eff.ai_tokens_daily_max as number | null } : undefined;
       // Cap math is the pure, unit-tested resolveBudgetCaps (common/ai-models.ts): finite default when
       // the plan omits the cap, legacy -1 "unlimited" → enterprise ceiling, hardMax clamped ≥ included.
       const { included, hardMax } = resolveBudgetCaps(plan, { includedDefault: AgentService.DEFAULT_AI_DAILY, enterpriseCap });
@@ -373,7 +379,7 @@ export class AgentService {
       switch (name) {
         case 'get_sales_summary': return await this.pos.summary(input.start_date, input.end_date);
         case 'get_recent_orders': return await this.pos.orders(input.limit ?? 10, 0);
-        case 'get_stock_levels': return await this.inv.getStock({ search: input.search, low_only: !!input.below_reorder_only, limit: input.limit ?? 50 } as any);
+        case 'get_stock_levels': return await this.inv.getStock({ search: input.search, low_only: !!input.below_reorder_only, limit: input.limit ?? 50 });
         case 'get_stock_item': return await this.inv.getStockDetail(input.item_id);
         case 'get_pl_summary': return await this.fin.pl(input.month, input.year);
         case 'get_kpi_dashboard': return await this.fin.kpi();

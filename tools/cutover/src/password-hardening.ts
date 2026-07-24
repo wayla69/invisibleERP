@@ -34,6 +34,14 @@ async function main() {
   ok('verifyScrypt: SHA-256 hash never accepted', (await pw.verifyScrypt('OldP@ss', legacyHash)).ok === false);
   ok('verifyScrypt: scrypt still works', (await pw.verifyScrypt('S3cret!', h)).ok === true);
 
+  // ── pepper (4.5-bis) — this process has NO PASSWORD_PEPPER, so back-compat + fail-closed hold: ──
+  // (the peppered round-trip is unit-tested with a pepper set in apps/api/test/password-pepper.test.ts)
+  ok('no-pepper hash stays the plain scrypt format (back-compat)', h.startsWith('scrypt$'));
+  // A peppered hash cannot be verified without the pepper — must fail closed, never silently accept.
+  const fakePeppered = `scrypt-p1$32768$8$1$${'a'.repeat(32)}$${'b'.repeat(128)}`;
+  ok('peppered hash rejected (fail-closed) when PASSWORD_PEPPER unset', (await pw.verify('x', fakePeppered)).ok === false);
+  ok('verifyScrypt: peppered hash rejected when pepper unset', (await pw.verifyScrypt('x', fakePeppered)).ok === false);
+
   console.log('\n── Wave 2 · 4.5 — password legacy-hash hardening (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);
   const failed = checks.filter((c) => !c.ok).length;

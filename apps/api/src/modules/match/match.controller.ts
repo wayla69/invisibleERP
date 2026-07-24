@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Param, Query, Body } from '@nestjs/common';
 import { z } from 'zod';
 import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { RequiresSuite } from '../billing/requires-suite.decorator';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ThreeWayMatchService } from './three-way-match.service';
 import { qint } from '../../common/query';
@@ -12,6 +13,8 @@ const MatchRunBody = z.object({
 const ToleranceBody = z.object({ qty_pct: z.number().min(0).optional(), price_pct: z.number().min(0).optional(), amount_pct: z.number().min(0).optional(), amount_abs: z.number().min(0).optional() });
 const OverrideBody = z.object({ reason: z.string().min(1), self_approval_reason: z.string().max(500).optional() });
 
+// 0451 — three-way match rides the 'scm_advanced' add-on suite (see RfqController for the grandfathering).
+@RequiresSuite('scm_advanced')
 @Controller('api/procurement/match')
 export class MatchController {
   constructor(private readonly svc: ThreeWayMatchService) {}
@@ -21,7 +24,10 @@ export class MatchController {
 
   @Get('tolerance') @Permissions('procurement', 'creditors')
   getTolerance() { return this.svc.getTolerance(); }
-  @Put('tolerance') @Permissions('creditors')
+  // PE-5 — the match tolerance governs whether EVERY invoice auto-passes the 3-way match, so it must NOT be
+  // set by the `creditors` (AP) beneficiary who runs the match and releases payment. Restrict to an approver
+  // duty (exec/approvals), mirroring how EXP-12 receiving-settings excludes the receiving operator.
+  @Put('tolerance') @Permissions('exec', 'approvals')
   setTolerance(@Body(new ZodValidationPipe(ToleranceBody)) b: any, @CurrentUser() u: JwtUser) { return this.svc.setTolerance(b, u); }
 
   // Match-results register / blocked-invoice worklist (use ?blocked=true for held-from-payment only).

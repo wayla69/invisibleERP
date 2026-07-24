@@ -1,13 +1,17 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ne, or, sql, inArray } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { itemCategories, taxCodes, items, accounts, locations, itemRelationships } from '../../database/schema';
+import { itemCategories, taxCodes, items, accounts, locations, itemRelationships, itemVariantAttributes } from '../../database/schema';
 import { isUniqueViolation } from '../../common/db-error';
 import { nameSimilarity, normalizeKey } from '../../common/text-similarity';
 import { isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { logger } from '../../observability/logger';
 import { previewUnusedItems as previewUnusedItemsQuery, purgeUnusedItems as purgeUnusedItemsQuery, forcePurgePreview as forcePurgePreviewQuery, forcePurgeItems as forcePurgeItemsQuery } from './item-cleanup';
+
+// Kill switch for the forced catalogue purge (see forcePurgeItems). Same spelling set as the platform D3
+// knobs — anything that is not an explicit truthy value leaves the route DISABLED (fail-closed).
+const ITEM_FORCE_PURGE_TRUTHY = new Set(['1', 'true', 'on', 'yes']);
 
 // Item-posting SETUP master data (docs/33 PR3, GL-21). Maintains the account/tax profile that the
 // AccountDeterminationService resolves at posting time: item categories, tax codes, and the per-item override.
@@ -35,9 +39,13 @@ export interface ItemProfileDto {
   // scan-to-add, MRP lot-sizing, FA-10 capital routing) but had no maintenance surface on this screen.
   barcode?: string | null; uom?: string | null; base_uom?: string | null; conversion_factor?: number | null;
   unit_price?: number | null; temperature_type?: string | null; bu_id?: string | null;
+  supply_type?: string | null; // 'goods' | 'service' | 'non_inventory' — service/non-inventory sell with no stock move / no COGS (docs/52 Phase 2a/2c)
   min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
+  is_lot_tracked?: boolean; // docs/52 Phase 3a — sell only from a real, non-expired, non-held lot (FEFO at POS)
+  is_serial_tracked?: boolean; // docs/52 Phase 3b — sell as a specific serial/IMEI unit
+  min_age?: number | null; // docs/52 Phase 3c — minimum buyer age (0 = unrestricted; alcohol/tobacco 20)
 }
 export interface WarehouseAccountsDto {
   location_name?: string | null; zone?: string | null; type?: string | null;
@@ -163,13 +171,60 @@ export class ItemSetupService {
       inventoryAccount: dto.inventory_account, valuationAccount: dto.valuation_account,
       vatCode: dto.vat_code, whtIncomeType: dto.wht_income_type, defaultLocationId: dto.default_location_id,
       barcode: dto.barcode, uom: dto.uom, baseUom: dto.base_uom, conversionFactor: num(dto.conversion_factor),
-      unitPrice: num(dto.unit_price), temperatureType: dto.temperature_type, buId: dto.bu_id,
+      unitPrice: num(dto.unit_price), temperatureType: dto.temperature_type, buId: dto.bu_id, supplyType: dto.supply_type ?? undefined,
       minStock: num(dto.min_stock), maxStock: num(dto.max_stock), avgDailyUsage: num(dto.avg_daily_usage), leadTimeDays: num(dto.lead_time_days),
       minOrderQty: num(dto.min_order_qty), orderMultiple: num(dto.order_multiple), orderCost: num(dto.order_cost), holdingCost: num(dto.holding_cost),
-      isFixedAsset: dto.is_fixed_asset, defaultAssetCategoryId: dto.default_asset_category_id,
+      isFixedAsset: dto.is_fixed_asset, defaultAssetCategoryId: dto.default_asset_category_id, isLotTracked: dto.is_lot_tracked, isSerialTracked: dto.is_serial_tracked, minAge: dto.min_age ?? undefined,
     }).where(eq(items.itemId, itemId)).returning();
     if (!row) throw new NotFoundException({ code: 'ITEM_NOT_FOUND', message: `Item ${itemId} not found`, messageTh: 'ไม่พบสินค้า' });
     return shapeItem(row);
+  }
+
+  // ── Product variants / matrix items (docs/52 Phase 2b) ──────────────────────────────────────────
+  // Generate the size×color (any axes) matrix under a PARENT item. Each combination becomes a real `items`
+  // row (its own item_id / barcode / unit_price / stock), linked by parent_item_id, plus its attribute rows.
+  // Idempotent: an existing variant SKU is skipped, so re-running to add a new colour only creates the new
+  // cells. The parent is flagged is_matrix_parent. Price inherits the parent (edit per-variant afterwards on
+  // the item posting screen); an optional per-SKU barcode may be supplied.
+  async generateVariants(parentItemId: string, dto: { axes?: { axis: string; values: string[] }[]; barcodes?: Record<string, string> }, user: JwtUser) {
+    const parent = await this.itemRow(parentItemId);
+    const axes = (dto.axes ?? []).map((a) => ({ axis: String(a.axis ?? '').trim(), values: [...new Set((a.values ?? []).map((v) => String(v).trim()).filter(Boolean))] })).filter((a) => a.axis && a.values.length);
+    if (!axes.length) throw new BadRequestException({ code: 'NO_AXES', message: 'Provide at least one axis with values (e.g. Size: S,M,L)', messageTh: 'ระบุอย่างน้อยหนึ่งแกน (เช่น ไซซ์ / สี) พร้อมค่า' });
+    // cartesian product of the axis values
+    let combos: { axis: string; value: string }[][] = [[]];
+    for (const ax of axes) combos = combos.flatMap((c) => ax.values.map((v) => [...c, { axis: ax.axis, value: v }]));
+    if (combos.length > 500) throw new BadRequestException({ code: 'TOO_MANY_VARIANTS', message: `That matrix would create ${combos.length} variants (max 500)`, messageTh: 'จำนวนตัวเลือกมากเกินไป (สูงสุด 500)' });
+    const sanitize = (s: string) => s.replace(/[^A-Za-z0-9ก-๙]+/g, '').toUpperCase();
+    let generated = 0;
+    for (const combo of combos) {
+      const childId = `${parent.itemId}-${combo.map((c) => sanitize(c.value)).join('-')}`;
+      const [ins] = await this.db.insert(items).values({
+        itemId: childId, itemDescription: `${parent.itemDescription ?? parent.itemId} ${combo.map((c) => c.value).join(' ')}`.trim(),
+        supplyType: parent.supplyType, uom: parent.uom, unitPrice: parent.unitPrice, barcode: dto.barcodes?.[childId] ?? null,
+        parentItemId: Number(parent.id), category: parent.category, categoryId: parent.categoryId,
+        revenueAccount: parent.revenueAccount, cogsAccount: parent.cogsAccount, inventoryAccount: parent.inventoryAccount, vatCode: parent.vatCode,
+      }).onConflictDoNothing({ target: items.itemId }).returning({ id: items.id });
+      if (ins) {
+        await this.db.insert(itemVariantAttributes).values(combo.map((c) => ({ itemId: childId, axis: c.axis, value: c.value }))).onConflictDoNothing();
+        generated++;
+      }
+    }
+    if (!parent.isMatrixParent) await this.db.update(items).set({ isMatrixParent: true }).where(eq(items.id, Number(parent.id)));
+    const listed = await this.listVariants(parentItemId, user);
+    return { parent_item_id: parent.itemId, generated, ...listed };
+  }
+
+  // List every variant under a parent (+ its attribute values).
+  async listVariants(parentItemId: string, _user: JwtUser) {
+    const parent = await this.itemRow(parentItemId);
+    const rows = await this.db.select().from(items).where(eq(items.parentItemId, Number(parent.id))).orderBy(asc(items.itemId));
+    const attrs = rows.length ? await this.db.select().from(itemVariantAttributes).where(inArray(itemVariantAttributes.itemId, rows.map((r: any) => r.itemId))) : [];
+    const byItem = new Map<string, { axis: string; value: string }[]>();
+    for (const a of attrs) { const l = byItem.get(a.itemId) ?? []; l.push({ axis: a.axis, value: a.value }); byItem.set(a.itemId, l); }
+    return {
+      is_matrix_parent: parent.isMatrixParent, count: rows.length,
+      variants: rows.map((r: any) => ({ item_id: r.itemId, description: r.itemDescription, barcode: r.barcode, unit_price: Number(r.unitPrice ?? 0), status: r.status, attributes: byItem.get(r.itemId) ?? [] })),
+    };
   }
 
   // ── Item lifecycle + relationships (master-data audit Phase 10) ─────────────────────────────────
@@ -189,14 +244,17 @@ export class ItemSetupService {
     return shapeItem(row);
   }
 
-  async addItemRelationship(itemId: string, dto: { to_item_id: string; rel_type: string; note?: string }, user: JwtUser) {
+  async addItemRelationship(itemId: string, dto: { to_item_id: string; rel_type: string; qty?: number; note?: string }, user: JwtUser) {
     const from = await this.itemRow(itemId);
     if (dto.to_item_id === itemId) throw new BadRequestException({ code: 'SELF_RELATION', message: 'An item cannot relate to itself', messageTh: 'สินค้าไม่สามารถเชื่อมโยงกับตัวเองได้' });
     const to = await this.itemRow(dto.to_item_id);
+    // Phase 2c: a kit_component row carries the per-component quantity consumed per kit sold; the advisory
+    // rel types (substitute/complement/…) ignore it (stored as the default 1).
+    const qty = dto.rel_type === 'kit_component' ? Math.max(0.001, Number(dto.qty ?? 1)) : 1;
     try {
       const [row] = await this.db.insert(itemRelationships).values({
         tenantId: user.tenantId ?? null, fromItemId: Number(from.id), toItemId: Number(to.id),
-        relType: dto.rel_type, note: dto.note ?? null, createdBy: user.username,
+        relType: dto.rel_type, qty: String(qty), note: dto.note ?? null, createdBy: user.username,
       }).returning();
       return shapeItemRel(row, { item_id: to.itemId, description: to.itemDescription ?? null }, 'outgoing');
     } catch (e) {
@@ -331,10 +389,38 @@ export class ItemSetupService {
     return forcePurgePreviewQuery(this.db, itemIds);
   }
 
-  async forcePurgeItems(user: JwtUser, itemIds: string[] | undefined, confirm: string) {
+  // Two fail-closed gates on top of the god check + confirm phrase, because this is the widest-blast-radius
+  // route in the system (omit `item_ids` and it targets the WHOLE catalogue, deleting referencing rows in
+  // every company). Maker-checker is not available here — the platform owner list is often a single human —
+  // so the controls are: an ops-controlled kill switch, and proof the operator actually saw the damage.
+  async forcePurgeItems(user: JwtUser, itemIds: string[] | undefined, confirm: string, expectedRefRows?: number) {
     this.assertItemGcAllowed(user);
+    // (1) Kill switch — inert unless an operator deliberately opens a maintenance window (ALLOW_* idiom,
+    // as with the tenancy boot-check opt-outs). A leaked god session cannot wipe the catalogue on a normal
+    // deploy; enabling it is a separate, logged, deploy-level act.
+    if (!ITEM_FORCE_PURGE_TRUTHY.has(String(process.env.ALLOW_ITEM_FORCE_PURGE ?? '').trim().toLowerCase())) {
+      throw new ForbiddenException({
+        code: 'FORCE_PURGE_DISABLED',
+        message: 'Forced item purge is disabled — set ALLOW_ITEM_FORCE_PURGE for a maintenance window',
+        messageTh: 'การลบสินค้าแบบบังคับถูกปิดไว้ — ต้องเปิด ALLOW_ITEM_FORCE_PURGE ก่อน',
+      });
+    }
     if ((confirm ?? '').trim() !== 'FORCE-PURGE-ITEMS') {
       throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type FORCE-PURGE-ITEMS to confirm the forced deletion', messageTh: 'พิมพ์ FORCE-PURGE-ITEMS เพื่อยืนยันการลบแบบบังคับ' });
+    }
+    // (2) The blast-radius preview was "mandatory" by documentation only — the API accepted a destructive
+    // call that had never previewed anything. Requiring the caller to echo the number of cross-tenant rows
+    // it will destroy makes force-preview genuinely load-bearing (that number cannot be known otherwise) AND
+    // closes the TOCTOU: if the catalogue changed since the preview, the counts diverge and we refuse rather
+    // than destroy a different, larger set than the operator approved.
+    const live = await forcePurgePreviewQuery(this.db, itemIds);
+    if (!Number.isInteger(expectedRefRows) || expectedRefRows !== live.total_ref_rows) {
+      throw new ConflictException({
+        code: 'BLAST_RADIUS_MISMATCH',
+        message: `Run force-preview first and echo its total_ref_rows: expected ${live.total_ref_rows}, got ${expectedRefRows ?? 'none'}`,
+        messageTh: `ต้องเรียก force-preview ก่อนแล้วส่งค่า total_ref_rows กลับมา (ค่าจริง ${live.total_ref_rows}, ได้รับ ${expectedRefRows ?? 'ไม่ได้ส่ง'})`,
+        details: { expected: live.total_ref_rows, received: expectedRefRows ?? null, items: live.items, by_tenant: live.by_tenant },
+      });
     }
     const result = await forcePurgeItemsQuery(this.db, itemIds);
     logger.warn({ event: 'items_force_purged', by: user.username, items: result.items_deleted, ref_rows: result.ref_rows_deleted, scoped: !!(itemIds && itemIds.length), blocked: result.blocked }, 'FORCE-purged shared-catalogue items incl. cross-tenant references (god)');
@@ -389,10 +475,13 @@ function shapeItem(i: any) {
     revenue_account: i.revenueAccount, cogs_account: i.cogsAccount, inventory_account: i.inventoryAccount,
     valuation_account: i.valuationAccount, vat_code: i.vatCode, wht_income_type: i.whtIncomeType, default_location_id: i.defaultLocationId,
     barcode: i.barcode, uom: i.uom, base_uom: i.baseUom, conversion_factor: n(i.conversionFactor),
-    unit_price: n(i.unitPrice), temperature_type: i.temperatureType, bu_id: i.buId,
+    unit_price: n(i.unitPrice), temperature_type: i.temperatureType, bu_id: i.buId, supply_type: i.supplyType ?? 'goods',
     min_stock: n(i.minStock), max_stock: n(i.maxStock), avg_daily_usage: n(i.avgDailyUsage), lead_time_days: n(i.leadTimeDays),
     min_order_qty: n(i.minOrderQty), order_multiple: n(i.orderMultiple), order_cost: n(i.orderCost), holding_cost: n(i.holdingCost),
     is_fixed_asset: i.isFixedAsset === true, default_asset_category_id: i.defaultAssetCategoryId != null ? Number(i.defaultAssetCategoryId) : null,
+    is_lot_tracked: i.isLotTracked === true,
+    is_serial_tracked: i.isSerialTracked === true,
+    min_age: i.minAge != null ? Number(i.minAge) : 0,
     status: i.status ?? 'active', superseded_by: i.supersededBy != null ? Number(i.supersededBy) : null,
     merged_into: i.mergedInto != null ? Number(i.mergedInto) : null,
   };
@@ -400,5 +489,5 @@ function shapeItem(i: any) {
 
 function shapeItemRel(r: any, other: { item_id: string; description: string | null }, direction: 'outgoing' | 'incoming') {
   // `party` shape mirrors the customer/vendor relationships so the shared web section renders it uniformly.
-  return { id: Number(r.id), rel_type: r.relType, direction, party: { item_id: other.item_id, name: other.description || other.item_id }, note: r.note ?? null, created_by: r.createdBy, created_at: r.createdAt };
+  return { id: Number(r.id), rel_type: r.relType, direction, qty: Number(r.qty ?? 1), party: { item_id: other.item_id, name: other.description || other.item_id }, note: r.note ?? null, created_by: r.createdBy, created_at: r.createdAt };
 }

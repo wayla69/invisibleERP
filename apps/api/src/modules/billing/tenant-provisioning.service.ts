@@ -7,13 +7,19 @@ import { reportSubscriptions } from '../../database/schema/bi';
 import { PasswordService } from '../auth/password.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { isIndustryKey } from '../ledger/coa-templates';
+import { smeNavProfile, PACK_TO_PLAN, isAddonKey } from '@ierp/shared';
 import { ymd } from '../../database/queries';
 import { normalizeUsername } from '../../common/username';
 import { isPlatformAdmin } from '../../common/decorators';
 import { isUniqueViolation } from '../../common/db-error';
 import { logger } from '../../observability/logger';
 import { PlatformNotificationsService } from '../platform-notifications/platform-notifications.module';
+import { MailerService } from '../mailer/mailer.service';
 import { wipeTenantRefs, tenantIdColumns } from './tenant-wipe';
+
+// Web-app base for links inside transactional emails (login / signup deep-links). Mirrors the Stripe
+// checkout return-URL convention (APP_BASE_URL), trailing slash tolerated.
+const appBaseUrl = (): string => (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 
 // Public self-serve signup gate (ITGC-AC-18). In PRODUCTION, self-service company provisioning is
 // DISABLED unconditionally — only the platform owner ("god", godmimi) opens a new company (directly via
@@ -44,6 +50,12 @@ export interface SignupDto {
   admin_password: string;
   email: string;
   plan_code?: string;
+  // Pack selection carried over from the public /plans configurator (0451). requested_plan is the
+  // MARKETING pack id (essential/growth/…) — mapped to the real seeded plan code via PACK_TO_PLAN at
+  // request-persist time; requested_addons are ADDON_KEYS (unknown values dropped, never rejected).
+  requested_plan?: string;
+  requested_billing?: 'monthly' | 'annual';
+  requested_addons?: string[];
   // industry CoA template the company picks at signup (GL-10): restaurant|retail|distribution|services|
   // general. Falls back to 'general' (full canonical chart) when omitted/unknown.
   industry?: string;
@@ -76,6 +88,7 @@ export class TenantProvisioningService {
     private readonly password: PasswordService,
     private readonly ledger?: LedgerService,
     private readonly platformNotifs?: PlatformNotificationsService,
+    private readonly mailer?: MailerService, // A1 — optional so hand-constructed test instances still work
   ) {}
 
   // ───────────────────── PUBLIC self-serve signup ─────────────────────
@@ -109,6 +122,18 @@ export class TenantProvisioningService {
       companyName: opts.company_name ?? null, planCode: opts.plan_code ?? null, email: opts.email ?? null,
       expiresAt,
     }).returning({ id: signupInvites.id });
+    // A1 — when the god gave an invitee address, email the single-use link directly (the console still
+    // shows the raw token once for copy-paste; the query param is future-proofing for a signup deep-link).
+    if (opts.email) {
+      await this.mailer?.send({
+        template: 'signup_invite', to: opts.email,
+        vars: {
+          company: opts.company_name ?? null,
+          signup_url: `${appBaseUrl()}/signup?invite_token=${rawToken}`,
+          expires_at: expiresAt.toISOString(),
+        },
+      }).catch((e) => logger.warn({ invite_id: Number(row!.id), err: (e as Error)?.message }, 'signup_invite email enqueue failed'));
+    }
     return { id: Number(row!.id), invite_token: rawToken, expires_at: expiresAt.toISOString(),
       company_name: opts.company_name ?? null, email: opts.email ?? null };
   }
@@ -156,12 +181,19 @@ export class TenantProvisioningService {
     const [u] = await this.db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
     if (u) throw new ConflictException({ code: 'CONFLICT', message: 'Username already taken', messageTh: 'ชื่อผู้ใช้นี้ถูกใช้แล้ว' });
     const industry = isIndustryKey(dto.industry) ? dto.industry : 'general';
+    // Pack selection from /plans (0451): store the REAL seeded plan code (unknown pack → none), the
+    // billing interval, and the recognised add-on keys. Never reject the request over these — they are
+    // advisory for the approving platform owner, not part of the identity being validated.
+    const requestedPlan = dto.requested_plan ? PACK_TO_PLAN[dto.requested_plan.trim().toLowerCase()] ?? null : null;
+    const requestedInterval = requestedPlan && (dto.requested_billing === 'annual' || dto.requested_billing === 'monthly') ? dto.requested_billing : null;
+    const requestedAddons = requestedPlan ? (dto.requested_addons ?? []).filter(isAddonKey) : [];
     try {
       const [row] = await this.db.insert(signupRequests).values({
         companyName: dto.company_name, tenantCode: code, adminUsername: username,
         passwordHash: await this.password.hash(dto.admin_password), email: dto.email, industry, status: 'pending',
+        requestedPlan, requestedInterval, requestedAddons: requestedAddons.length ? requestedAddons : null,
       }).returning({ id: signupRequests.id });
-      await this.platformNotifs?.emit({ type: 'signup_request', title: `คำขอเปิดบริษัทใหม่: ${dto.company_name}`, body: `รหัส ${code} · ผู้ดูแล ${username}${dto.email ? ` · ${dto.email}` : ''}`, refType: 'signup_request', refId: String(row!.id) });
+      await this.platformNotifs?.emit({ type: 'signup_request', title: `คำขอเปิดบริษัทใหม่: ${dto.company_name}`, body: `รหัส ${code} · ผู้ดูแล ${username}${dto.email ? ` · ${dto.email}` : ''}${requestedPlan ? ` · แพ็กเกจ ${requestedPlan}${requestedInterval === 'annual' ? ' (รายปี)' : ''}` : ''}`, refType: 'signup_request', refId: String(row!.id) });
       return { request_id: Number(row!.id), status: 'pending' };
     } catch (e) {
       if (isUniqueViolation(e)) throw new ConflictException({ code: 'REQUEST_PENDING', message: 'A pending request already exists for this company/username', messageTh: 'มีคำขอเปิดบัญชีนี้รออนุมัติอยู่แล้ว' });
@@ -177,6 +209,8 @@ export class TenantProvisioningService {
       requests: rows.map((r: any) => ({
         id: Number(r.id), company_name: r.companyName, tenant_code: r.tenantCode, admin_username: r.adminUsername,
         email: r.email, industry: r.industry, status: r.status, reject_reason: r.rejectReason,
+        requested_plan: r.requestedPlan ?? null, requested_interval: r.requestedInterval ?? null,
+        requested_addons: Array.isArray(r.requestedAddons) ? r.requestedAddons : [],
         reviewed_by: r.reviewedBy, reviewed_at: r.reviewedAt, requested_at: r.requestedAt,
         created_tenant_id: r.createdTenantId != null ? Number(r.createdTenantId) : null,
       })),
@@ -194,17 +228,39 @@ export class TenantProvisioningService {
       .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending'))).returning({ id: signupRequests.id });
     if (!claimed.length) throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: 'Request already handled', messageTh: 'คำขอนี้ถูกดำเนินการไปแล้ว' });
     const result = await this.provisionTenant(
-      { company_name: req.companyName, tenant_code: req.tenantCode, admin_username: req.adminUsername, admin_password: '', email: req.email, industry: req.industry ?? undefined },
-      { passwordHash: req.passwordHash },
+      // Approve honours the pack the prospect chose on /plans (0451): plan code + billing interval +
+      // add-ons stamp the provisioned subscription. Absent ⇒ the legacy default ('free', monthly).
+      { company_name: req.companyName, tenant_code: req.tenantCode, admin_username: req.adminUsername, admin_password: '', email: req.email, industry: req.industry ?? undefined, plan_code: req.requestedPlan ?? undefined },
+      {
+        passwordHash: req.passwordHash,
+        interval: req.requestedInterval === 'annual' ? 'annual' : req.requestedInterval === 'monthly' ? 'monthly' : undefined,
+        addons: Array.isArray(req.requestedAddons) ? (req.requestedAddons as string[]).filter(isAddonKey) : undefined,
+      },
     );
     await this.db.update(signupRequests).set({ createdTenantId: result.tenant_id }).where(eq(signupRequests.id, id));
+    // A1 — tell the requester their company is live (outbox + job; never blocks/undoes the approval).
+    if (req.email) {
+      await this.mailer?.send({
+        template: 'signup_approved', to: req.email, aboutTenantId: result.tenant_id,
+        vars: { company: req.companyName, username: req.adminUsername, login_url: `${appBaseUrl()}/login` },
+      }).catch((e) => logger.warn({ request_id: id, err: (e as Error)?.message }, 'signup_approved email enqueue failed'));
+    }
     return { ...result, request_id: id, status: 'approved' };
   }
 
   async rejectSignupRequest(id: number, reviewedBy: string, reason?: string) {
     const claimed = await this.db.update(signupRequests).set({ status: 'rejected', reviewedBy, reviewedAt: new Date(), rejectReason: reason ?? null })
-      .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending'))).returning({ id: signupRequests.id });
+      .where(and(eq(signupRequests.id, id), eq(signupRequests.status, 'pending')))
+      .returning({ id: signupRequests.id, email: signupRequests.email, companyName: signupRequests.companyName });
     if (!claimed.length) throw new ConflictException({ code: 'REQUEST_NOT_PENDING', message: 'Request not pending', messageTh: 'คำขอนี้ไม่อยู่ในสถานะรออนุมัติ' });
+    // A1 — tell the requester the outcome (with the reviewer's reason when given).
+    const row = claimed[0]!;
+    if (row.email) {
+      await this.mailer?.send({
+        template: 'signup_rejected', to: row.email,
+        vars: { company: row.companyName, reason: reason ?? null },
+      }).catch((e) => logger.warn({ request_id: id, err: (e as Error)?.message }, 'signup_rejected email enqueue failed'));
+    }
     return { request_id: id, status: 'rejected' };
   }
 
@@ -250,7 +306,7 @@ export class TenantProvisioningService {
   // endpoint (POST /api/admin/tenants). No public-signup gate here; each caller gates as appropriate. Runs
   // under whatever RLS scope the request carries: public signup is pre-auth (bypass); the admin endpoint
   // runs with the platform-admin bypass granted by PlatformAdminGuard (both can write a brand-new tenant_id).
-  async provisionTenant(dto: SignupDto, opts?: { passwordHash?: string }) {
+  async provisionTenant(dto: SignupDto, opts?: { passwordHash?: string; interval?: 'monthly' | 'annual'; addons?: string[] }) {
     const db = this.db;
     const code = dto.tenant_code.trim();
     const username = normalizeUsername(dto.admin_username);
@@ -288,8 +344,15 @@ export class TenantProvisioningService {
     let smePrefs: Record<string, unknown> = {};
     if (controlProfile === 'sme') {
       const [d] = await db.select().from(platformSmeDefaults).where(eq(platformSmeDefaults.id, 1)).limit(1);
+      // B1 (docs/50): fold the new company's sidebar from its INDUSTRY — the god-set platform defaults
+      // stay the base, and the industry profile adds its hidden domains + the default-open group keys.
+      // Stamped once here (like the rest of sme_prefs); later platform-default changes don't rewrite it.
+      const navProfile = smeNavProfile(industry);
+      const baseHidden = Array.isArray(d?.hiddenNavGroups) ? (d!.hiddenNavGroups as string[]) : [];
       smePrefs = {
-        hidden_nav_groups: Array.isArray(d?.hiddenNavGroups) ? d!.hiddenNavGroups : [],
+        hidden_nav_groups: [...new Set([...baseHidden, ...navProfile.hidden])],
+        open_nav_groups: navProfile.open,
+        nav_industry: industry,
         accountant_email: d?.accountantEmail ?? null,
       };
     }
@@ -318,6 +381,10 @@ export class TenantProvisioningService {
 
       await tx.insert(subscriptions).values({
         tenantId: Number(t.id), planCode, status: 'Trialing', trialEndsAt,
+        // 0456 — snapshot the plan's price at subscribe time; future PLAN_SEED repricings never touch it
+        grandfatheredPrice: plan.priceMonthly, grandfatheredAnnualPrice: plan.priceYearly,
+        ...(opts?.interval ? { billingInterval: opts.interval } : {}),
+        ...(opts?.addons?.length ? { addons: opts.addons.filter(isAddonKey) } : {}),
       });
 
       return t;

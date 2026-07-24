@@ -32,7 +32,7 @@ export class DeferredTaxController {
   @HttpCode(200)
   @Permissions('gl_close', 'gl_post')
   run(@Body(new ZodValidationPipe(RunBody)) b: RunBodyT, @CurrentUser() u: JwtUser) {
-    return this.svc.runDeferredTax({ period: b.period, asOfDate: b.as_of_date, taxRate: b.tax_rate, taxDepFactor: b.tax_dep_factor, tenantId: b.tenant_id ?? null, runBy: u.username });
+    return this.svc.runDeferredTax({ period: b.period, asOfDate: b.as_of_date, taxRate: b.tax_rate, taxDepFactor: b.tax_dep_factor, tenantId: u.role === 'Admin' ? (b.tenant_id ?? null) : null, runBy: u.username });
   }
 
   @Post(':id/post')

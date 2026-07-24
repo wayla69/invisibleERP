@@ -1,4 +1,4 @@
-# Backup & Restore Runbook — Invisible ERP V2 (Postgres)
+# Backup & Restore Runbook — Invisible ERP (Postgres)
 
 The whole system's state is in one Postgres database (Railway). A lost/corrupted DB = total data loss
 for every tenant. This is the minimum disaster-recovery procedure.

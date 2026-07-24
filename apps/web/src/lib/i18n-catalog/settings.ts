@@ -449,6 +449,8 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   'st.set.scope_invoices': { th: 'ใบแจ้งหนี้ (invoices:read)', en: 'Invoices (invoices:read)' },
   'st.set.scope_orders': { th: 'ออเดอร์ (orders:read)', en: 'Orders (orders:read)' },
   'st.set.scope_read': { th: 'อ่านทั้งหมด (read)', en: 'Read all (read)' },
+  'st.set.scope_analytics_read': { th: 'ฟีดวิเคราะห์ (analytics:read)', en: 'Analytics feeds (analytics:read)' },
+  'st.set.scope_analytics_write': { th: 'ส่งผลวิเคราะห์กลับ ERP (analytics:write)', en: 'Push analytics back to ERP (analytics:write)' },
   'st.set.search_placeholder': { th: 'ค้นหาเมนู…', en: 'Search menus…' },
   'st.set.secret_set_hint': { th: '(ตั้งไว้แล้ว — เว้นว่างเพื่อคงเดิม)', en: '(already set — leave blank to keep it)' },
   'st.set.show': { th: 'แสดง', en: 'Show' },
@@ -912,4 +914,46 @@ export const CATALOG: Record<string, Partial<Record<Lang, string>>> = {
   // mdio.* — shared bulk import/export section heading embedded on list screens (assets, menu, suppliers)
   // that reuse the master-data registry engine via <MasterIo>.
   'mdio.section_title': { th: 'นำเข้า/ส่งออกแบบกลุ่ม (Excel/CSV)', en: 'Bulk import / export (Excel / CSV)' },
+
+  // ── A3: self-serve add-on purchase on /billing ────────────────────────────
+  'st.bill.addons_title': { th: 'โมดูลเสริม (ซื้อเพิ่มรายโมดูล)', en: 'Add-on modules (à la carte)' },
+  'st.bill.addons_sub': { th: 'เปิด/ปิดแล้วกดบันทึก — สิทธิ์มีผลทันที ค่าบริการคิดตามรอบบิลของแพ็กเกจ (คิดตามส่วนของรอบเมื่อเพิ่มกลางรอบ)', en: 'Toggle and save — entitlement applies immediately; billing follows your plan cycle (prorated mid-cycle).' },
+  'st.bill.addon_in_plan': { th: 'รวมในแพ็กเกจแล้ว', en: 'Included in your plan' },
+  'st.bill.addons_save': { th: 'บันทึกโมดูลเสริม', en: 'Save add-ons' },
+  'st.bill.addons_saved': { th: '✅ บันทึกโมดูลเสริมแล้ว — สิทธิ์มีผลทันที', en: '✅ Add-ons saved — entitlements apply immediately' },
+  'st.bill.addons_saved_billed': { th: '✅ บันทึกแล้ว — ปรับรายการเรียกเก็บในรอบบิลให้อัตโนมัติ (+{added}/−{removed})', en: '✅ Saved — subscription line items reconciled (+{added}/−{removed})' },
+  'st.bill.per_month_short': { th: '/เดือน', en: '/mo' },
+  'st.bill.addons_group_modules': { th: 'ขายยกโมดูล', en: 'Whole modules' },
+  'st.bill.addons_group_advanced': { th: 'ส่วนเสริมขั้นสูง', en: 'Advanced extras' },
+  'st.bill.addons_ai_note': { th: 'รวมโควตา 100k token/วัน (เพดาน 200k, ส่วนเกิน ฿12/1k)', en: 'Includes 100k tokens/day (200k ceiling; overage ฿12/1k)' },
+  'st.bill.addons_delta': { th: 'รวมโมดูลเสริมที่เลือก +{amount}/เดือน', en: 'Selected add-ons: +{amount}/mo' },
+  'st.bill.addons_upsell_hint': { th: 'เลือกครบ 3 โมดูลขึ้นไป — อัปเกรดเป็นแพ็ก Professional (฿9,900/เดือน) รวมทุกโมดูลนี้พร้อมโควตา AI ใหญ่กว่า อาจคุ้มกว่า', en: 'At 3+ modules, upgrading to Professional (฿9,900/mo) — which includes them all plus a bigger AI band — is likely the better deal.' },
+
+  // ── A4: own-SaaS receipts on /billing ─────────────────────────────────────
+  'st.bill.receipts_title': { th: 'ใบเสร็จค่าบริการ', en: 'Subscription receipts' },
+  'st.bill.receipts_sub': { th: 'ใบเสร็จทุกรายการที่ระบบบันทึกไว้ — เปิดดู/พิมพ์ได้ทันที', en: 'Every recorded payment — open or print any receipt.' },
+  'st.bill.receipt_open': { th: 'เปิดใบเสร็จ', en: 'Open receipt' },
+  'st.bill.col_receipt_no': { th: 'เลขที่', en: 'Receipt no.' },
+  'st.bill.col_period': { th: 'งวด', en: 'Period' },
+  'st.bill.col_date': { th: 'วันที่', en: 'Date' },
+
+  // ── Wave C: pay by bank transfer / PromptPay on /billing ──────────────────
+  'st.bill.pay_title': { th: 'ชำระด้วยการโอน / พร้อมเพย์', en: 'Pay by bank transfer / PromptPay' },
+  'st.bill.pay_sub': { th: 'โอนตามยอดด้านล่างแล้วแจ้งเลขอ้างอิงจากสลิป — ทีมแพลตฟอร์มตรวจสอบยอดเข้าบัญชีแล้วออกใบเสร็จและเปิดใช้งานให้ทันที', en: 'Transfer the amount below, then file the slip reference — the platform team verifies the money arrived, issues your receipt, and re-activates the subscription.' },
+  'st.bill.pay_amount_due': { th: 'ยอดที่ต้องชำระ ({plan} · {interval})', en: 'Amount due ({plan} · {interval})' },
+  'st.bill.pay_qr_hint': { th: 'สแกนด้วยแอปธนาคารเพื่อโอนตามยอด', en: 'Scan with your banking app to pay the amount due.' },
+  'st.bill.pay_bank_title': { th: 'บัญชีธนาคาร', en: 'Bank account' },
+  'st.bill.pay_claim_title': { th: 'แจ้งโอนเงิน', en: 'File a payment claim' },
+  'st.bill.pay_slip_ref': { th: 'เลขอ้างอิงจากสลิป', en: 'Slip reference' },
+  'st.bill.pay_slip_ref_ph': { th: 'เช่น เลขอ้างอิงการโอนบนสลิปธนาคาร', en: 'e.g. the transfer reference on the bank slip' },
+  'st.bill.pay_note': { th: 'หมายเหตุ (ถ้ามี)', en: 'Note (optional)' },
+  'st.bill.pay_claim_submit': { th: 'แจ้งโอน', en: 'Submit claim' },
+  'st.bill.pay_claim_filed': { th: 'แจ้งโอนแล้ว — รอทีมแพลตฟอร์มตรวจสอบ', en: 'Claim filed — awaiting platform verification' },
+  'st.bill.pay_slip_read': { th: '📷 อ่านจากสลิป (เลือกรูป)', en: '📷 Read from slip (choose image)' },
+  'st.bill.pay_slip_reading': { th: 'กำลังอ่านสลิป…', en: 'Reading the slip…' },
+  'st.bill.pay_slip_read_done': { th: 'อ่านสลิปแล้ว — ตรวจสอบข้อมูลก่อนกดแจ้งโอน', en: 'Slip read — please review before submitting' },
+  'st.bill.pay_slip_read_none': { th: 'อ่านสลิปไม่สำเร็จ — กรุณากรอกเอง', en: 'Could not read the slip — please fill in manually' },
+  'st.bill.pay_status_pending': { th: 'รอตรวจสอบ', en: 'Pending' },
+  'st.bill.pay_status_approved': { th: 'ตรวจสอบแล้ว', en: 'Verified' },
+  'st.bill.pay_status_rejected': { th: 'ไม่ผ่าน', en: 'Rejected' },
 };

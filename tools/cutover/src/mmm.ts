@@ -154,6 +154,28 @@ async function main() {
   ok('MKT-15 (Multi-Tenant Test Protocol — data-leak): T2\'s summary has no run (never surfaces T1\'s result)',
     t2Summary.json.has_run === false, JSON.stringify(t2Summary.json));
 
+  // ── docs/62 Phase 2 — MKT-26 plan-vs-actual backtest against the REAL MMM-run actuals ──
+  // The latest T1 run recorded spend {facebook: 30000, google: 20000, tiktok: 0}. Seed an APPROVED plan
+  // (fixture insert — the maker-checker approve path is MKT-17's own ToE) whose allocation deliberately
+  // diverges: facebook +10000 over (50%, flagged), google −10000 under (−33.33%, flagged) → Σ|variance|
+  // 20000 over a 50000 plan = adherence 60. tiktok (planned 0, actual 0) must be dropped, not shown.
+  await db.insert(s.miBudgetPlans).values({
+    tenantId: t1, planNo: 'BP-BT-1', totalBudget: '50000', allocation: { facebook: 20000, google: 30000 },
+    status: 'Approved', requestedBy: 'mkt9', approvedBy: 'mkt8',
+  });
+  const bt = await inj('GET', '/api/marketing-intel/budget-plan/BP-BT-1/backtest', mkt1);
+  const btRows: any[] = bt.json.rows ?? [];
+  const btFb = btRows.find((r: any) => r.channel === 'facebook');
+  const btGo = btRows.find((r: any) => r.channel === 'google');
+  ok('MKT-26: backtest vs the MMM run actuals — exact per-channel variances from the recorded spend',
+    bt.status === 200 && bt.json.actuals_basis === 'mmm_run' && btFb?.variance === 10000 && btFb?.variance_pct === 50 && btFb?.flag === true && btGo?.variance === -10000 && btGo?.flag === true,
+    `${bt.status} basis=${bt.json.actuals_basis} fb=${JSON.stringify(btFb)} go=${JSON.stringify(btGo)}`);
+  ok('MKT-26: adherence 60 (Σ|variance| 20000 / planned 50000), zero-zero channels dropped, attributed revenue attached',
+    bt.json.adherence_pct === 60 && btRows.every((r: any) => r.channel !== 'tiktok') && Number(bt.json.attributed_revenue) > 0,
+    `adh=${bt.json.adherence_pct} rows=${btRows.map((r: any) => r.channel).join(',')} attr=${bt.json.attributed_revenue}`);
+  const btNoPerm = await inj('GET', '/api/marketing-intel/budget-plan/BP-BT-1/backtest', wh1);
+  ok('MKT-26: a non-marketing/exec principal is refused (403)', btNoPerm.status === 403, JSON.stringify({ st: btNoPerm.status }));
+
   await app.close();
   console.log('\n── Marketing Mix Modeling ToE (docs/48, MKT-15) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

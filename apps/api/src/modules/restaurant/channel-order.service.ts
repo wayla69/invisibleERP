@@ -257,7 +257,7 @@ export class ChannelOrderService {
           const cap = await this.channelRefs.captureOnIngest(tenantId, source, String(rawRef), view.order_no).catch(() => null);
           linkedMemberId = cap?.memberId ?? null;
         }
-        await db.update(dineInOrders).set({ channel: source as any, fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}`, memberId: linkedMemberId }).where(eq(dineInOrders.orderNo, view.order_no));
+        await db.update(dineInOrders).set({ channel: source as (typeof dineInOrders.$inferInsert)['channel'], fulfillmentType: body.fulfillment_type ?? 'delivery', fulfillmentStatus: 'accepted', extSource: source, extOrderId: String(body.ext_order_id), server: `channel:${source}`, memberId: linkedMemberId }).where(eq(dineInOrders.orderNo, view.order_no));
         if (body.customer) {
           const [oRow] = await db.select({ id: dineInOrders.id }).from(dineInOrders).where(eq(dineInOrders.orderNo, view.order_no)).limit(1);
           await db.insert(orderDeliveryDetails).values({ tenantId, orderId: Number(oRow!.id), contactName: body.customer.name ?? null, contactPhone: body.customer.phone ?? null, addressLine: body.customer.address ?? null });

@@ -155,6 +155,17 @@ describe('LedgerPostingService — approveEntry write path (GL-05 → GL-17/R1-2
     expect(cap.updates).toHaveLength(0);
     expect(cap.audits).toHaveLength(0);
   });
+
+  // Pentest P4: the approval path bypasses postEntry, so it must ALSO honour the hard-close (Locked) gate —
+  // otherwise a stale Draft could be approved into an irreversibly hard-closed period and rewrite its balances.
+  it('the period re-check ALSO blocks a since-LOCKED (hard-closed) period (PERIOD_LOCKED) before any write — pentest P4', async () => {
+    const { db, cap } = approveDb(DRAFT, { periodStatus: 'Locked', drLines: DR_LINES });
+    const svc = new LedgerPostingService(db, docNo);
+    await expect(svc.approveEntry('JE-5', { username: 'bob' } as any)).rejects.toMatchObject({ response: { code: 'PERIOD_LOCKED' } });
+    expect(cap.txCalls).toBe(0);
+    expect(cap.updates).toHaveLength(0);
+    expect(cap.audits).toHaveLength(0);
+  });
 });
 
 // ───────────────────── reverseEntry write path (slice 4) ─────────────────────

@@ -12,6 +12,7 @@ import { CATALOG as CAT_PROJECTS } from './i18n-catalog/projects';
 import { CATALOG as CAT_FINANCEX } from './i18n-catalog/financex';
 import { CATALOG as CAT_INVOPS } from './i18n-catalog/invops';
 import { CATALOG as CAT_MFG } from './i18n-catalog/mfg';
+import { CATALOG as CAT_SCM } from './i18n-catalog/scm';
 import { CATALOG as CAT_PLANBI } from './i18n-catalog/planbi';
 import { CATALOG as CAT_SETTINGS } from './i18n-catalog/settings';
 import { CATALOG as CAT_HRX } from './i18n-catalog/hrx';
@@ -28,6 +29,11 @@ import { CATALOG as CAT_SODREG } from './i18n-catalog/sodreg';
 import { CATALOG as CAT_MDCHANGE } from './i18n-catalog/mdchange';
 import { CATALOG as CAT_REPUTATION } from './i18n-catalog/reputation';
 import { CATALOG as CAT_MMM } from './i18n-catalog/mmm';
+import { CATALOG as CAT_MA } from './i18n-catalog/marketing-activation';
+import { CATALOG as CAT_PORTAL } from './i18n-catalog/portal';
+import { CATALOG as CAT_AUTH } from './i18n-catalog/auth';
+import { CATALOG as CAT_PUBLIC } from './i18n-catalog/public';
+import { CATALOG as CAT_PRICING } from './i18n-catalog/pricing';
 
 const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   // ── Common chrome ─────────────────────────────────────────────────────────
@@ -46,6 +52,13 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'sme.reason_ph': { th: 'เหตุผลที่อนุมัติรายการของตนเอง เช่น เจ้าของกิจการเป็นผู้ปฏิบัติงานคนเดียว…', en: 'Why you are approving your own item…' },
   'sme.reason_cancel': { th: 'ยกเลิก', en: 'Cancel' },
   'sme.reason_confirm': { th: 'ยืนยันการอนุมัติ', en: 'Confirm approval' },
+  // Plan/entitlement upsell dialog (wave B2) — shown when the API denies a request with a plan-level code
+  // (SUITE_NOT_ENTITLED / PLAN_FEATURE_REQUIRED / TRIAL_EXPIRED / SUBSCRIPTION_*). The server's localized
+  // deny message is shown as the description; these keys are the dialog chrome.
+  'plan.upsell_title': { th: 'สิทธิ์การใช้งานตามแพ็กเกจ', en: 'Plan & subscription' },
+  'plan.upsell_hint': { th: 'อัปเกรดแพ็กเกจหรือซื้อโมดูลเสริมได้ที่หน้าแพ็กเกจ & การชำระเงิน', en: 'Upgrade your plan or purchase the add-on from the Billing page.' },
+  'plan.upsell_cta': { th: 'ดูแพ็กเกจ & ชำระเงิน', en: 'View plans & billing' },
+  'plan.upsell_dismiss': { th: 'ปิด', en: 'Dismiss' },
   // SME first-run setup wizard (docs/49 v1.3) — one-time guided setup for a solo-operator company.
   'sme.wizard_title': { th: 'ตั้งค่าธุรกิจของคุณ (โหมด SME)', en: 'Set up your business (SME mode)' },
   'sme.wizard_step_of': { th: 'ขั้นที่ {n} จาก {total}', en: 'Step {n} of {total}' },
@@ -74,6 +87,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.favorites': { th: 'รายการโปรด', en: 'Favourites', ms: 'Kegemaran', vi: 'Yêu thích', id: 'Favorit' },
   'nav.recents': { th: 'ล่าสุด', en: 'Recent', ms: 'Terkini', vi: 'Gần đây', id: 'Terkini' },
   'nav.show_advanced': { th: 'แสดงเมนูขั้นสูง', en: 'Show advanced', ms: 'Tunjuk lanjutan', vi: 'Hiện nâng cao', id: 'Tampilkan lanjutan' },
+  'nav.show_sme_hidden': { th: 'แสดงเมนูที่ซ่อนไว้', en: 'Show hidden menus', ms: 'Tunjuk menu tersembunyi', vi: 'Hiện menu ẩn', id: 'Tampilkan menu tersembunyi' },
   'nav.items_count': { th: 'รายการ', en: 'items', ms: 'item', vi: 'mục', id: 'item' },
   'nav.fav_add': { th: 'เพิ่ม {label} ในรายการโปรด', en: 'Add {label} to favourites', ms: 'Tambah {label} ke kegemaran', vi: 'Thêm {label} vào yêu thích', id: 'Tambah {label} ke favorit' },
   'nav.fav_remove': { th: 'เอา {label} ออกจากรายการโปรด', en: 'Remove {label} from favourites', ms: 'Buang {label} dari kegemaran', vi: 'Xoá {label} khỏi yêu thích', id: 'Hapus {label} dari favorit' },
@@ -320,6 +334,7 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'nav.planning': { th: 'งบประมาณ & แผน', en: 'Budgets & Plans' },
   'nav.budget': { th: 'งบประมาณเทียบจริง (Budget vs Actual)', en: 'Budget vs Actual' },
   'nav.demand': { th: 'พยากรณ์ความต้องการ (สถิติ + backtest)', en: 'Demand Forecast (statistical)' }, // docs/27 R4-5: classical models honestly labeled — not ML
+  'nav.network': { th: 'เครือข่ายซัพพลาย', en: 'Supply network' }, // docs/57 Track B (B1) — multi-echelon topology master data
   'nav.projects': { th: 'โครงการ (Projects)', en: 'Projects' },
   'nav.pm_portfolio': { th: 'พอร์ตโครงการ', en: 'Portfolio' },
   'nav.pm_action_center': { th: 'ศูนย์งานที่ต้องทำ', en: 'Action Center' },
@@ -697,6 +712,14 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'acct.revenue': { th: 'รายได้', en: 'Revenue' },
   'acct.expense': { th: 'ค่าใช้จ่าย', en: 'Expense' },
   'acct.net_income': { th: 'กำไรสุทธิ', en: 'Net income' },
+  // 0438 — statement-section breakdown (งบดุล / งบกำไรขาดทุน จัดหมวดตามการผูกบัญชี)
+  'acct.pl_breakdown': { th: 'งบกำไรขาดทุนแยกตามหมวด', en: 'Income statement by section' },
+  'acct.bs_breakdown': { th: 'งบดุลแยกตามหมวด', en: 'Balance sheet by section' },
+  'acct.gross_profit': { th: 'กำไรขั้นต้น', en: 'Gross profit' },
+  'acct.operating_profit': { th: 'กำไรจากการดำเนินงาน', en: 'Operating profit' },
+  'acct.profit_before_tax': { th: 'กำไรก่อนภาษี', en: 'Profit before tax' },
+  'acct.income_tax': { th: 'ภาษีเงินได้', en: 'Income tax' },
+  'acct.section_total': { th: 'รวม', en: 'Total' },
 
   // Opening balances
   'acct.ob_paste_none': { th: 'ไม่พบรายการที่อ่านได้ — วางคอลัมน์ รหัสบัญชี / เดบิต / เครดิต', en: 'No readable rows found — paste columns Account code / Debit / Credit' },
@@ -871,6 +894,13 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'appr.exc_col_reason': { th: 'เหตุผล', en: 'Reason' },
   'appr.exc_col_issue_date': { th: 'วันที่ออก', en: 'Issue date' },
   'appr.exc_none': { th: 'ไม่มีรายการในช่วงนี้', en: 'No items in this period' },
+  'appr.exc_disc_title': { th: 'รายงานข้อยกเว้น: อนุมัติส่วนลดเกินเพดาน (ทบทวนอิสระ)', en: 'Exception report: over-cap discount authorizations (independent review)' },
+  'appr.exc_disc_desc': { th: 'ส่วนลดเกินเพดานที่หัวหน้าอนุมัติที่หน้าร้าน (SoD R08 — ผู้อนุมัติ ≠ แคชเชียร์) — ทบทวนเป็นรอบ', en: 'Over-cap discounts a supervisor authorized at the till (SoD R08 — approver ≠ cashier) — review periodically.' },
+  'appr.exc_disc_summary': { th: 'ออกรหัส {n} · ยังไม่ใช้ {unused}', en: '{n} issued · {unused} unused' },
+  'appr.exc_disc_upto': { th: 'อนุมัติสูงสุด', en: 'Authorized up to' },
+  'appr.exc_disc_by': { th: 'อนุมัติโดย', en: 'Approved by' },
+  'appr.exc_disc_used': { th: 'ใช้กับบิล', en: 'Used on sale' },
+  'appr.exc_disc_unused': { th: 'ยังไม่ใช้', en: 'Unused' },
   'appr.rejected_ok': { th: 'ปฏิเสธแล้ว', en: 'Rejected' },
   'appr.reject_reason_prompt': { th: 'เหตุผลที่ปฏิเสธ (ไม่บังคับ)', en: 'Reason for rejection (optional)' },
   // ── Batch approvals (multi-select — approve/reject many at once) ───────────
@@ -1810,6 +1840,17 @@ const BASE_MESSAGES: Record<string, Partial<Record<Lang, string>>> = {
   'pos.col_bills': { th: 'บิล', en: 'Bills' },
   'pos.col_session_total': { th: 'ยอดรวม', en: 'Total' },
   'pos.recent_bills': { th: 'บิลล่าสุด', en: 'Recent bills' },
+  'pos.fti_already': { th: 'บิลนี้มีใบกำกับเต็มรูปแล้ว ({doc_no})', en: 'This sale already has a full tax invoice ({doc_no})' },
+  'pos.fti_address': { th: 'ที่อยู่ผู้ซื้อ', en: 'Buyer address' },
+  'pos.fti_branch': { th: 'รหัสสาขา (00000 = สำนักงานใหญ่)', en: 'Branch code (00000 = HQ)' },
+  'pos.fti_btn_tip': { th: 'ออกใบกำกับภาษีเต็มรูป (ม.86/4)', en: 'Issue a full tax invoice (Sec. 86/4)' },
+  'pos.fti_desc': { th: 'สำหรับลูกค้านิติบุคคล/ผู้ประกอบการที่ขอใบกำกับเต็มรูป — ระบบจะแปลงใบกำกับอย่างย่อของบิลนี้ (ยอดเดิม ภาษีเดิม งวดภาษีเดิม) และออกได้บิลละ 1 ใบเท่านั้น', en: 'For a business buyer requesting a full tax invoice — the sale\'s abbreviated slip is converted (same amounts, VAT and tax period; exactly one full invoice per sale)' },
+  'pos.fti_failed': { th: 'ออกใบกำกับเต็มรูปไม่สำเร็จ', en: 'Failed to issue the full tax invoice' },
+  'pos.fti_issued': { th: 'ออกใบกำกับเต็มรูปแล้ว ({doc_no})', en: 'Full tax invoice issued ({doc_no})' },
+  'pos.fti_name': { th: 'ชื่อผู้ซื้อ (นิติบุคคล/บุคคล)', en: 'Buyer name' },
+  'pos.fti_submit': { th: 'ออกใบกำกับเต็มรูป', en: 'Issue full tax invoice' },
+  'pos.fti_taxid': { th: 'เลขประจำตัวผู้เสียภาษี (13 หลัก)', en: 'Tax ID (13 digits)' },
+  'pos.fti_title': { th: 'ขอใบกำกับเต็มรูป — {sale_no}', en: 'Full tax invoice — {sale_no}' },
   'pos.no_tills_title': { th: 'ยังไม่มีกะที่เปิดอยู่', en: 'No open tills' },
   'pos.no_tills_desc': { th: 'เปิดกะขายที่หน้า POS เพื่อเริ่มรับออเดอร์', en: 'Open a till on the POS screen to start taking orders' },
   'pos.no_bills_title': { th: 'ยังไม่มีบิลวันนี้', en: 'No bills today' },
@@ -1855,5 +1896,5 @@ export const MESSAGES: Record<string, Partial<Record<Lang, string>>> = Object.as
   {},
   BASE_MESSAGES,
   CAT_POS, CAT_LOYALTY, CAT_PROJECTS, CAT_FINANCEX, CAT_INVOPS,
-  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM,
+  CAT_MFG, CAT_PLANBI, CAT_SETTINGS, CAT_HRX, CAT_MISC, CAT_CONSTRUCTION, CAT_PLATFORM, CAT_CRMX, CAT_GOVERNANCE, CAT_SVC, CAT_QUALITY, CAT_SCAR, CAT_CONTROLCONSOLE, CAT_SODREG, CAT_MDCHANGE, CAT_REPUTATION, CAT_MMM, CAT_MA, CAT_PORTAL, CAT_AUTH, CAT_PUBLIC, CAT_PRICING, CAT_SCM,
 );

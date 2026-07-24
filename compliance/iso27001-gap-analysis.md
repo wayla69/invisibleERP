@@ -1,17 +1,17 @@
-# ISO 27001:2022 Gap Analysis — Invisible ERP V2
+# ISO 27001:2022 Gap Analysis — Invisible ERP
 
-**Entity:** Invisible Consulting — Oshinei Enterprise ERP
-**System in scope:** Invisible ERP V2 (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
+**Entity:** Invisible Consulting — Invisible Enterprise ERP
+**System in scope:** Invisible ERP (NestJS API · Next.js web · Drizzle · PostgreSQL 16, multi-tenant RLS)
 **Framework:** ISO/IEC 27001:2022 — Annex A (93 controls across 4 themes)
 **Prepared:** 2026-06-28 · Version 0.1 DRAFT — for review with ISMS Lead / certification body
 **Owner:** CISO / IT Security (to assign)
-**Related:** `soc2-readiness.md` · `COSO_ICFR_Audit_Readiness_Plan.md` · `Oshinei_ERP_SOX_RCM_v1.xlsx` · `policies/`
+**Related:** `soc2-readiness.md` · `COSO_ICFR_Audit_Readiness_Plan.md` · `Invisible_ERP_SOX_RCM_v1.xlsx` · `policies/`
 
 > **Relationship to SOC 2 and SOX work:** ISO 27001:2022 Annex A maps almost one-to-one with SOC 2 CC6–CC9
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->295<!-- /rcm-total -->-control RCM built for SOX
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->295<!-- /rcm-total -->-control RCM built for SOX
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->295<!-- /rcm-total -->-control RCM built for SOX
-> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->295<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->316<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->316<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->316<!-- /rcm-total -->-control RCM built for SOX
+> (Logical Access, System Operations, Change Management, Risk Mitigation). The <!-- rcm-total -->316<!-- /rcm-total -->-control RCM built for SOX
 > 404(a) covers the ITGC spine of ISO 27001; the gap analysis below shows where existing controls satisfy
 > Annex A requirements and where incremental work is needed. A shared evidence base keeps the three
 > certifications from tripling compliance work.
@@ -32,14 +32,14 @@
 
 **Recommendation:** pursue ISO 27001:2022 certification in parallel with the SOC 2 Type II observation
 period (M+4 onward) — the overlapping evidence collection makes both programmes less expensive. A shared
-ISMS scope (Invisible ERP V2, same system boundary as SOC 2) minimises scope-creep.
+ISMS scope (Invisible ERP, same system boundary as SOC 2) minimises scope-creep.
 
 ---
 
 ## 1. Scope and boundaries
 
 **ISMS scope statement (draft):**
-> "The design, development, operation, and support of Invisible ERP V2 — a multi-tenant cloud ERP and
+> "The design, development, operation, and support of Invisible ERP — a multi-tenant cloud ERP and
 > POS platform for the Thai hospitality/retail sector — including the API service, web application,
 > database, authentication subsystem, CI/CD pipeline, and secrets management, hosted on Railway with
 > GitHub Actions as the CI/CD provider."
@@ -52,7 +52,7 @@ covered by Railway's ISO 27001 / SOC 2 report (complementary user entity control
 
 ## 2. Statement of Applicability skeleton
 
-The table below lists all 93 Annex A controls, their applicability to Invisible ERP V2, current status,
+The table below lists all 93 Annex A controls, their applicability to Invisible ERP, current status,
 and the evidence source. Controls marked **N/A (justified)** have a documented exclusion reason; **N/A
 (to confirm)** require the ISMS Lead to confirm exclusion before the Stage 1 audit.
 
@@ -117,7 +117,7 @@ and the evidence source. Controls marked **N/A (justified)** have a documented e
 
 ### Theme A.7 — Physical controls (14 controls)
 
-> **Note:** Invisible ERP V2 is a cloud-native SaaS with no owned/leased physical infrastructure.
+> **Note:** Invisible ERP is a cloud-native SaaS with no owned/leased physical infrastructure.
 > Physical controls for Railway's data centres are addressed by Railway's own ISO 27001 / SOC 2 report
 > (complementary user entity control). The controls below are assessed for the Invisible Consulting
 > office environment (applicable) and the cloud hosting (covered by Railway).
@@ -289,7 +289,7 @@ justification for each control theme; full per-control SOA rows will be authored
 | A.8 Technological | 34 | 30 | A.8.23 (no outbound browsing); A.8.30 (in-house dev); A.7.10 / A.8.17 (cloud) |
 
 **Exclusion justification (cloud-native):** Physical controls A.7.1–A.7.14 (except A.7.7 and A.7.9) are
-not applicable to Invisible ERP V2 because the system is hosted entirely on Railway's managed
+not applicable to Invisible ERP because the system is hosted entirely on Railway's managed
 infrastructure. Physical security for the data centre environment is provided by Railway and documented
 in Railway's ISO 27001 / SOC 2 report, which is reviewed annually as a complementary user entity control.
 

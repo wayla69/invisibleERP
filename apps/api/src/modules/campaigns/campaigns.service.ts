@@ -1,9 +1,9 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { eq, and, desc, inArray, lte } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { eq, and, desc, inArray, lte, gte, isNotNull, sql } from 'drizzle-orm';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { loyaltyCampaigns, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
-import { resolveMessageGateway } from '../messaging/gateways';
+import { resolveMessageGateway, type MessageChannel } from '../messaging/gateways';
 import { SavedSegmentsService } from '../loyalty/saved-segments.service';
 import { bucketPct } from '../marketing/marketing-automation.service';
 import type { JwtUser } from '../../common/decorators';
@@ -27,6 +27,75 @@ export class CampaignsService {
     return user.tenantId;
   }
 
+  // docs/62 Phase 2 — the OWNING outcome read over message_log (the per-recipient send audit): delivery
+  // counts per campaign for downstream advisory surfaces (⑤'s deliverability signal). Read-only,
+  // tenant-scoped; inbound 'received' rows are not sends and are excluded. delivery_rate = the share of
+  // ATTEMPTED sends (sent+delivered+failed+undelivered) that got through — 'skipped' (consent/no-contact)
+  // is reported separately, never hidden inside the rate.
+  async outcomeSummary(user: JwtUser, q: { codes?: string[]; since_days?: number; limit?: number } = {}) {
+    const db = this.db; const tenantId = this.tid(user);
+    const sinceDays = Math.min(Math.max(Number(q.since_days ?? 90) || 90, 1), 365);
+    const since = new Date(Date.now() - sinceDays * 86400_000);
+    const conds: any[] = [eq(messageLog.tenantId, tenantId), gte(messageLog.createdAt, since), isNotNull(messageLog.campaign)];
+    if (q.codes?.length) conds.push(inArray(messageLog.campaign, q.codes));
+    const rows = await db.select({ campaign: messageLog.campaign, status: messageLog.status, n: sql<number>`count(*)::int` })
+      .from(messageLog).where(and(...conds)).groupBy(messageLog.campaign, messageLog.status);
+
+    const byCamp = new Map<string, { sent: number; delivered: number; failed: number; undelivered: number; skipped: number }>();
+    for (const r of rows) {
+      const code = String(r.campaign);
+      const st = String(r.status);
+      if (st === 'received') continue; // inbound, not a send outcome
+      let g = byCamp.get(code);
+      if (!g) { g = { sent: 0, delivered: 0, failed: 0, undelivered: 0, skipped: 0 }; byCamp.set(code, g); }
+      if (st === 'sent') g.sent += Number(r.n) || 0;
+      else if (st === 'delivered') g.delivered += Number(r.n) || 0;
+      else if (st === 'failed') g.failed += Number(r.n) || 0;
+      else if (st === 'undelivered') g.undelivered += Number(r.n) || 0;
+      else if (st === 'skipped') g.skipped += Number(r.n) || 0;
+    }
+    const limit = Math.min(Math.max(Number(q.limit ?? 50) || 50, 1), 200);
+    const outcomes = Array.from(byCamp.entries())
+      .map(([campaign, g]) => {
+        const attempted = g.sent + g.delivered + g.failed + g.undelivered;
+        return {
+          campaign, ...g, attempted,
+          delivery_rate: attempted > 0 ? Math.round(((g.sent + g.delivered) / attempted) * 10000) / 100 : null,
+        };
+      })
+      .sort((a, b) => b.attempted - a.attempted || a.campaign.localeCompare(b.campaign))
+      .slice(0, limit);
+    return { since_days: sinceDays, outcomes, note: 'Delivery outcomes from the message_log send audit (advisory). skipped = consent/no-contact, never counted against the rate.' };
+  }
+
+  // docs/62 Phase 3 — the OWNING per-variant recipient read for a body-A/B campaign: who was actually
+  // CONTACTED (sent/delivered) in each arm. The arm assignment is RECOMPUTED from the same deterministic
+  // bucketPct(campaignId, memberId) the send used, so the split is exactly reproducible from the audit —
+  // no separate variant column needed. Read-only, tenant-scoped; skipped/failed members belong to no arm
+  // (they were never treated).
+  async recipientsByVariant(user: JwtUser, campaignId: number) {
+    const db = this.db; const tenantId = this.tid(user);
+    const [c] = await db.select().from(loyaltyCampaigns)
+      .where(and(eq(loyaltyCampaigns.id, campaignId), eq(loyaltyCampaigns.tenantId, tenantId))).limit(1);
+    if (!c) throw new NotFoundException({ code: 'CAMPAIGN_NOT_FOUND', message: 'Campaign not found', messageTh: 'ไม่พบแคมเปญ' });
+    const splitB = Number(c.splitBPct ?? 0);
+    const hasB = !!c.variantBBody && splitB > 0;
+    const rows = await db.select({ memberId: messageLog.memberId }).from(messageLog)
+      .where(and(eq(messageLog.tenantId, tenantId), eq(messageLog.campaign, c.campaignCode), inArray(messageLog.status, ['sent', 'delivered'])));
+    const armA: number[] = []; const armB: number[] = [];
+    const seen = new Set<number>();
+    for (const r of rows) {
+      const mid = r.memberId == null ? 0 : Number(r.memberId);
+      if (!mid || seen.has(mid)) continue;
+      seen.add(mid);
+      (hasB && bucketPct(Number(c.id), mid) < splitB ? armB : armA).push(mid);
+    }
+    return {
+      campaign_id: Number(c.id), campaign_code: c.campaignCode, name: c.name, status: c.status,
+      sent_at: c.sentAt, split_b_pct: splitB, has_variant_b: hasB, arm_a: armA, arm_b: armB,
+    };
+  }
+
   async listCampaigns(user: JwtUser, q: { status?: string } = {}) {
     const db = this.db; const tenantId = this.tid(user);
     const conds: any[] = [eq(loyaltyCampaigns.tenantId, tenantId)];
@@ -37,15 +106,20 @@ export class CampaignsService {
 
   async upsertCampaign(user: JwtUser, dto: any) {
     const db = this.db; const tenantId = this.tid(user);
-    if (dto.audience === 'segment' && !dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required for a segment campaign', messageTh: 'ต้องระบุกลุ่ม RFM' });
+    if ((dto.audience === 'segment' || dto.audience === 'mi_segment') && !dto.segment) throw new BadRequestException({ code: 'NO_SEGMENT', message: 'segment required for a segment campaign', messageTh: 'ต้องระบุกลุ่ม RFM' });
     if (dto.audience === 'tier' && !dto.tier) throw new BadRequestException({ code: 'NO_TIER', message: 'tier required for a tier campaign', messageTh: 'ต้องระบุระดับสมาชิก' });
     if (dto.audience === 'saved_segment') {
       if (!dto.saved_segment_id) throw new BadRequestException({ code: 'NO_SAVED_SEGMENT', message: 'saved_segment_id required for a saved-segment campaign', messageTh: 'ต้องระบุเซกเมนต์ที่บันทึกไว้' });
       // Fail fast on an unknown/foreign segment at create time (send would 404 anyway).
       await this.savedSegments.membersForSend(db, tenantId, Number(dto.saved_segment_id));
     }
+    // 'members' → an explicit tenant-scoped member-id list (docs/60 Phase 3 treatment arm). Bounded + deduped.
+    const memberIds = dto.audience === 'members'
+      ? [...new Set((Array.isArray(dto.member_ids) ? dto.member_ids : []).map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)))].slice(0, 100_000)
+      : null;
+    if (dto.audience === 'members' && !memberIds!.length) throw new BadRequestException({ code: 'NO_MEMBERS', message: 'member_ids required for a members campaign', messageTh: 'ต้องระบุรายชื่อสมาชิก' });
     const scheduleAt = dto.schedule_at ? new Date(dto.schedule_at) : null;
-    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, body: dto.body, variantBBody: dto.variant_b_body ?? null, splitBPct: dto.variant_b_body ? Math.min(90, Math.max(0, Number(dto.split_b_pct ?? 0))) : 0, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
+    const vals: any = { name: dto.name, channel: dto.channel ?? 'sms', audience: dto.audience ?? 'all', segment: dto.segment ?? null, tier: dto.tier ?? null, savedSegmentId: dto.audience === 'saved_segment' ? Number(dto.saved_segment_id) : null, memberIds, body: dto.body, variantBBody: dto.variant_b_body ?? null, splitBPct: dto.variant_b_body ? Math.min(90, Math.max(0, Number(dto.split_b_pct ?? 0))) : 0, scheduleAt, status: scheduleAt ? 'scheduled' : 'draft' };
     if (dto.id) {
       // Only an un-sent campaign may be edited.
       const [cur] = await db.select({ status: loyaltyCampaigns.status }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.id, dto.id), eq(loyaltyCampaigns.tenantId, tenantId))).limit(1);
@@ -73,6 +147,10 @@ export class CampaignsService {
   // auto-commit, so the audit is durable too. (Gateway sends are irreversible; we must not put them inside a
   // transaction whose rollback would re-open the campaign.)
   async sendCampaign(user: JwtUser, id: number) {
+    // @NoTx send route (gateway delivery is irreversible, so no request tx): every read/write is scoped
+    // EXPLICITLY by tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the
+    // base-pool access. (Nested harmlessly when called from runDueAll's own runGlobalDb.)
+    return runGlobalDb('campaigns:send', async () => {
     const db = this.db; const tenantId = this.tid(user);
     const [claimed] = await db.update(loyaltyCampaigns).set({ status: 'sent', sentAt: new Date() })
       .where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId), inArray(loyaltyCampaigns.status, ['draft', 'scheduled']))).returning();
@@ -93,20 +171,25 @@ export class CampaignsService {
     }
     await db.update(loyaltyCampaigns).set({ targeted: members.length, sentCount: sent, skippedCount: skipped, failedCount: failed }).where(and(eq(loyaltyCampaigns.id, id), eq(loyaltyCampaigns.tenantId, tenantId)));
     return { campaign_code: claimed.campaignCode, status: 'sent', targeted: members.length, sent, skipped, failed };
+    });
   }
 
   // Cron entry (the @NoTx run-due route, NOT the sweep's big transaction — so each claim commits durably).
   // Admin/HQ runs every tenant's due campaigns; a tenant-scoped caller runs only its own.
   async runDueAll(user: JwtUser) {
-    const db = this.db;
-    let tenantIds: number[];
-    if (user.role === 'Admin' || user.tenantId == null) {
-      const rows = await db.selectDistinct({ tid: loyaltyCampaigns.tenantId }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
-      tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
-    } else tenantIds = [this.tid(user)];
-    let totalSent = 0; const results: any[] = [];
-    for (const tid of tenantIds) { const ran = await this.runDue(tid, user.username); totalSent += ran; results.push({ tenant_id: tid, campaigns_sent: ran }); }
-    return { tenants_processed: tenantIds.length, campaigns_sent: totalSent, results };
+    // @NoTx cron sweep across every tenant's due campaigns on the base pool, each filtered EXPLICITLY by
+    // tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('campaigns:run-due-all', async () => {
+      const db = this.db;
+      let tenantIds: number[];
+      if (user.role === 'Admin' || user.tenantId == null) {
+        const rows = await db.selectDistinct({ tid: loyaltyCampaigns.tenantId }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
+        tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
+      } else tenantIds = [this.tid(user)];
+      let totalSent = 0; const results: any[] = [];
+      for (const tid of tenantIds) { const ran = await this.runDue(tid, user.username); totalSent += ran; results.push({ tenant_id: tid, campaigns_sent: ran }); }
+      return { tenants_processed: tenantIds.length, campaigns_sent: totalSent, results };
+    });
   }
 
   // Send every scheduled campaign whose time has come, for one tenant. Best-effort per campaign (claim-first
@@ -116,7 +199,7 @@ export class CampaignsService {
     const due = await db.select({ id: loyaltyCampaigns.id }).from(loyaltyCampaigns).where(and(eq(loyaltyCampaigns.tenantId, tenantId), eq(loyaltyCampaigns.status, 'scheduled'), lte(loyaltyCampaigns.scheduleAt, new Date())));
     let ran = 0;
     for (const d of due) {
-      try { await this.sendCampaign({ tenantId, username: createdBy } as any, Number(d.id)); ran++; } catch { /* keep going */ }
+      try { await this.sendCampaign({ tenantId, username: createdBy } as JwtUser, Number(d.id)); ran++; } catch { /* keep going */ }
     }
     return ran;
   }
@@ -130,9 +213,18 @@ export class CampaignsService {
       if (!c.savedSegmentId) return [];
       try { return await this.savedSegments.membersForSend(tx, tenantId, Number(c.savedSegmentId)); } catch { return []; }
     }
-    if (c.audience === 'segment') {
-      const profs = await tx.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), eq(customerProfiles.rfmSegment, c.segment)));
+    if (c.audience === 'segment' || c.audience === 'mi_segment') {
+      // 'segment' → the ERP's own RFM (customer_profiles.rfm_segment); 'mi_segment' → the advanced RFM the
+      // external Marketing Intelligence platform pushed (customer_profiles.mi_rfm_segment). Same delivery.
+      const segCol = c.audience === 'mi_segment' ? customerProfiles.miRfmSegment : customerProfiles.rfmSegment;
+      const profs = await tx.select({ memberId: customerProfiles.memberId }).from(customerProfiles).where(and(eq(customerProfiles.tenantId, tenantId), eq(segCol, c.segment)));
       const ids = profs.map((p: any) => Number(p.memberId)).filter(Boolean);
+      return ids.length ? await tx.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids), eq(posMembers.active, true))) : [];
+    }
+    if (c.audience === 'members') {
+      // Explicit member-id list (docs/60 Phase 3 treatment arm) — tenant-scoped + active only, so the
+      // holdout control arm (never in this list) is structurally never contacted.
+      const ids = (Array.isArray(c.memberIds) ? c.memberIds : []).map((n: any) => Number(n)).filter(Boolean);
       return ids.length ? await tx.select().from(posMembers).where(and(eq(posMembers.tenantId, tenantId), inArray(posMembers.id, ids), eq(posMembers.active, true))) : [];
     }
     if (c.audience === 'tier') {
@@ -157,7 +249,7 @@ export class CampaignsService {
       await tx.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel, recipient: null, body, campaign: campaignCode, status: 'failed', provider: null, error: 'no contact', createdBy });
       return 'failed';
     }
-    const gw = resolveMessageGateway(channel as any);
+    const gw = resolveMessageGateway(channel as MessageChannel);
     const res = await gw.send(recipient, body);
     await tx.insert(messageLog).values({ tenantId, memberId: Number(member.id), channel, recipient, body, campaign: campaignCode, status: res.status, provider: res.provider, error: res.error ?? null, createdBy });
     return res.status === 'sent' ? 'sent' : 'failed';

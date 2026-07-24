@@ -142,6 +142,25 @@ async function main() {
     a.json.payment_no === b.json.payment_no && b.json.replayed === true && fetchCalls.length === before8 + 1,
     JSON.stringify({ same: a.json.payment_no === b.json.payment_no, charges: fetchCalls.length - before8 }));
 
+  // ── 9. #1 cash tendering: cash_tendered → change_due computed + persisted on the tender row ──
+  const r9 = await tender({ sale_no: 'S-PG-CHG', method: 'Cash', amount: 87, currency: 'THB', cash_tendered: 100 });
+  const list9 = await inj('GET', '/api/payments?sale_no=S-PG-CHG', token);
+  ok('cash tendering: change_due = tendered − due, tender Captured, drawer net unchanged',
+    (r9.status === 200 || r9.status === 201) && r9.json.status === 'Captured' && r9.json.change_due === 13 && r9.json.cash_tendered === 100 && (list9.json.payments ?? []).some((p: any) => p.status === 'Captured'),
+    JSON.stringify({ change: r9.json.change_due, tendered: r9.json.cash_tendered }));
+
+  // ── 10. #1 insufficient cash → INSUFFICIENT_TENDER (400), NO tender row Captured ──
+  const r10 = await tender({ sale_no: 'S-PG-SHORT', method: 'Cash', amount: 200, currency: 'THB', cash_tendered: 150 });
+  ok('cash tendering: tendered < due → 400 INSUFFICIENT_TENDER, no charge',
+    r10.status === 400 && r10.json?.error?.code === 'INSUFFICIENT_TENDER',
+    JSON.stringify({ s: r10.status, code: r10.json?.error?.code }));
+
+  // ── 11. #1 exact cash → change_due 0 (no over/under) ──
+  const r11 = await tender({ sale_no: 'S-PG-EXACT', method: 'Cash', amount: 50, currency: 'THB', cash_tendered: 50 });
+  ok('cash tendering: exact cash → change_due 0',
+    r11.json.status === 'Captured' && r11.json.change_due === 0,
+    JSON.stringify({ change: r11.json.change_due }));
+
   globalThis.fetch = realFetch;
   console.log('\n── C3 — Real card-gateway charge path (cutover) ──');
   for (const c of checks) console.log(`  ${c.ok ? '✅' : '❌'} ${c.name}${c.detail ? `  (${c.detail})` : ''}`);

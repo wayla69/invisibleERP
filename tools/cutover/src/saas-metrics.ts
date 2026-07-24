@@ -17,7 +17,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy, runGlobalDb } from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { BillingService } from '../../../apps/api/dist/modules/billing/billing.service';
@@ -99,7 +99,12 @@ async function main() {
   // t1 (Active Pro — included 200k/day, overage rate 12 THB/1k) consumed 10,000 overage tokens in May.
   await db.insert(s.aiTokenUsage).values({ tenantId: t1, usageDate: `${ovMonth}-15`, inputTokens: 300000, outputTokens: 0, overageTokens: 10000 });
   const billing = app.get(BillingService);
-  const inv = await billing.aiOverageInvoice(t1, ovMonth);
+  // These billing reads/writes are tenant-scoped in-tx methods (every prod route is @Permissions, never
+  // @NoTx — they run inside the per-request tenant tx). The harness pokes them DIRECTLY (no HTTP request, so
+  // no interceptor tx), which under STRICT_TENANT_PROXY=1 is an intentional base-pool access — declare it so
+  // the fail-closed proxy permits it. Each call still passes t1 explicitly, so isolation is unaffected.
+  const g = <T>(fn: () => Promise<T>): Promise<T> => runGlobalDb('saas-metrics:direct-billing', fn);
+  const inv = await g(() => billing.aiOverageInvoice(t1, ovMonth));
   ok('Overage invoice line: 10,000 tokens × 12 THB/1k = 120 THB (Pro rate)',
     near(inv.amount, 120) && inv.overage_tokens === 10000 && near(inv.overage_rate_thb_per_1k, 12), JSON.stringify(inv));
 
@@ -117,12 +122,12 @@ async function main() {
   ok('Overage ledger: exactly one row for (t1, 2026-05), amount 120, status recorded',
     ovRows.length === 1 && near(ovRows[0].amount, 120) && ovRows[0].status === 'recorded' && ovRows[0].stripe_invoice_item_id == null, JSON.stringify(ovRows));
 
-  const hist = await billing.listOverageRuns(t1, ovMonth);
+  const hist = await g(() => billing.listOverageRuns(t1, ovMonth));
   ok('Overage history: listOverageRuns returns the (t1, 2026-05) charge', (hist.runs ?? []).length === 1 && near(hist.runs[0].amount, 120) && hist.runs[0].month === ovMonth, JSON.stringify(hist));
 
   // Env-rate override: AI_OVERAGE_RATE_THB_PER_1K re-prices overage with no plan/code change (ops knob).
   process.env.AI_OVERAGE_RATE_THB_PER_1K = '20';
-  const invEnv = await billing.aiOverageInvoice(t1, ovMonth);
+  const invEnv = await g(() => billing.aiOverageInvoice(t1, ovMonth));
   delete process.env.AI_OVERAGE_RATE_THB_PER_1K;
   ok('Env rate override: AI_OVERAGE_RATE_THB_PER_1K=20 → 10,000 tokens = 200 THB', near(invEnv.amount, 200) && near(invEnv.overage_rate_thb_per_1k, 20), JSON.stringify(invEnv));
 
@@ -134,16 +139,16 @@ async function main() {
   await pg.query(`INSERT INTO usage_events (tenant_id, meter, event_key, period) SELECT ${t1}, 'etax_docs', 'TIV-'||g, '${uMonth}' FROM generate_series(1,1005) g`);
   // POS: only 5 transactions → well within the 30000 quota → 0 overage.
   await pg.query(`INSERT INTO usage_events (tenant_id, meter, event_key, period) SELECT ${t1}, 'pos_txns', 'SALE-'||g, '${uMonth}' FROM generate_series(1,5) g`);
-  const eInv = await billing.usageOverageInvoice(t1, 'etax_docs', uMonth);
+  const eInv = await g(() => billing.usageOverageInvoice(t1, 'etax_docs', uMonth));
   ok('Usage/e-Tax invoice: used 1005, included 1000, overage 5 × 2 THB = 10 THB',
     eInv.used === 1005 && eInv.included === 1000 && eInv.overage_units === 5 && near(eInv.amount, 10), JSON.stringify(eInv));
-  const pInv = await billing.usageOverageInvoice(t1, 'pos_txns', uMonth);
+  const pInv = await g(() => billing.usageOverageInvoice(t1, 'pos_txns', uMonth));
   ok('Usage/POS invoice: used 5 within the 30000 quota → overage 0, amount 0', pInv.used === 5 && pInv.overage_units === 0 && near(pInv.amount, 0), JSON.stringify(pInv));
   // Dedup: re-inserting an existing (tenant, meter, event_key) is a no-op (ON CONFLICT DO NOTHING) → count unchanged.
   await pg.query(`INSERT INTO usage_events (tenant_id, meter, event_key, period) VALUES (${t1}, 'etax_docs', 'TIV-1', '${uMonth}') ON CONFLICT (tenant_id, meter, event_key) DO NOTHING`);
-  const eInv2 = await billing.usageOverageInvoice(t1, 'etax_docs', uMonth);
+  const eInv2 = await g(() => billing.usageOverageInvoice(t1, 'etax_docs', uMonth));
   ok('Usage meter dedup: re-recording the same doc_no does not double-count (still 1005)', eInv2.used === 1005, JSON.stringify(eInv2));
-  const uSum = await billing.usageSummary(t1, uMonth);
+  const uSum = await g(() => billing.usageSummary(t1, uMonth));
   ok('Usage summary: both meters present for t1 (etax overage 5, pos 0)', (uSum.meters ?? []).length === 2 && uSum.meters.some((m: any) => m.meter === 'etax_docs' && m.overage_units === 5) && uSum.meters.some((m: any) => m.meter === 'pos_txns' && m.overage_units === 0), JSON.stringify(uSum).slice(0, 200));
   // Overage billing run: charges t1's e-Tax overage (10 THB) once; POS (0) is skipped. Mock path (no Stripe key).
   const uRun1 = await inj('POST', `/api/billing/usage-overage/run?month=${uMonth}`, token);
@@ -165,25 +170,57 @@ async function main() {
   const starterPlan = (plansRes.json.plans ?? []).find((p: any) => p.code === 'starter');
   ok('1.7: plans expose price_yearly (Standard ฿29,000 = 2 months free) + USD price list',
     starterPlan?.price_yearly === 29000 && starterPlan?.prices?.USD?.monthly === 85 && starterPlan?.prices?.USD?.yearly === 850, JSON.stringify({ y: starterPlan?.price_yearly, usd: starterPlan?.prices?.USD }));
-  const annCk = await billing.createCheckoutSession(t1, 'pro', 'annual');
+  const annCk = await g(() => billing.createCheckoutSession(t1, 'pro', 'annual'));
   const subRow: any = (await pg.query(`SELECT billing_interval, currency FROM subscriptions WHERE tenant_id=${t1} ORDER BY created_at DESC LIMIT 1`)).rows[0];
   ok('1.7: annual checkout (mock) charges ฿99,000/yr and stamps the billing intent on the sub',
     annCk.mock === true && annCk.interval === 'annual' && near(annCk.amount, 99000) && subRow.billing_interval === 'annual' && subRow.currency === 'THB', JSON.stringify({ ck: { i: annCk.interval, a: annCk.amount }, sub: subRow }));
-  const usdCk = await billing.createCheckoutSession(t1, 'starter', 'monthly', 'USD');
+  const usdCk = await g(() => billing.createCheckoutSession(t1, 'starter', 'monthly', 'USD'));
   ok('1.7: USD checkout resolves the per-currency price ($85/mo)', usdCk.currency === 'USD' && near(usdCk.amount, 85), JSON.stringify({ c: usdCk.currency, a: usdCk.amount }));
-  ok('1.7: an un-offered currency fails closed (CURRENCY_NOT_OFFERED)', (await errCode(() => billing.createCheckoutSession(t1, 'starter', 'monthly', 'JPY'))) === 'CURRENCY_NOT_OFFERED', 'JPY');
+  ok('1.7: an un-offered currency fails closed (CURRENCY_NOT_OFFERED)', (await errCode(() => g(() => billing.createCheckoutSession(t1, 'starter', 'monthly', 'JPY')))) === 'CURRENCY_NOT_OFFERED', 'JPY');
   await pg.query(`UPDATE plans SET price_yearly = NULL WHERE code = 'starter'`); // simulate a plan with no annual offer
-  ok('1.7: a plan without an annual price fails closed (ANNUAL_NOT_OFFERED)', (await errCode(() => billing.createCheckoutSession(t1, 'starter', 'annual'))) === 'ANNUAL_NOT_OFFERED', 'starter yearly=null');
+  ok('1.7: a plan without an annual price fails closed (ANNUAL_NOT_OFFERED)', (await errCode(() => g(() => billing.createCheckoutSession(t1, 'starter', 'annual')))) === 'ANNUAL_NOT_OFFERED', 'starter yearly=null');
   await pg.query(`UPDATE plans SET price_yearly = 29000 WHERE code = 'starter'`);
   // changePlan: re-stamp the sub to annual first (the USD checkout above set it monthly) — a same-interval
   // change prorates on the 365-day basis; an interval SWITCH returns proration null + note (no honest
   // single number across period bases).
-  await billing.createCheckoutSession(t1, 'pro', 'annual');
-  const chSame = await billing.changePlan(t1, 'starter', 'annual');
+  await g(() => billing.createCheckoutSession(t1, 'pro', 'annual'));
+  const chSame = await g(() => billing.changePlan(t1, 'starter', 'annual'));
   ok('1.7: same-interval (annual) change → proration computed on the 365-day basis', chSame.billing_interval === 'annual' && chSame.proration !== null && (chSame.proration as any).period_days === 365, JSON.stringify({ i: chSame.billing_interval, p: (chSame.proration as any)?.period_days }));
-  const chSwitch = await billing.changePlan(t1, 'pro', 'monthly');
+  const chSwitch = await g(() => billing.changePlan(t1, 'pro', 'monthly'));
   ok('1.7: interval switch (annual→monthly) → proration null + interval_change note, interval updated',
     chSwitch.billing_interval === 'monthly' && chSwitch.proration === null && (chSwitch as any).proration_note === 'interval_change', JSON.stringify({ i: chSwitch.billing_interval, n: (chSwitch as any).proration_note }));
+
+  // ── PRICE GRANDFATHERING (0456, docs/53 Q7): a subscription's snapshotted price survives a plan-row
+  //    repricing — charge paths and MRR read COALESCE(snapshot, list); a plan CHANGE re-snapshots. ──
+  // Simulate a legacy tenant: t3 subscribed to Standard back when it cost ฿1,900 (pre-1.9 list).
+  await pg.query(`UPDATE subscriptions SET grandfathered_price = 1900 WHERE tenant_id = ${t3}`);
+  const gfSub = await g(() => billing.getSubscription(t3));
+  ok('0456: getSubscription returns the EFFECTIVE price (snapshot 1,900), list price beside it, flagged',
+    near(gfSub.price_monthly, 1900) && near(gfSub.list_price_monthly, 2900) && gfSub.grandfathered === true, JSON.stringify({ p: gfSub.price_monthly, l: gfSub.list_price_monthly, g: gfSub.grandfathered }));
+  const gfCk = await g(() => billing.createCheckoutSession(t3, 'starter', 'monthly'));
+  ok('0456: checkout of the CURRENT plan charges the grandfathered ฿1,900, not list ฿2,900', near(gfCk.amount, 1900), `amount=${gfCk.amount}`);
+  const otherCk = await g(() => billing.createCheckoutSession(t3, 'business', 'monthly'));
+  ok('0456: checkout of a DIFFERENT plan prices at current list (฿4,900 — no snapshot carry-over)', near(otherCk.amount, 4900), `amount=${otherCk.amount}`);
+  // MRR sums effective prices: t1 pro 9,900 (re-snapshotted by the changePlan above) + t2 pro 9,900
+  // (NULL snapshot → list) + t3 starter 1,900 (grandfathered) = 21,700.
+  const m2 = (await inj('GET', '/api/billing/saas-metrics', token)).json;
+  ok('0456: MRR uses each sub\'s effective price (9,900 + 9,900 + 1,900 = 21,700)', near(m2.revenue?.mrr, 21700), `mrr=${m2.revenue?.mrr}`);
+  const gfCh = await g(() => billing.changePlan(t3, 'business'));
+  const gfRow: any = (await pg.query(`SELECT grandfathered_price FROM subscriptions WHERE tenant_id=${t3}`)).rows[0];
+  ok('0456: a plan change RE-SNAPSHOTS at the new plan\'s current price (฿4,900) — old lock ends',
+    gfCh.plan === 'business' && near(Number(gfRow.grandfathered_price), 4900), JSON.stringify(gfRow));
+
+  // ── PRODUCT-LINE SKUs (0457, docs/53 C1): POS line prices PER BRANCH — checkout multiplies by the
+  //    branch quantity, persists it, and a flat plan rejects an explicit quantity. ──
+  const pbCk = await g(() => billing.createCheckoutSession(t2, 'pos_pro', 'monthly', 'THB', 3));
+  const pbRow: any = (await pg.query(`SELECT branches FROM subscriptions WHERE tenant_id=${t2}`)).rows[0];
+  ok('0457: POS Pro × 3 branches checkout charges 3 × ฿1,190 = ฿3,570 and persists branches=3',
+    near(pbCk.amount, 3570) && pbCk.branches === 3 && Number(pbRow.branches) === 3, JSON.stringify({ a: pbCk.amount, b: pbRow.branches }));
+  const pbAnnual = await g(() => billing.createCheckoutSession(t2, 'pos_lite', 'annual', 'THB', 2));
+  ok('0457: POS Lite × 2 branches annual = 2 × ฿5,900 = ฿11,800 (per-branch × 10-month annual)',
+    near(pbAnnual.amount, 11800), `amount=${pbAnnual.amount}`);
+  ok('0457: a flat (per-company) plan rejects an explicit branch quantity → PLAN_NOT_PER_BRANCH',
+    (await errCode(() => g(() => billing.createCheckoutSession(t2, 'starter', 'monthly', 'THB', 3)))) === 'PLAN_NOT_PER_BRANCH', 'starter ×3');
 
   await app.close();
   console.log('\n── Step 9 — SaaS metrics (MRR / churn / DAU-MAU) ──');

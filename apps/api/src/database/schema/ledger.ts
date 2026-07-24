@@ -49,6 +49,10 @@ export const accounts = pgTable('accounts', {
   cfBucket: text('cf_bucket'),
   cfLabel: text('cf_label'),
   isCurrent: boolean('is_current'),
+  // 0442 — statement-section binding: which line of the Balance Sheet / Income Statement this account
+  // rolls into (own column → canonical default map → type fallback; see ledger-statement-sections.ts).
+  bsGroup: text('bs_group'),   // current_asset | noncurrent_asset | current_liability | noncurrent_liability | equity
+  isGroup: text('is_group'),   // revenue | cogs | selling_admin | other_income | other_expense | finance_cost | tax
 });
 
 // Per-tenant fiscal calendar. tenant_id added in 0043 so one tenant's period/year-end close
@@ -149,6 +153,8 @@ export const recurringJournals = pgTable(
     currency: text('currency').default('THB'),
     lines: jsonb('lines').notNull(), // [{ account_code, debit?, credit?, memo?, cost_center? }]
     active: text('active').default('true'),
+    // 0419 (docs/50 Wave 1 B2) — auto-reverse the posted accrual in the next business month (monthly only).
+    autoReverse: text('auto_reverse').default('false'),
     nextRunDate: date('next_run_date'),
     lastRunDate: date('last_run_date'),
     lastEntryNo: text('last_entry_no'),

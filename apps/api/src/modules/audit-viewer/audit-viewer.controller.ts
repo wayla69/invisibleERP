@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
+import { AuditRead, Permissions, CurrentUser, type JwtUser } from '../../common/decorators';
 import { qint } from '../../common/query';
 import { AuditViewerService, type AuditFilters } from './audit-viewer.service';
 
@@ -52,6 +52,7 @@ export class AuditViewerController {
     return this.svc.changes({ table, row_pk, actor, from, to, tenantId }, Math.min(qint('limit', limit, 50), 200), Math.max(qint('offset', offset, 0), 0));
   }
 
+  @AuditRead('audit_log_csv')
   @Get('export')
   @Permissions('users')
   async export(

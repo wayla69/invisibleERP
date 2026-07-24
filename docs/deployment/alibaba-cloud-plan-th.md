@@ -1,7 +1,7 @@
 # แผนการนำระบบขึ้นใช้งานจริงบน Alibaba Cloud (เน้นต้นทุนต่ำใน 3 ปีแรก)
 
 > **สถานะ:** ฉบับร่าง v1.0 · **วันที่:** 2026-06-23 · **ผู้ดูแล:** Platform
-> **ขอบเขต:** วางแผนการ deploy ระดับองค์กรของ Invisible ERP V2 บน **Alibaba Cloud** โดย
+> **ขอบเขต:** วางแผนการ deploy ระดับองค์กรของ Invisible ERP บน **Alibaba Cloud** โดย
 > **ตัดเรื่องการเตรียม NASDAQ/การตรวจสอบหนัก (SOC 2/ISO) ออกไปก่อน** และ **เน้นต้นทุนให้ต่ำที่สุดใน 3 ปีแรก**
 > ไฟล์งบประมาณประกอบ: [`alibaba-cloud-3yr-budget-th.xlsx`](alibaba-cloud-3yr-budget-th.xlsx)
 

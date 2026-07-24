@@ -50,6 +50,9 @@ export const AuthUser = z.object({
   role: z.enum(ROLES),
   customer_name: z.string().nullable(),
   permissions: z.array(z.string()),
+  // Display name of the active company (tenants.name) — customer_name above is only the tenant CODE.
+  // The web sidebar header shows it so users always know which company they're signed into.
+  company_name: z.string().nullable().optional(),
   must_change_password: z.boolean().optional(),
   // True when this account is a configured platform owner ("god", PLATFORM_ADMIN_USERNAMES) — the web uses
   // it to show the cross-company switcher. Server-derived from env; never a client-settable claim.
@@ -59,6 +62,10 @@ export const AuthUser = z.object({
   control_profile: z.enum(['enterprise', 'sme']).optional(),
   // Nav group title keys hidden for this SME tenant (from tenants.sme_prefs, stamped at provisioning).
   sme_hidden_nav_groups: z.array(z.string()).optional(),
+  // B1 (docs/50): group/subgroup title keys that default OPEN in the sidebar for this SME tenant —
+  // the industry-derived nav profile stamped into tenants.sme_prefs at provisioning. A user's own
+  // synced navFold toggle always overrides; absent/empty keeps the only-active-open default.
+  sme_open_nav_groups: z.array(z.string()).optional(),
 });
 export type AuthUser = z.infer<typeof AuthUser>;
 

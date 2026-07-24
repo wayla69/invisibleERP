@@ -18,6 +18,7 @@ import { notifySuccess, notifyError } from '@/lib/notify';
 interface CloseStep {
   id: number; step_key: string; title: string; seq: number;
   required: boolean; status: 'Pending' | 'Done';
+  owner_role?: string | null; due_date?: string | null; depends_on_key?: string | null;
   completed_by: string | null; completed_at: string | null;
 }
 interface CloseRun {
@@ -117,6 +118,17 @@ export default function PeriodClosePage() {
       refresh();
     },
     onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_reopen')),
+  });
+
+  // Close Manager v2 — evidence-driven auto-complete: system-verifiable steps flip Done "(auto)".
+  const autoComplete = useMutation<any, Error, void>({
+    mutationFn: () => api('/api/ledger/close/auto-complete', { method: 'POST', body: JSON.stringify({ close_run_id: run!.id }) }),
+    onSuccess: (r: any) => {
+      notifySuccess(t('fnx.close.toast_auto', { done: (r.completed ?? []).length }));
+      setSelectedRun(r.run);
+      refresh();
+    },
+    onError: (e: any) => notifyError(e?.message ?? t('fnx.close.err_step')),
   });
 
   // GL-19: programmatic pre-lock validation (read-only) — advisory readiness blockers before the lock.
@@ -233,6 +245,14 @@ export default function PeriodClosePage() {
                           {step.status === 'Done' && step.completed_by && (
                             <p className="text-xs text-muted-foreground">{step.completed_by} · {step.completed_at ? thaiDate(step.completed_at) : ''}</p>
                           )}
+                          {/* B1 Close Manager: owner / due / dependency from the tenant's task templates */}
+                          {(step.owner_role || step.due_date || step.depends_on_key) && (
+                            <p className="text-xs text-muted-foreground">
+                              {step.owner_role ? `${t('fnx.close.task_owner')}: ${step.owner_role}` : ''}
+                              {step.due_date ? ` · ${t('fnx.close.task_due')}: ${thaiDate(step.due_date)}` : ''}
+                              {step.depends_on_key ? ` · ${t('fnx.close.task_after')}: ${step.depends_on_key}` : ''}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 ml-2 shrink-0">
@@ -261,6 +281,7 @@ export default function PeriodClosePage() {
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm text-muted-foreground">{t('fnx.close.prelock_desc')}</p>
                       <Button size="sm" variant="outline" disabled={validate.isPending} onClick={() => validate.mutate()}>{t('fnx.close.validate')}</Button>
+                      <Button size="sm" variant="outline" disabled={autoComplete.isPending} onClick={() => autoComplete.mutate()}>{t('fnx.close.auto_complete')}</Button>
                     </div>
                     {validation && validation.period === run.period && (
                       <div className="space-y-2 text-sm">

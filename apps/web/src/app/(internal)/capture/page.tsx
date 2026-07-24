@@ -163,6 +163,7 @@ type EmailStatus = { email: string | null; verified: boolean; inbox_address: str
 // Email-to-Capture (docs/34 Phase 4). Verify the address you forward bills FROM (a code is mailed to it),
 // then forward any bill to the tenant inbox and it's filed for Accounting — attributed to you.
 function EmailCaptureCard() {
+  const { t } = useLang();
   const qc = useQueryClient();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -170,12 +171,12 @@ function EmailCaptureCard() {
 
   const register = useMutation({
     mutationFn: () => api<{ pending: boolean; email: string; sent: boolean }>('/api/capture-email/register', { method: 'POST', body: JSON.stringify({ email }) }),
-    onSuccess: (r) => { notifySuccess(r.sent ? `ส่งรหัสยืนยันไปที่ ${r.email} แล้ว` : `บันทึกอีเมล ${r.email} แล้ว (ส่งรหัสไม่สำเร็จ ลองขอใหม่ได้)`); qc.invalidateQueries({ queryKey: ['capture-email-status'] }); },
+    onSuccess: (r) => { notifySuccess(t(r.sent ? 'iv.capmail_sent' : 'iv.capmail_saved_fail', { email: r.email })); qc.invalidateQueries({ queryKey: ['capture-email-status'] }); },
     onError: (e) => notifyError((e as Error).message),
   });
   const verify = useMutation({
     mutationFn: () => api<{ verified: boolean; email: string }>('/api/capture-email/verify', { method: 'POST', body: JSON.stringify({ code }) }),
-    onSuccess: (r) => { notifySuccess(`ยืนยันอีเมล ${r.email} แล้ว`); setCode(''); qc.invalidateQueries({ queryKey: ['capture-email-status'] }); },
+    onSuccess: (r) => { notifySuccess(t('iv.capmail_verified_toast', { email: r.email })); setCode(''); qc.invalidateQueries({ queryKey: ['capture-email-status'] }); },
     onError: (e) => notifyError((e as Error).message),
   });
 
@@ -185,42 +186,42 @@ function EmailCaptureCard() {
   return (
     <Card className="mt-6">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base"><Mail className="size-4 text-primary" /> รับบิลทางอีเมล (ส่งต่อบิลเข้าอีเมล)</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base"><Mail className="size-4 text-primary" /> {t('iv.capmail_title')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {s?.inbox_address && (
           <p className="text-sm">
-            ส่งต่อ (forward) บิล/ใบแจ้งหนี้ไปที่:{' '}
+            {t('iv.capmail_forward_pre')}{' '}
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{s.inbox_address}</span>{' '}
-            แล้วระบบจะอ่านไฟล์แนบและส่งให้ฝ่ายบัญชีให้อัตโนมัติ
+            {t('iv.capmail_forward_post')}
           </p>
         )}
         {s?.verified ? (
           <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 className="size-4" /> อีเมลของคุณ <span className="font-mono">{s.email}</span> ยืนยันแล้ว — ส่งบิลจากอีเมลนี้ได้เลย
+            <CheckCircle2 className="size-4" /> {t('iv.capmail_verified_pre')} <span className="font-mono">{s.email}</span> {t('iv.capmail_verified_post')}
           </div>
         ) : (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              ยืนยันอีเมลที่คุณจะใช้ "ส่งบิล" ก่อน เพื่อให้ระบบรู้ว่าบิลที่ส่งมาเป็นของคุณ (จะมีรหัสยืนยันส่งไปที่อีเมลนั้น)
+              {t('iv.capmail_why')}
             </p>
             <div className="flex flex-wrap items-end gap-2">
               <div className="grow">
-                <label className="mb-1 block text-xs text-muted-foreground">อีเมลของคุณ</label>
+                <label className="mb-1 block text-xs text-muted-foreground">{t('iv.capmail_your_email')}</label>
                 <Input type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
               </div>
               <Button variant="outline" disabled={register.isPending || !email.trim()} onClick={() => register.mutate()}>
-                {register.isPending ? <Loader2 className="size-4 animate-spin" /> : null} ขอรหัสยืนยัน
+                {register.isPending ? <Loader2 className="size-4 animate-spin" /> : null} {t('iv.capmail_request_code')}
               </Button>
             </div>
             {pending && (
               <div className="flex flex-wrap items-end gap-2">
                 <div className="grow">
-                  <label className="mb-1 block text-xs text-muted-foreground">รหัสยืนยัน (ส่งไปที่ {s?.email})</label>
-                  <Input inputMode="numeric" placeholder="รหัส 6 หลัก" value={code} onChange={(e) => setCode(e.target.value)} />
+                  <label className="mb-1 block text-xs text-muted-foreground">{t('iv.capmail_code_label', { email: s?.email ?? '' })}</label>
+                  <Input inputMode="numeric" placeholder={t('iv.capmail_code_ph')} value={code} onChange={(e) => setCode(e.target.value)} />
                 </div>
                 <Button disabled={verify.isPending || !code.trim()} onClick={() => verify.mutate()}>
-                  {verify.isPending ? <Loader2 className="size-4 animate-spin" /> : null} ยืนยัน
+                  {verify.isPending ? <Loader2 className="size-4 animate-spin" /> : null} {t('iv.capmail_verify')}
                 </Button>
               </div>
             )}

@@ -1,6 +1,6 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, desc, lte, isNotNull, gte, sql, inArray } from 'drizzle-orm';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
 import { journeys, journeySteps, journeyEnrollments, posMembers, messageLog, customerProfiles } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { MessagingService } from '../messaging/messaging.service';
@@ -124,19 +124,23 @@ export class JourneysService {
   // Cron entry — run every ACTIVE journey for the caller's tenant (Admin/HQ ⇒ all tenants with active
   // journeys). @NoTx route: each claim/send/audit auto-commits (gateway sends are irreversible).
   async runDueAll(user: JwtUser) {
-    const db = this.db;
-    let tenantIds: number[];
-    if (user.role === 'Admin' || user.tenantId == null) {
-      const rows = await db.selectDistinct({ tid: journeys.tenantId }).from(journeys).where(eq(journeys.status, 'active'));
-      tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
-    } else tenantIds = [this.tid(user)];
-    const results: any[] = []; let totalSent = 0, totalSkipped = 0;
-    for (const tid of tenantIds) {
-      const r = await this.runDue(tid, user.username ?? 'system:journey-cron');
-      totalSent += r.sent; totalSkipped += r.skipped;
-      results.push({ tenant_id: tid, ...r });
-    }
-    return { tenants_processed: tenantIds.length, sent: totalSent, skipped: totalSkipped, results };
+    // @NoTx cron sweep: reads/writes across every active tenant on the base pool, each filtered EXPLICITLY by
+    // tenant_id. Declared global so the fail-closed proxy (STRICT_TENANT_PROXY) permits the base-pool access.
+    return runGlobalDb('journeys:run-due-all', async () => {
+      const db = this.db;
+      let tenantIds: number[];
+      if (user.role === 'Admin' || user.tenantId == null) {
+        const rows = await db.selectDistinct({ tid: journeys.tenantId }).from(journeys).where(eq(journeys.status, 'active'));
+        tenantIds = rows.map((r: any) => Number(r.tid)).filter((x: number) => x > 0);
+      } else tenantIds = [this.tid(user)];
+      const results: any[] = []; let totalSent = 0, totalSkipped = 0;
+      for (const tid of tenantIds) {
+        const r = await this.runDue(tid, user.username ?? 'system:journey-cron');
+        totalSent += r.sent; totalSkipped += r.skipped;
+        results.push({ tenant_id: tid, ...r });
+      }
+      return { tenants_processed: tenantIds.length, sent: totalSent, skipped: totalSkipped, results };
+    });
   }
 
   // One tenant's sweep: (1) segment-triggered journeys enrol newly-matching members (unique key dedupes);
@@ -145,7 +149,7 @@ export class JourneysService {
     const db = this.db;
     const act = await db.select().from(journeys).where(and(eq(journeys.tenantId, tenantId), eq(journeys.status, 'active')));
     let enrolled = 0, sent = 0, skipped = 0, completed = 0;
-    const sysUser = { tenantId, username: actor, role: 'System' } as any as JwtUser;
+    const sysUser = { tenantId, username: actor, role: 'System' } as unknown as JwtUser;
 
     for (const j of act) {
       if (j.trigger === 'segment' && j.segmentId) {
@@ -222,7 +226,7 @@ export class JourneysService {
     const [step] = await db.select().from(journeySteps).where(and(eq(journeySteps.journeyId, Number(enr.journeyId)), eq(journeySteps.stepNo, Number(enr.currentStep)))).limit(1);
     if (!step) return 'completed';
     const memberId = Number(enr.memberId);
-    const sysUser = { tenantId, username: actor, role: 'System' } as any as JwtUser;
+    const sysUser = { tenantId, username: actor, role: 'System' } as unknown as JwtUser;
     if (step.skipRule) {
       try { if (await this.segments.memberMatchesRule(db, tenantId, memberId, step.skipRule)) return 'skipped'; } catch { /* bad rule ⇒ don't skip */ }
     }

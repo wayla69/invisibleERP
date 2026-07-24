@@ -61,6 +61,7 @@ export const custPosSales = pgTable('cust_pos_sales', {
   pointsEarned: numeric('points_earned').default('0'),
   status: posStatusEnum('status').default('Completed'),
   notes: text('notes'),
+  ageVerified: boolean('age_verified').notNull().default(false), // docs/52 Phase 3c — the sale passed the age-restricted check (audit)
   createdBy: text('created_by'),
 }, (t) => ({
   // Highest-volume retail table. Daily/period sales reports filter tenant + sale_date (+ branch).
@@ -79,6 +80,9 @@ export const custPosItems = pgTable('cust_pos_items', {
   discountPct: numeric('discount_pct').default('0'),
   amount: numeric('amount', { precision: 14, scale: 2 }),
   isCustom: boolean('is_custom').default(false),
+  lotNo: text('lot_no'),                 // docs/52 Phase 3a — lot the line consumed (FEFO at sell time; null = untracked)
+  expiryDate: date('expiry_date'),       // docs/52 Phase 3a — the consumed lot's expiry (recall/traceability)
+  serialNo: text('serial_no'),           // docs/52 Phase 3b — serial/IMEI the line consumed (null = not serial-tracked)
 }, (t) => ({
   bySale: index('idx_cpi_sale').on(t.saleId), // sale ⋈ items join key
 }));

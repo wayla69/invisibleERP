@@ -1,8 +1,8 @@
 # 11 · Administration
 
-**Status: DRAFT v0.23 · 2026-07-15** · *v0.23 (2026-07-15): §14 — **self-approval registry**: the `/sme-review` screen gains a **ทะเบียน (Registry)** tab — a cross-period, filterable (date range / event / text search) register of every self-approval with a per-month sign-off-status summary and **CSV export** for auditors (docs/49 item 2; read/UI over SME-02, no new control).* · *v0.22 (2026-07-15): §14 — **SME-02 review attestation**: an SME company's monthly self-approvals must be **signed off** by two independent reviewers on the new **ทบทวนการอนุมัติเอง (SME)** screen (`/sme-review`) — the external accountant (`sme_review` duty) + the platform owner (act-as); a month completes only once both legs sign, and the SME-01 report/god inbox flag the outstanding leg (docs/49 item 1, control **SME-02**, migration 0417).* · *v0.21 (2026-07-14): §8.1 — added a **Force purge** danger-zone card (platform-owner only): deletes products even if a company still uses them, wiping their references in every company — preceded by a mandatory **ตรวจผลกระทบ (blast-radius)** report showing which companies would lose reference rows; strong confirm `FORCE-PURGE-ITEMS`. For junk/test products the normal purge keeps; a real company's data would be lost, so factory-reset is preferred where applicable. No new control.* · *v0.20 (2026-07-14): §8.1 — the unused-product **ตรวจสอบ** preview now also shows **which companies still use the products that would be kept** (`kept_by` diagnostic), so you can tell a reset-leftover (the reset company still appears ⇒ data not fully wiped) from a product genuinely used by another company. No new control.* · *v0.19 (2026-07-14): §8.1 — the unused-product cleanup now has a **Platform Console button** (`/platform` → **ดูแลระบบ / Maintenance** tab): **ตรวจสอบ** (dry-run preview) then **ลบ** with a confirm dialog — no need to touch the API or the company switcher. Wires the existing god-only endpoints; no new control.* · *v0.18 (2026-07-14): §8.1 — new **platform-owner** cleanup for leftover products after a company reset: because the product catalogue is shared (no company owner), a factory-reset/purge leaves a company's products in the shared catalogue and they keep showing in every company's `/shop`. Preview `GET /api/admin/item-maintenance/unused-items` then purge `POST /api/admin/item-maintenance/purge-unused-items` (`confirm: PURGE-UNUSED-ITEMS`) removes only products **no company references** any more; god-only (`ITEM_PURGE_HQ_ONLY`), idempotent. FAQ updated. No new numbered control.* · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
+**Status: DRAFT v0.39 · 2026-07-23** · *v0.39 (2026-07-23): §13a — added screen imagery for the module add-ons (the /billing ขายยกโมดูล card, the /plans configurator with toggled modules, and the included-badge honesty view on Scale), captured by the new on-demand `addons-mockup.capture.spec.ts` (same convention as the sidebar imagery). Docs + capture tooling only — no app behavior change.* · *v0.38 (2026-07-22): §13a step 2 — four NEW per-module add-ons on /billing: วางแผน & พยากรณ์ ฿1,900, การตลาด & แคมเปญ ฿1,290, CRM & สมาชิก ฿1,490, ผู้ช่วย AI ฿1,990 (มาพร้อมโควตา 100k token/วัน เพดาน 200k ส่วนเกิน ฿12/1k); the planning suite split into planning+marketing with existing plans grandfathered to both.* · *v0.37 (2026-07-22): §11.1 gains two paragraphs — bulk downloads are recorded (what was taken, by whom) while ordinary screen reads are not, and the trail can now PROVE completeness: verify re-walks the chain for alteration AND reconciles entry count against committed changes, because a never-written entry leaves no hole for the chain to find.* · *v0.36 (2026-07-22): new **§11.1** — what the audit trail records, and the one deliberate exception where *viewing* is logged: the platform-owner screens are audited on READS as well as changes (they see across all companies, so looking — above all downloading a company's data — is itself a cross-company act). **§14.3** gains the `PLATFORM_REQUIRE_MFA` rollout (enrol TOTP FIRST, then set the variable; recovery is always possible because the MFA-enrolment screens are not platform-gated) and the optional `PLATFORM_IP_ALLOWLIST` caveat (fixed egress only).* · *v0.35 (2026-07-21): §13a step 6 — the แจ้งโอนเงิน claim form gains **อ่านจากสลิป (เลือกรูป)**: the slip photo’s mini-QR is decoded on-device for the exact transfer reference and the amount/งวด pre-fill via doc-ai (pre-fill only — the user reviews and the platform owner still verifies the real transfer).* · *v0.34 (2026-07-21): wave D console ops depth — §14.3: god-inbox events also push to `PLATFORM_ALERT_EMAIL` (A1 outbox); **ส่งออกข้อมูลทั้งหมด (JSON)** button in the company drawer (full tenant export, schema-auto-discovered tables, offboarding/PDPA portability); optional god hardening `PLATFORM_REQUIRE_MFA` (403 PLATFORM_MFA_REQUIRED until TOTP enrolled) + `PLATFORM_IP_ALLOWLIST` (403 PLATFORM_IP_BLOCKED outside the CIDR list); สุขภาพระบบ panel gains a red threshold-breach banner (`PLATFORM_ALERT_*` envs, same alerts[] for external pollers).* · *v0.33 (2026-07-21): wave C Thai payment rails — §13a step 6: the /billing **ชำระด้วยการโอน / พร้อมเพย์** card (amount due, scannable PromptPay QR + bank account, แจ้งโอน slip claim with รอตรวจสอบ/ตรวจสอบแล้ว/ไม่ผ่าน status); §14.3: new Platform Console **การชำระเงิน** verify-queue tab (check the real bank statement → อนุมัติ issues the RCPT-S receipt + re-activates, ปฏิเสธ emails the reason; decided claims immutable); configure `PLATFORM_PROMPTPAY_ID`/`PLATFORM_BANK_ACCOUNT`.* · *v0.31 (2026-07-21): §14.3 — the **แพ็กเกจ & โมดูล** tab gains the **ผลกระทบการบังคับใช้แพ็กเกจ** triage panel (per-company rollup of every request plan enforcement would deny — shadow — or did deny — enforce; raw feed `GET /api/admin/entitlement-observations`), plus a 5-step staged-rollout walkthrough: SHADOW fleet-wide → clear each company in the panel → enforce per company via `ENTITLEMENTS_ENFORCE_TENANTS` → global `ENTITLEMENTS_ENFORCE`. §13a — blocked users now get a **สิทธิ์การใช้งานตามแพ็กเกจ** upgrade dialog with a ดูแพ็กเกจ & ชำระเงิน button to `/billing` instead of a bare error.* · *v0.30 (2026-07-21): §13a — the `/billing` page now lists **ใบเสร็จค่าบริการ** (subscription receipts): every payment the platform records (บัตรผ่าน Stripe หรือโอนธนาคารที่ platform owner บันทึกให้) appears with a printable ใบเสร็จรับเงิน (เปิด/พิมพ์ได้จากหน้าเดียวกัน) and is emailed automatically when recorded.* · *v0.29 (2026-07-21): new §13a — the company **แพ็กเกจ & การชำระเงิน** page (`/billing`) gains **โมดูลเสริม (ซื้อเพิ่มรายโมดูล)**: tick the add-ons you want and save — สิทธิ์มีผลทันที; a live card subscription has its billing line items adjusted automatically with mid-cycle proration, and add-ons already in your plan read "รวมในแพ็กเกจแล้ว".* · *v0.28 (2026-07-21): §14.3 — ระบบดูแลวงจรลูกค้าอัตโนมัติ: เตือนหมดช่วงทดลองใช้ (7 วัน/1 วันก่อนหมด), หมดแล้วเว้นช่วงผ่อนผันก่อน**ระงับอัตโนมัติ** (ลงชื่อ `saas_lifecycle (auto)` พร้อมอีเมลแจ้ง), แพ็กเกจฟรีเปิดใช้ต่อเอง, ติดตามค้างชำระเป็นลำดับ (แจ้งทันที/7 วัน/14 วัน แล้วระงับเมื่อครบ 21 วัน) — ตั้งเวลาผ่าน BI scheduler (`saas_lifecycle`) หรือกดรันเอง `POST /api/admin/saas-lifecycle/run`; ดูบันทึกทุกการกระทำที่ `GET /api/admin/saas-lifecycle/events`.* · *v0.27 (2026-07-21): §14.3 — onboarding decisions now email the requester automatically (อนุมัติ → ลิงก์เข้าสู่ระบบ, ปฏิเสธ → เหตุผล, ออกลิงก์เชิญพร้อมอีเมล → ลิงก์เชิญแบบใช้ครั้งเดียว); every send is recorded in a god-only outbox (`GET /api/admin/emails`, สถานะ Queued/Sent/Failed + ผู้ให้บริการ) with a manual `deliver-pending` sweep; ตั้งค่าผู้ให้บริการด้วย `MAIL_PROVIDER`/`MAIL_API_KEY`/`MAIL_FROM` (ไม่ตั้ง = โหมดทดสอบ ไม่ส่งจริง).* · *v0.26 (2026-07-20): §14.3 — new Platform Console tab **แพ็กเกจ & โมดูล**: a per-plan module matrix (ราคา/ที่นั่ง/สาขา + ทุกโมดูลที่รวมเป็น chip; โมดูลเสริมสีเหลือง) read from the live plan catalogue; the **Onboarding** queue previews the requested pack's modules; and the company detail drawer now **จัดการโมดูลเสริม** (à-la-carte add-ons with prices, "รวมในแพ็กเกจแล้ว" hint, live **โมดูลที่เปิดใช้ทั้งหมด** chips) — UI over the 0451 add-on SKUs, no new control.* · *v0.25 (2026-07-20): §14 — the Onboarding queue now shows each request's **แพ็กเกจที่ขอ (requested plan)** — pack · billing interval · add-ons carried from the public /plans page — and **อนุมัติ** provisions the company on that pack (plan + interval + add-ons on the trial subscription) instead of Free; a company's à-la-carte add-ons can be adjusted later via `POST /api/admin/tenants/:id/addons` (platform owner only).* · *v0.24 (2026-07-16): §14 — **industry nav folding (docs/51 B1)**: a new SME company's sidebar is folded at creation from its provisioning **industry** — per-industry hidden domains + default-open groups (stamped into `sme_prefs`, editable per company via ตั้งค่า SME; the industry open-profile survives such edits); first login shows ~15 relevant items instead of ~210; `general`/unknown industries hide nothing; enterprise unaffected.* · *v0.23 (2026-07-15): §14 — **self-approval registry**: the `/sme-review` screen gains a **ทะเบียน (Registry)** tab — a cross-period, filterable (date range / event / text search) register of every self-approval with a per-month sign-off-status summary and **CSV export** for auditors (docs/49 item 2; read/UI over SME-02, no new control).* · *v0.22 (2026-07-15): §14 — **SME-02 review attestation**: an SME company's monthly self-approvals must be **signed off** by two independent reviewers on the new **ทบทวนการอนุมัติเอง (SME)** screen (`/sme-review`) — the external accountant (`sme_review` duty) + the platform owner (act-as); a month completes only once both legs sign, and the SME-01 report/god inbox flag the outstanding leg (docs/49 item 1, control **SME-02**, migration 0417).* · *v0.21 (2026-07-14): §8.1 — added a **Force purge** danger-zone card (platform-owner only): deletes products even if a company still uses them, wiping their references in every company — preceded by a mandatory **ตรวจผลกระทบ (blast-radius)** report showing which companies would lose reference rows; strong confirm `FORCE-PURGE-ITEMS`. For junk/test products the normal purge keeps; a real company's data would be lost, so factory-reset is preferred where applicable. No new control.* · *v0.20 (2026-07-14): §8.1 — the unused-product **ตรวจสอบ** preview now also shows **which companies still use the products that would be kept** (`kept_by` diagnostic), so you can tell a reset-leftover (the reset company still appears ⇒ data not fully wiped) from a product genuinely used by another company. No new control.* · *v0.19 (2026-07-14): §8.1 — the unused-product cleanup now has a **Platform Console button** (`/platform` → **ดูแลระบบ / Maintenance** tab): **ตรวจสอบ** (dry-run preview) then **ลบ** with a confirm dialog — no need to touch the API or the company switcher. Wires the existing god-only endpoints; no new control.* · *v0.18 (2026-07-14): §8.1 — new **platform-owner** cleanup for leftover products after a company reset: because the product catalogue is shared (no company owner), a factory-reset/purge leaves a company's products in the shared catalogue and they keep showing in every company's `/shop`. Preview `GET /api/admin/item-maintenance/unused-items` then purge `POST /api/admin/item-maintenance/purge-unused-items` (`confirm: PURGE-UNUSED-ITEMS`) removes only products **no company references** any more; god-only (`ITEM_PURGE_HQ_ONLY`), idempotent. FAQ updated. No new numbered control.* · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company · *v0.32 (2026-07-21): §14.3 — the plan catalogue now includes the product-line SKUs (docs/53 C1): POS Lite/POS Pro (คิดราคาต่อสาขา — the checkout stores the purchased branch count) and ERP Essentials/ERP Growth; the แพ็กเกจ & โมดูล matrix and the Onboarding requested-pack preview show them automatically from the live plan rows; `sme` displays as **Solo** and `free` as **Trial**. Existing subscriptions are price-locked by the 0456 grandfathering snapshot — a repricing never re-bills a current company.* · *v0.31 (2026-07-21): §14.3 — the **แพ็กเกจ & โมดูล** tab gains the **ผลกระทบการบังคับใช้แพ็กเกจ** triage panel (per-company rollup of every request plan enforcement would deny — shadow — or did deny — enforce; raw feed `GET /api/admin/entitlement-observations`), plus a 5-step staged-rollout walkthrough: SHADOW fleet-wide → clear each company in the panel → enforce per company via `ENTITLEMENTS_ENFORCE_TENANTS` → global `ENTITLEMENTS_ENFORCE`. §13a — blocked users now get a **สิทธิ์การใช้งานตามแพ็กเกจ** upgrade dialog with a ดูแพ็กเกจ & ชำระเงิน button to `/billing` instead of a bare error.* · *v0.30 (2026-07-21): §13a — the `/billing` page now lists **ใบเสร็จค่าบริการ** (subscription receipts): every payment the platform records (บัตรผ่าน Stripe หรือโอนธนาคารที่ platform owner บันทึกให้) appears with a printable ใบเสร็จรับเงิน (เปิด/พิมพ์ได้จากหน้าเดียวกัน) and is emailed automatically when recorded.* · *v0.29 (2026-07-21): new §13a — the company **แพ็กเกจ & การชำระเงิน** page (`/billing`) gains **โมดูลเสริม (ซื้อเพิ่มรายโมดูล)**: tick the add-ons you want and save — สิทธิ์มีผลทันที; a live card subscription has its billing line items adjusted automatically with mid-cycle proration, and add-ons already in your plan read "รวมในแพ็กเกจแล้ว".* · *v0.28 (2026-07-21): §14.3 — ระบบดูแลวงจรลูกค้าอัตโนมัติ: เตือนหมดช่วงทดลองใช้ (7 วัน/1 วันก่อนหมด), หมดแล้วเว้นช่วงผ่อนผันก่อน**ระงับอัตโนมัติ** (ลงชื่อ `saas_lifecycle (auto)` พร้อมอีเมลแจ้ง), แพ็กเกจฟรีเปิดใช้ต่อเอง, ติดตามค้างชำระเป็นลำดับ (แจ้งทันที/7 วัน/14 วัน แล้วระงับเมื่อครบ 21 วัน) — ตั้งเวลาผ่าน BI scheduler (`saas_lifecycle`) หรือกดรันเอง `POST /api/admin/saas-lifecycle/run`; ดูบันทึกทุกการกระทำที่ `GET /api/admin/saas-lifecycle/events`.* · *v0.27 (2026-07-21): §14.3 — onboarding decisions now email the requester automatically (อนุมัติ → ลิงก์เข้าสู่ระบบ, ปฏิเสธ → เหตุผล, ออกลิงก์เชิญพร้อมอีเมล → ลิงก์เชิญแบบใช้ครั้งเดียว); every send is recorded in a god-only outbox (`GET /api/admin/emails`, สถานะ Queued/Sent/Failed + ผู้ให้บริการ) with a manual `deliver-pending` sweep; ตั้งค่าผู้ให้บริการด้วย `MAIL_PROVIDER`/`MAIL_API_KEY`/`MAIL_FROM` (ไม่ตั้ง = โหมดทดสอบ ไม่ส่งจริง).* · *v0.26 (2026-07-20): §14.3 — new Platform Console tab **แพ็กเกจ & โมดูล**: a per-plan module matrix (ราคา/ที่นั่ง/สาขา + ทุกโมดูลที่รวมเป็น chip; โมดูลเสริมสีเหลือง) read from the live plan catalogue; the **Onboarding** queue previews the requested pack's modules; and the company detail drawer now **จัดการโมดูลเสริม** (à-la-carte add-ons with prices, "รวมในแพ็กเกจแล้ว" hint, live **โมดูลที่เปิดใช้ทั้งหมด** chips) — UI over the 0451 add-on SKUs, no new control.* · *v0.25 (2026-07-20): §14 — the Onboarding queue now shows each request's **แพ็กเกจที่ขอ (requested plan)** — pack · billing interval · add-ons carried from the public /plans page — and **อนุมัติ** provisions the company on that pack (plan + interval + add-ons on the trial subscription) instead of Free; a company's à-la-carte add-ons can be adjusted later via `POST /api/admin/tenants/:id/addons` (platform owner only).* · *v0.24 (2026-07-16): §14 — **industry nav folding (docs/51 B1)**: a new SME company's sidebar is folded at creation from its provisioning **industry** — per-industry hidden domains + default-open groups (stamped into `sme_prefs`, editable per company via ตั้งค่า SME; the industry open-profile survives such edits); first login shows ~15 relevant items instead of ~210; `general`/unknown industries hide nothing; enterprise unaffected.* · *v0.23 (2026-07-15): §14 — **self-approval registry**: the `/sme-review` screen gains a **ทะเบียน (Registry)** tab — a cross-period, filterable (date range / event / text search) register of every self-approval with a per-month sign-off-status summary and **CSV export** for auditors (docs/49 item 2; read/UI over SME-02, no new control).* · *v0.22 (2026-07-15): §14 — **SME-02 review attestation**: an SME company's monthly self-approvals must be **signed off** by two independent reviewers on the new **ทบทวนการอนุมัติเอง (SME)** screen (`/sme-review`) — the external accountant (`sme_review` duty) + the platform owner (act-as); a month completes only once both legs sign, and the SME-01 report/god inbox flag the outstanding leg (docs/49 item 1, control **SME-02**, migration 0417).* · *v0.21 (2026-07-14): §8.1 — added a **Force purge** danger-zone card (platform-owner only): deletes products even if a company still uses them, wiping their references in every company — preceded by a mandatory **ตรวจผลกระทบ (blast-radius)** report showing which companies would lose reference rows; strong confirm `FORCE-PURGE-ITEMS`. For junk/test products the normal purge keeps; a real company's data would be lost, so factory-reset is preferred where applicable. No new control.* · *v0.20 (2026-07-14): §8.1 — the unused-product **ตรวจสอบ** preview now also shows **which companies still use the products that would be kept** (`kept_by` diagnostic), so you can tell a reset-leftover (the reset company still appears ⇒ data not fully wiped) from a product genuinely used by another company. No new control.* · *v0.19 (2026-07-14): §8.1 — the unused-product cleanup now has a **Platform Console button** (`/platform` → **ดูแลระบบ / Maintenance** tab): **ตรวจสอบ** (dry-run preview) then **ลบ** with a confirm dialog — no need to touch the API or the company switcher. Wires the existing god-only endpoints; no new control.* · *v0.18 (2026-07-14): §8.1 — new **platform-owner** cleanup for leftover products after a company reset: because the product catalogue is shared (no company owner), a factory-reset/purge leaves a company's products in the shared catalogue and they keep showing in every company's `/shop`. Preview `GET /api/admin/item-maintenance/unused-items` then purge `POST /api/admin/item-maintenance/purge-unused-items` (`confirm: PURGE-UNUSED-ITEMS`) removes only products **no company references** any more; god-only (`ITEM_PURGE_HQ_ONLY`), idempotent. FAQ updated. No new numbered control.* · *v0.17 (2026-07-11): §5a — new **SoD-Conflict Register & Compensating Controls** screen (`/admin/sod`, permission `users`/`exec`; control **ITGC-AC-22**): a standing dashboard of the company's CURRENT SoD conflicts grouped by rule, plus governed **acceptance** of a residual conflict (mandatory compensating control + owner + expiry, acceptor recorded) and a periodic **re-review** with an expired/overdue detective worklist. Governs (does not change) the preventive block in §2.2.* · *v0.16 (2026-07-07): §13 — added a **fax** field to the Company
 info form (`/setup`); it prints alongside phone in the full tax invoice (ม.86/4) header. Saves immediately
-like phone (not a maker-checker field).* · *v0.15 (2026-07-06): §13 — documented **where the G15 company-profile approval queue lives in the app**: a **"Financial-profile changes pending approval"** card on the **Company Setup** screen (`/setup`), where a **different** exec/approvals user approves/rejects the staged PromptPay/tax-ID change. UI surfacing of an already-shipped control — no new endpoint, no new numbered control.* · *v0.14 (2026-07-06): §13 — a change to the **PromptPay ID** or **tax ID** on the company profile is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve it before it takes effect (self-approval → `SOD_VIOLATION`); all other company-info fields still save immediately, and a no-op never stages (G15; strengthens SoD R02; no new numbered control).* · *v0.13 (2026-07-05): §8 — a bulk master-data import that **sets** a financially-sensitive field (customer/vendor credit limit, vendor payment term, price-list price, promotion discount) is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve before anything is written (self-approval → `SOD_VIOLATION`); ordinary imports are unaffected (audit gaps G5+G8; strengthens SoD R02/R09/R10/R13).* · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
+like phone (not a maker-checker field).* · *v0.16 (2026-07-16): §2 — the "only the platform owner grants Admin" rule now also covers the three side-doors a 2026-07-16 pentest found: **resetting an Admin's password** is platform-owner-only (`ADMIN_GRANT_DENIED`), self-service **SSO** cannot auto-assign Admin/Access-Admin (`BAD_ROLE`/`SSO_ROLE_NOT_ALLOWED`), and an **API key can never act as a platform owner**. Reinforces ITGC-AC-02; no new control.* · *v0.15 (2026-07-06): §13 — documented **where the G15 company-profile approval queue lives in the app**: a **"Financial-profile changes pending approval"** card on the **Company Setup** screen (`/setup`), where a **different** exec/approvals user approves/rejects the staged PromptPay/tax-ID change. UI surfacing of an already-shipped control — no new endpoint, no new numbered control.* · *v0.14 (2026-07-06): §13 — a change to the **PromptPay ID** or **tax ID** on the company profile is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve it before it takes effect (self-approval → `SOD_VIOLATION`); all other company-info fields still save immediately, and a no-op never stages (G15; strengthens SoD R02; no new numbered control).* · *v0.13 (2026-07-05): §8 — a bulk master-data import that **sets** a financially-sensitive field (customer/vendor credit limit, vendor payment term, price-list price, promotion discount) is now a two-person maker-checker: it is staged **pending approval** and a **different** exec/approvals user must approve before anything is written (self-approval → `SOD_VIOLATION`); ordinary imports are unaffected (audit gaps G5+G8; strengthens SoD R02/R09/R10/R13).* · *v0.12 (2026-07-05): §2.2 — granting an SoD-conflicting set with a justified override is now a two-person maker-checker; it stages a **Pending SoD-exception** request that a **different** admin (≠ requester, ≠ the affected user) must approve/reject (self-approval → `SOD_VIOLATION`), with the who/why/rules recorded in the audit trail (audit gap G11, part b).* · *v0.11 (2026-07-05): §2.1 role definitions (in-app Role guide); §1/§2 only the platform owner may grant the **Admin** role (`ADMIN_GRANT_DENIED`); §14 company creation is god-only in prod (public signup → request-access); FAQ entries added.* · *v0.10 (2026-07-05): §14.3 — platform notification inbox (god event feed with read state).* · *v0.9 (2026-07-04): §14.3 — read-only act-as toggle (safe inspection).* · *v0.8 (2026-07-04): §14.3 — bulk company actions + company tags/segments with tag filter.* · *v0.7 (2026-07-04): §14.3 — switcher search+recents, Overview system-health + AI-spend + setup-incomplete, and the Activity god-only (impersonation) lens.* · *v0.6 (2026-07-04): §14.3 — Platform Console **จัดการผู้ใช้** act-as shortcut + auto-refresh with new-request toast.* · *v0.5 (2026-07-04): §14.3 — Platform Console **กิจกรรม** (cross-company audit feed + hash-chain verify + CSV) and the **company detail drawer** with subscription controls.* · *v0.4 (2026-07-04): §14.3 — Platform Console **ภาพรวม** tab (cross-company KPIs + needs-attention) and the god **scope banner**.* · *v0.3 (2026-07-04): §14.3 — the **Platform Console** (`/platform`): companies table with act-as/suspend/provision + onboarding queue/invites.* · *v0.2 (2026-07-04): §14.3 — the platform-owner **company switcher** (act-as-one-company + current-company badge).*
 
 This chapter is for **Administrators** — *Admin*, *AccessAdmin* and
 *MasterDataAdmin*. It covers managing users, assigning roles and permissions,
@@ -35,6 +35,13 @@ their role requires it — to enrol in MFA.
 > role carries cross-company visibility, so adding an Admin is a platform-level
 > privileged-access decision reserved to the platform owner (see §14.3). Ask the
 > platform owner if a new Admin is genuinely needed.
+>
+> The same restriction now applies to the **other ways an account could reach Admin
+> authority**: only the platform owner can **reset an existing Admin's password**
+> (`ADMIN_GRANT_DENIED` otherwise — so a company Admin cannot seize a peer Admin's
+> account), self-service **SSO** cannot auto-assign the *Admin* or *Access-Admin* role
+> (the sign-in default role excludes them → `BAD_ROLE`/`SSO_ROLE_NOT_ALLOWED`), and an
+> **API key can never act as a platform owner** even if a platform owner created it.
 
 > **Finding a user.** The user list has a **search** box (username, role, or
 > company/tenant) with a live **match count**, so you can locate an account quickly
@@ -50,7 +57,7 @@ their role requires it — to enrol in MFA.
 | Task | How |
 |------|-----|
 | Change role / permissions | Open the user and edit |
-| Reset password | **Reset password** — forces a change at next login |
+| Reset password | **Reset password** — forces a change at next login. *(Resetting an **Admin** account is reserved to the platform owner — `ADMIN_GRANT_DENIED` otherwise.)* |
 | Delete a user | **Delete** |
 | Force-logout everywhere (compromised account) | `POST /api/auth/users/{username}/revoke-sessions` — immediately invalidates **all** of that user's existing sessions/tokens |
 
@@ -566,6 +573,41 @@ to investigate an issue or to give an auditor evidence of activity.
 your **own company's** events (entries are private to your tenant); HQ/Admin sees
 across the group.
 
+### 11.1 What gets logged — and the one place *viewing* is logged too
+
+Normal day-to-day **viewing is not logged** — only changes are. Reading a screen is
+already confined to your own company, and logging every page view would bury the
+real evidence.
+
+There is one deliberate exception: the **platform owner's** screens (`/platform` and
+the company-management endpoints). That operator can see across **all** companies, so
+for them *looking* is itself a cross-company action — most of all **ดาวน์โหลดข้อมูลบริษัท
+(download a company's data)**, which produces one file containing every record that
+company holds. Those screens are therefore logged on **reads as well as changes**: each
+entry names the operator, the company, the time, the IP and the request id, and is
+marked as a platform read. A platform owner cannot look at, or export, a customer's data
+without leaving a permanent record.
+
+**Downloads are recorded.** Exporting a list in bulk — the audit trail itself, master data, the access
+review, voucher codes — is logged with what was taken and by whom. Reading a screen is not: only data
+*leaving* the system is an event worth keeping.
+
+**The trail can prove it is complete.** *ตรวจสอบความครบถ้วน* (`GET /api/admin/audit/verify`) checks two
+different things. It re-walks the tamper-evident chain to show no past entry was **altered or deleted** —
+and, separately, it reconciles the number of entries against the number of changes that actually committed,
+to show none was **never written**. The second check exists because the first cannot see a missing entry:
+if an entry was never created, there is no hole for the chain to find. A shortfall is reported on its own,
+so "an entry was lost" is never confused with "an entry was edited".
+
+**Refused attempts are recorded too.** If someone who is *not* the platform operator tries
+to reach those screens — or the operator tries from a blocked network, or before enrolling
+MFA — the refusal itself is written to the log with the reason. So the trail answers both
+"who used this power?" and "who tried to?".
+
+*What this means for you as a company admin:* if you ever need to know whether the
+platform operator opened or exported your data, that evidence exists and an auditor can
+retrieve it.
+
 > **Note:** The log is **append-only** — entries can't be altered or removed, which
 > is what makes it acceptable as audit evidence.
 
@@ -721,7 +763,56 @@ brands its own documents independently.
 
 ---
 
+## 13a. Plans, billing & add-on modules (แพ็กเกจ & การชำระเงิน)
+
+**Screen:** `/billing` · **Required permission:** `users` (company admin)
+
+1. The top cards show your current plan, subscription status, monthly price, and trial end date;
+   the AI/usage cards underneath connect each metered quota to its charge.
+2. **โมดูลเสริม (ซื้อเพิ่มรายโมดูล):** tick any of the add-on modules (ซัพพลายเชนขั้นสูง, Webhook
+   ขาเข้า, ส่งออกกลุ่มเป้าหมายโฆษณา, Sandbox — และตั้งแต่ 2026-07-21 ขายยกโมดูลเพิ่มอีกสี่ตัว:
+   **วางแผน & พยากรณ์ ฿1,900**, **การตลาด & แคมเปญ ฿1,290**, **CRM & สมาชิก ฿1,490**, **ผู้ช่วย AI ฿1,990**
+   ซึ่งมาพร้อมโควตา 100k token/วัน เพดาน 200k ส่วนเกิน ฿12/1k) and press **บันทึกโมดูลเสริม** — the modules
+   unlock immediately. If you pay by card, the subscription's line items are adjusted automatically with
+   mid-cycle proration; add-ons your plan already includes read **รวมในแพ็กเกจแล้ว** and cost nothing.
+
+   ![The /billing add-on card: the ขายยกโมดูล group with the four per-module SKUs (the AI module shows its token band) above the advanced add-ons](./img/billing-addons-card.png)
+3. **เลือกแพ็กเกจ:** pick a plan and billing interval (รายเดือน/รายปี — annual = 2 months free). A new
+   card checkout carries your selected add-ons as separate line items, so one payment covers both.
+   The public **แพ็กเกจและราคา** page (`/plans`) offers the same module add-ons with a live total —
+   and displays honestly: a pack that already includes a module shows **รวมในแพ็กเกจนี้แล้ว** with no
+   price or switch, so the estimate never double-counts what the pack covers.
+
+   ![The /plans configurator: module add-ons toggled onto Growth with the itemized total](./img/plans-module-addons.png)
+
+   ![On Scale the four modules are already included — badge instead of a switch, total stays the pack price](./img/plans-included-badges.png)
+4. **ใบเสร็จค่าบริการ:** every subscription payment the platform records — a card charge via Stripe, or a
+   bank transfer the platform owner records for you — appears in the **ใบเสร็จค่าบริการ** list with its
+   number, date, period, and amount. Click **เปิดใบเสร็จ** to view/print the receipt document; a copy is
+   also emailed to your company address automatically when the payment is recorded.
+5. **ถ้าโมดูลไม่รวมในแพ็กเกจ:** when plan enforcement is on and you open a screen your current plan doesn't
+   include (or the trial ended / payment lapsed), the app shows a **สิทธิ์การใช้งานตามแพ็กเกจ** dialog with
+   the reason and a **ดูแพ็กเกจ & ชำระเงิน** button that brings you to this page to upgrade or buy the
+   add-on — the data itself is untouched; access resumes the moment the plan covers the module.
+6. **ชำระด้วยการโอน / พร้อมเพย์ (no card needed):** the **ชำระด้วยการโอน / พร้อมเพย์** card shows the amount
+   due for your plan (+ purchased add-ons), a **PromptPay QR** you can scan with any banking app (when the
+   platform has configured one) and/or the platform's bank account. After transferring, fill in **แจ้งโอนเงิน**:
+   the amount, the งวด (month), and the **เลขอ้างอิงจากสลิป**, then press **แจ้งโอน**. Or press
+   **อ่านจากสลิป (เลือกรูป)** and pick the slip photo — the QR on the slip gives the exact reference and the
+   amount/month pre-fill automatically; review the fields before submitting (the platform team still verifies
+   the real transfer either way). The claim shows as
+   **รอตรวจสอบ** until the platform team verifies the money arrived — then your receipt appears in the
+   ใบเสร็จค่าบริการ list (and by email) and the subscription re-activates automatically. A rejected claim
+   shows the reason next to its status; re-check the slip and file again. The same slip reference cannot be
+   filed twice.
+
 ## 14. Onboarding a new company (platform owner)
+
+> **Requested plan on the queue.** A request filed from the public **แพ็กเกจและราคา** page (`/plans`)
+> carries the prospect's chosen pack: the Onboarding queue shows **แพ็กเกจที่ขอ** (plan · รายเดือน/รายปี ·
+> add-ons), and clicking **อนุมัติ** provisions the company on that pack automatically. A request with no
+> selection provisions on **Free** as before, and you can always change the plan or add-ons afterwards
+> (**เปลี่ยนแพ็กเกจ** in the company table, or `POST /api/admin/tenants/:id/addons`).
 
 Each **company is one account (tenant)**; its branches live inside it. Companies are isolated from each
 other (a company's Admin never sees another company's data) when the platform runs in `multi-company` mode.
@@ -758,6 +849,16 @@ An SME company can be **upgraded to Enterprise at any time** (บริษัท
 can never be downgraded to SME (`403 PROFILE_DOWNGRADE_FORBIDDEN`). New SME companies are stamped with
 the platform-wide defaults from the **ค่าเริ่มต้น SME** tab (hidden menu groups + the accountant's email)
 at creation — changing the defaults later affects only companies created afterwards.
+
+**เมนูพับตามประเภทธุรกิจ (industry nav folding — docs/51 B1).** On top of the platform defaults, a new SME
+company's sidebar is folded at creation from the **industry** chosen on the provision form (restaurant /
+retail / distribution / services / general): domains the industry never uses are hidden (e.g. โครงการ for a
+restaurant; POS สำหรับธุรกิจค้าส่ง) and only the industry's daily-work groups start open — so the owner's
+first login shows ~15 relevant menu items instead of the full ~210-item enterprise tree. Everything hidden
+stays reachable from the ⌘K palette and favourites, users can unfold/refold anything (their own toggles
+always win and sync across devices), and the platform owner can adjust a company's hidden list later from
+the company drawer (**ตั้งค่า SME**) without disturbing the industry's default-open profile. `general`
+(and any unknown industry) hides nothing. Enterprise companies are unaffected.
 
 **Sign off the self-approval review each month — ทบทวนการอนุมัติเอง (SME-02).** A review report only has
 value once someone confirms they read it, so an SME company's self-approvals must be **attested** each
@@ -826,8 +927,30 @@ per-company Admin stays confined to its own org.
   Admin can never promote someone (or themselves) to see other companies' data.
 - Treat it like a **break-glass account:** keep the list to a few named people, require MFA on that login,
   and remove the username when they no longer need cross-company access. Everything a platform owner does
-  across companies is recorded in the [Audit trail](#11-audit-trail-who-changed-what-and-when). See
-  `docs/ops/tenancy-model.md` §2bis.
+  across companies — **including what it reads**, such as downloading a company's data — is recorded in the
+  [Audit trail](#11-audit-trail-who-changed-what-and-when); see §11.1. See `docs/ops/tenancy-model.md` §2bis.
+- **Make MFA mandatory on this account, not just advisory.** Set **`PLATFORM_REQUIRE_MFA=true`** on the API
+  service and a platform owner who has not enrolled TOTP is refused on every platform screen
+  (`PLATFORM_MFA_REQUIRED`) — this is the strongest credential in the system, so a password alone is not
+  enough. **Order matters:** enrol MFA on the platform-owner login *first* (Settings → MFA, keep the recovery
+  codes), confirm it is active, and only then set the variable. If you set it first by mistake, nothing is
+  lost and no other user is affected — the platform owner can still sign in and enrol; only the `/platform`
+  screens are blocked until it does.
+- Optionally add **`PLATFORM_IP_ALLOWLIST`** (IPv4 addresses/CIDRs) to accept platform-owner requests only
+  from your office/VPN egress. Only do this from a **fixed** address — a home connection whose IP changes
+  will lock the platform screens out.
+- **"Read-only company view" now also protects the platform screens.** When you enter a company in
+  look-only mode, every action that would change something is refused — including the company-management
+  actions (suspend, factory reset, delete, purge). Previously the protection stopped at the company's own
+  screens, so a destructive platform action could still go through while you believed you were only
+  looking. Leave read-only mode deliberately when you intend to act.
+- **Forced product deletion is switched off by default.** *ล้างสินค้าแบบบังคับ* deletes products from the
+  shared catalogue **even where a company is still using them**, removing those references from every
+  company — it cannot be undone. It now needs `ALLOW_ITEM_FORCE_PURGE` enabled on the API service for the
+  duration of the maintenance window (turn it off again afterwards), and the screen must show you the
+  blast-radius report first: the system re-checks that the number of affected rows still matches what you
+  were shown, and refuses if the catalogue changed in the meantime. Prefer *ล้างสินค้าที่ไม่มีใครใช้*, which
+  only collects products no company references at all.
 
 **Knowing which company you're looking at (the company switcher).** Because a platform owner sees every
 company's data at once, the lists you open would otherwise mix rows from all companies with no cue to which
@@ -852,16 +975,53 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
   reloads into its dashboard) or **ระงับ/คืนสถานะ** it. The **เปิดบริษัทใหม่** button provisions a brand-new
   company (tenant + its Admin + industry chart of accounts) in one step.
 - **Onboarding** — the queue of pending **คำขอเปิดบริษัท** to **อนุมัติ/ปฏิเสธ**, and **ออกลิงก์เชิญ** to issue a
-  single-use, expiring invite link (the token is shown once — copy it then).
+  single-use, expiring invite link (the token is shown once — copy it then). **การแจ้งผลอัตโนมัติ:** เมื่อกด
+  อนุมัติ/ปฏิเสธ (หรือออกลิงก์เชิญโดยกรอกอีเมล) ระบบส่งอีเมลแจ้งผู้ขอให้เอง — อนุมัติ = ลิงก์เข้าสู่ระบบ, ปฏิเสธ = เหตุผล,
+  เชิญ = ลิงก์สมัครแบบใช้ครั้งเดียว; ตรวจสถานะการส่งทั้งหมดได้ที่ outbox (`GET /api/admin/emails`) และกดส่งซ้ำรายการค้างด้วย
+  `POST /api/admin/emails/deliver-pending` (เฉพาะ platform owner). Each request row shows the
+  **แพ็กเกจที่ขอ** carried from the public pricing page (pack · รายเดือน/รายปี · add-ons by name) plus a
+  4-chip preview of the modules that pack will unlock — so you can see exactly what **อนุมัติ** will provision.
+- **แพ็กเกจ & โมดูล** — the sellable-plan catalogue, one card per plan straight from the live plan rows
+  provisioning uses: price (฿/เดือน and ฿/ปี, or **ราคาตามตกลง**), seat/branch caps (**ไม่จำกัด** where
+  unlimited), every included module as a chip (add-on modules in amber), and which of the four à-la-carte
+  add-ons are already included vs purchasable. Use this tab to review what each plan sells before approving
+  a request or changing a company's plan. Below the catalogue sits the **ผลกระทบการบังคับใช้แพ็กเกจ** panel —
+  see the staged-rollout steps below.
+
+  **To stage plan enforcement safely (ใครจะติดบล็อกถ้าบังคับใช้):**
+  1. Turn on observe-only mode fleet-wide: `ENTITLEMENTS_SHADOW=true` (nothing is blocked yet).
+  2. Let it run — every request a plan **would** deny lands in the **ผลกระทบการบังคับใช้แพ็กเกจ** panel
+     (per company: จำนวนเหตุการณ์, รหัสที่ติด such as `SUITE_NOT_ENTITLED`, โหมด `shadow`/`enforce`, ล่าสุด);
+     the raw feed is `GET /api/admin/entitlement-observations?days=30`.
+  3. For each company that appears: upgrade its plan, sell it the missing add-on (**จัดการโมดูลเสริม** in the
+     company drawer), or accept that the module will be cut off.
+  4. When a company reads clean, add its ID to **`ENTITLEMENTS_ENFORCE_TENANTS`** (comma-separated) — that
+     company alone is now truly enforced (its per-company Admin does not bypass; only the platform owner
+     does) while everyone else stays in observe-only.
+  5. Repeat company by company; when the panel stays empty, flip the global `ENTITLEMENTS_ENFORCE=true` and
+     remove the cohort list. A blocked user in the web app sees an upgrade dialog pointing at `/billing`
+     (see §13a), never a bare error.
+- **การชำระเงิน** — the bank-transfer/PromptPay **verify queue** (wave C). A customer files a slip claim
+  from its `/billing` page; the money becomes real only here:
+  1. Check the pending row (บริษัท · จำนวนเงิน · งวด · เลขอ้างอิงสลิป · หมายเหตุ) against the **real bank
+     statement** — the claim itself is the customer's assertion, never proof of payment.
+  2. **อนุมัติ** issues the numbered ใบเสร็จค่าบริการ (RCPT-S, appears on the customer's /billing + emailed),
+     and **re-activates the subscription** (closes any dunning cycle). A double-click cannot issue two
+     receipts, and a decided claim cannot be re-decided.
+  3. **ปฏิเสธ** asks for a reason and emails it to the company — they can correct the slip and file again.
+  Filter by สถานะ (รอตรวจสอบ/ตรวจสอบแล้ว/ไม่ผ่าน/ทั้งหมด). Configure the rails with `PLATFORM_PROMPTPAY_ID`
+  (the QR) and `PLATFORM_BANK_ACCOUNT` (bank details shown to customers).
 - **กิจกรรม** — a fleet-wide activity log (ทุกบริษัทรวมกัน) พร้อมกรองราย**บริษัท**/ผลลัพธ์ + ค้นหาผู้ทำ/การกระทำ,
   ปุ่ม **ตรวจ hash-chain** (พิสูจน์ว่า audit ไม่ถูกแก้), และ **ส่งออก CSV** — ไว้ตรวจสอบ/สืบสวนเหตุการณ์ข้ามบริษัท.
 - **ภาพรวม** — business KPIs across all companies (MRR/ARR, จำนวนบริษัทที่จ่ายเงิน, ผู้ใช้ active, churn, สัดส่วน
   แพ็กเกจ) and a **ต้องดูแล** panel that surfaces what needs action now: คำขอรออนุมัติ, บริษัททดลองใกล้หมดอายุ (7
   วัน), ค้างชำระ, และถูกระงับ.
 - **รายละเอียดบริษัท** — คลิกชื่อบริษัทในตารางเพื่อเปิดแผงด้านข้างที่รวมข้อมูลบริษัทนั้นครบ (subscription, จำนวน
-  ผู้ใช้/สาขา, การใช้ AI, กิจกรรมล่าสุด) พร้อม **เปลี่ยนแพ็กเกจ** และ **ต่อระยะทดลอง** ได้จากตรงนั้นเลย (ไม่ต้อง
+  ผู้ใช้/สาขา, การใช้ AI, กิจกรรมล่าสุด) พร้อม **เปลี่ยนแพ็กเกจ**, **ต่อระยะทดลอง**, และ **จัดการโมดูลเสริม** (ติ๊กเลือก add-on แต่ละตัวพร้อมราคา — ตัวที่แพ็กเกจรวมอยู่แล้วจะขึ้น "รวมในแพ็กเกจแล้ว" — แล้วดูรายการ **โมดูลที่เปิดใช้ทั้งหมด** อัปเดตสดก่อนกดบันทึก; สิทธิ์มีผลทันที) ได้จากตรงนั้นเลย (ไม่ต้อง
   สลับเข้าไปในบริษัท), ปุ่ม **เข้าดูบริษัทนี้**, และ **จัดการผู้ใช้** (พาเข้าไปที่หน้าจัดการผู้ใช้ของบริษัทนั้นเพื่อ
   รีเซ็ตรหัส/เตะ session/ปิดบัญชี).
+
+> **วงจรลูกค้าอัตโนมัติ (A2).** ตั้ง BI scheduler ให้รันรายงาน `saas_lifecycle` วันละครั้ง ระบบจะ: เตือนบริษัทที่ช่วงทดลองใช้จะหมด (7 วัน และ 1 วันก่อนหมด — อีเมลถึงอีเมลบริษัท), ระงับบริษัทแพ็กเกจเสียเงินที่หมดช่วงทดลองแล้วไม่ชำระเมื่อพ้นช่วงผ่อนผัน 7 วัน (ลงชื่อผู้ระงับว่า `saas_lifecycle (auto)` + อีเมลแจ้ง + แจ้งเตือน god), เปิดใช้แพ็กเกจฟรีต่อโดยอัตโนมัติ, และติดตามบริษัทค้างชำระเป็นลำดับ จนระงับเมื่อครบ 21 วัน — ชำระสำเร็จเมื่อไรรอบติดตามปิดเอง ทุกการกระทำกันซ้ำด้วย dedup key และดูย้อนหลังได้ที่ `GET /api/admin/saas-lifecycle/events`; กดรันทันทีได้ด้วย `POST /api/admin/saas-lifecycle/run` (idempotent — รันซ้ำไม่ทำซ้ำ).
 
 > **อัปเดตอัตโนมัติ.** ศูนย์ควบคุมจะรีเฟรชรายชื่อบริษัท/คิวคำขอให้เองเป็นระยะ และเด้งแจ้งเตือนเมื่อมี **คำขอเปิด
 > บริษัทใหม่เข้ามา** — ไม่ต้องคอยกดรีโหลดเอง.
@@ -881,6 +1041,20 @@ the sidebar (visible only to platform owners) — one place to run the whole fle
 > **กล่องแจ้งเตือนแพลตฟอร์ม.** แท็บ **แจ้งเตือน** ในศูนย์ควบคุมรวมเหตุการณ์ที่ต้องรู้ (คำขอเปิดบริษัทใหม่,
 > การเปิด/ระงับ/คืนสถานะบริษัท) เป็นรายการมีสถานะอ่าน/ยังไม่อ่าน — ตัวเลขยังไม่อ่านโชว์บนหัวแท็บ กด **อ่านทั้งหมด**
 > หรืออ่านทีละรายการได้ (ต่างจากการ์ด “ต้องดูแล” ที่โชว์สถานะปัจจุบัน — อันนี้เก็บประวัติเหตุการณ์ไว้).
+> **ส่งเข้าอีเมลด้วย (D1):** ตั้ง `PLATFORM_ALERT_EMAIL` แล้วทุกเหตุการณ์ในกล่องนี้จะถูกส่งเข้าอีเมลนั้นทันที
+> (ผ่าน outbox เดียวกับอีเมลลูกค้า — ดูสถานะส่งได้ที่ `GET /api/admin/emails`) โดยกล่องแจ้งเตือนยังเป็นบันทึกถาวร.
+
+> **เครื่องมือดูแลระดับแพลตฟอร์ม (wave D).**
+> - **ส่งออกข้อมูลบริษัททั้งหมด:** ปุ่ม **ส่งออกข้อมูลทั้งหมด (JSON)** ในแผงรายละเอียดบริษัทดาวน์โหลดไฟล์เดียวที่รวม
+>   ข้อมูลบริษัทนั้นทุกตาราง (ระบบไล่ตารางที่ผูกกับบริษัทให้เองจาก schema — ตารางใหม่ในอนาคตถูกรวมอัตโนมัติ) ใช้ตอน
+>   ปิดบัญชีลูกค้า (offboarding) หรือคำขอโอนย้ายข้อมูลตาม PDPA; ตารางที่เกิน 50,000 แถวถูกตัดและติดธง `truncated`.
+> - **บังคับ MFA สำหรับ platform owner:** ตั้ง `PLATFORM_REQUIRE_MFA=true` แล้ว god ที่ยังไม่เปิด TOTP จะถูกปฏิเสธ
+>   ทุกเส้นทางผู้ดูแลแพลตฟอร์ม (403 `PLATFORM_MFA_REQUIRED`) จนกว่าจะเปิดใช้ — สิทธิ์แรงที่สุดต้องมีปัจจัยที่สองเสมอ.
+> - **จำกัดเครือข่าย:** ตั้ง `PLATFORM_IP_ALLOWLIST` (IPv4/CIDR คั่นด้วยจุลภาค) แล้วคำขอผู้ดูแลแพลตฟอร์มจากนอกวง
+>   ถูกปฏิเสธ (403 `PLATFORM_IP_BLOCKED`; ใช้คู่ `TRUSTED_PROXY_HOPS` เมื่ออยู่หลัง proxy).
+> - **เกณฑ์แจ้งเตือนสุขภาพระบบ:** แถบ **สุขภาพระบบ** บนหน้า ภาพรวม ขึ้นป้ายแดงเมื่อเกินเกณฑ์
+>   (`PLATFORM_ALERT_POOL_PCT`/`_JOBS_FAILED`/`_JOBS_STUCK`/`_JOBS_QUEUED` + scheduler ขาดการเต้นของหัวใจ) —
+>   ค่าเดียวกันอ่านได้จาก `alerts[]` ใน `GET /api/jobs/ops-metrics` สำหรับระบบเฝ้าระวังภายนอก.
 
 Everything here is restricted to platform owners by the server, so the menu simply won't appear for a normal
 company Admin.
@@ -936,7 +1110,7 @@ one screen; the Overview tab's alerts mirror the weekly `governance_readiness` m
 the compliance / audit / exec function (`exec` or `users`). This is the single auditor-facing view of the
 whole control environment — the ~240-control Risk & Control Matrix (RCM), each control's status, and its
 test-of-effectiveness (ToE) results — that a NASDAQ audit team asks for. The catalogue is the *same* source
-as `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` (both are generated from `compliance/build_rcm.py`), so what you
+as `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` (both are generated from `compliance/build_rcm.py`), so what you
 see in-app can never drift from the spreadsheet.
 
 **Browse the catalogue.** The top cards show the census (total / Implemented / Partial / Gap). The table lists

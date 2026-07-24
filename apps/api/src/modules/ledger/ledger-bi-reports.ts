@@ -1,13 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import type { BiReportGenerator, BiReportSource } from '../bi/report-registry';
 import { LedgerService } from './ledger.service';
+import { FxRevalService } from './fx-reval.service';
+import { LedgerJeAnomalyService } from './ledger-je-anomaly.service';
+import { ymd } from '../../database/queries';
+
+// B3 (docs/50 Wave 2): the business month the period-end jobs target by default — the JUST-ENDED month
+// (a monthly schedule fires at the turn of the month to stage the closing period's run).
+export const prevBizMonth = (): string => {
+  const [y, m] = ymd().slice(0, 7).split('-').map(Number) as [number, number];
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 7);
+};
 
 // docs/46 Phase 1 — module-owned BI report generators (discovered by BiReportRegistrarService;
 // moved verbatim out of bi-generate.service.ts, behaviour identical). The scheduled GL action jobs
 // (GL-08 recurring, GL-09 prepaid, GL-23 allocations) ride the facade's delegators.
 @Injectable()
 export class LedgerBiReports implements BiReportSource {
-  constructor(private readonly ledger: LedgerService) {}
+  constructor(private readonly ledger: LedgerService, private readonly fxReval: FxRevalService, private readonly jeAnomaly: LedgerJeAnomalyService) {}
 
   biReports(): BiReportGenerator[] {
     return [
@@ -30,6 +42,38 @@ export class LedgerBiReports implements BiReportSource {
         generate: async (_f, user) => {
           const r = await this.ledger.runDueAllocations(user); // idempotent per period: next_run_date advanced + ux_je_idem
           return { data: r, summary: `Allocation cycles: posted ${r.posted} of ${r.scanned} due cycles`, summaryTh: `ปันส่วนต้นทุน: ${r.posted} จาก ${r.scanned} รอบ` };
+        },
+      },
+      {
+        // B3 (docs/50 Wave 2) — schedulable FX revaluation STAGING (GL-18). Auto-DRAFT only: the run
+        // stages/refreshes the period's Open run (idempotent per period — runReval recomputes an Open
+        // run in place); POSTING stays a maker-checker human act (SELF_POST unchanged). An
+        // already-posted period is a graceful no-op, so a monthly schedule never errors after close.
+        type: 'gl_fx_reval_run',
+        generate: async (f, user) => {
+          const period = typeof f?.period === 'string' && /^\d{4}-\d{2}$/.test(f.period) ? f.period : prevBizMonth();
+          try {
+            const r = await this.fxReval.runReval({ period, runBy: `${user?.username ?? 'system'} (scheduled)`, tenantId: user.tenantId ?? null });
+            return { data: r, summary: `FX revaluation ${period}: staged run #${(r as { id?: number }).id ?? '?'} (Open — awaiting maker-checker post)`, summaryTh: `ปรับปรุงอัตราแลกเปลี่ยนงวด ${period}: เตรียมรายการแล้ว (รอผู้อนุมัติโพสต์)` };
+          } catch (e: any) {
+            const code = e?.response?.code ?? (typeof e?.getResponse === 'function' ? (e.getResponse() as { code?: string })?.code : undefined);
+            if (code === 'ALREADY_POSTED') return { data: { period, outcome: 'already_posted' }, summary: `FX revaluation ${period}: already posted — no-op`, summaryTh: `งวด ${period} โพสต์แล้ว — ไม่มีการเปลี่ยนแปลง` };
+            throw e;
+          }
+        },
+      },
+      {
+        // B5 (docs/50 Wave 5, GL-28) — the scheduled JE-exception sweep. Idempotent: the register keys
+        // one row per tenant × rule × entry, so a re-run inserts nothing new; dismissed rows stay dismissed.
+        type: 'je_exceptions',
+        generate: async (f, user) => {
+          const days = typeof f?.days === 'number' && f.days > 0 ? f.days : undefined;
+          const r = await this.jeAnomaly.scan(user, { days });
+          return {
+            data: r,
+            summary: `JE exceptions: ${r.findings} finding(s) over ${r.scanned} entries (${r.new} new; ${r.open} open) — ${Object.entries(r.by_rule).map(([k, v]) => `${k}:${v}`).join(', ') || 'clean'}`,
+            summaryTh: `ตรวจจับรายการบัญชีผิดปกติ: พบ ${r.findings} รายการจาก ${r.scanned} JE (ใหม่ ${r.new} · คงค้าง ${r.open})`,
+          };
         },
       },
     ];

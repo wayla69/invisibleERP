@@ -48,3 +48,11 @@ coverage/
 # DR game-day throwaway output
 dr-backups/
 dr-gameday-out/
+
+# Python (services/forecast-engine — docs/54; also compliance/*.py tooling)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/

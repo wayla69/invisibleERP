@@ -1,0 +1,389 @@
+{
+  "_note": "SOX-ICFR #6 maker-checker coverage gate (tools/ci/check-maker-checker.mjs). `exempt` lists state-mutating approve/override/authorize/certify/reverse/release routes whose OWNING module has no inline assertMakerChecker/assertActionAllowed, yet are covered another way (cross-module delegation) or are genuinely not a self-approval surface. Every entry needs a `reason`; a NEW sensitive route in a non-enforcing module that is not exempted FAILS the build. `inventory` is auto-written by --update and is informational only. The list may grow with justification (use-client precedent) and stale entries are rejected.",
+  "exempt": {
+    "POST /api/payroll/runs/:period/approve": {
+      "reason": "Maker-checker enforced cross-module via the ledger: PayrollService.approvePayroll delegates to LedgerService.approveEntry (GL-05), which asserts approver != preparer on the Draft JE. Payroll is a top fraud-risk cycle and cannot be self-posted."
+    },
+    "POST /api/planning/versions/:id/approve": {
+      "reason": "Budget-version approval gates on the workflow engine (WorkflowService.assertCanTransition('BUDGET')), which carries the MAKER_CHECKER SoD rule kind. Approves a plan version, not a GL posting."
+    },
+    "POST /api/retention/:id/release": {
+      "reason": "The GL effect is a Draft JE posted via LedgerService.postEntry (GL-05) that a different user must approve before it is effective; the release call only stages it. Route is gl_close/exec gated."
+    },
+    "POST /api/pos/override": {
+      "reason": "Manager authorization of a cashier's exception (price/discount/void), a different-role, permission-gated control by design (a supervisor overrides a cashier) — not self-approval of the actor's own document."
+    },
+    "POST /api/loyalty/clock-in/override": {
+      "reason": "Attendance/labor time-clock correction (an override of a clock-in), permission-gated and audited; there is no financial document with a maker to self-approve."
+    },
+    "POST /api/lots/:lotNo/release": {
+      "reason": "QC quality disposition — releasing a lot from a QC hold. Permission-gated; the QC inspector legitimately places and lifts holds, so there is no separate document-maker to conflict with (not a maker-checker surface)."
+    }
+  },
+  "inventory": {
+    "PATCH /api/assets/:assetNo/dispose": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "PATCH /api/bom/submissions/:id/approve": {
+      "module": "modules/bom",
+      "moduleEnforces": true
+    },
+    "PATCH /api/procurement/pos/:poNo/approve": {
+      "module": "modules/procurement",
+      "moduleEnforces": true
+    },
+    "PATCH /api/procurement/prs/:prNo/approve": {
+      "module": "modules/procurement",
+      "moduleEnforces": true
+    },
+    "PATCH /api/wht/certificates/:docNo/void": {
+      "module": "modules/tax",
+      "moduleEnforces": true
+    },
+    "POST /api/admin/master-data/import-approvals/:reqNo/approve": {
+      "module": "modules/masterdata",
+      "moduleEnforces": true
+    },
+    "POST /api/admin/signup-requests/:id/approve": {
+      "module": "modules/billing",
+      "moduleEnforces": true
+    },
+    "POST /api/admin/users/access-exceptions/:reqNo/approve": {
+      "module": "modules/admin-users",
+      "moduleEnforces": true
+    },
+    "POST /api/admin/users/access-review/campaign/:id/certify": {
+      "module": "modules/admin-users",
+      "moduleEnforces": true
+    },
+    "POST /api/admin/users/access-review/certify": {
+      "module": "modules/admin-users",
+      "moduleEnforces": true
+    },
+    "POST /api/assets/:assetNo/dispose/approve": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "POST /api/assets/:assetNo/dispose/reject": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "POST /api/assets/:assetNo/revalue/approve": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "POST /api/assets/cip/:cipNo/settle/approve": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "POST /api/assets/custody/:reqNo/approve": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "POST /api/assets/registrations/:regNo/approve": {
+      "module": "modules/assets",
+      "moduleEnforces": true
+    },
+    "POST /api/bank/accounts/:id/approve": {
+      "module": "modules/bank",
+      "moduleEnforces": true
+    },
+    "POST /api/bank/lines/:lineId/adjustment/approve": {
+      "module": "modules/bank",
+      "moduleEnforces": true
+    },
+    "POST /api/costing/allocations/:refDoc/release": {
+      "module": "modules/costing",
+      "moduleEnforces": true
+    },
+    "POST /api/costing/std-cost/:no/approve": {
+      "module": "modules/costing",
+      "moduleEnforces": true
+    },
+    "POST /api/cpq/quotes/:id/approve": {
+      "module": "modules/cpq",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ap/discount-terms/:id/approve": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ap/payment-runs/:runNo/approve": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ap/payments/:paymentNo/approve": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ar/cash-application/:applicationNo/reverse": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ar/cash-application/:batchNo/approve": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ar/credit-limit/:reqNo/approve": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ar/credit-release": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/ar/write-off": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/netting/settlements/:settlementNo/approve": {
+      "module": "modules/finance",
+      "moduleEnforces": true
+    },
+    "POST /api/finance/petty-cash/requests/:reqNo/approve": {
+      "module": "modules/petty-cash",
+      "moduleEnforces": true
+    },
+    "POST /api/fx/rates/approve": {
+      "module": "modules/fx",
+      "moduleEnforces": true
+    },
+    "POST /api/hcm/comp/changes/:id/approve": {
+      "module": "modules/hcm",
+      "moduleEnforces": true
+    },
+    "POST /api/hcm/ess/profile-requests/:id/approve": {
+      "module": "modules/hcm",
+      "moduleEnforces": true
+    },
+    "POST /api/hcm/leave/:id/approve": {
+      "module": "modules/hcm",
+      "moduleEnforces": true
+    },
+    "POST /api/hcm/recruiting/offers/:id/approve": {
+      "module": "modules/hcm",
+      "moduleEnforces": true
+    },
+    "POST /api/hcm/recruiting/requisitions/:reqNo/approve": {
+      "module": "modules/hcm",
+      "moduleEnforces": true
+    },
+    "POST /api/hcm/timesheets/:id/approve": {
+      "module": "modules/hcm",
+      "moduleEnforces": true
+    },
+    "POST /api/ic-reconciliation/groups/:groupId/approve": {
+      "module": "modules/ic-reconciliation",
+      "moduleEnforces": true
+    },
+    "POST /api/inventory/writeoffs/:id/approve": {
+      "module": "modules/inventory",
+      "moduleEnforces": true
+    },
+    "POST /api/inventory/writeoffs/:id/reject": {
+      "module": "modules/inventory",
+      "moduleEnforces": true
+    },
+    "POST /api/ledger/budgets/approve": {
+      "module": "modules/budget",
+      "moduleEnforces": true
+    },
+    "POST /api/ledger/change-requests/:id/approve": {
+      "module": "modules/ledger",
+      "moduleEnforces": true
+    },
+    "POST /api/ledger/journal/:entryNo/approve": {
+      "module": "modules/ledger",
+      "moduleEnforces": true
+    },
+    "POST /api/ledger/journal/:id/reverse": {
+      "module": "modules/ledger",
+      "moduleEnforces": true
+    },
+    "POST /api/ledger/posting-rules/:id/approve": {
+      "module": "modules/ledger",
+      "moduleEnforces": true
+    },
+    "POST /api/ledger/tie-out/:id/certify": {
+      "module": "modules/ledger",
+      "moduleEnforces": true
+    },
+    "POST /api/lessor-leases/:leaseNo/approve": {
+      "module": "modules/leases",
+      "moduleEnforces": true
+    },
+    "POST /api/lots/:lotNo/release": {
+      "module": "modules/lots",
+      "moduleEnforces": false
+    },
+    "POST /api/loyalty/clock-in/override": {
+      "module": "modules/pos",
+      "moduleEnforces": false
+    },
+    "POST /api/loyalty/receipts/:id/approve": {
+      "module": "modules/loyalty",
+      "moduleEnforces": true
+    },
+    "POST /api/loyalty/transfers/:reqNo/approve": {
+      "module": "modules/loyalty",
+      "moduleEnforces": true
+    },
+    "POST /api/masterdata/change-requests/:reqNo/approve": {
+      "module": "modules/masterdata",
+      "moduleEnforces": true
+    },
+    "POST /api/payments/refund-requests/:id/approve": {
+      "module": "modules/payments",
+      "moduleEnforces": true
+    },
+    "POST /api/payments/till/variance/:sessionNo/approve": {
+      "module": "modules/payments",
+      "moduleEnforces": true
+    },
+    "POST /api/payroll/runs/:period/approve": {
+      "module": "modules/payroll",
+      "moduleEnforces": false
+    },
+    "POST /api/planning/versions/:id/approve": {
+      "module": "modules/planning",
+      "moduleEnforces": false
+    },
+    "POST /api/pmr/:pmrNo/approve": {
+      "module": "modules/pmr",
+      "moduleEnforces": true
+    },
+    "POST /api/pmr/boq-request/:reqNo/approve": {
+      "module": "modules/pmr",
+      "moduleEnforces": true
+    },
+    "POST /api/pos/gift-cards/:card_no/approve": {
+      "module": "modules/giftcards",
+      "moduleEnforces": true
+    },
+    "POST /api/pos/override": {
+      "module": "modules/pos",
+      "moduleEnforces": false
+    },
+    "POST /api/pricing/rules/:id/approve": {
+      "module": "modules/pricing",
+      "moduleEnforces": true
+    },
+    "POST /api/procurement/match/:txnNo/override": {
+      "module": "modules/match",
+      "moduleEnforces": true
+    },
+    "POST /api/procurement/vendor-bank-changes/:reqNo/approve": {
+      "module": "modules/procurement",
+      "moduleEnforces": true
+    },
+    "POST /api/progress-billing/:claimNo/certify": {
+      "module": "modules/progress-billing",
+      "moduleEnforces": true
+    },
+    "POST /api/projects/boq/:boqId/approve": {
+      "module": "modules/projects",
+      "moduleEnforces": true
+    },
+    "POST /api/projects/change-orders/:coId/approve": {
+      "module": "modules/projects",
+      "moduleEnforces": true
+    },
+    "POST /api/projects/close-review/:period/approve": {
+      "module": "modules/projects",
+      "moduleEnforces": true
+    },
+    "POST /api/quality/coa/:id/release": {
+      "module": "modules/quality",
+      "moduleEnforces": true
+    },
+    "POST /api/realestate/contracts/:no/approve": {
+      "module": "modules/realestate",
+      "moduleEnforces": true
+    },
+    "POST /api/recon/periods/:id/certify": {
+      "module": "modules/reconciliation",
+      "moduleEnforces": true
+    },
+    "POST /api/recon/periods/auto-certify": {
+      "module": "modules/reconciliation",
+      "moduleEnforces": true
+    },
+    "POST /api/reservations/:id/release": {
+      "module": "modules/reservations",
+      "moduleEnforces": true
+    },
+    "POST /api/reservations/returns/:returnNo/approve": {
+      "module": "modules/reservations",
+      "moduleEnforces": true
+    },
+    "POST /api/retention/:id/release": {
+      "module": "modules/retention",
+      "moduleEnforces": false
+    },
+    "POST /api/revenue/contracts/:id/financing-component/approve": {
+      "module": "modules/revrec-disclosure",
+      "moduleEnforces": true
+    },
+    "POST /api/revenue/contracts/:id/modifications/:modId/approve": {
+      "module": "modules/revrec-modifications",
+      "moduleEnforces": true
+    },
+    "POST /api/revenue/contracts/:id/variable-consideration/:vcId/approve": {
+      "module": "modules/revrec-variable",
+      "moduleEnforces": true
+    },
+    "POST /api/scheduled-changes/:id/approve": {
+      "module": "modules/scheduled-changes",
+      "moduleEnforces": true
+    },
+    "POST /api/service/renewals/:id/approve": {
+      "module": "modules/service",
+      "moduleEnforces": true
+    },
+    "POST /api/service/warranty/claims/:id/authorize": {
+      "module": "modules/service-warranty",
+      "moduleEnforces": true
+    },
+    "POST /api/subcontracts/valuations/:valNo/certify": {
+      "module": "modules/subcontracts",
+      "moduleEnforces": true
+    },
+    "POST /api/tax-invoices/:docNo/approve-note": {
+      "module": "modules/tax",
+      "moduleEnforces": true
+    },
+    "POST /api/tenant/profile-approvals/:reqNo/approve": {
+      "module": "modules/billing",
+      "moduleEnforces": true
+    },
+    "POST /api/treasury/facilities/:id/approve": {
+      "module": "modules/treasury-debt",
+      "moduleEnforces": true
+    },
+    "POST /api/treasury/hedges/:id/approve": {
+      "module": "modules/treasury-hedge",
+      "moduleEnforces": true
+    },
+    "POST /api/treasury/ic-loans/:id/approve": {
+      "module": "modules/treasury-pool",
+      "moduleEnforces": true
+    },
+    "POST /api/treasury/investments/:id/approve": {
+      "module": "modules/treasury-invest",
+      "moduleEnforces": true
+    },
+    "POST /api/treasury/prices/approve": {
+      "module": "modules/treasury-invest",
+      "moduleEnforces": true
+    },
+    "POST /api/vouchers/campaigns/:id/approve": {
+      "module": "modules/campaigns",
+      "moduleEnforces": true
+    },
+    "POST /api/wht/certificates": {
+      "module": "modules/tax",
+      "moduleEnforces": true
+    }
+  }
+}

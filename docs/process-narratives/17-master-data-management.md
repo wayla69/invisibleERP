@@ -26,7 +26,7 @@ To define and control the maintenance of master data — items, customers, vendo
 ## 4. References
 
 - ISO 9001:2015 cl. 4.4 (process approach), cl. 7.5 (control of documented information), cl. 8.5.1 (control of production data / configuration).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — MDM-01..03, ITGC-AC-10, ITGC-CM.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — MDM-01..03, ITGC-AC-10, ITGC-CM.
 - `compliance/policies/03-delegation-of-authority.md` (master-data authorization), `07-change-management-policy.md` (COA change management).
 - Code: `apps/api/src/modules/masterdata/masterdata.service.ts` + `masterdata.controller.ts` + `master-registry.ts`, `apps/api/src/modules/ledger/ledger.service.ts` (`seedChartOfAccounts`), `apps/api/src/database/schema/`.
 
@@ -150,6 +150,47 @@ Single-duty roles enforce SoD: **vendor master** maintenance is segregated from 
     savepoint-wrapped (a blocked table is reported, not a 500) and authorised for append-only rows via the same
     `app.tenant_wipe` GUC as the tenant-wipe engine; audit-logged (`items_force_purged`). Verified by the
     `onboarding` harness.
+16. **Item supply type — goods vs service at the POS (docs/52 Phase 2a).** Every item carries a
+    **`supply_type`** of **goods** (default) or **service**, editable on `/setup/items` under the same setup
+    duties (`md_item`/`md_config`/`masterdata`/`exec`). A POS sale now **resolves each sale line against the
+    shared `items` master**: a **service** line (a haircut, a consultation, a delivery fee) is not a stocked
+    good, so it sells with **no inventory movement and no cost-of-goods**, and its revenue posts to the
+    **`SALE.SERVICE`** posting event (a mixed cart splits item revenue by line — goods to the sale's revenue
+    event, service to `SALE.SERVICE`; the two legs sum exactly to the taxable base). An `item_id` with **no
+    master row** defaults to **goods**, so the existing goods money-path is byte-identical (golden/writeflow
+    unchanged). `SALE.GOODS`/`SALE.SERVICE` are registered in `posting_event_types` (migration **`0439`**) so
+    a services business can **remap** its service revenue to a dedicated income account via the GL-24
+    posting-override screen. Descriptive/posting master-data — **no new numbered control**; verified by the
+    `item-service` harness.
+17. **Product variants / matrix items (docs/52 Phase 2b).** An item can be a **matrix parent** (a T-shirt)
+    owning **variant** child items (each size×colour combination). Every variant is a **real `items` row**
+    with its own `item_id`, barcode, `unit_price` and stock, linked to the parent via **`parent_item_id`**;
+    its attribute values live in **`item_variant_attributes`** (axis, value). `POST /api/item-setup/items/:id/variants`
+    (setup duties `md_item`/`md_config`/`masterdata`/`exec`) generates the matrix from axes — the cartesian
+    product of the axis values becomes child SKUs (`${parentSku}-${value…}`, price inherited from the parent
+    and editable per-variant afterwards, optional per-cell barcode) — and is **idempotent** (an existing
+    variant SKU is skipped, so adding a colour later creates only the new cells); `GET …/variants` lists them.
+    Because a variant is an ordinary `items` row, **scanning its barcode resolves the exact SKU** through the
+    existing catalogue scan-to-add (`/api/procurement/catalog?barcode=`) with no extra wiring. `items` is a
+    **shared** master (no `tenant_id`), so the variant rows + `item_variant_attributes` stay tenant-neutral.
+    Migration **`0440`**. Descriptive master-data depth — **no GL, no new numbered control**; verified by the
+    `item-variants` harness.
+18. **Kits/bundles + non-inventory items (docs/52 Phase 2c).** A **kit/bundle** parent (a gift set) is sold
+    as **one** sale line at **one** price, but its **components** are what leave stock. The kit's bill of
+    materials is stored as typed **`item_relationships`** (`rel_type='kit_component'`, from = kit → to =
+    component) each carrying a per-kit **`qty`** (migration **`0441`** adds `item_relationships.qty`, default
+    1). A **Kit components** panel on `/setup/items` (same setup duties) adds/lists/removes components with
+    their quantities. At the POS, a kit line **explodes** into its components: for each component the sale
+    decrements `customer_inventory` (+ `cust_stock_log` + per-branch `branch_stock`) and books costed COGS
+    (`costing.onIssue`) at **component qty × line qty**, while the kit SKU itself is **never** decremented or
+    costed. Revenue posts the **kit's own line price** to the goods revenue event (not the sum of component
+    prices), so the kit is a merchandising/fulfilment construct, not a re-pricing one. A goods line with **no**
+    `kit_component` rows is byte-identical to before. Separately, an item may be **`supply_type='non_inventory'`**
+    (a delivery fee, gift-wrap, a printed-on-demand charge): like a `service` item it moves **no stock and
+    books no COGS**, but unlike a service its revenue stays on the **goods** revenue event. Because the BOM
+    lives in the **tenant-scoped** `item_relationships` (a per-shop merchandising choice on the shared `items`
+    master) the kit definition is tenant-isolated. Descriptive/posting master-data depth — **no new numbered
+    control**; verified by the `item-kit` harness.
 
 ## 8. Process flow
 
@@ -265,3 +306,6 @@ flowchart TD
 | 0.6 | 2026-07-04 | Platform | **Direct .xlsx import + setup-page IO surface:** §7 step 3b — all import endpoints now accept a base64-encoded **`.xlsx`** workbook (parsed server-side via ExcelJS into the same header-keyed rows as csv), so a downloaded template/export round-trips back in without a Save-As-CSV step. §7 step 3c — **item_categories** and **tax_codes** gain a bulk import/export surface on their own setup screens (`/api/item-setup/io/*`), gated to the setup duties (`md_item`/`md_config`/`masterdata`/`exec`) and restricted by an allow-list to those two entities, so a narrow master-data role gets the bulk surface without the coarse `masterdata` duty (SoD **R13** preserved). §2 in-scope updated. No schema change, no GL, no new control; verified by the `ext` harness (xlsx round-trip, setup IO, and the md_config-only SoD boundary). |
 | 0.11 | 2026-07-14 | Platform | **Global item-master garbage collection (unused-item purge):** §7 step 14 — because `items` is a shared master with no `tenant_id`, the tenant factory-reset/purge never clears it, so a wiped company's catalogue rows survive and keep showing in every tenant's `/shop`. Two **platform-owner-only** ops garbage-collect the items no tenant references any more: preview `GET /api/admin/item-maintenance/unused-items` and destructive `POST /api/admin/item-maintenance/purge-unused-items` (typed confirm `PURGE-UNUSED-ITEMS`). "Unreferenced" is computed **across every tenant** via catalogue-driven discovery of all item-code / `item_relationships` / successor-pointer references (same convention as `md_merge_repoint_text`); an orphan is deleted with its `item_images` row, while a `status='merged'` row is preserved. Both routes are `@PlatformAdmin` (full cross-tenant RLS bypass even when act-as-scoped, so another company's in-use item is never mistaken for an orphan); non-owner → `ITEM_PURGE_HQ_ONLY`. Idempotent + audit-logged (`items_unused_purged`). §13 error codes updated (`ITEM_PURGE_HQ_ONLY`, `CONFIRM_MISMATCH`). **No GL, no new numbered control** (god-gated + typed-confirm + dry-run, mirroring §7 step 12 merge and the PN-08 tenant reset/purge gates). Verified by the `onboarding` harness. |
 | 0.12 | 2026-07-15 | Platform / Compliance | SME edition exception note added to the control matrix (docs/49 v1.2, control SME-01) — maker-checker self-approval blocks are conditionally relaxed for `control_profile='sme'` tenants via the central seam; no control logic changed in this cycle. |
+| 0.15 | 2026-07-19 | Platform | **Kits/bundles + non-inventory items — universal POS docs/52 Phase 2c:** §7 step 18. Migration **`0441`** adds `item_relationships.qty` (per-component count on a `kit_component` row; existing rows default 1). A kit line at the POS **explodes** into its components — each component decrements `customer_inventory`/`cust_stock_log`/`branch_stock` and books costed COGS at component-qty × line-qty — while the kit SKU is never decremented/costed; revenue posts the kit's own line price to the goods event. A `supply_type='non_inventory'` item sells with no stock/COGS but keeps the **goods** revenue event (vs `service` → `SALE.SERVICE`). Kit components panel on `/setup/items` (`ItemRelBody.qty`). A non-kit goods line is byte-identical (golden 534 / writeflow 36 / restaurant 220 / returns 25 unchanged). **No GL change on the plain path, no new numbered control.** Verified by the `item-kit` harness (9). |
+| 0.14 | 2026-07-18 | Platform | **Product variants / matrix items — universal POS docs/52 Phase 2b:** §7 step 17. Migration **`0440`** adds `items.parent_item_id` (self-ref) + `is_matrix_parent` + the shared `item_variant_attributes(item_id, axis, value)` table (no `tenant_id`). `POST /api/item-setup/items/:id/variants` generates the size×colour matrix into real child `items` rows (own SKU/barcode/price/stock, linked by `parent_item_id`; idempotent) + `GET …/variants`; a variant barcode resolves via `/api/procurement/catalog?barcode=`. Minimal Variants panel on `/setup/items`. **No GL, no new numbered control** (shared-master depth, mirrors item relationships). Verified by the `item-variants` harness (7). |
+| 0.13 | 2026-07-18 | Platform | **Item supply type (goods/service) at the POS — universal POS docs/52 Phase 2a:** §7 step 16. `items.supply_type` (goods default / service) is now editable on `/setup/items` (`ItemProfileDto`), and a POS sale resolves each `item_id` against the shared `items` master: a **service** line sells with **no stock move + no COGS** and posts revenue to `SALE.SERVICE`; a mixed cart splits item revenue by line; an unknown `item_id` defaults to goods (byte-identical — golden 534 / writeflow 36 / returns / basics unchanged). Migration **`0439`** registers `SALE.GOODS`/`SALE.SERVICE` in `posting_event_types` so they are GL-24-overridable (a services tenant remaps `SALE.SERVICE` to its service-income account). **No GL change on the goods path, no new numbered control.** Verified by the `item-service` harness (7). |

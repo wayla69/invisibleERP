@@ -145,9 +145,19 @@ test('pos-home — summary stats + open tills + recent bills fit the phone viewp
     '/api/pos/sessions': { sessions: [{ Cashier: 'cashier01', Sale_Date: '2026-07-09', session_total: 9200, order_count: 25 }] },
     '/api/pos/orders': { orders: [{ Sale_No: 'S-1023', Sale_Date: '2026-07-09', Total: 362.6, Status: 'Paid', Payment_Method: 'Cash', Cashier: 'cashier01' }] },
   });
+  // pos-home is the heaviest page in this sweep (recharts bundle + three parallel queries) and this is
+  // the FIRST paint of it in the run — under late-job CI load its 30s visibility windows still flaked
+  // (#791, #794, #805 ×2, #821, then twice more post-#809) because they start at goto and must absorb
+  // app boot + hydration + query dispatch BEFORE any rendering. Anchor on the two mocked responses
+  // instead: the 60s waits absorb the boot/dispatch tail, and each visibility window then covers only
+  // render-after-data. The spec's purpose is the overflow assertion, not latency.
+  const ordersSeen = page.waitForResponse((r) => r.url().includes('/api/pos/orders'), { timeout: 60_000 });
+  const sessionsSeen = page.waitForResponse((r) => r.url().includes('/api/pos/sessions'), { timeout: 60_000 });
   await page.goto('/pos-home');
-  await expect(page.getByText('S-1023').first()).toBeVisible();
-  await expect(page.getByText('cashier01').first()).toBeVisible();
+  await ordersSeen;
+  await sessionsSeen;
+  await expect(page.getByText('S-1023').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('cashier01').first()).toBeVisible({ timeout: 30_000 });
   await expectNoOverflow(page, 'pos home dashboard');
 });
 

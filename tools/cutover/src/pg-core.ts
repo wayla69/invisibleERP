@@ -192,6 +192,20 @@ async function main() {
   ok('multi-company: god read-only act-as allows GET but blocks writes (403 READONLY_IMPERSONATION)',
     roRead === 1 && roWrite.status === 403 && roWrite.json.error?.code === 'READONLY_IMPERSONATION',
     `read=${roRead} write=${roWrite.status} ${roWrite.json.error?.code}`);
+  // ...and the rail must cover the PLATFORM surface too. A @PlatformAdmin route deliberately keeps its full
+  // bypass (so the switcher's own company directory still lists every company), which meant act-as scoping —
+  // and therefore the read-only check, previously keyed on it — did NOT apply there: a god in "read-only
+  // company view" could still fire a destructive fleet mutation (suspend/factory-reset/purge). The check is
+  // now keyed on being a god, so the safety rail holds on both surfaces while GETs stay available.
+  const roPlatRead = await inj('GET', '/api/admin/tenants', godTok, undefined, { 'x-act-as-tenant': String(mB), 'x-act-as-read-only': '1' });
+  const roPlatWrite = await inj('POST', `/api/admin/tenants/${mB}/suspend`, godTok, {}, { 'x-act-as-tenant': String(mB), 'x-act-as-read-only': '1' });
+  ok('multi-company: read-only view also blocks PLATFORM-surface mutations (403 READONLY_IMPERSONATION), reads still work',
+    roPlatRead.status === 200 && roPlatWrite.status === 403 && roPlatWrite.json.error?.code === 'READONLY_IMPERSONATION',
+    `read=${roPlatRead.status} write=${roPlatWrite.status} ${roPlatWrite.json.error?.code}`);
+  // Without the read-only header the same god mutation is served — the rail is opt-in, not a new block.
+  const rwPlatWrite = await inj('POST', `/api/admin/tenants/${mB}/suspend`, godTok, {}, { 'x-act-as-tenant': String(mB) });
+  ok('multi-company: the same platform mutation succeeds when NOT in read-only view (no new block)',
+    rwPlatWrite.status === 200 || rwPlatWrite.status === 201, `${rwPlatWrite.status} ${JSON.stringify(rwPlatWrite.json).slice(0, 90)}`);
   delete process.env.PLATFORM_ADMIN_USERNAMES;
   delete process.env.TENANCY_MODE; // restore harness default
 

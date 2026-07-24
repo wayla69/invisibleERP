@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HealthModule } from '../modules/health/health.module';
 import { BillingModule } from '../modules/billing/billing.module';
 import { PlatformNotificationsModule } from '../modules/platform-notifications/platform-notifications.module';
+import { MailerModule } from '../modules/mailer/mailer.module';
 import { PlatformModule } from '../modules/platform/platform.module';
 import { WorkflowModule } from '../modules/workflow/workflow.module';
 import { CustomFieldsModule } from '../modules/custom-fields/custom-fields.module';
@@ -44,6 +45,7 @@ import { GovernanceModule } from '../modules/governance/governance.module';
     HealthModule,
     BillingModule,
     PlatformNotificationsModule,
+    MailerModule,
     PlatformModule,
     WorkflowModule,
     CustomFieldsModule,
@@ -82,6 +84,7 @@ import { GovernanceModule } from '../modules/governance/governance.module';
     HealthModule,
     BillingModule,
     PlatformNotificationsModule,
+    MailerModule,
     PlatformModule,
     WorkflowModule,
     CustomFieldsModule,

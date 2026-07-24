@@ -28,7 +28,7 @@ To define the controlled process for maintaining authorized foreign-exchange rat
 ## 4. References
 
 - ISO 9001:2015 clause 4.4 (QMS and its processes); clause 8.1 (Operational planning and control); clause 8.5.1 (Control of provision of services).
-- `compliance/Oshinei_ERP_SOX_RCM_v1.xlsx` — FX-*, GL-01 families.
+- `compliance/Invisible_ERP_SOX_RCM_v1.xlsx` — FX-*, GL-01 families.
 - `compliance/policies/foreign-currency-policy.md`; `compliance/policies/journal-entry-policy.md`.
 - Code: `apps/api/src/modules/fx/fx.controller.ts`, `apps/api/src/modules/fx/fx.service.ts`, `apps/api/src/modules/ledger/ledger.service.ts`.
 

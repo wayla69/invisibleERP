@@ -290,9 +290,14 @@ async function main() {
   await db.insert(s.users).values([
     { username: 'hqaa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: hq.id },
     { username: 'cf2aa', passwordHash: await pw.hash('pw'), role: 'AccessAdmin', tenantId: cf2.id },
+    // cf2 tenant Admin — provisions the cf2 full-scope (`*`) public-API key. A full-scope key expands (via the
+    // Sales role's `exec`) to gl_post/gl_close, so PE-1 permits it only for a holder of those perms (an Admin),
+    // NOT the users-only AccessAdmin (which could otherwise mint a GL-capable machine key it can't use itself).
+    { username: 'cf2admin', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: cf2.id },
   ]).onConflictDoNothing();
   const hqaa = (await inj('POST', '/api/login', undefined, { username: 'hqaa', password: 'pw' })).json.token;
   const cf2aa = (await inj('POST', '/api/login', undefined, { username: 'cf2aa', password: 'pw' })).json.token;
+  const cf2admin = (await inj('POST', '/api/login', undefined, { username: 'cf2admin', password: 'pw' })).json.token;
   // a guaranteed cf2-tenant mutation → one known audit row (actor cfwh2, tenant cf2)
   await inj('POST', '/api/saved-views', token2, { module: 'audit-probe', name: 'AUDITPROBE', config: {}, shared: false });
 
@@ -638,7 +643,7 @@ async function main() {
   const hqKeyR = await inj('POST', '/api/platform/api-keys', token, { name: 'pub-hq', scopes: ['*'] });
   const hqKey = hqKeyR.json.key;
   ok('Public API: an API key is issued (ierp_) for the public surface', /^ierp_/.test(hqKey ?? ''), `${hqKeyR.status}`);
-  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cf2', scopes: ['*'] })).json.key;
+  const cf2Key = (await inj('POST', '/api/platform/api-keys', cf2admin, { name: 'pub-cf2', scopes: ['*'] })).json.key; // full-scope key → minted by the cf2 Admin (PE-1)
   const catKey = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-cat', scopes: ['catalog:read'] })).json.key;
   const rateKey = (await inj('POST', '/api/platform/api-keys', token, { name: 'pub-rate', scopes: ['*'] })).json.key;
 
@@ -882,6 +887,545 @@ async function main() {
   const hqRows = hqTxn.json.data ?? [];
   ok('Public API: /customers/transactions — HQ key sees only its own member', hqRows.some((r: any) => r.customer_no === 'M-HQA') && !hqRows.some((r: any) => r.customer_no === 'M-CF2A'), `hq=${hqRows.map((r: any) => r.customer_no).join(',')}`);
 
+  // ── Analytics push-back (docs/48 phase 3, MKT-15) — the Marketing Intelligence platform PUSHES its
+  //    computed MMM / RFM / TOWS into the ERP (scope analytics:write); /marketing-intel renders the store. ──
+  const anWriteCf2 = (await inj('POST', '/api/platform/api-keys', cf2aa, { name: 'pub-anw-cf2', scopes: ['analytics:write'] })).json.key;
+  const mmmPayload = { r2: 0.49, total_spend: 50000, channels: [{ channel: 'tiktok', spend: 0, roi: null, contribution_pct: 10.3 }, { channel: 'facebook', spend: 30000, roi: 4.17, contribution_pct: 60.61 }] };
+  const snapBody = { snapshots: [
+    { kind: 'mmm', payload: mmmPayload, model_run_ref: 'MMM-CF2-001' },
+    { kind: 'rfm', payload: { segments: [{ segment: 'Loyal Promoters', customers: 12, monetary: 34000 }] } },
+    { kind: 'tows', payload: { items: [{ quadrant: 'SO', factor: 'tiktok momentum', recommendation: 'scale tiktok spend', priority: 1 }] } },
+  ] };
+
+  // Scope enforcement: neither a catalog-only key NOR an analytics:READ key may write (read ≠ write).
+  const catWrite = await inj('POST', '/api/v1/analytics/snapshots', catKey2, snapBody);
+  ok('Push-back: analytics write requires analytics:write (catalog key → 403 INSUFFICIENT_SCOPE)', catWrite.status === 403 && catWrite.json.error?.code === 'INSUFFICIENT_SCOPE', `${catWrite.status} ${catWrite.json.error?.code}`);
+  const readWrite = await inj('POST', '/api/v1/analytics/snapshots', anKeyCf2, snapBody);
+  ok('Push-back: an analytics:READ key cannot WRITE (read alias ⊄ :write → 403)', readWrite.status === 403 && readWrite.json.error?.code === 'INSUFFICIENT_SCOPE', `${readWrite.status} ${readWrite.json.error?.code}`);
+
+  // Happy path: the write key pushes all three snapshot kinds (idempotent upsert).
+  const pushed = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, snapBody);
+  ok('Push-back: analytics:write key pushes MMM/RFM/TOWS (200, pushed 3)', pushed.status === 200 && pushed.json.pushed === 3, `${pushed.status} ${JSON.stringify(pushed.json)}`);
+
+  // Storage is tenant-scoped: the rows carry cf2's tenant_id and none belong to HQ.
+  const snapRows = await db.select().from(s.miAnalyticsSnapshots);
+  const cf2Snaps = snapRows.filter((r: any) => Number(r.tenantId) === cf2.id);
+  ok('Push-back: snapshots stored tenant-scoped for the key tenant (3 kinds, none for HQ)', cf2Snaps.length === 3 && !snapRows.some((r: any) => Number(r.tenantId) === hq.id), `cf2=${cf2Snaps.map((r: any) => r.kind).join(',')} hq=${snapRows.filter((r: any) => Number(r.tenantId) === hq.id).length}`);
+
+  // APPEND-ONLY history: a second mmm push adds a row (does not overwrite); the summary shows the LATEST.
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'mmm', payload: { ...mmmPayload, r2: 0.55 }, model_run_ref: 'MMM-CF2-002' }] });
+  const afterRepush = (await db.select().from(s.miAnalyticsSnapshots)).filter((r: any) => Number(r.tenantId) === cf2.id && r.kind === 'mmm');
+  ok('Push-back: history is append-only (2 mmm rows after a re-push, not 1)', afterRepush.length === 2, `n=${afterRepush.length}`);
+  const miHist = await inj('GET', '/api/marketing-intel/mmm-history', cf2admin);
+  ok('Push-back: GET /mmm-history returns the run trend (2 runs, newest first r2=0.55)', miHist.status === 200 && (miHist.json.runs ?? []).length === 2 && Number(miHist.json.runs[0]?.r2) === 0.55, `${miHist.status} runs=${(miHist.json.runs ?? []).length} r2=${miHist.json.runs?.[0]?.r2}`);
+
+  // Internal read: the /marketing-intel page reads the ERP's OWN store (cf2 Admin holds marketing/exec).
+  const miSummary = await inj('GET', '/api/marketing-intel/summary', cf2admin);
+  ok('Push-back: GET /api/marketing-intel/summary returns the LATEST MMM/RFM/TOWS (has_data, r2=0.55)', miSummary.status === 200 && miSummary.json.has_data === true && Number(miSummary.json.mmm?.payload?.r2) === 0.55 && miSummary.json.tows?.payload != null, `${miSummary.status} has_data=${miSummary.json.has_data}`);
+
+  // ── RFM → campaign action loop: the pushed per-customer segment lands on customer_profiles.mi_rfm_segment
+  //    (a SEPARATE column from the ERP's own rfm_segment) and drives a campaign via the mi_segment audience.
+  //    cf2Mem ('M-CF2A') already has a customer_profiles row (seeded above), so the push updates it. ──
+  const rfmMembersPush = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs' }] }] });
+  ok('Push-back: an rfm push with per-customer members applies them (members_applied ≥ 1)', rfmMembersPush.status === 200 && rfmMembersPush.json.members_applied >= 1, `${rfmMembersPush.status} applied=${rfmMembersPush.json.members_applied}`);
+  const profAfter = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('Push-back: mi_rfm_segment set on the member WITHOUT clobbering the ERP rfm_segment column', profAfter?.miRfmSegment === 'At Risk VIPs', `mi=${profAfter?.miRfmSegment} own=${profAfter?.rfmSegment ?? null}`);
+  const miSegs = await inj('GET', '/api/marketing-intel/segments', cf2admin);
+  ok('Push-back: GET /segments counts members per pushed segment', miSegs.status === 200 && (miSegs.json.segments ?? []).some((x: any) => x.segment === 'At Risk VIPs' && x.members >= 1), `${miSegs.status} ${JSON.stringify(miSegs.json.segments ?? [])}`);
+  const activated = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'At Risk VIPs' });
+  ok('Push-back: activate a segment → a DRAFT campaign (audience=mi_segment) is created', (activated.status === 200 || activated.status === 201) && activated.json.audience === 'mi_segment' && activated.json.segment === 'At Risk VIPs' && activated.json.status === 'draft', `${activated.status} ${JSON.stringify({ a: activated.json.audience, s: activated.json.status })}`);
+  const emptyActivate = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'Nonexistent Segment' });
+  ok('Push-back: activating an empty segment → 400 EMPTY_SEGMENT (no members)', emptyActivate.status === 400 && emptyActivate.json.error?.code === 'EMPTY_SEGMENT', `${emptyActivate.status} ${emptyActivate.json.error?.code}`);
+
+  // ── Customer Intelligence (docs/60 Phase 2, MKT-18) — a push MAY carry per-customer CLV / churn / NBA
+  //    scores, landed on customer_profiles.mi_clv / mi_churn_risk / mi_nba (SEPARATE from the ERP's own
+  //    explainable churn_risk / predicted_ltv). Advisory: contact still goes through the consent-gated draft. ──
+  const ciPush = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs', clv: 8400.5, churn_risk: 0.72, nba: 'WINBACK' }] }] });
+  ok('CustIntel: an rfm push with per-customer scores stamps them (scores_applied ≥ 1)', ciPush.status === 200 && ciPush.json.scores_applied >= 1, `${ciPush.status} scores=${ciPush.json.scores_applied}`);
+  const ciProf = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('CustIntel: mi_clv / mi_churn_risk / mi_nba set WITHOUT clobbering the ERP own churn_risk/predicted_ltv', Number(ciProf?.miClv) === 8400.5 && Math.abs(Number(ciProf?.miChurnRisk) - 0.72) < 1e-6 && ciProf?.miNba === 'WINBACK' && ciProf?.churnRisk == null && ciProf?.predictedLtv == null, `mi_clv=${ciProf?.miClv} mi_churn=${ciProf?.miChurnRisk} mi_nba=${ciProf?.miNba} own_churn=${ciProf?.churnRisk ?? null}`);
+
+  const ciDrill = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers`, cf2admin);
+  ok('CustIntel: GET segment drill-down returns the member with CLV/churn/NBA (sort=clv default)', ciDrill.status === 200 && ciDrill.json.count >= 1 && ciDrill.json.sort === 'clv' && ciDrill.json.customers.some((c: any) => c.customer_no === 'M-CF2A' && c.clv === 8400.5 && Math.abs(c.churn_risk - 0.72) < 1e-6 && c.nba === 'WINBACK'), `${ciDrill.status} count=${ciDrill.json.count} ${JSON.stringify(ciDrill.json.customers?.[0] ?? {})}`);
+  const ciDrillChurn = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers?sort=churn`, cf2admin);
+  ok('CustIntel: drill-down accepts sort=churn (highest churn first)', ciDrillChurn.status === 200 && ciDrillChurn.json.sort === 'churn', `${ciDrillChurn.status} sort=${ciDrillChurn.json.sort}`);
+  const ciDrillHq = await inj('GET', `/api/marketing-intel/segment/${encodeURIComponent('At Risk VIPs')}/customers`, cf2admin);
+  ok('CustIntel: drill-down is tenant-scoped — no HQ member (M-HQA) leaks into cf2 results', !ciDrillHq.json.customers?.some((c: any) => c.customer_no === 'M-HQA'), `${(ciDrillHq.json.customers ?? []).map((c: any) => c.customer_no).join(',')}`);
+
+  // A Phase-1-style push (segment only, no scores) must LEAVE the existing scores untouched (back-compat).
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'At Risk VIPs', customers: 1, monetary: 1250 }] }, members: [{ customer_no: 'M-CF2A', segment: 'At Risk VIPs' }] }] });
+  const ciProf2 = (await db.select().from(s.customerProfiles)).find((r: any) => Number(r.tenantId) === cf2.id && Number(r.memberId) === cf2Mem.id);
+  ok('CustIntel: a segment-only push leaves the previously-pushed scores intact (back-compat)', Number(ciProf2?.miClv) === 8400.5 && ciProf2?.miNba === 'WINBACK', `mi_clv=${ciProf2?.miClv} mi_nba=${ciProf2?.miNba}`);
+
+  // ── Budget Optimizer (docs/60 Phase 1, MKT-17) — prescriptive MMM: response curves + what-if + optimise,
+  //    then a STAGED budget plan under maker-checker (advisory, never posts spend). MMM was pushed above so
+  //    the curves derive a fallback from spend/roi (no saturation params pushed → derived=true). ──
+  const curvesRes = await inj('GET', '/api/marketing-intel/response-curves', cf2admin);
+  ok('BudgetOpt: GET response-curves returns per-channel curves (derived fallback, has_data)', curvesRes.status === 200 && curvesRes.json.has_data === true && (curvesRes.json.channels ?? []).length >= 2 && curvesRes.json.channels.every((c: any) => c.beta > 0 && c.kappa > 0), `${curvesRes.status} n=${(curvesRes.json.channels ?? []).length} derived=${curvesRes.json.derived}`);
+
+  const optRes = await inj('POST', '/api/marketing-intel/optimize', cf2admin, { budget: 100000 });
+  const optSpent = Object.values(optRes.json.allocation ?? {}).reduce((s: number, v: any) => s + Number(v), 0);
+  ok('BudgetOpt: POST optimize spends ~the whole budget with predicted sales > 0', (optRes.status === 200 || optRes.status === 201) && Math.abs(optSpent - 100000) < 1000 && Number(optRes.json.predictedSales) > 0, `${optRes.status} spent=${Math.round(optSpent)} pred=${Math.round(Number(optRes.json.predictedSales || 0))}`);
+
+  const simRes = await inj('POST', '/api/marketing-intel/simulate', cf2admin, { allocation: optRes.json.allocation });
+  ok('BudgetOpt: POST simulate on the optimal allocation reproduces the predicted sales (deterministic)', (simRes.status === 200 || simRes.status === 201) && Math.abs(Number(simRes.json.predicted_sales) - Number(optRes.json.predictedSales)) < 1, `sim=${Math.round(Number(simRes.json.predicted_sales || 0))} opt=${Math.round(Number(optRes.json.predictedSales || 0))}`);
+
+  const simBad = await inj('POST', '/api/marketing-intel/simulate', cf2admin, { allocation: {} });
+  ok('BudgetOpt: simulate with an empty allocation → 400 (validation)', simBad.status === 400, `${simBad.status}`);
+
+  // STAGE a plan as the Planner (cf2ex holds pr_raise). Advisory → Pending, never posts spend.
+  const stageRes = await inj('POST', '/api/marketing-intel/budget-plan', cf2ex, { total_budget: 100000, allocation: optRes.json.allocation, note: 'Q3 reallocation' });
+  const planNo = stageRes.json.plan_no;
+  ok('BudgetOpt: stage a budget plan → Pending (advisory) with a BP- id', (stageRes.status === 200 || stageRes.status === 201) && stageRes.json.status === 'Pending' && /^BP-/.test(planNo ?? ''), `${stageRes.status} ${JSON.stringify({ p: planNo, s: stageRes.json.status })}`);
+
+  // Maker-checker (MKT-17): a DIFFERENT user (cf2admin, exec/approvals) approves the Planner's plan → Approved.
+  const approveOk = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: planNo });
+  ok('BudgetOpt: a different user approves the staged plan → Approved (maker-checker)', (approveOk.status === 200 || approveOk.status === 201) && approveOk.json.status === 'Approved' && approveOk.json.approved_by === 'cf2admin', `${approveOk.status} ${JSON.stringify({ s: approveOk.json.status, by: approveOk.json.approved_by })}`);
+
+  // Self-approval is blocked: the SAME user (cf2admin) that stages a plan cannot approve it.
+  const selfStage = await inj('POST', '/api/marketing-intel/budget-plan', cf2admin, { total_budget: 50000, allocation: optRes.json.allocation });
+  const selfApprove = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: selfStage.json.plan_no });
+  ok('BudgetOpt: the requester cannot approve their OWN plan → SOD_SELF_APPROVAL', selfApprove.status === 400 && selfApprove.json.error?.code === 'SOD_SELF_APPROVAL', `${selfApprove.status} ${selfApprove.json.error?.code}`);
+
+  // Approving a non-existent plan → 404.
+  const approveMissing = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: 'BP-nope-999' });
+  ok('BudgetOpt: approving a non-existent plan → 404 PLAN_NOT_FOUND', approveMissing.status === 404 && approveMissing.json.error?.code === 'PLAN_NOT_FOUND', `${approveMissing.status} ${approveMissing.json.error?.code}`);
+
+  // Storage is tenant-scoped: every staged plan belongs to cf2 (none leaked to HQ).
+  const planRows = await db.select().from(s.miBudgetPlans);
+  ok('BudgetOpt: budget plans stored tenant-scoped (cf2 only, none for HQ)', planRows.length >= 2 && planRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${planRows.length} tenants=${[...new Set(planRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // ── Closed-loop Measurement (docs/60 Phase 3, MKT-19) — an activated segment is split into a treatment arm
+  //    (contacted) and a randomised HOLDOUT control (never contacted); after the window, lift = treatment vs
+  //    control per-head on real POS revenue proves incrementality. Seed several cf2 members in a fresh segment. ──
+  const liftIds: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const [m] = await db.insert(s.posMembers).values({ tenantId: cf2.id, memberCode: `M-LIFT${i}`, name: `Lift ${i}`, active: true }).returning({ id: s.posMembers.id });
+    await db.insert(s.customerProfiles).values({ tenantId: cf2.id, memberId: m.id, miRfmSegment: 'LiftTest', totalOrders: 1, totalSpend: '100' });
+    liftIds.push(Number(m.id));
+  }
+  // Start an experiment: 50% holdout, measurable immediately (window 0), and send the treatment-only campaign.
+  const startExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'LiftTest', control_pct: 0.5, window_days: 0, activate: true });
+  const expNo = startExp.json.experiment_no;
+  ok('CloseLoop: start experiment splits treatment/control arms (sum = members, both non-empty)', (startExp.status === 200 || startExp.status === 201) && startExp.json.treatment_count + startExp.json.control_count === 8 && startExp.json.treatment_count > 0 && startExp.json.control_count > 0, `${startExp.status} t=${startExp.json.treatment_count} c=${startExp.json.control_count}`);
+
+  // Learn the arm assignment (fixed at creation) to seed revenue per arm.
+  const expRow = (await db.select().from(s.miCampaignExperiments)).find((r: any) => r.experimentNo === expNo && Number(r.tenantId) === cf2.id);
+  const armRows = (await db.select().from(s.miExperimentArms)).filter((a: any) => Number(a.experimentId) === Number(expRow?.id));
+  const treatIds = armRows.filter((a: any) => a.arm === 'treatment').map((a: any) => Number(a.memberId));
+  const ctrlIds = armRows.filter((a: any) => a.arm === 'control').map((a: any) => Number(a.memberId));
+  ok('CloseLoop: arms are immutable + partition the segment (no member in both arms; all 8 assigned)', armRows.length === 8 && treatIds.length + ctrlIds.length === 8 && treatIds.every((id: number) => !ctrlIds.includes(id)), `arms=${armRows.length} t=${treatIds.length} c=${ctrlIds.length}`);
+
+  // The treatment-only campaign never lists a control member (holdout integrity).
+  const liftCamp = (await db.select().from(s.loyaltyCampaigns)).find((c: any) => Number(c.id) === Number(startExp.json.campaign_id));
+  ok('CloseLoop: treatment-only campaign excludes every control member (never contacted)', !!liftCamp && liftCamp.audience === 'members' && Array.isArray(liftCamp.memberIds) && ctrlIds.every((id: number) => !liftCamp.memberIds.includes(id)) && treatIds.every((id: number) => liftCamp.memberIds.includes(id)), `aud=${liftCamp?.audience} ids=${(liftCamp?.memberIds ?? []).length}`);
+
+  // Seed post-send revenue: treatment ฿1000/head, control ฿100/head (in the measurement window).
+  let ordSeq = 0;
+  for (const mid of treatIds) await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-LIFT-${ordSeq++}`, memberId: mid, total: '1000', saleNo: `S-LIFT-${ordSeq}`, openedAt: new Date() });
+  for (const mid of ctrlIds) await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-LIFT-${ordSeq++}`, memberId: mid, total: '100', saleNo: `S-LIFT-${ordSeq}`, openedAt: new Date() });
+
+  const measure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
+  ok('CloseLoop: measure computes positive lift (฿1000/head treatment vs ฿100/head control → ~900%)', (measure.status === 200 || measure.status === 201) && measure.json.status === 'Measured' && Number(measure.json.lift_pct) > 500 && Number(measure.json.incremental_revenue) > 0, `${measure.status} lift=${measure.json.lift_pct}% inc=${measure.json.incremental_revenue}`);
+  // docs/62 Phase 3 — statistical honesty: zero-variance arms (every treatment head 1000, every control head
+  // 100) collapse the 95% CI to the point estimate [900, 900], and 4 heads/arm (< 30) flags weak evidence.
+  // The flag is display/report-only — lift_pct and incremental_revenue above are UNCHANGED by it.
+  ok('CloseLoop Phase 3: measured lift carries the honest 95% CI + weak-evidence flag (CI [900,900]; n=4/arm → weak)', Number(measure.json.lift_ci_low_pct) === 900 && Number(measure.json.lift_ci_high_pct) === 900 && measure.json.weak_evidence === true, `ci=[${measure.json.lift_ci_low_pct},${measure.json.lift_ci_high_pct}] weak=${measure.json.weak_evidence}`);
+
+  // A measured experiment is not re-measured (idempotent guard).
+  const remeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: expNo });
+  ok('CloseLoop: re-measuring a Measured experiment → 400 ALREADY_MEASURED', remeasure.status === 400 && remeasure.json.error?.code === 'ALREADY_MEASURED', `${remeasure.status} ${remeasure.json.error?.code}`);
+
+  // A still-open window can't be measured early.
+  const openExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'LiftTest', control_pct: 0.5, window_days: 30 });
+  const openMeasure = await inj('POST', '/api/marketing-intel/experiments/measure', cf2admin, { experiment_no: openExp.json.experiment_no });
+  ok('CloseLoop: measuring before the window elapses → 400 WINDOW_NOT_ELAPSED', openMeasure.status === 400 && openMeasure.json.error?.code === 'WINDOW_NOT_ELAPSED', `${openMeasure.status} ${openMeasure.json.error?.code}`);
+
+  // Starting on an empty segment is rejected.
+  const emptyExp = await inj('POST', '/api/marketing-intel/experiments', cf2admin, { segment: 'NoSuchSegment', control_pct: 0.5 });
+  ok('CloseLoop: starting an experiment on an empty segment → 400 EMPTY_SEGMENT', emptyExp.status === 400 && emptyExp.json.error?.code === 'EMPTY_SEGMENT', `${emptyExp.status} ${emptyExp.json.error?.code}`);
+
+  // Measured outcomes are exposed for the platform pull-back (analytics:read), tenant-scoped.
+  const outcomes = await inj('GET', '/api/v1/marketing/experiment-outcomes', anKeyCf2, undefined);
+  ok('CloseLoop: measured outcomes are pullable via the public API (analytics:read), tenant-scoped', outcomes.status === 200 && Array.isArray(outcomes.json.outcomes) && outcomes.json.outcomes.some((o: any) => o.experiment_no === expNo && Number(o.lift_pct) > 500), `${outcomes.status} n=${(outcomes.json.outcomes ?? []).length}`);
+
+  // Storage is tenant-scoped: every experiment belongs to cf2.
+  const expAll = await db.select().from(s.miCampaignExperiments);
+  ok('CloseLoop: experiments stored tenant-scoped (cf2 only, none for HQ)', expAll.length >= 2 && expAll.every((r: any) => Number(r.tenantId) === cf2.id), `n=${expAll.length} tenants=${[...new Set(expAll.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // ── Model Governance (docs/60 Phase 4, MKT-20) — a governed tenant must have a pushed analytics run
+  //    APPROVED by a second person (≠ the pusher) before it can drive spend/contact; runs carry model cards;
+  //    a drifted run is flagged into GOV-01 + blocks until approved-with-reason; the audit chain links all. ──
+  const govOff = await inj('GET', '/api/marketing-intel/governance/settings', cf2admin);
+  ok('Governance: default settings are off (require_approval=false, back-compat)', govOff.status === 200 && govOff.json.require_approval === false, `${govOff.status} ${JSON.stringify(govOff.json)}`);
+  const govOn = await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: true });
+  ok('Governance: enabling require_approval persists', govOn.status === 200 && govOn.json.require_approval === true, `${govOn.status} ${JSON.stringify(govOn.json)}`);
+
+  // A new mmm push with a materially lower R² than the prior approved run (0.55) drifts + lands Pending.
+  const govDrift = await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'mmm', payload: { ...mmmPayload, r2: 0.20 }, model_run_ref: 'MMM-GOV-DRIFT', model_card: { model_version: 'v3', training_window: '2026-05..07', features: ['spend', 'impressions'], metrics: { r2: 0.20 } } }] });
+  ok('Governance: a governed push is accepted (lands Pending, not auto-consumable)', govDrift.status === 200, `${govDrift.status}`);
+  const govRuns = await inj('GET', '/api/marketing-intel/governance/runs', cf2admin);
+  const driftRun = (govRuns.json.runs ?? []).find((r: any) => r.model_run_ref === 'MMM-GOV-DRIFT');
+  ok('Governance: the pushed run is Pending, carries its model card + a drift flag', !!driftRun && driftRun.status === 'Pending' && driftRun.model_card?.model_version === 'v3' && driftRun.quality?.drift === true && driftRun.quality?.blocked === true, `status=${driftRun?.status} card=${driftRun?.model_card?.model_version} drift=${driftRun?.quality?.drift}`);
+
+  const gov01 = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Governance: the pending analytics run surfaces in the GOV-01 center (MKT-20)', gov01.status === 200 && (gov01.json.items ?? []).some((i: any) => i.type === 'mi_analytics_run' && i.control === 'MKT-20'), `${gov01.status} types=${[...new Set((gov01.json.items ?? []).map((i: any) => i.type))].join(',')}`);
+
+  const apprNoReason = await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: driftRun?.id });
+  ok('Governance: approving a DRIFTED run without a reason → 400 DRIFT_REASON_REQUIRED', apprNoReason.status === 400 && apprNoReason.json.error?.code === 'DRIFT_REASON_REQUIRED', `${apprNoReason.status} ${apprNoReason.json.error?.code}`);
+  const apprOk = await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: driftRun?.id, reason: 'reviewed — seasonal dip, retained' });
+  ok('Governance: a different user approves the run with a reason → Approved (maker-checker; pusher = the api key)', (apprOk.status === 200 || apprOk.status === 201) && apprOk.json.status === 'Approved', `${apprOk.status} ${apprOk.json.status}`);
+
+  // Consumption gate: a fresh rfm push (Pending) means the latest RFM is unapproved → activation is blocked.
+  await inj('POST', '/api/v1/analytics/snapshots', anWriteCf2, { snapshots: [{ kind: 'rfm', payload: { segments: [{ segment: 'GovSeg', customers: 1 }] }, members: [{ customer_no: 'M-CF2A', segment: 'GovSeg' }] }] });
+  const blockedAct = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'GovSeg' });
+  ok('Governance: activating off an UNAPPROVED latest RFM run → 400 ANALYTICS_NOT_APPROVED', blockedAct.status === 400 && blockedAct.json.error?.code === 'ANALYTICS_NOT_APPROVED', `${blockedAct.status} ${blockedAct.json.error?.code}`);
+  const govRuns2 = await inj('GET', '/api/marketing-intel/governance/runs', cf2admin);
+  const rfmRun = (govRuns2.json.runs ?? []).find((r: any) => r.kind === 'rfm' && r.status === 'Pending');
+  await inj('POST', '/api/marketing-intel/governance/runs/approve', cf2admin, { id: rfmRun?.id });
+  const okAct = await inj('POST', '/api/marketing-intel/segments/activate', cf2admin, { segment: 'GovSeg' });
+  ok('Governance: after the RFM run is approved, activation succeeds (draft campaign)', (okAct.status === 200 || okAct.status === 201) && okAct.json.status === 'draft', `${okAct.status} ${okAct.json.status}`);
+
+  const miAudit = await inj('GET', '/api/marketing-intel/governance/audit-trail', cf2admin);
+  ok('Governance: the audit trail links runs → budget plans → experiment outcomes (ICFR chain)', miAudit.status === 200 && Array.isArray(miAudit.json.runs) && Array.isArray(miAudit.json.plans) && Array.isArray(miAudit.json.experiments) && miAudit.json.runs.length > 0 && miAudit.json.experiments.length > 0, `${miAudit.status} runs=${(miAudit.json.runs ?? []).length} plans=${(miAudit.json.plans ?? []).length} exp=${(miAudit.json.experiments ?? []).length}`);
+
+  const govRows = await db.select().from(s.miGovernanceSettings);
+  ok('Governance: settings stored tenant-scoped (cf2 only)', govRows.length >= 1 && govRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${govRows.length} tenants=${[...new Set(govRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // Reset governance OFF so it can't affect any later checks.
+  await inj('PUT', '/api/marketing-intel/governance/settings', cf2admin, { require_approval: false });
+
+  // ── Marketing Activation — the shared FACT LAYER (docs/61 Phase 0). A read-only aggregator that composes
+  //    the CRM + Marketing-Intelligence facts every activation tool consumes. M-CF2A carries the pushed
+  //    Customer-Intelligence scores (mi_clv 8400.5 / mi_churn 0.72 / mi_nba WINBACK) from the CustIntel block. ──
+  const custFacts = await inj('GET', '/api/marketing-activation/facts/customer/M-CF2A', cf2admin);
+  ok('FactLayer: customer fact sheet composes CRM + MI facts (CLV/churn/NBA/opt-in) for a member', custFacts.status === 200 && custFacts.json.customer_no === 'M-CF2A' && custFacts.json.value?.clv_platform === 8400.5 && Math.abs(Number(custFacts.json.risk?.churn_risk_platform) - 0.72) < 1e-6 && custFacts.json.next_best_action === 'WINBACK' && custFacts.json.marketing_opt_in === true, `${custFacts.status} ${JSON.stringify({ clv: custFacts.json.value?.clv_platform, nba: custFacts.json.next_best_action })}`);
+  const custMissing = await inj('GET', '/api/marketing-activation/facts/customer/M-NOPE', cf2admin);
+  ok('FactLayer: an unknown customer → 404 CUSTOMER_NOT_FOUND', custMissing.status === 404 && custMissing.json.error?.code === 'CUSTOMER_NOT_FOUND', `${custMissing.status} ${custMissing.json.error?.code}`);
+
+  const segFacts = await inj('GET', `/api/marketing-activation/facts/segment/${encodeURIComponent('GovSeg')}`, cf2admin);
+  ok('FactLayer: segment fact sheet rolls up count + value + dominant NBA + best channel (from MMM)', segFacts.status === 200 && segFacts.json.segment === 'GovSeg' && segFacts.json.count >= 1 && segFacts.json.next_best_action?.dominant === 'WINBACK' && segFacts.json.best_channel?.channel != null, `${segFacts.status} ${JSON.stringify({ n: segFacts.json.count, dom: segFacts.json.next_best_action?.dominant, ch: segFacts.json.best_channel?.channel })}`);
+
+  // Tenant isolation: the fact layer is RLS-scoped — HQ's member is invisible to cf2 and vice-versa.
+  const custHqFromCf2 = await inj('GET', '/api/marketing-activation/facts/customer/M-HQA', cf2admin);
+  ok('FactLayer: tenant-scoped — cf2 cannot read HQ member M-HQA (404)', custHqFromCf2.status === 404, `${custHqFromCf2.status}`);
+
+  // A principal without marketing/exec is refused the fact surface.
+  const custForbidden = await inj('GET', '/api/marketing-activation/facts/customer/M-CF2A', token2);
+  ok('FactLayer: a non-marketing/exec principal is refused (403)', custForbidden.status === 403, `${custForbidden.status}`);
+
+  // ── Marketing Activation — ③ PROPENSITY & CROSS-SELL (docs/61 Phase 1, control MKT-23). Advisory scoring
+  //    over real co-purchase: seed a cf2 basket where AFF-A ↔ AFF-B co-occur (lift 2, conf 100%) and AFF-C ↔
+  //    AFF-D as noise, give M-CF2A the favourite AFF-A, and confirm the ranked cross-sell + best-audiences. ──
+  const affDay = new Date(Date.now() - 86400000).toISOString().slice(0, 10); // yesterday (safely inside the 90-day window)
+  await db.insert(s.menuItems).values([
+    { tenantId: cf2.id, sku: 'AFF-A', name: 'Coffee', price: '100', cost: '40', active: true },   // margin 60 / 60%
+    { tenantId: cf2.id, sku: 'AFF-B', name: 'Croissant', price: '80', cost: '40', active: true },  // margin 40 / 50%
+    { tenantId: cf2.id, sku: 'AFF-C', name: 'Tea', price: '60', cost: '30', active: true },
+    { tenantId: cf2.id, sku: 'AFF-D', name: 'Muffin', price: '50', cost: '25', active: true },
+  ]).onConflictDoNothing();
+  const mkAffSale = async (no: string, items: string[]): Promise<void> => {
+    const [sale] = await db.insert(s.custPosSales).values({ saleNo: no, saleDate: affDay, tenantId: cf2.id, total: '100', status: 'Completed' }).returning({ id: s.custPosSales.id });
+    for (const it of items) await db.insert(s.custPosItems).values({ saleId: Number(sale!.id), itemId: it, itemDescription: it, qty: '1', unitPrice: '50', amount: '50' });
+  };
+  await mkAffSale('SALE-AFF-1', ['AFF-A', 'AFF-B']);
+  await mkAffSale('SALE-AFF-2', ['AFF-A', 'AFF-B']);
+  await mkAffSale('SALE-AFF-3', ['AFF-C', 'AFF-D']);
+  await mkAffSale('SALE-AFF-4', ['AFF-C', 'AFF-D']);
+  await db.update(s.customerProfiles).set({ favoriteItemIds: ['AFF-A'] }).where(and(eq(s.customerProfiles.tenantId, cf2.id), eq(s.customerProfiles.memberId, Number(cf2Mem.id))));
+
+  const nbo = await inj('GET', '/api/marketing-activation/propensity/customer/M-CF2A', cf2admin);
+  ok('Propensity ③: next-best-offer ranks an un-owned cross-sell (AFF-B) driven by an owned item (AFF-A)', nbo.status === 200 && Array.isArray(nbo.json.offers) && nbo.json.offers.some((o: any) => o.item_id === 'AFF-B' && o.driver_item_id === 'AFF-A' && o.lift > 1) && nbo.json.marketing_opt_in === true, `${nbo.status} ${JSON.stringify(nbo.json.offers?.[0] ?? {})}`);
+  ok('Propensity ③: the ranked offers EXCLUDE what the customer already buys (no AFF-A)', nbo.status === 200 && (nbo.json.offers ?? []).every((o: any) => o.item_id !== 'AFF-A'), `${JSON.stringify((nbo.json.offers ?? []).map((o: any) => o.item_id))}`);
+  ok('Propensity ③: advisory-only (MKT-23) — the response carries no contact, only a ranked list + a consent-gated note', nbo.status === 200 && typeof nbo.json.note === 'string' && /MKT-23/.test(nbo.json.note), `${nbo.json.note ?? ''}`);
+
+  const aud = await inj('GET', '/api/marketing-activation/propensity/item/AFF-B', cf2admin);
+  ok('Propensity ③: best-audiences ranks the segments to push a product to, driven by its affinity antecedents', aud.status === 200 && Array.isArray(aud.json.driver_item_ids) && aud.json.driver_item_ids.includes('AFF-A') && Array.isArray(aud.json.audiences) && aud.json.candidate_members >= 1 && aud.json.audiences.some((a: any) => a.segment === 'GovSeg'), `${aud.status} ${JSON.stringify({ drivers: aud.json.driver_item_ids, n: aud.json.candidate_members, segs: (aud.json.audiences ?? []).map((a: any) => a.segment) })}`);
+
+  const nboForbidden = await inj('GET', '/api/marketing-activation/propensity/customer/M-CF2A', token2);
+  ok('Propensity ③: a non-marketing/exec principal is refused (403)', nboForbidden.status === 403, `${nboForbidden.status}`);
+  const nboHq = await inj('GET', '/api/marketing-activation/propensity/customer/M-HQA', cf2admin);
+  ok('Propensity ③: tenant-scoped — cf2 cannot score HQ member M-HQA (404)', nboHq.status === 404, `${nboHq.status}`);
+
+  // ── Marketing Activation — ⑤ SEGMENT × CHANNEL ROI (docs/61 Phase 2, control MKT-25). Extends the MKT-17
+  //    Budget Optimizer from channel to segment×channel: rank cells by incremental ROI × segment value, and
+  //    STAGE the split as a maker-checker budget plan (reusing the MKT-17 mi_budget_plans + approve path).
+  //    cf2 already has a pushed MMM (channels w/ ROI) + the GovSeg segment (M-CF2A, mi_clv 8400.5). ──
+  const scRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
+  ok('SegChannelROI ⑤: ranks segment × channel cells + splits a budget toward the best channels (advisory)', scRoi.status === 200 && Array.isArray(scRoi.json.cells) && scRoi.json.cells.length >= 1 && scRoi.json.has_mmm === true && scRoi.json.channel_allocation && Object.keys(scRoi.json.channel_allocation).length >= 1 && /MKT-25/.test(scRoi.json.note ?? ''), `${scRoi.status} ${JSON.stringify({ n: (scRoi.json.cells ?? []).length, alloc: scRoi.json.channel_allocation, basis: scRoi.json.recommendation_basis })}`);
+  const scAllocSum = Object.values((scRoi.json.channel_allocation ?? {}) as Record<string, number>).reduce((a, b) => a + Number(b), 0);
+  ok('SegChannelROI ⑤: the recommended channel allocation sums to ~the budget', Math.abs(scAllocSum - 100000) < 1, `sum=${scAllocSum}`);
+
+  // Stage the recommendation → a Pending budget plan (never posts spend); a DIFFERENT user approves it (MKT-17).
+  const scStage = await inj('POST', '/api/marketing-activation/segment-channel-roi/stage', cf2admin, { total_budget: 100000 });
+  ok('SegChannelROI ⑤: staging the split creates a Pending budget plan (reuses MKT-17, no spend posted)', scStage.status === 201 || scStage.status === 200 ? (scStage.json.status === 'Pending' && typeof scStage.json.plan_no === 'string') : false, `${scStage.status} ${JSON.stringify({ plan: scStage.json.plan_no, st: scStage.json.status })}`);
+  const scApprove = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2ex, { plan_no: scStage.json.plan_no });
+  ok('SegChannelROI ⑤: a DIFFERENT user approves the staged plan (maker-checker → Approved)', scApprove.status === 200 || scApprove.status === 201 ? scApprove.json.status === 'Approved' : false, `${scApprove.status} ${scApprove.json.status ?? scApprove.json.error?.code}`);
+
+  // Self-approval of one's own staged plan is refused by the reused MKT-17 maker-checker.
+  const scStage2 = await inj('POST', '/api/marketing-activation/segment-channel-roi/stage', cf2admin, { total_budget: 50000 });
+  const scSelf = await inj('POST', '/api/marketing-intel/budget-plan/approve', cf2admin, { plan_no: scStage2.json.plan_no });
+  ok('SegChannelROI ⑤: the requester cannot approve their own staged plan (SOD_SELF_APPROVAL)', scSelf.status === 400 && scSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${scSelf.status} ${scSelf.json.error?.code}`);
+
+  const scForbidden = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', token2);
+  ok('SegChannelROI ⑤: a non-marketing/exec principal is refused (403)', scForbidden.status === 403, `${scForbidden.status}`);
+
+  // ── Marketing Activation — ② NBA ORCHESTRATOR (docs/61 Phase 2, control MKT-22, migration 0470). Seed a
+  //    cf2 cohort 'NbaSeg' exercising every path: 2 eligible (ranked by EV), + CONSENT / NO_ACTION /
+  //    RECENT_PURCHASE suppression. Stage → maker-checker activate (a DIFFERENT user) → consent-gated draft. ──
+  const nbaMembers: number[] = [];
+  const mkNbaMember = async (code: string, optIn: boolean, nba: string | null, clv: number, churn: number, lastOrderAt: Date | null): Promise<void> => {
+    const [m] = await db.insert(s.posMembers).values({ tenantId: cf2.id, memberCode: code, name: code, marketingOptIn: optIn, active: true }).returning({ id: s.posMembers.id });
+    await db.insert(s.customerProfiles).values({ tenantId: cf2.id, memberId: Number(m!.id), miNba: nba, miClv: String(clv), miChurnRisk: String(churn), miRfmSegment: 'NbaSeg', lastOrderAt });
+    nbaMembers.push(Number(m!.id));
+  };
+  await mkNbaMember('NBA-1', true, 'UPSELL', 1000, 0.2, null);                          // eligible, EV 200
+  await mkNbaMember('NBA-2', true, 'WINBACK', 2000, 0.8, null);                         // eligible, EV 540 (ranks first)
+  await mkNbaMember('NBA-3', false, 'UPSELL', 1500, 0.3, null);                         // suppressed CONSENT
+  await mkNbaMember('NBA-4', true, null, 800, 0.1, null);                               // suppressed NO_ACTION
+  await mkNbaMember('NBA-5', true, 'CROSS_SELL', 900, 0.2, new Date(Date.now() - 86400000)); // suppressed RECENT_PURCHASE
+
+  const nbaPrev = await inj('GET', '/api/marketing-activation/nba/preview?segment=NbaSeg&recent_days=14&control_pct=0', cf2admin);
+  ok('NBA ②: preview ranks eligible customers by expected value (WINBACK VIP first) and suppresses the rest', nbaPrev.status === 200 && nbaPrev.json.scored === 5 && nbaPrev.json.suppressed_count === 3 && (nbaPrev.json.targets ?? [])[0]?.action === 'WINBACK' && nbaPrev.json.treatment_count === 2, `${nbaPrev.status} ${JSON.stringify({ scored: nbaPrev.json.scored, supp: nbaPrev.json.suppressed_count, first: (nbaPrev.json.targets ?? [])[0]?.action, tc: nbaPrev.json.treatment_count })}`);
+  ok('NBA ②: suppression records the reason per member (CONSENT / NO_ACTION / RECENT_PURCHASE)', nbaPrev.status === 200 && new Set((nbaPrev.json.suppressed ?? []).map((x: any) => x.reason)).size === 3 && (nbaPrev.json.suppressed ?? []).every((x: any) => ['CONSENT', 'NO_ACTION', 'RECENT_PURCHASE'].includes(x.reason)), `${JSON.stringify((nbaPrev.json.suppressed ?? []).map((x: any) => x.reason))}`);
+
+  const nbaStage = await inj('POST', '/api/marketing-activation/nba/stage', cf2admin, { segment: 'NbaSeg', control_pct: 0, recent_days: 14 });
+  ok('NBA ②: staging persists a Pending journey (nothing contacted yet)', (nbaStage.status === 200 || nbaStage.status === 201) && nbaStage.json.status === 'Pending' && typeof nbaStage.json.journey_no === 'string' && nbaStage.json.treatment_count === 2, `${nbaStage.status} ${JSON.stringify({ j: nbaStage.json.journey_no, st: nbaStage.json.status, tc: nbaStage.json.treatment_count })}`);
+
+  // A DIFFERENT user activates → maker-checker passes → a consent-gated DRAFT for the treatment arm.
+  const nbaAct = await inj('POST', '/api/marketing-activation/nba/activate', cf2ex, { journey_no: nbaStage.json.journey_no });
+  ok('NBA ②: a DIFFERENT user activates it (maker-checker) → Active + a consent-gated draft for the treatment arm', (nbaAct.status === 200 || nbaAct.status === 201) && nbaAct.json.status === 'Active' && nbaAct.json.contacted === 2 && nbaAct.json.campaign_id != null, `${nbaAct.status} ${JSON.stringify({ st: nbaAct.json.status, n: nbaAct.json.contacted, camp: nbaAct.json.campaign_id })}`);
+
+  // The requester cannot activate their OWN staged journey (maker-checker).
+  const nbaStage2 = await inj('POST', '/api/marketing-activation/nba/stage', cf2admin, { segment: 'NbaSeg', control_pct: 0 });
+  const nbaSelf = await inj('POST', '/api/marketing-activation/nba/activate', cf2admin, { journey_no: nbaStage2.json.journey_no });
+  ok('NBA ②: the requester cannot activate their own journey (SOD_SELF_APPROVAL)', nbaSelf.status === 400 && nbaSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${nbaSelf.status} ${nbaSelf.json.error?.code}`);
+
+  const nbaForbidden = await inj('GET', '/api/marketing-activation/nba/preview?segment=NbaSeg', token2);
+  ok('NBA ②: a non-marketing/exec principal is refused (403)', nbaForbidden.status === 403, `${nbaForbidden.status}`);
+
+  // Tenant isolation: the journeys + targets are RLS-scoped (cf2 only).
+  const nbaJrows = await db.select().from(s.miJourneys);
+  ok('NBA ②: staged journeys are tenant-scoped (cf2 only)', nbaJrows.length >= 2 && nbaJrows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${nbaJrows.length} tenants=${[...new Set(nbaJrows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // ── Marketing Activation — ① AI CAMPAIGN STUDIO (docs/61 Phase 4, control MKT-21, migration 0471). Generate
+  //    a FACT-GROUNDED campaign draft for 'NbaSeg' (5 members, dominant NBA UPSELL, best channel from MMM),
+  //    then stage it as a consent-gated DRAFT while LOGGING the model card. Nothing is sent. Studio v2: the
+  //    ③→① hook puts the segment's top un-bought product on the fact sheet — give NBA-1 the AFF-A favourite
+  //    so the affinity basis (AFF-A → AFF-B 'Croissant', seeded above) yields a deterministic top_offer; and
+  //    this keyless run MUST stay on the deterministic template path (the LLM swap is fail-closed). ──
+  await db.update(s.customerProfiles).set({ favoriteItemIds: ['AFF-A'] })
+    .where(and(eq(s.customerProfiles.tenantId, cf2.id), eq(s.customerProfiles.memberId, nbaMembers[0]!)));
+  const gen = await inj('GET', '/api/marketing-activation/studio/generate/NbaSeg', cf2admin);
+  ok('Studio ①: generates a fact-grounded draft (channel/send-hour/th+en copy) from the segment fact sheet', gen.status === 200 && gen.json.draft?.audience === 'mi_segment' && typeof gen.json.draft?.subject_th === 'string' && typeof gen.json.draft?.subject_en === 'string' && gen.json.draft?.channel != null && gen.json.model === 'studio-template-v1', `${gen.status} ${JSON.stringify({ ch: gen.json.draft?.channel, hour: gen.json.draft?.send_hour, model: gen.json.model })}`);
+  ok('Studio ①: the prompt is retrieval-grounded (the segment + its facts are IN the prompt, not hallucinated)', gen.status === 200 && typeof gen.json.prompt === 'string' && gen.json.prompt.includes('NbaSeg') && /ground/i.test(gen.json.prompt) && gen.json.facts?.count === 5, `${(gen.json.prompt ?? '').slice(0, 40)}… count=${gen.json.facts?.count}`);
+  ok('Studio ① v2: the ③→① hook — the segment\'s top un-bought product (Croissant, via the AFF-A driver) lands on the fact sheet, in the prompt and in the offer copy', gen.status === 200 && gen.json.facts?.top_offer === 'Croissant' && gen.json.prompt.includes('Croissant') && String(gen.json.draft?.offer_th ?? '').includes('Croissant'), `top_offer=${JSON.stringify(gen.json.facts?.top_offer)}`);
+  // docs/62 Phase 3 — TOWS tone: cf2's pushed TOWS is a single SO item ('scale tiktok spend'), so the
+  // dominant quadrant SO grounds the confident-growth tone on the fact sheet AND in the logged prompt.
+  ok('Studio ① Phase 3: the pushed TOWS strategy sets the copy tone (dominant SO → confident-growth, in facts + prompt)', gen.status === 200 && gen.json.facts?.tone === 'confident-growth' && gen.json.prompt.includes('confident-growth'), `tone=${JSON.stringify(gen.json.facts?.tone)}`);
+  // docs/62 Phase 3 — creative A/B: a deterministic variant B (offer-first angle) is generated beside A.
+  ok('Studio ① Phase 3: a variant-B draft (second creative angle) is generated alongside A, and differs from it', gen.status === 200 && typeof gen.json.draft_b?.body_th === 'string' && gen.json.draft_b.body_th !== gen.json.draft?.body_th && typeof gen.json.draft_b?.subject_en === 'string', `b=${JSON.stringify(gen.json.draft_b?.subject_en ?? null)}`);
+
+  const genStage = await inj('POST', '/api/marketing-activation/studio/stage', cf2admin, { segment: 'NbaSeg' });
+  ok('Studio ①: staging creates a consent-gated campaign DRAFT + logs the model card (never auto-sends)', (genStage.status === 200 || genStage.status === 201) && genStage.json.status === 'draft' && typeof genStage.json.gen_no === 'string' && genStage.json.campaign_id != null, `${genStage.status} ${JSON.stringify({ g: genStage.json.gen_no, camp: genStage.json.campaign_id, st: genStage.json.status })}`);
+  // docs/62 Phase 3 — the staged draft is a REAL A/B: variant B rides the campaign's deterministic
+  // per-member split (variant_b_body ≠ body, split_b_pct 50); still a DRAFT — nothing sends.
+  const abCampRow = (await db.select().from(s.loyaltyCampaigns)).find((c: any) => Number(c.id) === Number(genStage.json.campaign_id));
+  ok('Studio ① Phase 3: the staged campaign carries the A/B pair (variant_b_body set ≠ body, split_b_pct 50, still draft)', !!abCampRow && typeof abCampRow.variantBBody === 'string' && abCampRow.variantBBody !== abCampRow.body && Number(abCampRow.splitBPct) === 50 && abCampRow.status === 'draft', `split=${abCampRow?.splitBPct} st=${abCampRow?.status}`);
+  // docs/62 Phase 3 — the A/B outcome read fails honest: an UNSENT A/B has no contacted recipients yet,
+  // and a campaign without a B variant cannot claim an A/B outcome at all.
+  const abNoRec = await inj('GET', `/api/marketing-activation/studio/ab/${genStage.json.campaign_id}`, cf2admin);
+  ok('Studio ① Phase 3: A/B outcome on an unsent campaign → 400 NO_RECIPIENTS (no invented arms)', abNoRec.status === 400 && abNoRec.json.error?.code === 'NO_RECIPIENTS', `${abNoRec.status} ${abNoRec.json.error?.code}`);
+  const abNoB = await inj('GET', `/api/marketing-activation/studio/ab/${activated.json.id}`, cf2admin);
+  ok('Studio ① Phase 3: A/B outcome on a campaign with no B variant → 400 NO_VARIANT_B', abNoB.status === 400 && abNoB.json.error?.code === 'NO_VARIANT_B', `${abNoB.status} ${abNoB.json.error?.code}`);
+  const genList = await inj('GET', '/api/marketing-activation/studio/generations', cf2admin);
+  ok('Studio ①: the generation (model card) is logged + listable', genList.status === 200 && (genList.json.generations ?? []).some((g: any) => g.gen_no === genStage.json.gen_no && g.model === 'studio-template-v1' && g.segment === 'NbaSeg'), `${genList.status} n=${(genList.json.generations ?? []).length}`);
+
+  const genEmpty = await inj('GET', '/api/marketing-activation/studio/generate/NoSuchSeg', cf2admin);
+  ok('Studio ①: an empty segment → 400 SEGMENT_EMPTY (no draft grounded on nothing)', genEmpty.status === 400 && genEmpty.json.error?.code === 'SEGMENT_EMPTY', `${genEmpty.status} ${genEmpty.json.error?.code}`);
+  const genForbidden = await inj('GET', '/api/marketing-activation/studio/generate/NbaSeg', token2);
+  ok('Studio ①: a non-marketing/exec principal is refused (403)', genForbidden.status === 403, `${genForbidden.status}`);
+
+  const genRows = await db.select().from(s.miCampaignGenerations);
+  ok('Studio ①: logged generations are tenant-scoped (cf2 only)', genRows.length >= 1 && genRows.every((r: any) => Number(r.tenantId) === cf2.id), `n=${genRows.length} tenants=${[...new Set(genRows.map((r: any) => Number(r.tenantId)))].join(',')}`);
+
+  // ── Marketing Activation — ④ CHURN-SAVE AUTOPILOT (docs/61 Phase 5, control MKT-24, migration 0472). A
+  //    maker-checker save-offer POLICY (capped offer) + a sweep that produces a consent-gated draft + a
+  //    retention P&L. cf2 at-risk cohort: NBA-2 (churn 0.8, clv 2000) + M-CF2A (churn 0.72, clv 8400.5). ──
+  const savePolBad = await inj('POST', '/api/marketing-activation/save/policy', cf2admin, { churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 0 });
+  ok('SaveAutopilot ④: a non-positive offer cap is rejected (INVALID_OFFER_CAP — the control)', savePolBad.status === 400 && savePolBad.json.error?.code === 'INVALID_OFFER_CAP', `${savePolBad.status} ${savePolBad.json.error?.code}`);
+
+  const savePreBefore = await inj('GET', '/api/marketing-activation/save/preview', cf2admin);
+  ok('SaveAutopilot ④: no sweep runs without an APPROVED policy (NO_ACTIVE_POLICY)', savePreBefore.status === 400 && savePreBefore.json.error?.code === 'NO_ACTIVE_POLICY', `${savePreBefore.status} ${savePreBefore.json.error?.code}`);
+
+  const savePol = await inj('POST', '/api/marketing-activation/save/policy', cf2admin, { churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 500 });
+  ok('SaveAutopilot ④: staging a save-offer policy is Pending (not yet usable)', (savePol.status === 200 || savePol.status === 201) && savePol.json.status === 'Pending' && typeof savePol.json.policy_no === 'string', `${savePol.status} ${JSON.stringify({ p: savePol.json.policy_no, st: savePol.json.status })}`);
+  const savePolApprove = await inj('POST', '/api/marketing-activation/save/policy/approve', cf2ex, { policy_no: savePol.json.policy_no });
+  ok('SaveAutopilot ④: a DIFFERENT user approves the policy (maker-checker → Active)', (savePolApprove.status === 200 || savePolApprove.status === 201) && savePolApprove.json.status === 'Active', `${savePolApprove.status} ${savePolApprove.json.status ?? savePolApprove.json.error?.code}`);
+
+  const savePol2 = await inj('POST', '/api/marketing-activation/save/policy', cf2admin, { churn_threshold: 0.5, min_clv: 100, offer_rate: 0.1, offer_cap: 500 });
+  const saveSelf = await inj('POST', '/api/marketing-activation/save/policy/approve', cf2admin, { policy_no: savePol2.json.policy_no });
+  ok('SaveAutopilot ④: the requester cannot approve their own policy (SOD_SELF_APPROVAL)', saveSelf.status === 400 && saveSelf.json.error?.code === 'SOD_SELF_APPROVAL', `${saveSelf.status} ${saveSelf.json.error?.code}`);
+
+  const savePre = await inj('GET', '/api/marketing-activation/save/preview?control_pct=0', cf2admin);
+  const savePreCapped = (savePre.json.targets ?? []).every((t: any) => t.offer <= 500) && (savePre.json.targets ?? []).some((t: any) => t.offer === 500);
+  ok('SaveAutopilot ④: the retention P&L sweeps at-risk savers, CAPS every offer (≤500, one hit), nets saved−cost', savePre.status === 200 && savePre.json.eligible >= 2 && savePreCapped && typeof savePre.json.net_benefit === 'number' && savePre.json.offer_cost > 0, `${savePre.status} ${JSON.stringify({ elig: savePre.json.eligible, cost: savePre.json.offer_cost, saved: savePre.json.expected_saved_revenue, net: savePre.json.net_benefit })}`);
+
+  const saveRun = await inj('POST', '/api/marketing-activation/save/run', cf2admin, { control_pct: 0 });
+  ok('SaveAutopilot ④: staging a run records the P&L + a consent-gated draft for the treatment arm (no auto-send)', (saveRun.status === 200 || saveRun.status === 201) && typeof saveRun.json.run_no === 'string' && saveRun.json.campaign_id != null && saveRun.json.treatment_count >= 1 && typeof saveRun.json.net_benefit === 'number', `${saveRun.status} ${JSON.stringify({ r: saveRun.json.run_no, camp: saveRun.json.campaign_id, tc: saveRun.json.treatment_count, net: saveRun.json.net_benefit })}`);
+
+  const saveForbidden = await inj('GET', '/api/marketing-activation/save/preview', token2);
+  ok('SaveAutopilot ④: a non-marketing/exec principal is refused (403)', saveForbidden.status === 403, `${saveForbidden.status}`);
+
+  const savePolRows = await db.select().from(s.miSavePolicies);
+  const saveRunRows = await db.select().from(s.miSaveRuns);
+  ok('SaveAutopilot ④: policies + runs are tenant-scoped (cf2 only)', savePolRows.length >= 2 && saveRunRows.length >= 1 && savePolRows.every((r: any) => Number(r.tenantId) === cf2.id) && saveRunRows.every((r: any) => Number(r.tenantId) === cf2.id), `pol=${savePolRows.length} run=${saveRunRows.length}`);
+
+  // ── Marketing Activation — REALIZED-OUTCOME MEASUREMENT (migration 0476; MKT-19 discipline extended to
+  //    MKT-22 journeys + MKT-24 save runs). The measurement math is under test — the harness pins the arm
+  //    assignment deterministically (a fixture convenience; the product's hash split stays untouched), seeds
+  //    per-arm dineInOrders revenue AFTER the anchor, backdates only the measure_after threshold, and checks
+  //    that the measured lift feeds ⑤'s ranking. ──
+  // stageRun now persists BOTH arms: the earlier control_pct-0 run has treatment-only targets on record.
+  const firstRunRow = (await db.select().from(s.miSaveRuns)).find((r: any) => r.runNo === saveRun.json.run_no);
+  const firstRunTargets = (await db.select().from(s.miSaveTargets)).filter((t: any) => Number(t.runId) === Number(firstRunRow?.id));
+  ok('Measure: staging a save run PERSISTS its per-member holdout arms (mi_save_targets, tenant-scoped)', firstRunTargets.length >= 1 && firstRunTargets.every((t: any) => Number(t.tenantId) === cf2.id && t.arm === 'treatment' && Number(t.offer) <= 500), `n=${firstRunTargets.length}`);
+  const firstRunNoCtrl = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: saveRun.json.run_no });
+  // (window still open on the control-less run — prove WINDOW_NOT_ELAPSED first, then NO_CONTROL after backdating)
+  ok('Measure: a save run cannot be measured before its window elapses (WINDOW_NOT_ELAPSED)', firstRunNoCtrl.status === 400 && firstRunNoCtrl.json.error?.code === 'WINDOW_NOT_ELAPSED', `${firstRunNoCtrl.status} ${firstRunNoCtrl.json.error?.code}`);
+  await db.update(s.miSaveRuns).set({ measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miSaveRuns.id, Number(firstRunRow!.id)));
+  const firstRunNoCtrl2 = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: saveRun.json.run_no });
+  ok('Measure: a run with no control arm cannot claim a measured save (NO_CONTROL — holdout integrity)', firstRunNoCtrl2.status === 400 && firstRunNoCtrl2.json.error?.code === 'NO_CONTROL', `${firstRunNoCtrl2.status} ${firstRunNoCtrl2.json.error?.code}`);
+
+  // ② Journey realized lift: stage on NbaSeg, PIN one treatment + one control, maker-checker activate,
+  // seed ฿1000/head vs ฿100/head AFTER activation, then measure → ~900% realized lift.
+  const mJourney = await inj('POST', '/api/marketing-activation/nba/stage', cf2admin, { segment: 'NbaSeg', control_pct: 0.5 });
+  const mJourneyRow = (await db.select().from(s.miJourneys)).find((r: any) => r.journeyNo === mJourney.json.journey_no);
+  const mjTargets = (await db.select().from(s.miJourneyTargets)).filter((t: any) => Number(t.journeyId) === Number(mJourneyRow?.id) && !t.suppressed).sort((a: any, b: any) => Number(a.memberId) - Number(b.memberId));
+  ok('Measure ②: the staged journey has recoverable non-suppressed arms (mi_journey_targets)', mjTargets.length === 2, `n=${mjTargets.length}`);
+  await db.update(s.miJourneyTargets).set({ arm: 'treatment' }).where(eq(s.miJourneyTargets.id, Number(mjTargets[0]!.id)));
+  await db.update(s.miJourneyTargets).set({ arm: 'control' }).where(eq(s.miJourneyTargets.id, Number(mjTargets[1]!.id)));
+  await db.update(s.miJourneys).set({ targetCount: 1, controlCount: 1 }).where(eq(s.miJourneys.id, Number(mJourneyRow!.id)));
+  const mjActivate = await inj('POST', '/api/marketing-activation/nba/activate', cf2ex, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: activation stamps the measurement window (measure_after)', (mjActivate.status === 200 || mjActivate.status === 201) && mjActivate.json.status === 'Active' && mjActivate.json.measure_after != null, `${mjActivate.status} after=${mjActivate.json.measure_after}`);
+  const mjEarly = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: a journey cannot be measured before its window elapses (WINDOW_NOT_ELAPSED)', mjEarly.status === 400 && mjEarly.json.error?.code === 'WINDOW_NOT_ELAPSED', `${mjEarly.status} ${mjEarly.json.error?.code}`);
+  await db.update(s.miJourneys).set({ measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miJourneys.id, Number(mJourneyRow!.id)));
+  let mOrd = 0;
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mjTargets[0]!.memberId), total: '1000', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mjTargets[1]!.memberId), total: '100', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  const mjMeasure = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: realized journey lift on REAL POS revenue (฿1000/head vs ฿100/head → 900%)', (mjMeasure.status === 200 || mjMeasure.status === 201) && Number(mjMeasure.json.realized_lift_pct) === 900 && Number(mjMeasure.json.incremental_revenue) === 900, `${mjMeasure.status} lift=${mjMeasure.json.realized_lift_pct}% inc=${mjMeasure.json.incremental_revenue}`);
+  // docs/62 Phase 3 — statistical honesty on the journey list: 1-head arms cannot support a CI (null
+  // bounds) and are flagged weak; the realized lift itself is unchanged by the flag.
+  const mjList = await inj('GET', '/api/marketing-activation/nba/journeys', cf2admin);
+  const mjListRow = (mjList.json.journeys ?? []).find((j: any) => j.journey_no === mJourney.json.journey_no);
+  ok('Measure ② Phase 3: the journey list carries the honesty fields (1v1 arms → CI null + weak_evidence, lift unchanged)', !!mjListRow && mjListRow.weak_evidence === true && mjListRow.lift_ci_low_pct == null && Number(mjListRow.realized_lift_pct) === 900, `weak=${mjListRow?.weak_evidence} ci=${mjListRow?.lift_ci_low_pct} lift=${mjListRow?.realized_lift_pct}`);
+  const mjAgain = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: mJourney.json.journey_no });
+  ok('Measure ②: a measured journey is not re-measured (ALREADY_MEASURED)', mjAgain.status === 400 && mjAgain.json.error?.code === 'ALREADY_MEASURED', `${mjAgain.status} ${mjAgain.json.error?.code}`);
+  const mjPending = await inj('POST', '/api/marketing-activation/nba/measure', cf2admin, { journey_no: nbaStage2.json.journey_no });
+  ok('Measure ②: a Pending (never-activated) journey cannot be measured (JOURNEY_NOT_ACTIVE)', mjPending.status === 400 && mjPending.json.error?.code === 'JOURNEY_NOT_ACTIVE', `${mjPending.status} ${mjPending.json.error?.code}`);
+
+  // ④ Save-run realized retention P&L: a second run WITH a control arm (pinned), measured the same way.
+  const mRun = await inj('POST', '/api/marketing-activation/save/run', cf2admin, { control_pct: 0.5 });
+  const mRunRow = (await db.select().from(s.miSaveRuns)).find((r: any) => r.runNo === mRun.json.run_no);
+  const mRunTargets = (await db.select().from(s.miSaveTargets)).filter((t: any) => Number(t.runId) === Number(mRunRow?.id)).sort((a: any, b: any) => Number(a.memberId) - Number(b.memberId));
+  ok('Measure ④: the staged run persisted BOTH holdout arms for later measurement', mRunTargets.length === 2, `n=${mRunTargets.length}`);
+  await db.update(s.miSaveTargets).set({ arm: 'treatment' }).where(eq(s.miSaveTargets.id, Number(mRunTargets[0]!.id)));
+  await db.update(s.miSaveTargets).set({ arm: 'control' }).where(eq(s.miSaveTargets.id, Number(mRunTargets[1]!.id)));
+  await db.update(s.miSaveRuns).set({ treatmentCount: 1, controlCount: 1, measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miSaveRuns.id, Number(mRunRow!.id)));
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mRunTargets[0]!.memberId), total: '1000', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  await db.insert(s.dineInOrders).values({ tenantId: cf2.id, orderNo: `DIN-MEAS-${mOrd++}`, memberId: Number(mRunTargets[1]!.memberId), total: '100', saleNo: `S-MEAS-${mOrd}`, openedAt: new Date() });
+  const mRunMeasure = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: mRun.json.run_no });
+  const mNetConsistent = Math.abs(Number(mRunMeasure.json.realized_net_benefit) - (Number(mRunMeasure.json.realized_saved_revenue) - Number(mRunMeasure.json.offer_cost ?? 0))) < 0.01;
+  ok('Measure ④: realized retention P&L — saved revenue is treatment-vs-control incremental, net = saved − offer cost', (mRunMeasure.status === 200 || mRunMeasure.status === 201) && Number(mRunMeasure.json.realized_saved_revenue) === 900 && Number(mRunMeasure.json.realized_lift_pct) === 900 && mNetConsistent, `${mRunMeasure.status} saved=${mRunMeasure.json.realized_saved_revenue} net=${mRunMeasure.json.realized_net_benefit} cost=${mRunMeasure.json.offer_cost}`);
+  const mRunAgain = await inj('POST', '/api/marketing-activation/save/measure', cf2admin, { run_no: mRun.json.run_no });
+  ok('Measure ④: a measured run is not re-measured (ALREADY_MEASURED)', mRunAgain.status === 400 && mRunAgain.json.error?.code === 'ALREADY_MEASURED', `${mRunAgain.status} ${mRunAgain.json.error?.code}`);
+
+  // ⑤ closes the loop: the journey's measured NbaSeg lift now feeds the segment×channel ranking.
+  const mRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
+  const mNbaCell = (mRoi.json.cells ?? []).find((c: any) => c.segment === 'NbaSeg');
+  ok('Measure ⑤: the realized journey lift feeds back into the Segment×Channel ROI ranking (measured+mmm)', mRoi.status === 200 && mRoi.json.recommendation_basis === 'measured+mmm' && mNbaCell != null && Number(mNbaCell.lift_pct) === 900 && Number(mNbaCell.lift_multiplier) === 10, `basis=${mRoi.json.recommendation_basis} cell=${JSON.stringify({ lift: mNbaCell?.lift_pct, mult: mNbaCell?.lift_multiplier })}`);
+  // docs/62 Phase 3 — the weak flag rides into ⑤ display-only: the NbaSeg lift came from the 1v1-arm
+  // journey (weak), so the cell is flagged — while the multiplier/score math above stayed IDENTICAL.
+  ok('Measure ⑤ Phase 3: the cell carries lift_weak from the winning measurement (display-only — multiplier unchanged)', mNbaCell?.lift_weak === true && Number(mNbaCell?.lift_multiplier) === 10, `weak=${mNbaCell?.lift_weak} mult=${mNbaCell?.lift_multiplier}`);
+
+  // ── Marketing Activation — docs/62 Phase 1: AUTOPILOT CADENCE + ACTION CENTER (no new control; the
+  //    scheduled jobs only ever act as the MAKER — activation/approval stays human maker-checker; the
+  //    GOV-01 queues + the action center surface the waiting acts). Fixtures already pending at this
+  //    point: journey nbaStage2 (Pending), policy savePol2 (Pending), budget plan scStage2 (Pending). ──
+  // GOV-01: the marketing queues auto-append to the pending-approvals monitor.
+  const mktGov = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Autopilot GOV-01: a Pending NBA journey surfaces in the pending-approvals monitor (MKT-22)', mktGov.status === 200 && (mktGov.json.items ?? []).some((i: any) => i.type === 'mi_nba_journey' && i.control === 'MKT-22' && i.ref === nbaStage2.json.journey_no), `n=${(mktGov.json.items ?? []).length}`);
+  ok('Autopilot GOV-01: a Pending save-offer policy surfaces (MKT-24)', (mktGov.json.items ?? []).some((i: any) => i.type === 'mi_save_policy' && i.control === 'MKT-24' && i.ref === savePol2.json.policy_no), `${JSON.stringify((mktGov.json.items ?? []).filter((i: any) => i.type === 'mi_save_policy').map((i: any) => i.ref))}`);
+  ok('Autopilot GOV-01: a Pending marketing budget plan surfaces with its amount (MKT-17)', (mktGov.json.items ?? []).some((i: any) => i.type === 'mi_budget_plan' && i.control === 'MKT-17' && i.ref === scStage2.json.plan_no && Number(i.amount) === 50000), `${JSON.stringify((mktGov.json.items ?? []).filter((i: any) => i.type === 'mi_budget_plan').map((i: any) => [i.ref, i.amount]))}`);
+
+  // The action center: one "what needs me now" worklist, marketing/exec-gated.
+  const mktCenter = await inj('GET', '/api/marketing-activation/action-center', cf2admin);
+  ok('ActionCenter: lists the waiting acts (pending journey + pending policy + pending budget plan), severity-ranked', mktCenter.status === 200 && (mktCenter.json.items ?? []).some((i: any) => i.kind === 'journey_pending' && i.ref === nbaStage2.json.journey_no) && (mktCenter.json.items ?? []).some((i: any) => i.kind === 'save_policy_pending') && (mktCenter.json.items ?? []).some((i: any) => i.kind === 'budget_plan_pending' && i.ref === scStage2.json.plan_no), `n=${mktCenter.json.count} kinds=${[...new Set((mktCenter.json.items ?? []).map((i: any) => i.kind))].join(',')}`);
+  const mktCenterForbidden = await inj('GET', '/api/marketing-activation/action-center', token2);
+  ok('ActionCenter: a non-marketing/exec principal is refused (403)', mktCenterForbidden.status === 403, `${mktCenterForbidden.status}`);
+
+  // mkt_nba_autostage: stages ONE journey attributed "(auto)"; a re-run keeps one in flight (idempotent).
+  const autoNbaSub = await inj('POST', '/api/bi/subscriptions', cf2admin, { name: 'auto nba', report_type: 'mkt_nba_autostage', frequency: 'daily', filters: { segment: 'NbaSeg', control_pct: 0.5 } });
+  const autoNbaRun1 = await inj('POST', `/api/bi/subscriptions/${autoNbaSub.json.id}/run`, cf2admin, {});
+  const autoJourneys1 = (await db.select().from(s.miJourneys)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ②: the scheduled job stages a journey attributed "(auto)" — awaiting HUMAN activation', (autoNbaRun1.status === 200 || autoNbaRun1.status === 201) && autoNbaRun1.json.status === 'success' && autoJourneys1.length === 1 && autoJourneys1[0]!.status === 'Pending', `${autoNbaRun1.status} auto=${autoJourneys1.length} ${autoJourneys1[0]?.journeyNo}`);
+  await inj('POST', `/api/bi/subscriptions/${autoNbaSub.json.id}/run`, cf2admin, {});
+  const autoJourneys2 = (await db.select().from(s.miJourneys)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ②: a re-run stages NOTHING while one auto journey is in flight (one-in-flight idempotency)', autoJourneys2.length === 1, `auto=${autoJourneys2.length}`);
+
+  // A human activates the machine-staged journey — SOD is structurally clean (maker is the scheduler).
+  const autoJourneyNo = String(autoJourneys1[0]!.journeyNo);
+  const autoActivate = await inj('POST', '/api/marketing-activation/nba/activate', cf2ex, { journey_no: autoJourneyNo });
+  ok('Autopilot ②: a human activates the auto-staged journey with NO SOD trip (machine maker ≠ human checker)', (autoActivate.status === 200 || autoActivate.status === 201) && autoActivate.json.status === 'Active', `${autoActivate.status} ${autoActivate.json.status ?? autoActivate.json.error?.code}`);
+  const mktGovAfter = await inj('GET', '/api/finance/approvals/pending', cf2admin);
+  ok('Autopilot GOV-01: the activated journey CLEARS from the pending queue (surface-then-clear)', (mktGovAfter.json.items ?? []).every((i: any) => !(i.type === 'mi_nba_journey' && i.ref === autoJourneyNo)), `${JSON.stringify((mktGovAfter.json.items ?? []).filter((i: any) => i.type === 'mi_nba_journey').map((i: any) => i.ref))}`);
+
+  // mkt_measure_windows: pin the auto journey's arms (fixture determinism), backdate its window, then the
+  // scheduled job measures it — measured_by carries the "(auto)" evidence marker; a re-run measures 0.
+  const autoJRow = (await db.select().from(s.miJourneys)).find((r: any) => r.journeyNo === autoJourneyNo);
+  const autoJTargets = (await db.select().from(s.miJourneyTargets)).filter((t: any) => Number(t.journeyId) === Number(autoJRow?.id) && !t.suppressed).sort((a: any, b: any) => Number(a.memberId) - Number(b.memberId));
+  await db.update(s.miJourneyTargets).set({ arm: 'treatment' }).where(eq(s.miJourneyTargets.id, Number(autoJTargets[0]!.id)));
+  await db.update(s.miJourneyTargets).set({ arm: 'control' }).where(eq(s.miJourneyTargets.id, Number(autoJTargets[1]!.id)));
+  await db.update(s.miJourneys).set({ targetCount: 1, controlCount: 1, measureAfter: new Date(Date.now() - 60_000) }).where(eq(s.miJourneys.id, Number(autoJRow!.id)));
+  const measureSub = await inj('POST', '/api/bi/subscriptions', cf2admin, { name: 'auto measure', report_type: 'mkt_measure_windows', frequency: 'daily' });
+  const measureRun1 = await inj('POST', `/api/bi/subscriptions/${measureSub.json.id}/run`, cf2admin, {});
+  const autoJAfter = (await db.select().from(s.miJourneys)).find((r: any) => r.journeyNo === autoJourneyNo);
+  ok('Autopilot measure: the scheduled job measures the elapsed window (measured_by carries "(auto)")', measureRun1.json.status === 'success' && /Measured 1 journey/.test(measureRun1.json.summary ?? '') && autoJAfter?.measuredAt != null && String(autoJAfter?.measuredBy ?? '').endsWith('(auto)'), `${measureRun1.json.summary} by=${autoJAfter?.measuredBy}`);
+  const measureRun2 = await inj('POST', `/api/bi/subscriptions/${measureSub.json.id}/run`, cf2admin, {});
+  ok('Autopilot measure: a re-run measures NOTHING (windows measure exactly once)', /Measured 0 journey\(s\) \+ 0 save run/.test(measureRun2.json.summary ?? ''), `${measureRun2.json.summary}`);
+
+  // mkt_save_autostage: with the Active policy it stages one "(auto)" run; a re-run keeps one in flight.
+  const autoSaveSub = await inj('POST', '/api/bi/subscriptions', cf2admin, { name: 'auto save', report_type: 'mkt_save_autostage', frequency: 'weekly', filters: { control_pct: 0.5 } });
+  const autoSaveRun1 = await inj('POST', `/api/bi/subscriptions/${autoSaveSub.json.id}/run`, cf2admin, {});
+  const autoRuns1 = (await db.select().from(s.miSaveRuns)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ④: the scheduled job stages a save run attributed "(auto)" under the APPROVED policy', autoSaveRun1.json.status === 'success' && autoRuns1.length === 1, `${autoSaveRun1.json.summary} auto=${autoRuns1.length}`);
+  await inj('POST', `/api/bi/subscriptions/${autoSaveSub.json.id}/run`, cf2admin, {});
+  const autoRuns2 = (await db.select().from(s.miSaveRuns)).filter((r: any) => Number(r.tenantId) === cf2.id && String(r.requestedBy ?? '').endsWith('(auto)'));
+  ok('Autopilot ④: a re-run stages NOTHING while the auto run is unmeasured (one-in-flight idempotency)', autoRuns2.length === 1, `auto=${autoRuns2.length}`);
+
+  // ── Marketing Activation — docs/62 Phase 2: OFFER-LEVEL ⑤ CELLS + PLAN-VS-ACTUAL BACKTEST (MKT-26). ──
+  // ⑤ cells now carry the segment's top un-bought products from ③ (the AFF-A → AFF-B 'Croissant' basis;
+  // NBA-1 owns AFF-A) and the response carries the message_log deliverability read. Offers never touch
+  // the allocation math (asserted structurally: allocation still sums to the budget — the earlier check).
+  const offerRoi = await inj('GET', '/api/marketing-activation/segment-channel-roi?budget=100000', cf2admin);
+  const offerCell = (offerRoi.json.cells ?? []).find((c: any) => c.segment === 'NbaSeg');
+  ok('Offer ⑤: cells carry the segment\'s top un-bought offer from ③ (Croissant via the AFF-A driver)', offerRoi.status === 200 && offerCell?.offer === 'Croissant' && Array.isArray(offerCell?.top_offers) && offerCell.top_offers[0]?.item_id === 'AFF-B', `offer=${JSON.stringify(offerCell?.offer)} top=${JSON.stringify((offerCell?.top_offers ?? []).map((o: any) => o.item_id))}`);
+  ok('Offer ⑤: the response carries the message_log deliverability read (owning CampaignsService read)', offerRoi.json.delivery != null && Array.isArray(offerRoi.json.delivery.outcomes), `outcomes=${JSON.stringify((offerRoi.json.delivery?.outcomes ?? []).length)}`);
+
+  // MKT-26 — backtest the APPROVED ⑤ plan against the PUSHED MMM snapshot spend (facebook 30000, tiktok 0).
+  const btOk = await inj('GET', `/api/marketing-intel/budget-plan/${scStage.json.plan_no}/backtest`, cf2admin);
+  const btRows: any[] = btOk.json.rows ?? [];
+  const btFb = btRows.find((r: any) => r.channel === 'facebook');
+  const btConsistent = btRows.every((r: any) => Math.abs(Number(r.variance) - (Number(r.actual) - Number(r.planned))) < 0.01);
+  ok('MKT-26: backtesting the APPROVED plan reconciles per-channel planned vs actual (pushed-snapshot basis)', btOk.status === 200 && btOk.json.actuals_basis === 'pushed' && btRows.length >= 1 && btFb != null && Number(btFb.actual) === 30000 && btConsistent, `${btOk.status} basis=${btOk.json.actuals_basis} rows=${btRows.length} fb=${JSON.stringify({ p: btFb?.planned, a: btFb?.actual })}`);
+  ok('MKT-26: adherence + flags are internally consistent (flagged rows counted; adherence ∈ [0,100])', Number(btOk.json.flagged_count) === btRows.filter((r: any) => r.flag).length && Number(btOk.json.adherence_pct) >= 0 && Number(btOk.json.adherence_pct) <= 100, `adh=${btOk.json.adherence_pct} flagged=${btOk.json.flagged_count}`);
+  const btPending = await inj('GET', `/api/marketing-intel/budget-plan/${scStage2.json.plan_no}/backtest`, cf2admin);
+  ok('MKT-26: a Pending (unapproved) plan cannot be "reconciled" (PLAN_NOT_APPROVED — fail-honest)', btPending.status === 400 && btPending.json.error?.code === 'PLAN_NOT_APPROVED', `${btPending.status} ${btPending.json.error?.code}`);
+  const btForbidden = await inj('GET', `/api/marketing-intel/budget-plan/${scStage.json.plan_no}/backtest`, token2);
+  ok('MKT-26: a non-marketing/exec principal is refused (403)', btForbidden.status === 403, `${btForbidden.status}`);
+
   // ── B1 embedded copilot (Platform Phase 15) ──
   // Local fallback embedder is whitespace bag-of-words, so the doc + question must share word tokens.
   await inj('POST', '/api/ai/kb/documents', token, { title: 'Refund policy', content: 'Refund policy: customers can return products within 7 days with a receipt. Refunds go to the original payment method.' });
@@ -892,10 +1436,14 @@ async function main() {
   // ── B2 document-AI intake (Platform Phase 16) ──
   const docEx = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9001\nDate 2026-06-15\nSubtotal 1,401.87\nVAT 98.13\nGrand Total 1,500.00' });
   ok('Doc-AI: extracts invoice no / amount / date (regex fallback)', (docEx.status === 200 || docEx.status === 201) && docEx.json.fields?.invoice_no === 'INV-9001' && Number(docEx.json.fields?.amount) === 1500 && docEx.json.fields?.invoice_date === '2026-06-15', `${JSON.stringify(docEx.json.fields ?? {})}`);
+  ok('Doc-AI: rules path returns lines:[] (deterministic path never invents lines) + THB default', Array.isArray(docEx.json.fields?.lines) && docEx.json.fields.lines.length === 0 && docEx.json.fields?.currency === 'THB', `lines=${JSON.stringify(docEx.json.fields?.lines)} cur=${docEx.json.fields?.currency}`);
+  const docUsd = await inj('POST', '/api/doc-ai/extract', token, { text: 'ACME Supplies Co.\nInvoice INV-9002\nGrand Total USD 1,500.00' });
+  ok('Doc-AI: rules path detects a non-THB currency (USD)', docUsd.json.fields?.currency === 'USD' && docUsd.json.fields?.invoice_no === 'INV-9002', `cur=${docUsd.json.fields?.currency}`);
   // image/PDF extraction endpoint (Quick Capture preview + LINE channel, docs/34) — extract-only, no GL.
   const docPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   const docImg = await inj('POST', '/api/doc-ai/extract-document', token, { file_name: 'bill.png', data_url: docPng });
   ok('Doc-AI: extract-document accepts an image (no key → honest empty draft, source none)', (docImg.status === 200 || docImg.status === 201) && docImg.json.source === 'none' && docImg.json.fields && 'invoice_no' in docImg.json.fields, JSON.stringify({ st: docImg.status, src: docImg.json.source }));
+  ok('Doc-AI: extract-document honest-empty draft carries lines:[]', Array.isArray(docImg.json.fields?.lines) && docImg.json.fields.lines.length === 0, `lines=${JSON.stringify(docImg.json.fields?.lines)}`);
   const docBad = await inj('POST', '/api/doc-ai/extract-document', token, { data_url: `data:text/plain;base64,${Buffer.from('x').toString('base64')}` });
   ok('Doc-AI: extract-document rejects non-image/PDF (400 UNSUPPORTED_FILE_TYPE)', docBad.status === 400 && docBad.json.error?.code === 'UNSUPPORTED_FILE_TYPE', JSON.stringify({ st: docBad.status, code: docBad.json.error?.code }));
 

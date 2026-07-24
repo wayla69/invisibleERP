@@ -17,7 +17,7 @@ function grnEnv(routes: any[][], opts: { withCommitments?: boolean } = {}) {
   const cap: GrnCap = { inserts: [], updates: [], logs: [], notifies: [], consumes: [], releases: [] };
   let call = 0;
   const chain = (rows: any[]) => {
-    const p: any = { from: () => p, where: () => p, limit: () => p, orderBy: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
+    const p: any = { from: () => p, where: () => p, limit: () => p, orderBy: () => p, for: () => p, then: (r: any, j: any) => Promise.resolve(rows).then(r, j) };
     return p;
   };
   const select = () => { if (call >= routes.length) throw new Error(`unexpected select #${call + 1} — add a route`); return chain(routes[call++] ?? []); };

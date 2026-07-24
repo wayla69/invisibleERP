@@ -1,6 +1,6 @@
 # 09 · Reports & Analytics
 
-**Status: DRAFT v0.9** _(2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
+**Status: DRAFT v0.19** _(2026-07-23: **Statistical honesty + creative A/B (docs/62 Phase 3)** — §5e/§5g: every measured lift (experiments, journeys, save runs) now shows its 95% confidence interval and a ⚠ หลักฐานยังอ่อน flag on small/inconclusive samples (display-only — numbers never adjusted; the ⑤ cells inherit the flag); §5g ①: the Studio states the TOWS-derived โทนกลยุทธ์, drafts an ข้อความแบบ B second creative angle staged as a real 50/50 A/B, and the new ผล A/B จากยอดขายจริง panel compares the two wordings on real POS revenue per contacted arm. UAT-MA-27.)_ _(2026-07-23: **Offer-level ⑤ + plan backtest (docs/62 Phase 2, NEW detective control MKT-26)** — §5g ⑤: cells gain a **แนะนำเสนอ** top-offer chip (from ③) and an **อัตราส่งถึงล่าสุด** deliverability line; §5c: approved budget plans gain **ตรวจสอบแผน (backtest)** — planned vs actual per channel, red flags on drift/unplanned spend, adherence %, schedulable as ตรวจสอบแผนงบเทียบจ่ายจริง. Variances are findings; nothing moves money. UAT-MA-26.)_ _(2026-07-23: **Autopilot + action center (docs/62 Phase 1)** — §5g: three schedulable marketing jobs (auto-stage NBA / auto-stage save sweep / measure elapsed windows — machine prepares with an `(auto)` marker, humans keep activation/approval; one-in-flight idempotency) and the สิ่งที่รอคุณตอนนี้ action-center card on the overview + the marketing queues in the pending-approvals monitor. UAT-MA-AUTO-01/02.)_ _(2026-07-23: **Realized measurement (docs/61 loop close)** — §5g ② and ④ gain a **วัดผล** step: after the window, journeys pin a realized treatment-vs-control lift chip and save runs replace the expected P&L with a **พิสูจน์แล้ว** realized net benefit, both on real POS revenue; the proven lift feeds the ROI กลุ่ม × ช่องทาง ranking. UAT-MA-22b/24b.)_ _(2026-07-23: **Studio v2 (MKT-21 unchanged)** — §5g ①: the draft now carries an **เขียนโดย AI / แม่แบบมาตรฐาน** badge (a live AI model refines the copy when the company has not opted out of external AI processing; the deterministic template is the automatic fail-closed fallback), the fact sheet now includes the segment's top un-bought product as the concrete offer, and targeting always stays fact-driven with the producing model recorded on the model card. UAT-MA-21b.)_ _(2026-07-23: **docs/61 web** — new §5g **Marketing Activation workspace** (`/marketing-activation`): one Marketing-Studio home for the five activation tools — ③ cross-sell lookup, ⑤ segment×channel budget ranking (staged via the MKT-17 maker-checker plan), ② NBA journeys (maker-checker activation, suppression reasons shown), ① AI campaign drafts with the model-card evidence, ④ churn-save policy/preview/runs with the capped-offer chips and retention P&L. Amounts show as "THB" (no ฿ sign). UAT-UI-MA-01.)_ _(2026-07-22: **docs/60 Phase 4** — §5f **Model governance** (MKT-20): opt-in two-person approval before pushed analytics drive spend/contact, model cards, drift flag into the pending-approvals center, and a recommendation → action → outcome audit trail. UAT-RPT-063.)_ _(2026-07-22: **docs/60 Phase 3** — §5e **Incrementality** (MKT-19): A/B holdout test on a pushed segment (treatment contacted, control never contacted, fixed at start), then measure real lift + incremental revenue once the window elapses; outcomes flow back to the platform. UAT-RPT-062.)_ _(2026-07-22: **Marketing Intelligence depth (docs/60)** — §5c **Budget Planner** (Phase 1, MKT-17): optimise a budget across channels from the MMM response curves, live what-if sliders, stage → maker-checker approve; and §5d **Customer Intelligence** (Phase 2, MKT-18): per-customer CLV / churn / next-best-action drill-down per segment, sortable, one-click consent-gated campaign draft. UAT-RPT-060, UAT-RPT-061.)_ _(2026-07-16: **Close Cockpit gains the JE-exceptions pillar (GL-28, docs/50 Wave 5 B5)** — §1c: the rule-based JE anomaly sweep (duplicates, round manual amounts, backdated, after-hours, cash↔revenue pairs) surfaces as a fifth pillar with inline สแกนใหม่ + dismiss-with-reason (audit-logged); red while any HIGH exception is open; schedulable as ตรวจจับรายการบัญชีผิดปกติ. UAT-GL-202..204.)_ _(v0.9, 2026-07-16: new **Analytics Home** — a single hub at `/analytics` (sidebar →
 **วางแผน & BI → ศูนย์วิเคราะห์**) that gathers every analytics surface (Insights, BI, Analytics Studio, NL
 Analytics, dashboards, saved views, scheduled reports, planning) into one launcher grouped by task; the
 individual sidebar links are unchanged, this just adds one front door — see §0; 2026-07-13: new §7 reputation & analytics sync — `reputation_review_sync`/
@@ -172,12 +172,22 @@ each with its own RAG:
   snapshot reconciles to the raw ledger (GL-19 / GL-20).
 - **Pending approvals** — everything still awaiting a maker-checker sign-off, with
   ageing and an overdue count (GOV-01).
+- **JE exceptions (รายการบัญชีผิดปกติ, GL-28)** — the detective sweep over the posted
+  journal: duplicate entries, suspiciously round manual amounts, backdated dates,
+  after-hours posting (06:00–22:00 Asia/Bangkok is normal), and manual cash↔revenue
+  pairs. **สแกนใหม่** re-runs the sweep (idempotent — reviewed items never re-appear);
+  each open exception is cleared with **ยกเลิก**, which *requires a reason* and writes
+  it to the GL audit log. The pillar turns **red while any HIGH exception is open**
+  (duplicates, cash↔revenue pairs), amber for any other open item. The same sweep can
+  be scheduled under Reports → Scheduled reports (**ตรวจจับรายการบัญชีผิดปกติ**).
 - **Close checklist** — the required close steps and what's done (appears once a
   close run is started).
 
-The **overall status turns red** if any control account is out of balance or a hard
-readiness check fails — the controller's cue not to lock yet. Read-only; it posts
-nothing and drives no lock (the lock stays on the period-close screen).
+The **overall status turns red** if any control account is out of balance, a hard
+readiness check fails, or a HIGH JE exception is open — the controller's cue not to
+lock yet. Read-only; it posts nothing and drives no lock (the lock stays on the
+period-close screen). Dismissing a JE exception changes only the exception register
+(with the audit-logged reason) — never the journal itself.
 
 ---
 
@@ -430,6 +440,244 @@ The workspace has four tabs:
 **Good to know:** MMM is analysis only — it posts nothing to the general ledger. Each company
 sees only its own signals and runs. The v1 model is a transparent lift-share heuristic (a
 statistical regression can replace it later without changing this screen).
+
+## 5c. Budget Planner — Marketing Intelligence (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Budget Planner**. **Who:** `marketing`
+or `exec` to plan; `exec` / `approvals` to approve a plan.
+
+Once an MMM run has been pushed in, the Budget Planner answers the forward question — *"if I have
+฿X to spend, how should I split it across channels for the most sales?"*
+
+**To find the best split for a budget:**
+
+1. Open **Budget Planner**. Each channel shows its **response curve** (spend → extra sales): the
+   curve flattens as a channel saturates, so the first baht returns more than the last.
+2. Enter a **total budget** and press **หาสัดส่วนที่ดีที่สุด (Optimise)** — the planner fills the
+   allocation that maximises predicted sales (it keeps feeding each next baht to whichever channel
+   is still returning the most).
+3. Or drag the **per-channel sliders** yourself; the **predicted sales** figure updates live as you
+   move them (a "what-if"). Optimise and the sliders use the same math, so a re-check always gives
+   the same number.
+
+> If the platform hasn't pushed precise response curves yet, the planner derives a serviceable
+> curve from each channel's current spend and ROI (shown as *ประมาณการ / derived*) so you can still
+> plan; the numbers sharpen once real curves arrive.
+
+**To turn a plan into an approved budget (two people):**
+
+4. Press **เสนอแผนงบ (Stage plan)** — this records the allocation as a **draft plan** (status
+   *Pending*). **It does not spend or move any money** — it is a proposal.
+5. A **different** person (with `exec` / `approvals`) opens the plan and presses **อนุมัติ (Approve)**.
+   You **cannot approve your own plan** — the system refuses it (*ต้องให้คนอื่นอนุมัติ*), so a budget
+   shift always has a second pair of eyes.
+
+**Check the plan against reality (backtest — MKT-26):**
+
+6. On any **approved** plan, press **ตรวจสอบแผน (Backtest)** — the system compares each channel's
+   *planned* amount against the *actual* spend recorded by the latest MMM run (or, before a run
+   exists, the platform-pushed spend snapshot — the source is always shown). Each channel row shows
+   planned → actual and the variance; a row turns red when it drifts more than the tolerance
+   (default 20%) or when **unplanned** spend appears on a channel the plan never authorised. The
+   headline **ความตรงตามแผน (adherence)** says how closely the money followed the approved plan.
+7. Variances are **findings to review, not actions** — the screen never moves money. If the plan
+   needs to change, stage a new plan and have a different person approve it, exactly as above. You
+   can also schedule **ตรวจสอบแผนงบเทียบจ่ายจริง** as a recurring report so drift is surfaced
+   automatically every month.
+
+**Good to know:** the Budget Planner never posts to the general ledger — a plan is advice until a
+person acts on it in your normal budgeting/PR process. Each company sees only its own plans.
+
+---
+
+## 5d. Customer Intelligence — drill-down (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Customer Intelligence**. **Who:**
+`marketing` or `exec` (read-only).
+
+Once the platform has pushed the advanced RFM, each segment can be opened to see **who** is in it and
+**what to do** with each customer. For every member the platform estimates a **12-month value (CLV)**,
+a **churn risk** (how likely they are to stop buying), and a **next-best-action** (e.g. *ดึงกลับ /
+WINBACK*, *ขายเพิ่ม / UPSELL*, *ดูแลลูกค้า VIP / VIP_CARE*, *กระตุ้นให้กลับมา / REACTIVATE*).
+
+**To review a segment's customers:**
+
+1. Open **Customer Intelligence** and pick a **segment** (e.g. *At Risk VIPs*). The members appear as a
+   sortable list.
+2. Sort by **มูลค่า (CLV)** to see your most valuable customers first, or by **ความเสี่ยงเลิกใช้
+   (churn)** to see who is most likely to leave. Each row shows the recommended **next action**.
+3. To act, press **สร้างแคมเปญ (Create campaign)** — this opens a **draft** campaign aimed at that
+   segment, which you **edit and send** through the normal messaging screen.
+
+> These scores are **advice**, kept separate from the company's own churn/value figures — they never
+> overwrite them. Nothing is sent automatically: a customer is only contacted through a campaign a
+> person reviews and sends, and only if they have consented. Each company sees only its own customers.
+
+---
+
+## 5e. Incrementality — did the campaign actually work? (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Incrementality**. **Who:** `marketing`
+or `exec`.
+
+A jump in sales after a campaign isn't proof the campaign *caused* it — sales can rise for many
+reasons. The honest way to know is an **A/B holdout test**: contact most of a segment (the **treatment**
+group) but deliberately hold back a small random slice (the **control** group), then compare. The
+difference is the real **lift**.
+
+**To run a holdout test:**
+
+1. Open **Incrementality**, pick a **segment**, set the **holdout %** (e.g. 20% held back) and a
+   **measurement window** (e.g. 14 days), and press **เริ่มการทดลอง (Start test)**. The system splits
+   the members and sends the campaign to the **treatment** group only — the **control** group is fixed
+   at that moment and **never contacted**.
+2. After the window has passed, press **วัดผล (Measure)**. The system compares the average sales per
+   person in each group and reports the **lift %** and the **incremental revenue** the campaign caused.
+   The measured card also states the **ช่วงความเชื่อมั่น 95%** (the range the true lift plausibly sits in)
+   and shows **หลักฐานยังอ่อน** with a ⚠ when either group had fewer than 30 people or the result is
+   statistically inconclusive — a +900% from a handful of customers *should* look weaker than a +12% from
+   two thousand. The flag is honesty only; the numbers themselves are never adjusted.
+
+> The control group is chosen once and never contacted, so the comparison is fair. You can't measure
+> before the window ends, and a test can't be re-measured (the result is locked). Each company sees
+> only its own tests. These measured results also flow back to the analytics platform so future
+> recommendations learn from what actually worked.
+
+---
+
+## 5f. Model governance (`/marketing-intel`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Intelligence → Governance**. **Who:** `marketing` or
+`exec` to view; `exec` / `approvals` to change the setting and approve runs.
+
+Because these analytics now drive real spend and customer contact, you can require them to be **checked by
+a second person** before anyone acts on them — the same control posture as the rest of the finance system.
+
+**To turn on governance:**
+
+1. Open **Governance** and switch **Require approval** on. From now on, each result the platform pushes in
+   arrives **Pending** and can't drive a budget plan or a campaign until someone approves it.
+
+**To review and approve a run:**
+
+2. Each run shows its **model card** (which model version, over what training window, key metrics like R²)
+   — the record of *what produced this recommendation*.
+3. If a run's quality dropped sharply from the last approved one, it's flagged **drift** and appears in the
+   company-wide **pending-approvals center**. Approving a drifted run **requires a reason**.
+4. Press **อนุมัติ (Approve)**. You **cannot approve a run you pushed** — a different person must, so a
+   recommendation always has a second pair of eyes.
+
+The **audit trail** at the bottom links the whole chain — the recommendation (run) → the action it drove
+(budget plan) → the measured outcome (campaign lift) — the evidence auditors ask for.
+
+> Governance is **off by default**, so nothing changes until you switch it on. Each company has its own
+> setting and sees only its own runs.
+
+---
+
+## 5g. Marketing Activation workspace (`/marketing-activation`)
+
+**Where:** sidebar **วางแผน & BI → Marketing Activation**. **Who:** `marketing` or `exec`.
+
+One friendly "Marketing Studio" home for the five activation tools (docs/61, controls MKT-21…25). Every
+tool is **advisory**: nothing here sends a message or spends money by itself — contact always goes through
+a consent-gated campaign **draft**, spend/contact needs a **second approver**, and holdout groups keep every
+action measurable. Amounts on this workspace display as **"48,000 THB"** (no ฿ sign, by design).
+
+**ภาพรวม (Overview).** Live counters (journeys, AI drafts, the latest save-run net benefit, segments ready)
+plus one card per tool — click a card to jump to its tab. The **ทำงานอย่างปลอดภัย** card summarises the
+guardrails.
+
+**To find what to offer a customer (③ Cross-sell):**
+1. Open the **สินค้าที่ควรเสนอ** tab and enter a customer code (e.g. `M-1042`), then **ค้นหา**.
+2. Read the ranked offers — each one says *why* (**เพราะซื้อ "…"**), with the confidence, **lift** and margin
+   behind it, and shows whether the customer has consented to marketing.
+3. The right-hand panel answers the reverse question: enter an item id to see the **best audiences** for it.
+
+**To decide where the next budget goes (⑤ Segment × Channel):**
+1. Open **ROI กลุ่ม × ช่องทาง**, set the budget and press **จัดอันดับ**.
+2. Cells are ranked by incremental ROI × segment value; a **lift จริง** chip means a real measured
+   experiment (MKT-19) backs that cell, not just the model. If that measurement came from a small or
+   inconclusive sample the chip adds **⚠ หลักฐานยังอ่อน** — the number still shows and the ranking math is
+   unchanged, but you know how much to trust it. A **แนะนำเสนอ** chip names the segment's
+   top un-bought product (from ③) — the concrete offer to lead with in that cell — and a small
+   **อัตราส่งถึงล่าสุด** line shows recent campaign deliverability so a weak channel is visible before
+   you fund it. Neither changes the budget math; they tell you *what to say* where the money goes.
+3. **จัดเป็นแผนงบ** stages the split as a Pending budget plan — a *different* user approves it on
+   **Marketing Intelligence → Budget Planner** (the MKT-17 maker-checker path), and once approved you
+   can later **ตรวจสอบแผน (backtest)** it against actual spend there (see §5c).
+
+**To run a prioritised journey (② Next-best action):**
+1. Open **ลำดับการกระทำ**, pick a segment — the preview ranks members by expected value and shows who was
+   auto-suppressed (no consent / recent purchase / no action), each with the reason recorded.
+2. **จัดเป็น journey** stages it; a *different* user presses **เปิดใช้งาน** (self-activation is refused —
+   แบ่งแยกหน้าที่) and only then a consent-gated draft is created for the treatment arm.
+3. **Prove it worked:** activation starts a measurement window (14 days by default). Once it elapses, press
+   **วัดผล** on the journey — the system compares the treatment arm's *real* POS revenue against the
+   never-contacted control arm and pins the **realized lift** on the journey (a green/red chip). The chip
+   also shows the **95% confidence interval** in brackets, and a **⚠ หลักฐานยังอ่อน** tag appears when the
+   sample was too small (under 30 per group) or the result is inconclusive — the honest read of how solid
+   the number is; the lift itself is never adjusted. Measuring
+   early tells you the window hasn't elapsed; a journey staged without a control group can never claim a
+   measured lift. The proven lift automatically feeds the **ROI กลุ่ม × ช่องทาง** ranking.
+
+**To draft a campaign with AI (① Studio):**
+1. Open **สตูดิโอ AI**, pick a segment — the studio drafts bilingual copy from the segment's *facts*
+   (size, CLV, dominant action, best channel, send-hour, and the segment's **top un-bought product** as the
+   concrete offer). If your analytics platform has pushed a **TOWS** strategy matrix, a
+   **โทนกลยุทธ์ (TOWS)** chip shows the voice the copy was steered toward (e.g. *confident-growth* when the
+   strategy is dominated by strengths×opportunities) — with no TOWS data the tone is simply neutral, never
+   invented. Expand **ดูพรอมป์ + model card** to see the grounding evidence.
+2. A badge on the draft shows **who wrote the copy**: **เขียนโดย AI** (a live AI model refined the wording —
+   only when your company has not opted out of external AI processing in Settings › Labs & AI, per PDPA) or
+   **แม่แบบมาตรฐาน** (the built-in deterministic template — also the automatic fallback whenever AI is
+   unavailable). Either way the *targeting* (channel, send-hour, reach, holdout) always comes straight from
+   the facts, and the model card records which one produced it.
+3. Below the main draft, an **ข้อความแบบ B** box shows a second creative angle for the same facts (offer-first
+   wording). **สร้างดราฟต์แคมเปญ** logs the model card (both variants) and creates a *draft* that carries the
+   A/B pair on a fixed 50/50 per-member split — a human always reviews; you edit and send it from the normal
+   campaign flow; nothing auto-sends.
+
+**To see which wording actually sold (① Studio A/B):**
+1. After the campaign has been sent (the normal consent-gated flow) and customers have had time to buy, open
+   **สตูดิโอ AI → ดราฟต์ที่เคยสร้าง** and press **A/B** on the generation's row.
+2. The **ผล A/B จากยอดขายจริง** panel splits the *actually contacted* recipients back into their A and B
+   groups (the split is deterministic, so it is exactly reconstructable from the send audit) and compares
+   real POS revenue per head: **B เทียบ A** shows the lift with its 95% confidence interval, and
+   **⚠ หลักฐานยังอ่อน** flags a small or inconclusive sample.
+3. A campaign that was never sent reports that it has no recipients yet, and one staged without a B variant
+   reports that no A/B exists — the panel never invents groups.
+
+**To save at-risk customers (④ Churn-save):**
+1. Open **รักษาลูกค้า** and stage a policy (risk threshold, minimum CLV, offer rate and the **hard offer
+   cap** — the control that stops runaway discounts). A *different* user approves it.
+2. The preview sweeps at-risk, consented customers, shows every **capped** offer and the retention P&L
+   (expected saved − offer cost, ROI). **เริ่มรอบรักษาลูกค้า** records the run and creates the draft for
+   the treatment arm only — the control group is never contacted, so the saved revenue is provable. The run
+   also records *who* was in each group, so the proof can be computed later.
+3. **Prove the save:** after the run's measurement window (14 days by default), press **วัดผล** on the run —
+   the system compares real POS revenue between the treated and control groups and replaces the *expected*
+   numbers with a **พิสูจน์แล้ว** chip: the realized saved revenue and the realized net benefit
+   (saved − offer cost). A run with no control group cannot claim a measured save.
+
+**Run the toolkit on a schedule (autopilot):**
+1. Open **รายงานตามกำหนดเวลา** (Scheduled Reports) and add any of the three marketing jobs:
+   **จัดแผน NBA อัตโนมัติ** (stages a journey and waits for a human to activate it),
+   **จัดรอบรักษาลูกค้าอัตโนมัติ** (stages a save sweep under the *approved* policy), and
+   **วัดผลการตลาดเมื่อครบกำหนด** (measures every journey/run whose window elapsed, so realized lift keeps
+   flowing into the ROI ranking by itself).
+2. The jobs only ever *prepare* work — anything staged shows `(auto)` as its requester, and activating,
+   approving, sending and spending always remain a person's decision (แบ่งแยกหน้าที่ unchanged). A job that
+   finds an item still in flight, or no approved policy yet, simply reports why and does nothing.
+
+**See what needs you (action center):**
+1. The **ภาพรวม** tab now opens with a **สิ่งที่รอคุณตอนนี้** card: red dots = measurement windows that
+   elapsed (the proof is waiting), amber = journeys/policies/budget plans awaiting a second person, grey =
+   standing nudges (e.g. no approved save policy yet). Click a row to jump to the owning tab.
+2. The same items appear in the company-wide **pending-approvals monitor** for approvers who live there.
+
+> **Good to know:** a brand-new company sees friendly zeros here. The tools light up as Marketing
+> Intelligence pushes results in and campaigns start running.
 
 ---
 

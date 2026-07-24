@@ -2,7 +2,7 @@
   "name": "@ierp/erp-mcp",
   "version": "1.0.0",
   "private": true,
-  "description": "Invisible ERP V2 — MCP server exposing ERP tools to Claude",
+  "description": "Invisible ERP — MCP server exposing ERP tools to Claude",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

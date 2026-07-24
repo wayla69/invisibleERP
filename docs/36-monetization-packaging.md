@@ -34,11 +34,13 @@ PLAN (free / starter / business / pro / enterprise)
 |-------|------------------|
 | **core** (always-on) | users, dashboard, approvals, mobile, images, track |
 | **finance** | ar, creditors, exec, treasury *(TRE-01..05 depth; `treasury_approve` is a sub-permission)* |
-| **sales** | pos, order_mgt, claim_mgt, crm, delivery, returns, pricelist, promos |
+| **sales** | order_mgt, claim_mgt, crm *(docs/53 C1 — order-to-cash remainder after the POS split)* |
+| **pos_frontoffice** | pos, delivery, returns, pricelist, promos *(docs/53 C1 — the register/till surface, sold per branch on the POS line; bundles list BOTH suites)* |
 | **inventory** | warehouse, lots, locations |
 | **procurement** | procurement, pr_raise |
 | **masterdata** | masterdata, bom_master |
-| **planning** | planner, marketing |
+| **planning** | planner *(2026-07-21 split — sellable per-module)* |
+| **marketing** | marketing *(2026-07-21 split — sellable per-module)* |
 | **crm_loyalty** | loyalty, survey |
 | **ai** | ai_chat |
 | **multibranch** | branch |
@@ -53,12 +55,62 @@ PLAN (free / starter / business / pro / enterprise)
 
 | Plan (code) | Commercial name | THB/mo | THB/yr (2 mo free) | USD/mo · USD/yr | Seats | Suites |
 |-------------|-----------------|--------|--------------------|------------------|-------|--------|
-| `free` | Free / trial-limited | 0 | — | — | 2 | core, portal, selfservice |
-| `sme` | **SME (เจ้าของคนเดียว)** | 690 | 6,900 | $20 · $200 | 1 | core, finance, sales, inventory, masterdata, procurement, planning, crm_loyalty, ai, portal, selfservice |
-| `starter` | **Standard** | 2,900 | 29,000 | $85 · $850 | 10 | core, finance, sales, inventory, masterdata, portal, selfservice |
+| `free` | Trial (evaluation only) | 0 | — | — | 2 | core, portal, selfservice |
+| `sme` | **Solo (เจ้าของคนเดียว)** | 690 | 6,900 | $20 · $200 | 1 | core, finance, sales, pos_frontoffice, inventory, masterdata, procurement, planning, crm_loyalty, ai, portal, selfservice |
+| `starter` | **Standard** | 2,900 | 29,000 | $85 · $850 | 10 | core, finance, sales, pos_frontoffice, inventory, masterdata, portal, selfservice, **procurement** *(docs/53 Q1 — base P2P from Standard up; RFQ/3-way stays scm_advanced)* |
 | `business` | **Business** | 4,900 | 49,000 | $140 · $1,400 | 25 | + procurement, multibranch |
 | `pro` | **Professional** | 9,900 | 99,000 | $285 · $2,850 | 50 | + planning, crm_loyalty, ai |
+| `franchise` | **Franchise** | 14,900 | 149,000 | $425 · $4,250 | 100 | + manufacturing, projects, all add-on suites (0451) |
 | `enterprise` | **Enterprise** | quote (custom) | quote | quote | ∞ | all suites (custom deals tune via `features.suites`) |
+
+### 3b. Product lines (docs/53 C1, SHIPPED 2026-07-21) — split-sell SKUs beside the Complete bundles
+
+| Line | Plan (code) | THB/mo | THB/yr | Seats | Suites |
+|---|---|---|---|---|---|
+| POS (per **branch**) | `pos_lite` **POS Lite** | 590/branch | 5,900/branch | 3/branch | core, pos_frontoffice, masterdata |
+| POS (per **branch**) | `pos_pro` **POS Pro** | 1,190/branch | 11,900/branch | 10/branch | + inventory, portal (QR ordering) |
+| ERP (flat) | `erp_essentials` **ERP Essentials** | 1,900 | 19,000 | 10 | core, finance, sales, inventory, masterdata, selfservice |
+| ERP (flat) | `erp_growth` **ERP Growth** | 3,900 | 39,000 | 25 | + procurement, planning, multibranch (3 locations) |
+
+POS-line plans carry `features.per_branch: true`: checkout multiplies the unit price by the purchased
+branch quantity (`subscriptions.branches`, migration 0457; `PLAN_NOT_PER_BRANCH` guards a quantity on a
+flat plan) and branch-scaled quotas (`pos_txns_monthly`) multiply the same way. The `/plans` configurator
+gained a product-line picker (Complete packs · POS only · ERP only) with a branch stepper. Upgrading a
+line SKU to a bundle is an ordinary plan change on the same tenant — an entitlement flip, never a
+migration. Positioning + market evidence: docs/53 + docs/ops/pricing-market-study-2026-07.md. ToE:
+`cutover:plan-gating` (line-SKU boundaries: pos_lite blocks exec/procurement, erp_essentials blocks pos)
++ `cutover:saas-metrics` (0457 per-branch checkout block). Locations caps remain advisory (display +
+billing quantity) exactly as on the pre-existing plans — a hard branch-creation check is a separate
+hardening item.
+
+### 3c. Per-module add-ons (2026-07-21) — sell the module, not the tier
+
+| Add-on (key) | โมดูล | THB/mo | THB/yr (2 mo free) | Grants |
+|---|---|---|---|---|
+| `scm_advanced` | ซัพพลายเชน & เส้นทางอนุมัติจัดซื้อขั้นสูง | 1,500 | 15,000 | scm_advanced + procurement |
+| `integrations` | Webhook ขาเข้า (แชต/CRM) | 990 | 9,900 | integrations |
+| `cdp` | ส่งออกกลุ่มเป้าหมายโฆษณา (CDP) | 1,290 | 12,900 | cdp |
+| `sandbox` | Sandbox/Staging เฉพาะราย | 2,900 | 29,000 | sandbox |
+| `planning` | วางแผน & พยากรณ์ (MRP) | **1,900** | 19,000 | planning (planner token) |
+| `marketing` | การตลาด & แคมเปญ | **1,290** | 12,900 | marketing (marketing token) |
+| `crm_loyalty` | CRM & สมาชิกสะสมแต้ม | **1,490** | 14,900 | crm_loyalty (loyalty + survey) |
+| `ai` | ผู้ช่วย AI | **1,990** | 19,900 | ai (ai_chat) **+ its own token band** — 100k/day included, 200k ceiling, overage ฿12/1k (`AI_ADDON_FEATURES`, overlaid by `applyAiAddonFeatures` at the PlanGuard feature gate, the agent budget gate, and the /billing usage card; a plan's own bigger band always wins, legacy -1 preserved) |
+
+**Pricing rationale:** the module add-ons price the Business→Professional differentiators individually.
+Sum of the four = ฿6,670/mo vs the ฿5,000 bundle step — 1–2 modules à la carte undercut the upgrade;
+wanting 3+ makes Professional the better deal (and it carries the bigger AI band). The `planning`
+suite was **split** into `planning` (planner) + `marketing` (marketing) so each sells separately;
+every plan that carried the combined suite lists BOTH (grandfathered — bundle breadth unchanged,
+`seedPlans()` refreshes the DB rows at boot). Sold whole-module by design — no sub-feature slicing.
+
+**Display honesty (2026-07-22 UX pass):** every surface derives "included in this pack" from the SAME
+shared maps the API charges by (`ADDON_GRANTS ⊆ PLAN_SUITES[PACK_TO_PLAN[tier]]`): the /plans
+configurator shows included add-ons as a badge (no price, no switch — they can never enter the total or
+the signup `addons=` params), groups the list into ขายยกโมดูล vs ส่วนเสริมขั้นสูง, and shows an explicit
+nudge once tier + à-la-carte modules meet the Scale price; the /billing card mirrors the grouping, shows
+the live "+฿X/เดือน" delta of billable selections, the AI band note, and a 3+-modules Professional nudge.
+ToE: `pricing.spec.ts` included-addon honesty (badge, no-double-count totals ฿9,580/฿11,570, nudge
+threshold, CTA params).
 
 **SME single-operator edition (docs/49):** the `sme` plan is the DEFAULT a `control_profile='sme'` company
 provisions onto (`provisionTenant` picks `sme` when the edition is SME and no explicit `plan_code` is passed;
@@ -91,6 +143,16 @@ Prices/seats/suites are seeded in `PLAN_SEED` (`billing.service.ts`) and upserte
 `seedPlans()` at startup — which also **backfills `features.suites`** onto every plan row (the grandfather
 step). Codes are unchanged (`starter`/`pro`) so existing `subscriptions.plan_code` FKs stay valid; only the
 display names/prices changed. Prices are the recommended market-entry defaults — tune after market testing.
+
+**Price grandfathering (0456, docs/53 Q7 — code-enforced):** every subscription snapshots its plan's
+price at subscribe time (`subscriptions.grandfathered_price` / `grandfathered_annual_price`, backfilled
+for pre-0456 rows at migration time). Charge paths — same-plan checkout, `getSubscription`
+(`price_monthly` = effective, `list_price_monthly` beside it), the proration credit side, and SaaS-metrics
+MRR — read `COALESCE(snapshot, plans.price_*)`, so a later `PLAN_SEED` repricing **never re-prices an
+existing subscription**. The lock ends only on a **plan change** (which re-snapshots at the new plan's
+current price) or when a platform admin clears the snapshot at a contractual renewal
+(`grandfathered_until` reserved for future renewal automation; NULL = indefinite). ToE:
+`cutover:saas-metrics` (0456 block).
 
 ## 4. Premium/add-on suites — the `@RequiresSuite` mechanism (1.1b, RESOLVED)
 
@@ -150,10 +212,69 @@ insurance, not upsell garnish:
   bypasses; infra error fails **open**, successfully-read missing/unknown plan fails **closed** to `ALWAYS_ON`
   (via `resolveEntitledSuites`). Blocking mirrors `ModuleEnabledGuard` (block only when NONE of the route's
   tokens is entitled). Decision logic verified across 20 plan/route combos.
-- **1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
+- **Rollout procedure (ops):** [`ops/entitlements-rollout-runbook.md`](ops/entitlements-rollout-runbook.md)
+— shadow observation, triage of the structured telemetry (`entitlement_shadow_block` /
+`entitlement_block` pino events, added 2026-07-21 beside the legacy console lines), per-tenant
+remediation levers, flip, and rollback.
+
+**1.2 rollout order (MANDATORY):** enable SHADOW → watch logs → run the 1.3 backfill (every tenant gets
   `features.suites`) → only then enable ENFORCE. Do NOT enable ENFORCE before the backfill.
 - **1.8 (pending):** cutover harness `tools/cutover/src/billing.ts` — plan→suite→403 matrix + god-bypass +
   kill-switch modes end-to-end (this is where the UAT negative case is codified).
+- **Wave B (done) — staged enforcement rollout tooling** (the operating loop between "shadow for all" and
+  "enforce for all"):
+  - **B1 — observation ledger** (`entitlement_observations`, migration `0455`, platform-level
+    `about_tenant_id`): every would-block (shadow) and did-block (enforce) decision lands one row per
+    (business day × tenant × deny code × mode × route-perm set) — fire-and-forget from `PlanGuard.decide()`
+    behind an in-process first-seen gate + a DB `dedup_key` UNIQUE, so the request hot path pays at most one
+    insert per unique denial per day per process and can NEVER fail a request. God read:
+    `GET /api/admin/entitlement-observations?days=N` (rollup + raw rows); Platform Console → **แพ็กเกจ &
+    โมดูล** shows the "who would break" triage panel.
+  - **B2 — upsell UX:** a plan-level deny code (`SUITE_NOT_ENTITLED` / `PLAN_FEATURE_REQUIRED` /
+    `TRIAL_EXPIRED` / `SUBSCRIPTION_INACTIVE` / `SUBSCRIPTION_PASTDUE_READONLY`) reaching `lib/api.ts` raises
+    an app-wide `ierp:plan-denied` event; the AppShell-mounted `PlanUpsellDialog` turns the bare 403 into the
+    server's localized message + a **ดูแพ็กเกจ & ชำระเงิน** CTA → `/billing` (internal variant only; open
+    dialog + per-code cooldown absorb parallel-query 403 bursts). Errors still throw unchanged.
+  - **B3 — per-tenant cohort:** `ENTITLEMENTS_ENFORCE_TENANTS` (comma-separated tenant IDs) gives listed
+    tenants FULL enforcement (Admin no-bypass semantics included) while everyone else keeps the global mode —
+    the legacy path stays zero-cost for non-cohort tenants. Rollout: shadow for all → clear a tenant in the
+    B1 panel → add it to the cohort → repeat → finally `ENTITLEMENTS_ENFORCE=true` global.
+- **Wave C (done) — Thai payment rails** (`saas_payment_claims`, migration `0458`): a tenant that pays by
+  bank transfer / PromptPay (no card) gets a real self-serve loop:
+  - **Where + how much:** `GET /api/billing/payment-info` — the platform's dynamic EMVCo PromptPay QR for
+    the amount due (`PLATFORM_PROMPTPAY_ID`; reuses the POS `buildPromptPayPayload`, raw payload — never a
+    deep link) and/or free-text bank details (`PLATFORM_BANK_ACCOUNT`); amount due = plan price for the
+    subscription's interval + purchased add-ons via the ONE A3 pricing rule (`resolveAddonCharges`).
+  - **Slip claim:** `POST /api/billing/payment-claims` (perm `users`, always the caller's own tenant) files
+    the transfer reference + amount as a **Pending claim** — `(tenant, slip_ref)` UNIQUE refuses a re-filed
+    slip (`DUPLICATE_SLIP`); a god-inbox notification fires. A claim is NEVER money by itself.
+  - **Slip pre-fill (UX addendum):** the /billing claim form's **อ่านจากสลิป** upload decodes the slip's
+    Slip-Verify mini-QR CLIENT-side (`@ierp/shared` `slipTransferRef` — exact transfer ref, zero cost)
+    and asks `POST /api/doc-ai/slip-extract` for amount/date (+ref fallback): Claude vision when keyed,
+    deterministic Thai-slip rules for text, honestly EMPTY otherwise. Pre-fill ONLY — the human confirms
+    the form and the god verify queue still checks the real bank statement, so a misread never moves money.
+  - **God verify queue:** `GET /api/admin/payment-claims` + Platform Console **การชำระเงิน** tab — approve
+    (after checking the real bank statement) records the A4 `saas_receipt` (source `bank_transfer`,
+    idempotent on `claim:<id>` — a double-click approves once), **re-activates the subscription** (the A2
+    dunning-recovery signal) and emails the receipt; reject emails the reason (`payment_claim_rejected`
+    template). Decided claims are immutable (`CLAIM_NOT_PENDING`).
+- **Wave D (done) — Platform Console ops depth** (no migration; all knobs default off = unchanged):
+  - **D1 — god-inbox email push:** every `platform_notifications` emit (signup requests, suspend/
+    reactivate, payment claims …) is ALSO sent to **`PLATFORM_ALERT_EMAIL`** via the A1 outbox
+    (`platform_alert` template) — the wake-up call; the inbox stays the durable log.
+  - **D2 — full tenant data export** (offboarding / PDPA portability): god-only
+    `GET /api/admin/tenants/:id/export` dumps the tenant row + every row of every tenant-scoped table as
+    one JSON document — tables **auto-discovered from the drizzle schema** (`tenant_id` +
+    `about_tenant_id` columns), so a future table can never be silently omitted; per-table rows capped at
+    50k with a `truncated` flag. Download button in the console company drawer.
+  - **D3 — platform-owner hardening:** `PLATFORM_REQUIRE_MFA` — a god without TOTP enrolled is refused on
+    every `@PlatformAdmin` route (403 `PLATFORM_MFA_REQUIRED`; live DB check, fail-closed);
+    `PLATFORM_IP_ALLOWLIST` — comma-separated IPv4/CIDR entries; requests from outside are 403
+    `PLATFORM_IP_BLOCKED` (fail-closed on unparsable/IPv6 peers; pair with `TRUSTED_PROXY_HOPS`).
+  - **D4 — health alert thresholds:** `/api/jobs/ops-metrics` now returns server-evaluated `alerts[]`
+    (`PLATFORM_ALERT_POOL_PCT`/`_JOBS_FAILED`/`_JOBS_STUCK`/`_JOBS_QUEUED` + stale-scheduler; pure
+    `evaluateHealthAlerts`, unit-tested) — the console overview shows a red breach banner and external
+    pollers read the same field.
 
 ## 5b. Usage metering → overage billing (1.5, DONE)
 
@@ -201,6 +322,14 @@ NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover saas-metrics   # 
 
 | Version | Date | Author | Change |
 |---------|------|--------|--------|
+| 1.11 | 2026-07-21 | Platform | **Per-module add-ons (no migration).** Suite split `planning`→`planning`(planner)+`marketing`(marketing) with every combined-suite plan grandfathered to BOTH (seedPlans refresh; invariant 47 modules/22 suites green). Four new sellable add-ons `planning` ฿1,900 / `marketing` ฿1,290 / `crm_loyalty` ฿1,490 / `ai` ฿1,990 (§3c) — ai carries its own token band via `AI_ADDON_FEATURES` + `applyAiAddonFeatures`, overlaid at the PlanGuard feature gate (enforce AND legacy paths), the agent budget gate, and the /billing usage card. /plans configurator + /billing + Platform Console pick the new SKUs up from the shared maps. ToE: `plan-gating` 59→65, `onboarding` 216→217, vitest `module-addons.test.ts` (8). Sold whole-module (no sub-feature slicing) per the commercial decision of 2026-07-21. |
+| 1.10 | 2026-07-21 | Platform | **Slip-OCR pre-fill (wave C UX; no migration, no new control).** `@ierp/shared` `slip-qr.ts` (`parseTlv`/`slipTransferRef` — Slip-Verify mini-QR TLV, nested containers contribute sub-values only, mixed-alnum outranks digits-only) decoded client-side via the existing `lib/qr-decode` frame decoder; `POST /api/doc-ai/slip-extract` (perm `users`) on the doc-ai honesty ladder (vision when keyed / Thai-slip regex rules for text / EMPTY otherwise, `normalizeSlipFields` bounds); /billing claim form gains the อ่านจากสลิป upload (bounded 1600px JPEG re-encode before upload). ToE: `onboarding` 214→216, vitest `slip-extract.test.ts` (8), `billing-slip.spec.ts` e2e (prefill from stubbed extraction). |
+| 1.9 | 2026-07-21 | Platform | **Wave D — Platform Console ops depth (no migration; knobs default off).** D1 god-inbox → email push (`PLATFORM_ALERT_EMAIL`, `platform_alert` template over the A1 outbox, wired inside `PlatformNotificationsService.emit` — best-effort, never breaks the emitting action). D2 full tenant export `GET /api/admin/tenants/:id/export` (tenant row + every tenant-scoped table auto-discovered from the drizzle schema via `getTableConfig` — `tenant_id`/`about_tenant_id`; 50k/table cap with `truncated` flag; drawer download button). D3 god hardening in `PlatformAdminGuard`: `PLATFORM_REQUIRE_MFA` (live `users.mfa_enabled` check, fail-closed 403 `PLATFORM_MFA_REQUIRED`) + `PLATFORM_IP_ALLOWLIST` (IPv4/CIDR, fail-closed 403 `PLATFORM_IP_BLOCKED`). D4 `evaluateHealthAlerts` on `/api/jobs/ops-metrics` (`PLATFORM_ALERT_*` thresholds + stale scheduler) + console breach banner. ToE: `onboarding` 207→214, vitest `health-alerts.test.ts` (14 incl. guard helpers), template suite auto-covers `platform_alert`. No ICFR control change (optional hardening strengthens ITGC-AC-18 operationally). |
+| 1.8 | 2026-07-21 | Platform | **Wave C — Thai payment rails (migration `0458`).** `saas_payment_claims` slip-claim ledger: `GET /api/billing/payment-info` (platform PromptPay dynamic EMVCo QR via the POS `buildPromptPayPayload` + `PLATFORM_PROMPTPAY_ID`/`PLATFORM_BANK_ACCOUNT`; amount due = plan + add-ons via the shared `resolveAddonCharges`, now public), tenant slip claims (`POST/GET /api/billing/payment-claims`, own-tenant only, `(tenant, slip_ref)` UNIQUE → `DUPLICATE_SLIP`, god-inbox notify), god verify queue (`/api/admin/payment-claims` + Platform Console การชำระเงิน tab: approve → A4 receipt source `bank_transfer` idempotent on `claim:<id>` + subscription Active + receipt email; reject → `payment_claim_rejected` email; decided = immutable `CLAIM_NOT_PENDING`). `/billing` gains the ชำระด้วยการโอน card (QR + bank + claim form + status list). ToE: `onboarding` 196→207, platform e2e 5→6. No ICFR control change (platform revenue collection; tenant GL untouched). |
+| 1.7 | 2026-07-21 | Platform | **Wave B — staged enforcement rollout (migration `0455`).** B1 observation ledger `entitlement_observations` (would-block/did-block per business day × tenant × code × mode, written fire-and-forget from `PlanGuard.decide()` with in-process + DB dedup; god read `GET /api/admin/entitlement-observations` + Platform Console triage panel on the แพ็กเกจ & โมดูล tab). B2 upsell UX: plan-level deny codes raise `ierp:plan-denied` from `lib/api.ts` → AppShell `PlanUpsellDialog` (localized server message + ดูแพ็กเกจ & ชำระเงิน CTA → `/billing`, internal only; cooldown against parallel-403 bursts). B3 per-tenant cohort `ENTITLEMENTS_ENFORCE_TENANTS` — listed tenants get full enforcement while everyone else keeps the global mode (legacy path stays zero-cost). ToE: `plan-gating` 41→52, `onboarding` 194→196, platform-plans e2e 3→5. No ICFR control change (commercial gating; tenant GL untouched). |
+| 1.6 | 2026-07-21 | Platform | **A4 — own-SaaS receipts (migration `0454`).** One `saas_receipts` row per subscription payment the platform collects: Stripe `invoice.paid`/`invoice.payment_succeeded` webhooks (which now also confirm the subscription Active — the A2 dunning-recovery signal) and god-recorded bank transfers (`POST /api/admin/tenants/:id/receipts`). RCPT-S numbering, idempotent on the invoice id (`source_ref` UNIQUE), 7% VAT breakdown ONLY when `RECEIPT_ISSUER_TAX_ID` is configured (else a plain ใบเสร็จรับเงิน — never a false tax-invoice claim), `saas_receipt` email via the A1 outbox, bilingual A4 document via the shared PdfRenderer (HTML fallback). Tenant self-serve: `GET /api/billing/receipts` + printable `/:no/pdf`, hard-scoped to the caller's own tenant (foreign number = 404); `/billing` gains a receipts card. ToE: `onboarding` 186→194. No ICFR control change (platform revenue paper trail; tenant GL untouched). |
+| 1.5 | 2026-07-21 | Platform | **A3 — add-on BILLING + tenant self-serve purchase.** Checkout now carries purchased add-ons as extra **recurring Stripe line items** on the same subscription (amount interval-scaled: annual = 10× monthly; keys in session metadata → the webhook stamps `subscriptions.addons` on completion). New tenant self-serve `POST /api/billing/addons` (perm `users`, ALWAYS the caller's own tenant): entitlement applies immediately; a live Stripe subscription gets its add-on line items **reconciled** (`syncAddonItems` — items identified by `metadata.addon_key`, default proration both directions), else entitlement-only (mock/dev/Trialing). Pricing fail-closed: unknown key → 400 `UNKNOWN_ADDON`, non-THB checkout with add-ons → 400 `ADDON_CURRENCY_UNSUPPORTED`, plan-included add-ons dropped from the charge. `/billing` gains an add-on card (toggle + save, "รวมในแพ็กเกจแล้ว" for included ones). ToE: `onboarding` 178→186. No ICFR control change. |
+| 1.4 | 2026-07-20 | Platform | **Franchise tier + à-la-carte ADD-ON suites + /plans pack carry-through (migration `0451`).** New seeded plan **`franchise`** (฿14,900/mo · ฿149,000/yr · USD 425; Professional + manufacturing + projects + every add-on suite; 100 seats / 25 locations). Four token-less **add-on suites** `scm_advanced`/`integrations`/`cdp`/`sandbox` (the /plans configurator's "Advanced add-ons"): grandfathered into the plans whose tokens already reached those surfaces (scm_advanced→business+, cdp/integrations→pro+, sandbox→franchise+), purchasable per tenant via **`subscriptions.addons`** (`POST /api/admin/tenants/:id/addons`, god-only; unknown key → 400 `UNKNOWN_ADDON`); `resolveEntitledSuites(plan, features, addons)` unions each purchased add-on's **`ADDON_GRANTS`** set (scm_advanced also carries the base `procurement` suite — its RFQ/match endpoints ride that token). `@RequiresSuite` gates added: `scm_advanced` on RFQ + three-way-match controllers, `sandbox` on the developer portal, `cdp` per-handler on the CRM audience-export/register/rules/CDP-export endpoints; the @Public web-to-lead webhook checks `integrations` IN-SERVICE (mirrors guard semantics; enforce-mode only, trial allows, fail-open on infra error). All gates INERT under the default legacy mode. **Pack carry-through:** the public /plans configurator's CTA carries `?plan=&billing=&addons=` → the signup request stores the PACK_TO_PLAN-mapped REAL plan code + interval + add-ons (`signup_requests.requested_*`), the Platform Console onboarding queue shows them, and **approve provisions the requested pack** (plan + `billing_interval` + `addons` stamped on the trialing subscription; absent ⇒ legacy `free`). ToE: `plan-gating` 34→41 (add-on grants, grandfathering, franchise suites, junk-key ignored, legacy inert) + `onboarding` 157→160 (queue row carries the mapped pack; approve honours it; franchise seeded). No ICFR control change. |
 | 1.3 | 2026-07-15 | Platform | **SME single-operator plan** (docs/49) — new `sme` plan seeded (฿690/mo · ฿6,900/yr · $20/$200), full day-to-day operational suites (`PLAN_SUITES.sme` = core/finance/sales/inventory/masterdata/procurement/planning/crm_loyalty/ai/portal/selfservice) but capped to **1 seat / 1 location** (the commercial fence vs per-seat Enterprise; sits below Standard on price). `provisionTenant` defaults a `control_profile='sme'` company with no explicit `plan_code` to the `sme` plan (explicit plan always wins; plan and control profile stay orthogonal). Volume caps solo-appropriate (200 e-Tax/mo, 5,000 POS/mo; AI 100k/day, metered as overage). Seeded via `PLAN_SEED` upsert — existing subscriptions untouched. Commercial policy + seed data; no control/RCM change. |
 | 1.2 | 2026-07-13 | Platform | **CI wiring** — `check-entitlements.mjs` added as a step in the `.github/workflows/ci.yml` `build` job (right after the shared build), so entitlement-map drift now fails every PR instead of accumulating silently (the rev-1.1 orphaned-token drift went unnoticed for a week because the guard was doc-only). No map/behaviour change. |
 | 1.1 | 2026-07-12 | Platform | **Entitlement-map drift repaired** — four coarse MODULE_KEYs added by post-1.1 waves were never assigned to a suite, failing `check-entitlements.mjs` (`hr, hr_admin, quality, treasury`). Mapped: `treasury` → **finance** (TRE-01..05 is finance depth), `quality` → **manufacturing** (QMS rides the premium suite the doc already scoped as "Manufacturing/MRP/QC/APS"), `hr`+`hr_admin` → **hcm** (those controllers already carry `@RequiresSuite('hcm')`). The `*_approve` checker duties are sub-permissions (not suite-gated). `TOKENLESS_SUITES` narrowed to projects/realestate. Map-only — no runtime change while `ENTITLEMENTS_ENFORCE` is off; guard now reports 46 module keys across 16 suites. No control/RCM change. |

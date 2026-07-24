@@ -27,6 +27,41 @@ export function mintTableToken(c: TableClaim): string {
   return Buffer.from(`${payload}|${sig}`, 'utf8').toString('base64url');
 }
 
+// ── Rotating table QR (SOX-ICFR #3) ────────────────────────────────────────────────────────────────────
+// The printed static `diningTables.qrToken` is a PERMANENT unauthenticated capability: anyone who ever
+// photographs a table card can open sessions / fire orders from anywhere, forever. A tenant with a per-table
+// display (tablet / e-ink) can instead show a SHORT-TTL signed token `HMAC(tenant:table:window)` that a
+// photographed code makes worthless within ~a minute. This is additive — static-placard tenants keep the
+// stable token; the rotating path is offered alongside it.
+const ROT_WINDOW_MS = Number(process.env.QR_ROTATING_WINDOW_MS ?? 30_000); // token validity granularity
+
+export function mintRotatingTableToken(tenantId: number, tableId: number, now = Date.now()): string {
+  const win = Math.floor(now / ROT_WINDOW_MS);
+  const payload = `rot:${tenantId}:${tableId}:${win}`;
+  const sig = createHmac('sha256', tokenKey()).update(payload).digest('hex');
+  return Buffer.from(`${payload}|${sig}`, 'utf8').toString('base64url');
+}
+
+/** Verify a rotating token: valid only for the current or immediately-previous window (≤ ~2×window old). */
+export function verifyRotatingTableToken(token: string, now = Date.now()): { tenantId: number; tableId: number } | null {
+  if (!token) return null;
+  let blob: string;
+  try { blob = Buffer.from(token, 'base64url').toString('utf8'); } catch { return null; }
+  const idx = blob.lastIndexOf('|');
+  if (idx < 0) return null;
+  const payload = blob.slice(0, idx);
+  const sig = blob.slice(idx + 1);
+  const parts = payload.split(':');
+  if (parts[0] !== 'rot' || parts.length !== 4) return null;
+  const tenantId = Number(parts[1]), tableId = Number(parts[2]), win = Number(parts[3]);
+  if (![tenantId, tableId, win].every(Number.isInteger)) return null;
+  const cur = Math.floor(now / ROT_WINDOW_MS);
+  if (win !== cur && win !== cur - 1) return null; // expired — outside the current/previous window
+  const expected = createHmac('sha256', tokenKey()).update(payload).digest('hex');
+  if (!sig || sig.length !== expected.length || !safeEqualHex(sig, expected)) return null;
+  return { tenantId, tableId };
+}
+
 export function verifyTableToken(token: string): TableClaim | null {
   if (!token) return null;
   let blob: string;

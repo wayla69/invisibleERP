@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, numeric, timestamp, jsonb, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, bigserial, bigint, integer, text, numeric, timestamp, jsonb, pgEnum } from 'drizzle-orm/pg-core';
 import { tenants } from './tenants';
 
 // Self-serve tenant lifecycle + subscription billing (move #6)
@@ -26,6 +26,18 @@ export const subscriptions = pgTable('subscriptions', {
   status: subStatusEnum('status').default('Trialing'),
   billingInterval: text('billing_interval').default('monthly'), // 1.7 — 'monthly' | 'annual' (default = legacy behaviour)
   currency: text('currency').default('THB'),                    // 1.7 — the currency this subscription is billed in
+  // 0451 — purchased à-la-carte add-on suite keys (ADDON_KEYS in @ierp/shared); unioned into the
+  // tenant's entitled suites by resolveEntitledSuites. NULL = none.
+  addons: jsonb('addons'),
+  // 0456 — price grandfathering (docs/53 Q7): the plan price snapshotted at subscribe/plan-change time.
+  // Charge paths read COALESCE(snapshot, plans.price_*), so a later PLAN_SEED repricing never re-prices
+  // an existing subscription. grandfathered_until NULL = indefinite lock (cleared by plan change or an
+  // explicit platform-admin re-price at contractual renewal).
+  grandfatheredPrice: numeric('grandfathered_price'),
+  grandfatheredAnnualPrice: numeric('grandfathered_annual_price'),
+  grandfatheredUntil: timestamp('grandfathered_until'),
+  // 0457 — POS-line per-branch billing quantity (plans with features.per_branch). NULL = 1.
+  branches: integer('branches'),
   trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
   stripeCustomerId: text('stripe_customer_id'),

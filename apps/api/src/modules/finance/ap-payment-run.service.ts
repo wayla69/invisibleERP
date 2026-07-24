@@ -1,11 +1,12 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { assertMakerChecker } from '../../common/control-profile';
-import { createHash } from 'node:crypto';
-import { eq, and, ne, or, isNull, sql, lte, desc, asc, inArray, type SQL } from 'drizzle-orm';
+import { eq, and, or, isNull, sql, lte, desc, asc, inArray, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { apTransactions, apPayments, apPaymentRuns, apPaymentRunLines, apDiscountTerms, bankAccounts, vendors, tenants } from '../../database/schema';
+import { apTransactions, apPayments, apPaymentRuns, apPaymentRunLines, apDiscountTerms, bankAccounts } from '../../database/schema';
 import { DocNumberService } from '../../common/doc-number.service';
 import { StatusLogService } from '../../common/status-log.service';
+import { ApDiscountTermsService } from './ap-discount-terms.service';
+import { ApPaymentRunFileService } from './ap-payment-run-file.service';
 import { FinanceService } from './finance.service';
 import { ThreeWayMatchService } from '../match/three-way-match.service';
 import { AccountDeterminationService } from '../ledger/account-determination.service';
@@ -70,7 +71,15 @@ export class ApPaymentRunService {
     @Optional() private readonly determination?: AccountDeterminationService,
     @Optional() private readonly taxJobs?: TaxJobsService,
     @Optional() private readonly ledger?: LedgerService, // posts the FIN-9 discount-income adjustment JE
-  ) {}
+  ) {
+    // Ctor-body plain class (god-service ratchet pattern) — the FIN-9/EXP-14 discount-policy register.
+    this.discountTerms = new ApDiscountTermsService(db, statusLog);
+    // Ctor-body plain class (service-size headroom round) — the EXP-13 bank bulk-transfer file surface.
+    // The canonical run loader is passed as a facade-ctor closure (procurement-facade pattern).
+    this.file = new ApPaymentRunFileService(db, statusLog, (runNo) => this.loadRun(runNo));
+  }
+  private readonly discountTerms: ApDiscountTermsService;
+  private readonly file: ApPaymentRunFileService;
 
   // ── Resolve + validate a WHT tax code exactly like a manual payment request (TAX-03 / docs/33 PR7) ──
   private async resolveWht(tenantId: number | null, taxCode: string | null | undefined, rate?: number | null, incomeType?: string | null):
@@ -437,138 +446,19 @@ export class ApPaymentRunService {
   }
 
   // ══════════════════ FIN-9 (EXP-14) — early-payment discount policy (maker-checker change control) ══════════════════
-  // A sliding-scale prompt-payment discount schedule, per-vendor or global (vendor_id NULL). Created Draft by a
-  // 'creditors' maker; activated by a DIFFERENT approvals/gl_close checker (self-approval → SOD_VIOLATION).
-  // Only an Active policy is applied by a payment run; approving one supersedes the prior Active policy for the
-  // same vendor scope so at most one Active policy governs a vendor at a time.
-  async createDiscountTerm(dto: DiscountTermDto, user: JwtUser) {
-    const tenantId = user.tenantId ?? null;
-    const pct = round4(dto.discount_pct);
-    if (!(pct > 0 && pct <= 0.30)) throw new BadRequestException({ code: 'INVALID_DISCOUNT_PCT', message: 'discount_pct must be between 0 and 0.30', messageTh: 'อัตราส่วนลดต้องอยู่ระหว่าง 0 ถึง 0.30' });
-    const minDays = Math.max(1, Math.floor(Number(dto.min_days_early ?? 1)));
-    const fullDays = Math.max(minDays, Math.floor(Number(dto.full_discount_days ?? 20)));
-    if (dto.vendor_id != null) {
-      const [v] = await this.db.select({ id: vendors.id }).from(vendors).where(eq(vendors.id, Number(dto.vendor_id))).limit(1);
-      if (!v) throw new NotFoundException({ code: 'VENDOR_NOT_FOUND', message: 'Vendor not found', messageTh: 'ไม่พบผู้ขาย' });
-    }
-    const [row] = await this.db.insert(apDiscountTerms).values({
-      tenantId, vendorId: dto.vendor_id != null ? Number(dto.vendor_id) : null, name: dto.name,
-      discountPct: String(pct), minDaysEarly: minDays, fullDiscountDays: fullDays,
-      prorate: dto.prorate ?? true, discountAccount: dto.discount_account ?? '4600',
-      activeFrom: dto.active_from ?? null, activeTo: dto.active_to ?? null, status: 'Draft', createdBy: user.username,
-    }).returning({ id: apDiscountTerms.id });
-    await this.statusLog.log('APDISC', String(row!.id), '', 'Draft', user.username, `Discount policy '${dto.name}' ${pct * 100}%`);
-    return this.getDiscountTerm(Number(row!.id));
-  }
+  // FIN-9 / EXP-14 discount-policy register — extracted to ApDiscountTermsService (god-service ratchet
+  // round; ctor-body plain class). Policy RESOLUTION (resolveDiscountPolicy/computeDiscount) stays here.
+  async createDiscountTerm(dto: DiscountTermDto, user: JwtUser) { return this.discountTerms.createDiscountTerm(dto, user); }
+  async approveDiscountTerm(id: number, approver: JwtUser, selfApprovalReason?: string | null) { return this.discountTerms.approveDiscountTerm(id, approver, selfApprovalReason); }
+  async rejectDiscountTerm(id: number, approver: JwtUser, reason?: string) { return this.discountTerms.rejectDiscountTerm(id, approver, reason); }
+  async deactivateDiscountTerm(id: number, user: JwtUser) { return this.discountTerms.deactivateDiscountTerm(id, user); }
+  async getDiscountTerm(id: number) { return this.discountTerms.getDiscountTerm(id); }
+  async listDiscountTerms(user: JwtUser, status?: string) { return this.discountTerms.listDiscountTerms(user, status); }
 
-  async approveDiscountTerm(id: number, approver: JwtUser, selfApprovalReason?: string | null) {
-    const db = this.db;
-    const [t] = await db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
-    await assertMakerChecker(db, { user: approver, maker: t.createdBy, event: 'ap.discount-term.approve', ref: String(id), reason: selfApprovalReason, code: 'SOD_VIOLATION', message: 'Maker-checker: you cannot activate a discount policy you created', messageTh: 'ผู้จัดทำนโยบายส่วนลดอนุมัติเองไม่ได้ (แบ่งแยกหน้าที่)' });
-    // Supersede the prior Active policy for the SAME vendor scope so only one Active policy governs a vendor.
-    const scope = t.vendorId != null ? eq(apDiscountTerms.vendorId, Number(t.vendorId)) : isNull(apDiscountTerms.vendorId);
-    const scopeConds: SQL[] = [eq(apDiscountTerms.status, 'Active'), scope, ne(apDiscountTerms.id, Number(id))];
-    if (t.tenantId != null) scopeConds.push(eq(apDiscountTerms.tenantId, Number(t.tenantId)));
-    await db.update(apDiscountTerms).set({ status: 'Inactive' }).where(and(...scopeConds));
-    await db.update(apDiscountTerms).set({ status: 'Active', approvedBy: approver.username, approvedAt: new Date() }).where(eq(apDiscountTerms.id, Number(id)));
-    await this.statusLog.log('APDISC', String(id), 'Draft', 'Active', approver.username);
-    return this.getDiscountTerm(Number(id));
-  }
-
-  async rejectDiscountTerm(id: number, approver: JwtUser, reason?: string) {
-    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    if (t.status !== 'Draft') throw new BadRequestException({ code: 'NOT_DRAFT', message: `Policy ${id} is ${t.status}, not pending activation`, messageTh: 'นโยบายนี้ไม่ได้อยู่ในสถานะร่าง' });
-    await this.db.update(apDiscountTerms).set({ status: 'Rejected', approvedBy: approver.username, approvedAt: new Date(), rejectReason: reason ?? null }).where(eq(apDiscountTerms.id, Number(id)));
-    await this.statusLog.log('APDISC', String(id), 'Draft', 'Rejected', approver.username, reason);
-    return this.getDiscountTerm(Number(id));
-  }
-
-  async deactivateDiscountTerm(id: number, user: JwtUser) {
-    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    if (t.status !== 'Active') throw new BadRequestException({ code: 'NOT_ACTIVE', message: `Policy ${id} is ${t.status}, not active`, messageTh: 'นโยบายนี้ไม่ได้เปิดใช้งานอยู่' });
-    await this.db.update(apDiscountTerms).set({ status: 'Inactive' }).where(eq(apDiscountTerms.id, Number(id)));
-    await this.statusLog.log('APDISC', String(id), 'Active', 'Inactive', user.username);
-    return this.getDiscountTerm(Number(id));
-  }
-
-  async getDiscountTerm(id: number) {
-    const [t] = await this.db.select().from(apDiscountTerms).where(eq(apDiscountTerms.id, Number(id))).limit(1);
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Discount policy not found', messageTh: 'ไม่พบนโยบายส่วนลด' });
-    return shapeDiscountTerm(t);
-  }
-
-  async listDiscountTerms(user: JwtUser, status?: string) {
-    const conds: SQL[] = [];
-    if (user.tenantId != null) conds.push(eq(apDiscountTerms.tenantId, user.tenantId));
-    if (status) conds.push(eq(apDiscountTerms.status, status));
-    const rows = await this.db.select().from(apDiscountTerms).where(conds.length ? and(...conds) : undefined).orderBy(desc(apDiscountTerms.id)).limit(200);
-    return { terms: rows.map(shapeDiscountTerm), count: rows.length };
-  }
-
-  // ── Thai bank bulk-transfer file (generic CSV + named presets) / minimal ISO 20022 pain.001 XML.
-  // The layouts are DOCUMENTED, CONFIGURABLE presets (see PN-02 §7(8b)) — column orders for scb/kbank/bbl
-  // follow the common Thai cash-management bulk-upload shape (header/detail/trailer records) and are meant
-  // to be adjusted to the bank's current template before go-live. The file's SHA-256 is pinned on the run
-  // and status-logged so the file handed to the bank is provably the file the run generated (EXP-13). ──
+  // ── Thai bank bulk-transfer file (EXP-13) — extracted to ApPaymentRunFileService (service-size
+  // headroom round; ctor-body plain class). Formats, fail-closed beneficiary checks, SHA-256 pinning. ──
   async bankFile(runNo: string, format: string | undefined, user: JwtUser): Promise<{ filename: string; contentType: string; body: string; sha256: string }> {
-    const db = this.db;
-    const run = await this.loadRun(runNo);
-    // Use the run's canonical, DB-sourced run_no (APRUN-YYYYMMDD-NNN) everywhere below — never the raw
-    // path param — so no request-controlled value is reflected into the filename/headers or the file body.
-    const canonicalRunNo = run.runNo;
-    if (run.status !== 'Approved' && run.status !== 'Executed') {
-      throw new BadRequestException({ code: 'RUN_NOT_APPROVED', message: `Bank file is available only for an approved/executed run (run is ${run.status})`, messageTh: 'สร้างไฟล์ธนาคารได้เฉพาะรอบจ่ายที่อนุมัติแล้ว' });
-    }
-    const fmt = (format ?? 'generic').toLowerCase();
-    if (!['generic', 'scb', 'kbank', 'bbl', 'iso20022'].includes(fmt)) {
-      throw new BadRequestException({ code: 'UNSUPPORTED_FILE_FORMAT', message: `Unsupported bank-file format '${format}'`, messageTh: 'ไม่รองรับรูปแบบไฟล์นี้ (generic | scb | kbank | bbl | iso20022)' });
-    }
-    const [bank] = run.bankAccountId != null ? await db.select().from(bankAccounts).where(eq(bankAccounts.id, Number(run.bankAccountId))).limit(1) : [null];
-    const [payer] = run.tenantId != null ? await db.select().from(tenants).where(eq(tenants.id, Number(run.tenantId))).limit(1) : [null];
-    const lines = await db.select().from(apPaymentRunLines).where(and(eq(apPaymentRunLines.runId, Number(run.id)), ne(apPaymentRunLines.status, 'Failed'))).orderBy(asc(apPaymentRunLines.id));
-    if (!lines.length) throw new BadRequestException({ code: 'EMPTY_RUN', message: 'Run has no payable lines', messageTh: 'รอบจ่ายไม่มีรายการที่จ่ายได้' });
-
-    // Beneficiary bank details come from the vendor master at the payment boundary (encrypted at rest,
-    // ITGC-AC-19). FAIL CLOSED on a missing account: a bulk file with blank beneficiaries is a mispay risk.
-    const vendorIds = [...new Set(lines.map((l) => l.vendorId).filter((v): v is number => v != null).map(Number))];
-    const vrows = vendorIds.length ? await db.select().from(vendors).where(inArray(vendors.id, vendorIds)) : [];
-    const vmap = new Map<number, typeof vendors.$inferSelect>(vrows.map((v) => [Number(v.id), v]));
-    const missing: string[] = [];
-    const details = lines.map((l, i) => {
-      const v = l.vendorId != null ? vmap.get(Number(l.vendorId)) : undefined;
-      const acct = (v?.bankAccount ?? '').replace(/[^0-9]/g, '');
-      const bankName = v?.bankName ?? '';
-      if (!acct) missing.push(`${l.txnNo} (${l.vendorName ?? v?.name ?? 'vendor ' + (l.vendorId ?? '?')})`);
-      return {
-        seq: i + 1, beneficiary_bank: bankName, beneficiary_account: acct,
-        beneficiary_name: v?.name ?? l.vendorName ?? '', amount: n(l.netAmount ?? l.amount),
-        ref: l.txnNo, wht: n(l.whtAmount),
-      };
-    });
-    if (missing.length) {
-      throw new BadRequestException({ code: 'VENDOR_BANK_MISSING', message: `Vendor bank account missing for: ${missing.join(', ')} — record the beneficiary account on the vendor master (bank-detail changes are maker-checked, EXP-11)`, messageTh: 'ไม่มีเลขบัญชีธนาคารของผู้ขาย — บันทึกในทะเบียนผู้ขายก่อนสร้างไฟล์' });
-    }
-    const total = round2(details.reduce((a, d) => a + d.amount, 0));
-    const payDate = String(run.payDate ?? ymd());
-    const debitAcct = (bank?.accountNo ?? '').replace(/[^0-9]/g, '');
-
-    let body: string; let contentType = 'text/csv; charset=utf-8'; let ext = 'csv';
-    if (fmt === 'iso20022') {
-      body = pain001Xml({ runNo: canonicalRunNo, payDate, debitAcct, debitName: payer?.legalName ?? payer?.name ?? '', details, total });
-      contentType = 'application/xml; charset=utf-8'; ext = 'xml';
-    } else {
-      body = thaiBulkCsv(fmt, { runNo: canonicalRunNo, payDate, debitAcct, debitBank: bank?.bankName ?? '', debitName: payer?.legalName ?? payer?.name ?? '', details, total });
-    }
-    const sha256 = createHash('sha256').update(body, 'utf8').digest('hex');
-    await db.update(apPaymentRuns).set({ fileFormat: fmt, fileHash: sha256, fileGeneratedAt: new Date() }).where(eq(apPaymentRuns.id, Number(run.id)));
-    // Audit event — the hash of the exact bytes handed to the bank (EXP-13 evidence; GETs skip the
-    // mutating-request audit interceptor, so the status log carries it).
-    await this.statusLog.log('APRUN', canonicalRunNo, String(run.status), String(run.status), user.username, `bank-file ${fmt} sha256=${sha256}`);
-    return { filename: `${canonicalRunNo}-${fmt}.${ext}`, contentType, body, sha256 };
+    return this.file.bankFile(runNo, format, user);
   }
 }
 
@@ -581,79 +471,6 @@ function shapeRun(r: typeof apPaymentRuns.$inferSelect) {
     executed_by: r.executedBy, executed_at: r.executedAt, reject_reason: r.rejectReason,
     file_format: r.fileFormat, file_hash: r.fileHash, file_generated_at: r.fileGeneratedAt, remarks: r.remarks,
   };
-}
-
-function shapeDiscountTerm(t: typeof apDiscountTerms.$inferSelect) {
-  return {
-    id: Number(t.id), vendor_id: t.vendorId != null ? Number(t.vendorId) : null, name: t.name,
-    discount_pct: n(t.discountPct), min_days_early: Number(t.minDaysEarly ?? 1), full_discount_days: Number(t.fullDiscountDays ?? 20),
-    prorate: !!t.prorate, discount_account: t.discountAccount, active_from: t.activeFrom, active_to: t.activeTo,
-    status: t.status, created_by: t.createdBy, created_at: t.createdAt, approved_by: t.approvedBy, approved_at: t.approvedAt, reject_reason: t.rejectReason,
-  };
-}
-
-interface FileDetail { seq: number; beneficiary_bank: string; beneficiary_account: string; beneficiary_name: string; amount: number; ref: string; wht: number }
-interface FileCtx { runNo: string; payDate: string; debitAcct: string; debitBank?: string; debitName: string; details: FileDetail[]; total: number }
-
-// Generic Thai bulk-transfer CSV: one H(eader), N D(etail) rows, one T(railer). The named presets reorder
-// the detail columns to each bank's common bulk-upload shape; adjust to the bank's current template at
-// go-live (documented as configurable in PN-02 §7(8b)). Amounts are plain 2-dp decimals; CSV fields are
-// quoted only when they contain a comma/quote.
-function thaiBulkCsv(preset: string, ctx: FileCtx): string {
-  const q = (s: string | number) => { const v = String(s); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
-  const amt = (x: number) => x.toFixed(2);
-  const rows: string[] = [];
-  rows.push(['H', ctx.runNo, ctx.payDate, ctx.debitAcct, String(ctx.details.length), amt(ctx.total)].map(q).join(','));
-  for (const d of ctx.details) {
-    let cols: (string | number)[];
-    switch (preset) {
-      case 'scb':   // SCB Business Net bulk shape: seq, receiving bank, receiving acct, name, amount, value date, reference
-        cols = ['D', d.seq, d.beneficiary_bank, d.beneficiary_account, d.beneficiary_name, amt(d.amount), ctx.payDate, d.ref]; break;
-      case 'kbank': // K-Cash Connect bulk shape: seq, receiving acct, name, bank, amount, reference, value date
-        cols = ['D', d.seq, d.beneficiary_account, d.beneficiary_name, d.beneficiary_bank, amt(d.amount), d.ref, ctx.payDate]; break;
-      case 'bbl':   // Bualuang iBanking bulk shape: seq, bank, acct, amount, name, reference
-        cols = ['D', d.seq, d.beneficiary_bank, d.beneficiary_account, amt(d.amount), d.beneficiary_name, d.ref]; break;
-      default:      // generic
-        cols = ['D', d.seq, d.beneficiary_bank, d.beneficiary_account, d.beneficiary_name, amt(d.amount), d.ref, amt(d.wht)]; break;
-    }
-    rows.push(cols.map(q).join(','));
-  }
-  rows.push(['T', String(ctx.details.length), amt(ctx.total)].map(q).join(','));
-  return rows.join('\r\n') + '\r\n';
-}
-
-// Minimal, well-formed ISO 20022 pain.001.001.03 (CustomerCreditTransferInitiation) — one payment info
-// block, one credit transfer per run line. THB, Asia/Bangkok business dating.
-function pain001Xml(ctx: { runNo: string; payDate: string; debitAcct: string; debitName: string; details: FileDetail[]; total: number }): string {
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const txs = ctx.details.map((d) => `      <CdtTrfTxInf>
-        <PmtId><EndToEndId>${esc(d.ref)}</EndToEndId></PmtId>
-        <Amt><InstdAmt Ccy="THB">${d.amount.toFixed(2)}</InstdAmt></Amt>
-        <Cdtr><Nm>${esc(d.beneficiary_name)}</Nm></Cdtr>
-        <CdtrAcct><Id><Othr><Id>${esc(d.beneficiary_account)}</Id></Othr></Id></CdtrAcct>
-        <RmtInf><Ustrd>${esc(d.ref)}</Ustrd></RmtInf>
-      </CdtTrfTxInf>`).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03">
-  <CstmrCdtTrfInitn>
-    <GrpHdr>
-      <MsgId>${esc(ctx.runNo)}</MsgId>
-      <CreDtTm>${new Date().toISOString()}</CreDtTm>
-      <NbOfTxs>${ctx.details.length}</NbOfTxs>
-      <CtrlSum>${ctx.total.toFixed(2)}</CtrlSum>
-      <InitgPty><Nm>${esc(ctx.debitName)}</Nm></InitgPty>
-    </GrpHdr>
-    <PmtInf>
-      <PmtInfId>${esc(ctx.runNo)}</PmtInfId>
-      <PmtMtd>TRF</PmtMtd>
-      <ReqdExctnDt>${esc(ctx.payDate)}</ReqdExctnDt>
-      <Dbtr><Nm>${esc(ctx.debitName)}</Nm></Dbtr>
-      <DbtrAcct><Id><Othr><Id>${esc(ctx.debitAcct)}</Id></Othr></Id></DbtrAcct>
-${txs}
-    </PmtInf>
-  </CstmrCdtTrfInitn>
-</Document>
-`;
 }
 
 function addDaysYmd(dateStr: string, days: number): string {

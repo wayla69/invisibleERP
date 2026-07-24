@@ -1,12 +1,14 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Inject, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { eq, desc } from 'drizzle-orm';
-import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, type Permission, type SuiteKey } from '@ierp/shared';
-import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { subscriptions, plans } from '../../database/schema';
+import { permissionsForSuites, resolveEntitledSuites, isPermissionEntitled, applyAiAddonFeatures, type Permission, type SuiteKey } from '@ierp/shared';
+import { DRIZZLE, runGlobalDb, type DrizzleDb } from '../../database/database.module';
+import { subscriptions, plans, entitlementObservations } from '../../database/schema';
+import { bizYmdDash } from '../../common/bizdate';
 import { IS_PUBLIC_KEY, PERMISSIONS_KEY, isPlatformAdmin, type JwtUser } from '../../common/decorators';
 import { PLAN_FEATURE_KEY } from './plan-feature.decorator';
 import { REQUIRES_SUITE_KEY } from './requires-suite.decorator';
+import { logger as pino } from '../../observability/logger';
 
 // ── Rollout modes (Wave 1 · 1.2) ────────────────────────────────────────────────────────────────
 // Suite-based plan gating is DEFAULT-OFF so it never breaks an existing tenant. Three states:
@@ -20,6 +22,24 @@ export function entitlementsEnforced(env: NodeJS.ProcessEnv = process.env): bool
 }
 export function entitlementsShadow(env: NodeJS.ProcessEnv = process.env): boolean {
   return TRUTHY.has(String(env.ENTITLEMENTS_SHADOW ?? '').trim().toLowerCase());
+}
+
+// B3 — per-tenant enforcement cohort: ENTITLEMENTS_ENFORCE_TENANTS is a comma-separated list of tenant
+// IDs that get FULL enforcement while everyone else keeps the global mode (legacy or shadow). This is the
+// staged-rollout dial between "shadow for all" and "ENTITLEMENTS_ENFORCE=true for all": move tenants in
+// one at a time after the observation ledger (B1) shows them clean. Memoized on the raw env string so the
+// request hot path never re-parses.
+let cohortCache: { raw: string; ids: Set<number> } | null = null;
+export function entitlementEnforceTenantIds(env: NodeJS.ProcessEnv = process.env): Set<number> {
+  const raw = String(env.ENTITLEMENTS_ENFORCE_TENANTS ?? '').trim();
+  if (cohortCache?.raw === raw) return cohortCache.ids;
+  const ids = new Set<number>();
+  for (const part of raw.split(',')) {
+    const n = Number(part.trim());
+    if (Number.isInteger(n) && n > 0) ids.add(n);
+  }
+  cohortCache = { raw, ids };
+  return ids;
 }
 
 // 1.4 — PastDue grace window (days) before a lapsed subscription is hard-blocked. Within the window the
@@ -67,7 +87,10 @@ export class PlanGuard implements CanActivate {
     const required = this.reflector.getAllAndOverride<Permission[]>(PERMISSIONS_KEY, [ctx.getHandler(), ctx.getClass()]) ?? [];
     const reqSuite = this.reflector.getAllAndOverride<SuiteKey>(REQUIRES_SUITE_KEY, [ctx.getHandler(), ctx.getClass()]);
 
-    const enforce = entitlementsEnforced();
+    // B3 — a tenant in the enforcement cohort gets FULL enforcement regardless of the global flags; all
+    // other tenants keep the global mode (so the default legacy path stays zero-cost for them).
+    const cohortEnforce = user?.tenantId != null && entitlementEnforceTenantIds().has(user.tenantId);
+    const enforce = entitlementsEnforced() || cohortEnforce;
     const shadow = entitlementsShadow();
 
     // ── LEGACY path (default): identical behaviour to pre-1.2. Suite gating is not evaluated at all unless
@@ -86,26 +109,39 @@ export class PlanGuard implements CanActivate {
     // Nothing to gate on this route.
     if (!feature && required.length === 0 && !reqSuite) return true;
 
-    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; currentPeriodEnd: Date | null; planCode: string | null } | undefined;
+    let row: { features: unknown; status: string | null; trialEndsAt: Date | null; currentPeriodEnd: Date | null; planCode: string | null; addons: unknown } | undefined;
+    const tid = user.tenantId; // narrowed to number by the guard above; captured so the closure keeps the narrowing
     try {
-      [row] = await this.db
+      // Runs in a guard (pre-tenant tx) → base-pool read, explicit tenant filter. Global for STRICT_TENANT_PROXY.
+      [row] = await runGlobalDb('plan-guard:subscription', () => this.db
         .select({
           features: plans.features,
           status: subscriptions.status,
           trialEndsAt: subscriptions.trialEndsAt,
           currentPeriodEnd: subscriptions.currentPeriodEnd,
           planCode: subscriptions.planCode,
+          addons: subscriptions.addons,
         })
         .from(subscriptions)
         .leftJoin(plans, eq(subscriptions.planCode, plans.code))
-        .where(eq(subscriptions.tenantId, user.tenantId))
+        .where(eq(subscriptions.tenantId, tid))
         .orderBy(desc(subscriptions.createdAt))
-        .limit(1);
+        .limit(1));
     } catch (e) {
       // Infra error → fail OPEN (never lock out a paying tenant over a DB blip).
       this.logger.warn(`plan check DB error (fail-open) tenant=${user.tenantId}: ${(e as Error)?.message ?? e}`);
       return true;
     }
+
+    // Structured telemetry context for decide() — makes a shadow/enforce log line self-contained for the
+    // rollout triage (docs/ops/entitlements-rollout-runbook.md): no manual tenant→plan join needed.
+    const meta = {
+      plan_code: row?.planCode ?? null,
+      sub_status: row?.status ?? null,
+      method: String(req.method ?? ''),
+      url: String(req.url ?? ''),
+      username: user.username ?? null,
+    };
 
     // Trialing within window → grant everything (all suites). Expired → block.
     if (row?.status === 'Trialing') {
@@ -115,14 +151,14 @@ export class PlanGuard implements CanActivate {
         code: 'TRIAL_EXPIRED',
         message: 'Your free trial has ended. Please upgrade your plan to continue.',
         messageTh: 'ช่วงทดลองใช้งานสิ้นสุดแล้ว กรุณาอัปเกรดแพ็กเกจเพื่อใช้งานต่อ',
-      }), user.tenantId, 'TRIAL_EXPIRED', required);
+      }), user.tenantId, 'TRIAL_EXPIRED', required, meta);
     }
     if (row?.status === 'Canceled') {
       return this.decide(shadow, enforce, () => new ForbiddenException({
         code: 'SUBSCRIPTION_INACTIVE',
         message: 'Subscription is canceled. Please update your billing to restore access.',
         messageTh: 'การสมัครสมาชิกถูกยกเลิก กรุณาตรวจสอบการชำระเงิน',
-      }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required);
+      }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required, meta);
     }
     if (row?.status === 'PastDue') {
       // 1.4 — grace window: within it, reads pass (fall through to suite gating); mutations are blocked;
@@ -133,21 +169,22 @@ export class PlanGuard implements CanActivate {
           code: 'SUBSCRIPTION_PASTDUE_READONLY',
           message: 'Payment is past due — your account is read-only during the grace period. Please update your billing.',
           messageTh: 'ค้างชำระเงิน — บัญชีอยู่ในโหมดอ่านอย่างเดียวช่วงผ่อนผัน กรุณาชำระเงิน',
-        }), user.tenantId, 'SUBSCRIPTION_PASTDUE_READONLY', required);
+        }), user.tenantId, 'SUBSCRIPTION_PASTDUE_READONLY', required, meta);
       }
       if (grace === 'block') {
         return this.decide(shadow, enforce, () => new ForbiddenException({
           code: 'SUBSCRIPTION_INACTIVE',
           message: 'Subscription is past due beyond the grace period. Please update your billing to restore access.',
           messageTh: 'การสมัครสมาชิกค้างชำระเกินระยะผ่อนผัน กรุณาชำระเงิน',
-        }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required);
+        }), user.tenantId, 'SUBSCRIPTION_INACTIVE', required, meta);
       }
       // grace === 'allow' → within grace + read: fall through to normal suite gating.
     }
 
-    // Active (or no row → fail CLOSED to ALWAYS_ON via resolveEntitledSuites's fallback).
+    // Active (or no row → fail CLOSED to ALWAYS_ON via resolveEntitledSuites's fallback). Purchased
+    // per-tenant add-ons (subscriptions.addons, 0451) union in on top of the plan's suites.
     const features = (row?.features as Record<string, unknown>) ?? {};
-    const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, features.suites);
+    const entitledSuites = resolveEntitledSuites(row?.planCode ?? null, features.suites, row?.addons);
     const entitledPerms = new Set<Permission>(permissionsForSuites(entitledSuites));
 
     // Premium/add-on suite gate (@RequiresSuite) — a token-less suite is entitled only if the plan lists it.
@@ -156,7 +193,7 @@ export class PlanGuard implements CanActivate {
         code: 'SUITE_NOT_ENTITLED',
         message: `Your current plan does not include this module (${reqSuite}). Please upgrade your plan.`,
         messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ',
-      }), user.tenantId, 'SUITE_NOT_ENTITLED', [reqSuite as unknown as Permission]);
+      }), user.tenantId, 'SUITE_NOT_ENTITLED', [reqSuite as unknown as Permission], meta);
     }
 
     // Suite gate: block only when NONE of the route's required tokens is entitled (mirrors ModuleEnabledGuard
@@ -168,17 +205,19 @@ export class PlanGuard implements CanActivate {
           code: 'SUITE_NOT_ENTITLED',
           message: `Your current plan does not include this module (${required.join(', ')}). Please upgrade your plan.`,
           messageTh: 'แพ็กเกจปัจจุบันของคุณไม่รวมโมดูลนี้ กรุณาอัปเกรดแพ็กเกจ',
-        }), user.tenantId, 'SUITE_NOT_ENTITLED', required);
+        }), user.tenantId, 'SUITE_NOT_ENTITLED', required, meta);
       }
     }
 
-    // Legacy explicit feature flag (fail-closed under enforce).
-    if (feature && !features[feature]) {
+    // Legacy explicit feature flag (fail-closed under enforce). The AI add-on overlay applies first —
+    // a purchased 'ai' add-on confers ai_chat + its token band (applyAiAddonFeatures; no-op otherwise).
+    const effFeatures = applyAiAddonFeatures(features, row?.addons);
+    if (feature && !effFeatures[feature]) {
       return this.decide(shadow, enforce, () => new ForbiddenException({
         code: 'PLAN_FEATURE_REQUIRED',
         message: `Your current plan does not include '${feature}'. Please upgrade to access this feature.`,
         messageTh: `แพ็กเกจปัจจุบันของคุณไม่รองรับฟีเจอร์ '${feature}' กรุณาอัปเกรดแพ็กเกจ`,
-      }), user.tenantId, 'PLAN_FEATURE_REQUIRED', required);
+      }), user.tenantId, 'PLAN_FEATURE_REQUIRED', required, meta);
     }
 
     return true;
@@ -187,13 +226,13 @@ export class PlanGuard implements CanActivate {
   // Legacy feature check (used only in default off-mode) — verbatim pre-1.2 semantics, incl. fail-open.
   private async legacyFeatureCheck(tenantId: number, feature: string): Promise<boolean> {
     try {
-      const [row] = await this.db
-        .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt })
+      const [row] = await runGlobalDb('plan-guard:legacy-feature', () => this.db
+        .select({ features: plans.features, status: subscriptions.status, trialEndsAt: subscriptions.trialEndsAt, addons: subscriptions.addons })
         .from(subscriptions)
         .leftJoin(plans, eq(subscriptions.planCode, plans.code))
         .where(eq(subscriptions.tenantId, tenantId))
         .orderBy(desc(subscriptions.createdAt))
-        .limit(1);
+        .limit(1));
       if (!row) return true;
       if (row.status === 'Trialing') {
         if (row.trialEndsAt && Date.now() > new Date(row.trialEndsAt).getTime()) {
@@ -204,7 +243,9 @@ export class PlanGuard implements CanActivate {
       if (row.status === 'PastDue' || row.status === 'Canceled') {
         throw new ForbiddenException({ code: 'SUBSCRIPTION_INACTIVE', message: `Subscription is ${row.status}. Please update your billing to restore access.`, messageTh: 'การสมัครสมาชิกไม่ได้ใช้งาน กรุณาตรวจสอบการชำระเงิน' });
       }
-      const features: Record<string, unknown> = (row.features as Record<string, unknown> | null) ?? {};
+      // A purchased 'ai' add-on grants ai_chat even in legacy mode — the add-on is live product today,
+      // not something that waits for the entitlements flags (applyAiAddonFeatures is a no-op otherwise).
+      const features: Record<string, unknown> = applyAiAddonFeatures(row.features as Record<string, unknown> | null, row.addons);
       if (!features[feature]) {
         throw new ForbiddenException({ code: 'PLAN_FEATURE_REQUIRED', message: `Your current plan does not include '${feature}'. Please upgrade to access this feature.`, messageTh: `แพ็กเกจปัจจุบันของคุณไม่รองรับฟีเจอร์ '${feature}' กรุณาอัปเกรดแพ็กเกจ` });
       }
@@ -215,14 +256,53 @@ export class PlanGuard implements CanActivate {
     }
   }
 
-  // In ENFORCE mode: throw the block. In SHADOW mode: log the would-block and allow. Always observable.
-  private decide(shadow: boolean, enforce: boolean, mkErr: () => ForbiddenException, tenantId: number, code: string, required: Permission[]): boolean {
+  // In ENFORCE mode: throw the block. In SHADOW mode: log the would-block and allow. Always observable,
+  // three ways per decision: the legacy console line (docs/36 §5 references its literal text), a
+  // structured pino JSON line (event entitlement_shadow_block / entitlement_block) carrying plan_code,
+  // status, method, url, and username so the rollout triage (docs/ops/entitlements-rollout-runbook.md)
+  // can aggregate without joining tenant→plan by hand, and the entitlement_observations ledger (B1) so
+  // gods can review who would break before widening the enforcement cohort. Deliberately NOT alert:"ops" —
+  // a shadow denial is expected traffic during rollout and must never page; alert routing is a
+  // log-pipeline decision.
+  private decide(
+    shadow: boolean, enforce: boolean, mkErr: () => ForbiddenException, tenantId: number, code: string,
+    required: Permission[],
+    meta?: { plan_code: string | null; sub_status: string | null; method: string; url: string; username: string | null },
+  ): boolean {
+    const fields = { tenant_id: tenantId, code, tokens: required, ...(meta ?? {}) };
     if (enforce) {
+      this.record('enforce', tenantId, code, required);
       this.logger.warn(`entitlement block ${code} tenant=${tenantId} route-perms=[${required.join(',')}]`);
+      pino.warn({ event: 'entitlement_block', ...fields }, `entitlement block ${code}`);
       throw mkErr();
     }
     // shadow
+    this.record('shadow', tenantId, code, required);
     this.logger.log(`[shadow] WOULD block ${code} tenant=${tenantId} route-perms=[${required.join(',')}]`);
+    pino.info({ event: 'entitlement_shadow_block', ...fields }, `[shadow] would block ${code}`);
     return true;
+  }
+
+  // B1 — fire-and-forget observation. MUST never affect the request: fully wrapped (a stubbed db without
+  // .insert, or an insert failure, is swallowed to a debug log). The in-process first-seen Set keeps the
+  // hot path to at most one insert per unique (day × tenant × code × mode × perms) per process; the DB
+  // unique index dedups across processes/restarts (and after the size-cap clear below).
+  private readonly seenObservations = new Set<string>();
+  private record(mode: 'shadow' | 'enforce', tenantId: number, code: string, required: Permission[]): void {
+    try {
+      const day = bizYmdDash(new Date());
+      const routePerms = required.join(',');
+      const dedupKey = `${day}:${tenantId}:${code}:${mode}:${routePerms}`;
+      if (this.seenObservations.has(dedupKey)) return;
+      this.seenObservations.add(dedupKey);
+      if (this.seenObservations.size > 10_000) this.seenObservations.clear();
+      void runGlobalDb('plan-guard:observe', () => this.db
+        .insert(entitlementObservations)
+        .values({ day, aboutTenantId: tenantId, code, mode, routePerms, dedupKey })
+        .onConflictDoNothing(),
+      ).catch((e) => this.logger.debug(`observation insert failed (ignored): ${(e as Error)?.message ?? e}`));
+    } catch (e) {
+      this.logger.debug(`observation skipped: ${(e as Error)?.message ?? e}`);
+    }
   }
 }

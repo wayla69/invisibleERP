@@ -111,6 +111,35 @@ class ErpClient:
         body = self._get("/api/v1/sales/daily", {"from": date_from, "to": date_to, "group_by": group_by})
         return body.get("data", [])
 
+    def push_analytics_snapshots(self, snapshots: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """POST /api/v1/analytics/snapshots — push computed MMM/RFM/TOWS back into the ERP.
+
+        The key must hold the `analytics:write` scope (distinct from the read scope). Each snapshot is
+        `{ "kind": "mmm"|"rfm"|"tows", "payload": {...}, "model_run_ref": "..."?, "model_card": {...}? }`
+        — the `model_card` (docs/60 Phase 4) carries the run's version / training window / features / metrics
+        for the ERP's governance surface. Append-only server-side (history preserved).
+        """
+        return self._post("/api/v1/analytics/snapshots", {"snapshots": snapshots})
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.cfg.base_url}{path}"
+        for attempt in range(self.cfg.max_retries + 1):
+            resp = self._session.post(url, json=body, timeout=self.cfg.timeout)
+            if resp.status_code == 429:
+                wait = _retry_after_seconds(resp, default=2 ** attempt)
+                logger.warning("ERP rate-limited on %s (attempt %d) — sleeping %.1fs", path, attempt + 1, wait)
+                time.sleep(wait)
+                continue
+            if resp.status_code in (401, 403):
+                raise ErpApiError(
+                    f"ERP auth/scope error {resp.status_code} on {path}: {resp.text[:200]} "
+                    f"(the key needs the 'analytics:write' scope)"
+                )
+            if resp.status_code >= 400:
+                raise ErpApiError(f"ERP API {resp.status_code} on {path}: {resp.text[:200]}")
+            return resp.json()
+        raise ErpApiError(f"ERP API still rate-limited after {self.cfg.max_retries} retries on {path}")
+
     def fetch_customer_transactions(self, date_from: Optional[str] = None, date_to: Optional[str] = None) -> List[Dict[str, Any]]:
         """GET /api/v1/customers/transactions — per-customer RFM base facts (auto-paginated)."""
         params: Dict[str, Any] = {}
@@ -124,6 +153,17 @@ class ErpClient:
         """GET /api/v1/invoices — AR invoices (auto-paginated)."""
         params = {"status": status} if status else {}
         return list(self._paginate("/api/v1/invoices", params))
+
+    def fetch_experiment_outcomes(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """GET /api/v1/marketing/experiment-outcomes — measured campaign LIFT (docs/60 Phase 3 pull-back).
+
+        The ERP splits an activated segment into a treatment arm and a randomised holdout control, then
+        measures the incremental revenue the campaign caused. Pulling these realised outcomes lets the next
+        MMM fit use campaign lift as a regressor — the loop's feedback edge. Returns a list of
+        ``{experiment_no, segment, incremental_revenue, lift_pct, treatment_count, control_count,
+        window_days, measured_at}``.
+        """
+        return self._get("/api/v1/marketing/experiment-outcomes", {"limit": limit}).get("outcomes", [])
 
     def close(self) -> None:
         self._session.close()

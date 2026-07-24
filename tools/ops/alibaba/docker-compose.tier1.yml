@@ -1,4 +1,4 @@
-# Invisible ERP V2 — Alibaba Cloud "Tier 1" stack. Same single-host app tier as Tier 0, but Postgres
+# Invisible ERP — Alibaba Cloud "Tier 1" stack. Same single-host app tier as Tier 0, but Postgres
 # is now EXTERNAL (ApsaraDB RDS for PostgreSQL, HA): the `db` container is gone and the api talks to
 # RDS via DATABASE_URL. Migrate Tier 0 → Tier 1 with tools/ops/alibaba/migrate-tier0-to-tier1.sh.
 #

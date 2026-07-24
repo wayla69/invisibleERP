@@ -17,7 +17,7 @@ import { resolve, join } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import * as s from '../../../apps/api/dist/database/schema/index';
 import { AppModule } from '../../../apps/api/dist/app.module';
-import { DRIZZLE, tenantAwareProxy } from '../../../apps/api/dist/database/database.module';
+import { DRIZZLE, tenantAwareProxy , runGlobalDb} from '../../../apps/api/dist/database/database.module';
 import { AllExceptionsFilter } from '../../../apps/api/dist/common/all-exceptions.filter';
 import { PasswordService } from '../../../apps/api/dist/modules/auth/password.service';
 import { LedgerService } from '../../../apps/api/dist/modules/ledger/ledger.service';
@@ -83,12 +83,15 @@ async function main() {
   // 1c. Seed an open AR invoice (via finance sync)
   // Use LedgerService post directly via service (bypass HTTP)
   const biSvc = app.get(BiService);
+  // These BI reads/writes are tenant-scoped in-tx methods (prod calls them via HTTP/scheduler tx); the
+  // harness pokes them directly, so declare the base-pool access for STRICT_TENANT_PROXY=1.
+  const g = <T>(fn: () => Promise<T>): Promise<T> => runGlobalDb('bi:direct', fn);
   const agentSvc = app.get(AgentService);
   const adminUser = { username: 'admin', role: 'Admin', tenantId: hq, permissions: ['exec','crm','masterdata'] } as any;
   const mgrUser  = { username: 'mgr1',  role: 'Sales', tenantId: t1,  permissions: ['exec','crm'] } as any;
 
   // ── 1. kpiBoard returns expected fields ──
-  const kpi = await biSvc.kpiBoard(mgrUser);
+  const kpi = await g(() => biSvc.kpiBoard(mgrUser));
   ok('kpiBoard has sales/receivables/payables/pipeline fields',
     'sales' in kpi && 'receivables' in kpi && 'payables' in kpi && 'pipeline' in kpi,
     JSON.stringify(kpi));
@@ -104,7 +107,7 @@ async function main() {
   ok('kpiBoard pipeline open_value = 100000', near(kpi.pipeline.open_value, 100000), `value=${kpi.pipeline.open_value}`);
 
   // ── 5. salesCube returns period_type + rows + totals ──
-  const cube = await biSvc.salesCube({ period: 'month', months: 1 }, mgrUser);
+  const cube = await g(() => biSvc.salesCube({ period: 'month', months: 1 }, mgrUser));
   ok('salesCube returns period_type=month + rows array + totals',
     cube.period_type === 'month' && Array.isArray(cube.rows) && 'totals' in cube,
     JSON.stringify({ period_type: cube.period_type, rows: cube.rows.length }));
@@ -113,12 +116,12 @@ async function main() {
   ok('salesCube totals.total_orders is a number ≥ 0', typeof cube.totals.total_orders === 'number' && cube.totals.total_orders >= 0, `orders=${cube.totals.total_orders}`);
 
   // ── 7. financeTrend returns months + trend array ──
-  const ft = await biSvc.financeTrend({ months: 3 }, mgrUser);
+  const ft = await g(() => biSvc.financeTrend({ months: 3 }, mgrUser));
   const ftConsistent = ft.trend.every((r: any) => Math.abs(r.gross_profit - (r.revenue - r.expense)) < 0.01 && typeof r.revenue === 'number' && typeof r.expense === 'number');
   ok('financeTrend returns months=3 + trend array (JOIN+CASE aggregation: gross_profit = revenue − expense)', ft.months === 3 && Array.isArray(ft.trend) && ftConsistent, JSON.stringify({ months: ft.months, rows: ft.trend.length, consistent: ftConsistent }));
 
   // ── 8. pipelineTrend returns months + trend array ──
-  const pt = await biSvc.pipelineTrend({ months: 3 }, mgrUser);
+  const pt = await g(() => biSvc.pipelineTrend({ months: 3 }, mgrUser));
   ok('pipelineTrend returns months=3 + trend array', pt.months === 3 && Array.isArray(pt.trend), JSON.stringify({ months: pt.months, rows: pt.trend.length }));
 
   // ── 9. pipelineTrend current month has open_count ≥ 1 ──
@@ -127,7 +130,7 @@ async function main() {
   ok('pipelineTrend current month has open_count ≥ 1', !!(thisMonthRow && thisMonthRow.open >= 1), `row=${JSON.stringify(thisMonthRow)}`);
 
   // ── 10. refreshSnapshot writes a row and returns it ──
-  const snap = await biSvc.refreshSnapshot({}, mgrUser);
+  const snap = await g(() => biSvc.refreshSnapshot({}, mgrUser));
   ok('refreshSnapshot returns date + snapshot', !!snap.date && !!snap.snapshot, JSON.stringify(snap));
 
   // ── 10b. streaming analytics (docs/22 Phase B): refreshSnapshot published a live kpi_refresh event ──
@@ -144,19 +147,19 @@ async function main() {
     !(t1AfterNull.events ?? []).some((e: any) => e.type === 'platform_notice_l7'), `t1_has_notice=${(t1AfterNull.events ?? []).some((e: any) => e.type === 'platform_notice_l7')}`);
 
   // ── 11. getSnapshots retrieves the refreshed row ──
-  const snaps = await biSvc.getSnapshots({ days: 1 }, mgrUser);
+  const snaps = await g(() => biSvc.getSnapshots({ days: 1 }, mgrUser));
   ok('getSnapshots count ≥ 1 after refresh', snaps.count >= 1, `count=${snaps.count}`);
   ok('getSnapshots pipeline_value matches kpiBoard', near(snaps.snapshots[0]?.pipeline_value, 100000), `val=${snaps.snapshots[0]?.pipeline_value}`);
 
   // ── 12. Report subscription CRUD ──
-  const sub = await biSvc.createSubscription({ name: 'Weekly KPI', report_type: 'kpi_board', frequency: 'weekly', recipients: [{ email: 'cfo@example.com' }] }, mgrUser);
+  const sub = await g(() => biSvc.createSubscription({ name: 'Weekly KPI', report_type: 'kpi_board', frequency: 'weekly', recipients: [{ email: 'cfo@example.com' }] }, mgrUser));
   ok('createSubscription → has id, name, next_run_at', !!sub.id && sub.name === 'Weekly KPI' && !!sub.next_run_at, JSON.stringify(sub));
 
-  const subs = await biSvc.listSubscriptions(mgrUser);
+  const subs = await g(() => biSvc.listSubscriptions(mgrUser));
   ok('listSubscriptions → 1 active subscription', subs.count === 1, `count=${subs.count}`);
 
-  await biSvc.deleteSubscription(sub.id, mgrUser);
-  const subsAfter = await biSvc.listSubscriptions(mgrUser);
+  await g(() => biSvc.deleteSubscription(sub.id, mgrUser));
+  const subsAfter = await g(() => biSvc.listSubscriptions(mgrUser));
   ok('deleteSubscription soft-deletes → 0 active', subsAfter.count === 0, `count=${subsAfter.count}`);
 
   // ── 13. AI tool: get_kpi_board wired correctly ──
@@ -164,7 +167,7 @@ async function main() {
   ok('AI tool get_kpi_board returns kpiBoard data', 'sales' in toolKpi && 'pipeline' in toolKpi, JSON.stringify({ keys: Object.keys(toolKpi) }));
 
   // ── 14. AI tool: get_pipeline_forecast wired correctly ──
-  const toolFc = await (agentSvc as any).exec('get_pipeline_forecast', {}, mgrUser);
+  const toolFc = await g(() => (agentSvc as any).exec('get_pipeline_forecast', {}, mgrUser));
   ok('AI tool get_pipeline_forecast returns by_stage + total_pipeline', 'by_stage' in toolFc && 'total_pipeline' in toolFc, JSON.stringify({ keys: Object.keys(toolFc) }));
 
   // ── 15. BI HTTP endpoints accessible ──

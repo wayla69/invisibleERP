@@ -18,6 +18,13 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@ierp/shared'],
+  // The tsconfig alias points @ierp/shared at its TS SOURCE (so web never sees a stale dist), but that
+  // source uses nodenext-style `./x.js` specifiers — map them back to `.ts` for webpack, exactly like tsc
+  // does. Without this, the first real @ierp/shared import fails `Module not found: './entitlements.js'`.
+  webpack: (config) => {
+    config.resolve.extensionAlias = { '.js': ['.js', '.ts'], '.mjs': ['.mjs', '.mts'] };
+    return config;
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

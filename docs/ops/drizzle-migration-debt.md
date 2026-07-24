@@ -91,6 +91,25 @@ June-30 build.
   When you renumber a migration after merging `main`, also make sure its `when` is **greater than the
   current journal maximum** — renumbering the filename alone is not enough.
 
+## 3ter. Snapshot resync #2 (2026-07-16) — the §3 drift recurred, same fix applied
+
+The baseline froze again: after `0129_baseline_resync` essentially every migration (`0130`–`0417`, ~288 of
+them) was hand-written, so `db:generate` was back to diffing against a stale snapshot and emitting a giant
+catch-up. The §3/§4 procedure was repeated verbatim: `drizzle-kit generate` → keep the new snapshot
+(`meta/0418_snapshot.json`) + journal entry → **neutralise the catch-up to a no-op**
+(`0418_baseline_resync_2.sql` = `SELECT 1;`) → second `generate` confirms **"No schema changes"**.
+Verified: `new-migration.mjs` analyzer (journal consistent, next = 0419/idx 393), `migration-parity`
+(filename-order ≡ journal-order, 7,274 columns / 1,672 indexes identical), `migration-tooling` 11/11.
+
+**Two gotchas the tool itself introduced — fix BOTH whenever `db:generate` is used here:**
+1. **Numbering:** generate names the file from the journal **entry count** (392 entries → `0392_*`), not the
+   next free filename number — it collided with the existing `0392_crm_sequences.sql`. Rename to the next
+   free number (per §1) and fix the journal `tag` to match.
+2. **`when`:** generate stamps a **real epoch-ms** `when` (~1.78e12), which is *lower* than this journal's
+   long-standing fake monotonic scheme (~2.02e12) — i.e. a brand-new entry is born **non-monotonic** (§3bis
+   silent-skip class; the CI gate rejects it). Rewrite the generated entry's `when` to current max + 1.
+   `db:new` (the scaffolder) already does this correctly — the caveat applies only to raw `db:generate`.
+
 ## 4. Adding migrations going forward
 
 - Use `db:generate` to draft, **or** hand-write — either way assign the **next free number** and ensure the
@@ -101,6 +120,14 @@ June-30 build.
   baseline alone for hand-written no-DDL-snapshot changes (it stays valid).
 - If the snapshot drifts again, repeat the §3 fix: `generate` → keep the new snapshot + journal entry →
   neutralise the catch-up `.sql` to a no-op → confirm a second `generate` is empty + harnesses green.
+- **Known benign staleness — `0284_annual_billing.sql` backfill (audited 2026-07-21):** the migration
+  backfills `plans.price_yearly`/`prices` with values that predate later `PLAN_SEED` repricing (starter
+  yr 19,000 / USD 55 vs the current 29,000 / USD 85). Harmless in every running deployment because
+  `seedPlans()` upserts **all** price columns (`priceMonthly`, `priceYearly`, `prices`, `features`) at
+  every API boot, overwriting the stale values before any request is served — but a fresh DB that runs
+  migrations *without* booting the API (e.g. an offline restore probe) will briefly show 0284's numbers.
+  Do not "fix" the historical migration (mantra: journaled history is immutable); the seed is the price
+  source of truth.
 
 ---
 
@@ -112,4 +139,5 @@ June-30 build.
 | 2026-06-25 | v1.1 | Platform / DB | **Snapshot drift resolved**: regenerated the baseline (`0129_baseline_resync`, snapshot-only, catch-up neutralised to a no-op). `db:generate` now yields a minimal diff again; zero runtime/prod effect (snapshots are generate-only). Verified by the `migrations-journaled` gate + `tenant-isolation`/`e2e` harnesses. §3/§4 rewritten; orphan-journaling + dup-number grandfathering left as low-priority follow-ups. |
 | 2026-07-02 | v1.2 | Platform / DB | **docs/27 R5-1:** the 'orphans' were found journaled all along (idx 102/103) — stale dead-code `GRANDFATHERED` list removed (now empty); dup-number grandfathering made a recorded decision (cannot renumber applied migrations); new `migration-parity` CI harness proves filename-order ≡ journal-order schema. |
 | 2026-07-03 | v1.3 | Platform / DB | **§3bis — non-monotonic `when` silent-skip (prod deploy outage):** 0145/0146 (`when` ≤ 0144's) were never applied in prod; 0218's tenant-index on the missing `tip_distribution_lines` failed every deploy since 2026-07-02. Fix: 0218 now idempotently re-creates the 0145/0146 objects (PGlite-verified on prod-like + fresh paths); `migrations-journaled` gate extended to fail on any new non-monotonic `when` (0145/0146 grandfathered). |
+| 2026-07-16 | v1.5 | Platform / DB | **§3ter — snapshot resync #2:** the §3 drift recurred (0130–0417 hand-written; baseline stuck at 0129). Repeated the documented fix: `0418_baseline_resync_2` (no-op SQL + fresh `0418_snapshot.json`); second `generate` = "No schema changes". Recorded two raw-`db:generate` gotchas found doing it: it numbers from journal-entry COUNT (collides with the real next free filename number) and stamps a real-epoch `when` that is NON-monotonic vs this journal's fake scheme — both must be hand-fixed (or use `db:new`). Verified: analyzer, `migration-parity` (7,274 cols/1,672 idx identical), `migration-tooling` 11/11. |
 | 2026-07-07 | v1.4 | Platform / DB | **Wave 2 · 2.3 — pre-emptive migration scaffolder.** The `migrations-journaled` gate catches collisions *after* the fact; `tools/ci/new-migration.mjs` prevents them *before*: it computes the correct next number / journal `idx` / monotonic `when` from the live tree and (with `--create <slug>`, wired as `pnpm --filter @ierp/api db:new <slug>`) scaffolds the `.sql` stub **and** the journal entry together so they can't drift. Pure `analyzeMigrations()` also detects dup number/idx/tag + orphan sql↔journal (honouring the grandfathered dup-numbers). ToE: `cutover/migration-tooling` (11/11). |

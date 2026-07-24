@@ -1,7 +1,7 @@
 # 12 — Outclass-the-Market Customization Roadmap (Platform Phase 10+)
 
 > **Date:** 2026-06-24 · **Status:** DRAFT v0.1 · **Owner:** Platform / Product
-> **Scope:** Define the customization & differentiation roadmap that takes Invisible ERP V2 from
+> **Scope:** Define the customization & differentiation roadmap that takes Invisible ERP from
 > *feature-complete* to *market-winning*, building on the delivered world-class foundations
 > (`09-worldclass-roadmap.md`, `11-next-upgrade-realworld-roadmap.md`) and the shipped Platform
 > Customization track (`process-narratives/27-platform-customization.md`, Phases 1–9).

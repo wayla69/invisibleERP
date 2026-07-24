@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity, AlertTriangle, ArrowUpCircle, BadgeCheck, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, PauseCircle, Pause, Play, Plus, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowUpCircle, BadgeCheck, Bell, Building2, CheckCheck, CircleDollarSign, Clock, Database, Download, Eye, Package, PauseCircle, Pause, Play, Plus, Puzzle, Server, ShieldCheck, Sparkles, Ticket, Trash2, TrendingUp, UserPlus, Users } from 'lucide-react';
+// Entitlement vocabulary from the shared package — the SAME maps the API's plan guard and provisioning
+// use (single source of truth; the plan CATALOG itself renders from GET /api/billing/plans, the DB truth).
+// First real @ierp/shared import in web — the workspace dep + transpilePackages were already wired.
+import { ADDON_GRANTS, ADDON_KEYS, ADDONS, SUITE_LABELS, resolveEntitledSuites, type SuiteKey } from '@ierp/shared';
 
 import { api, apiDownload, setActingTenant } from '@/lib/api';
 import { INTERNAL_NAV } from '@/lib/nav';
@@ -54,6 +58,18 @@ interface Company {
   setup_complete?: boolean;
   tags?: string[];
   control_profile?: 'enterprise' | 'sme'; // docs/49 — SME single-user edition
+  addons?: string[] | null; // 0451 — purchased à-la-carte add-on suite keys
+}
+
+// One row of GET /api/billing/plans — the DB-authoritative plan catalogue (features.suites is the
+// boot-backfilled copy of PLAN_SUITES; a hand-edited plan row overrides the code map, so render THIS).
+interface PlanRow {
+  code: string;
+  name: string;
+  price_monthly: string | number | null;
+  price_yearly?: string | number | null;
+  currency?: string | null;
+  features?: { suites?: string[]; users?: number; locations?: number; custom?: boolean } & Record<string, unknown>;
 }
 
 interface SignupRequest {
@@ -64,9 +80,19 @@ interface SignupRequest {
   email: string | null;
   status: string;
   requested_at: string | null;
+  // Pack selection carried from the public /plans configurator (0451) — approve provisions this plan.
+  requested_plan?: string | null;
+  requested_interval?: string | null;
+  requested_addons?: string[];
 }
 
-const INDUSTRIES = ['restaurant', 'retail', 'distribution', 'services', 'manufacturing'];
+// Mirrors INDUSTRY_KEYS in apps/api/src/modules/ledger/coa-templates.ts (the CoA-template packs the platform
+// owner can provision a company with). 'general' = full canonical chart.
+const INDUSTRIES = [
+  'restaurant', 'retail', 'distribution', 'services', 'manufacturing', 'construction', 'ecommerce',
+  'hospitality', 'healthcare', 'professional', 'agriculture', 'automotive', 'logistics', 'education',
+  'nonprofit', 'realestate', 'general',
+];
 
 function statusBadge(s: string | null, t: (key: string, vars?: Record<string, string | number>) => string) {
   const variant =
@@ -89,16 +115,240 @@ function statusBadge(s: string | null, t: (key: string, vars?: Record<string, st
   return <Badge variant={variant as 'default' | 'secondary' | 'destructive' | 'outline'}>{label}</Badge>;
 }
 
+// ── Plans & modules review (god) ─────────────────────────────────────────────
+// Add-on suites render amber to stand apart from a plan's base modules at a glance.
+const ADDON_SUITE_SET = new Set<string>(ADDON_KEYS);
+const suiteLabel = (s: string, lang: string): string =>
+  (SUITE_LABELS as Record<string, { en: string; th: string }>)[s]?.[lang === 'th' ? 'th' : 'en'] ?? s;
+
+function SuiteChips({ suites, max }: { suites: readonly string[]; max?: number }) {
+  const { lang } = useLang();
+  const shown = max != null ? suites.slice(0, max) : suites;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {shown.map((s) => (
+        <Badge
+          key={s}
+          variant="outline"
+          className={cn(
+            'px-1.5 py-0 text-[10px] font-normal',
+            ADDON_SUITE_SET.has(s) && 'border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+          )}
+        >
+          {suiteLabel(s, lang)}
+        </Badge>
+      ))}
+      {max != null && suites.length > max && (
+        <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-muted-foreground">+{suites.length - max}</Badge>
+      )}
+    </div>
+  );
+}
+
+// The per-plan module matrix — what each sellable pack actually contains, straight from the plan rows the
+// provisioning/approve flow assigns (custom-priced plans sort last; the marketing page mirrors this data).
+function PlansTab() {
+  const { t } = useLang();
+  const plans = useQuery<{ plans: PlanRow[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
+  const rows = [...(plans.data?.plans ?? [])].sort((a, b) => {
+    const ca = a.features?.custom ? 1 : 0;
+    const cb = b.features?.custom ? 1 : 0;
+    return ca - cb || Number(a.price_monthly ?? 0) - Number(b.price_monthly ?? 0);
+  });
+  const cap = (n: number | undefined) => (n == null ? '—' : n === -1 ? t('plt.plans_unlimited') : num(n));
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">{t('plt.plans_sub')}</p>
+      <StateView q={plans}>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {rows.map((p) => {
+            const suites = p.features?.suites ?? [];
+            const includedAddons = ADDON_KEYS.filter((k) => ADDON_GRANTS[k].every((s) => suites.includes(s)));
+            return (
+              <Card key={p.code} className="gap-3 p-4" data-testid={`plan-card-${p.code}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="grid leading-tight">
+                    <span className="flex items-center gap-1.5 font-semibold"><Package className="size-4 text-muted-foreground" /> {p.name}</span>
+                    <span className="text-xs text-muted-foreground">{p.code}</span>
+                  </div>
+                  <div className="grid text-right leading-tight">
+                    <span className="font-semibold">
+                      {p.features?.custom ? t('plt.plans_custom_price') : `${baht(Number(p.price_monthly ?? 0))}${t('plt.plans_per_month')}`}
+                    </span>
+                    {!p.features?.custom && p.price_yearly != null && (
+                      <span className="text-xs text-muted-foreground">{baht(Number(p.price_yearly))}{t('plt.plans_per_year')}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t('plt.plans_seats_locations', { users: cap(p.features?.users), locations: cap(p.features?.locations) })}
+                </div>
+                <div className="grid gap-1">
+                  <div className="text-xs font-medium">{t('plt.plans_modules_count', { n: suites.length })}</div>
+                  <SuiteChips suites={suites} />
+                </div>
+                <div className="grid gap-1 border-t pt-2">
+                  <div className="flex items-center gap-1 text-xs font-medium"><Puzzle className="size-3.5 text-amber-600 dark:text-amber-400" /> {t('plt.plans_included_addons')}</div>
+                  {includedAddons.length > 0 ? (
+                    <SuiteChips suites={includedAddons} />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{t('plt.plans_addons_purchasable')}</span>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </StateView>
+      <EntitlementObservationsPanel />
+    </div>
+  );
+}
+
+// Wave B — enforcement-rollout triage: the per-tenant rollup of PlanGuard observations (shadow = would
+// block / enforce = did block). A company must read clean here before it goes into the
+// ENTITLEMENTS_ENFORCE_TENANTS cohort.
+const OBS_DAYS = 30;
+function EntitlementObservationsPanel() {
+  const { t } = useLang();
+  const obs = useQuery<{ observations: unknown[]; summary: { tenant_id: number; tenant: string | null; total: number; codes: string[]; modes: string[]; last_at: string | null }[] }>({
+    queryKey: ['entitlement-observations', OBS_DAYS],
+    queryFn: () => api(`/api/admin/entitlement-observations?days=${OBS_DAYS}`),
+  });
+  const summary = obs.data?.summary ?? [];
+  const cols: Column<(typeof summary)[number]>[] = [
+    { key: 'tenant', label: t('plt.obs_col_company'), render: (r) => <span className="font-medium">{r.tenant ?? `#${r.tenant_id}`}</span> },
+    { key: 'total', label: t('plt.obs_col_total'), render: (r) => num(r.total), align: 'right' },
+    {
+      key: 'codes', label: t('plt.obs_col_codes'),
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.codes.map((c) => <Badge key={c} variant="outline" className="px-1.5 py-0 text-[10px] font-normal">{c}</Badge>)}
+        </div>
+      ),
+    },
+    {
+      key: 'modes', label: t('plt.obs_col_modes'),
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.modes.map((m) => (
+            <Badge key={m} variant="outline" className={cn('px-1.5 py-0 text-[10px] font-normal', m === 'enforce' && 'border-red-400/60 bg-red-500/10 text-red-700 dark:text-red-300')}>{m}</Badge>
+          ))}
+        </div>
+      ),
+    },
+    { key: 'last_at', label: t('plt.obs_col_last'), render: (r) => (r.last_at ? thaiDate(r.last_at) : '—') },
+  ];
+  return (
+    <Card className="gap-3 p-4" data-testid="entitlement-observations">
+      <div className="grid gap-1 leading-tight">
+        <span className="flex items-center gap-1.5 font-semibold"><ShieldCheck className="size-4 text-muted-foreground" /> {t('plt.obs_title')}</span>
+        <span className="text-xs text-muted-foreground">{t('plt.obs_sub')}</span>
+      </div>
+      <StateView q={obs}>
+        {summary.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t('plt.obs_empty', { days: OBS_DAYS })}</p>
+        ) : (
+          <DataTable columns={cols} rows={summary} rowKey={(r) => String(r.tenant_id)} />
+        )}
+      </StateView>
+    </Card>
+  );
+}
+
+// Wave C — the bank-transfer/PromptPay slip verify queue: a tenant files a claim on /billing; the money
+// becomes real only here — อนุมัติ checks the transfer against the real bank statement, issues the A4
+// receipt, and re-activates the subscription; ปฏิเสธ emails the reason back to the company.
+function PaymentClaimsTab() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const [status, setStatus] = useState('Pending');
+  const claims = useQuery<{ claims: any[] }>({
+    queryKey: ['payment-claims-admin', status],
+    queryFn: () => api(`/api/admin/payment-claims${status ? `?status=${status}` : ''}`),
+  });
+  const [rejecting, setRejecting] = useState<any | null>(null);
+  const [reason, setReason] = useState('');
+  const refresh = () => qc.invalidateQueries({ queryKey: ['payment-claims-admin'] });
+  const approve = useMutation({
+    mutationFn: (id: number) => api(`/api/admin/payment-claims/${id}/approve`, { method: 'POST' }),
+    onSuccess: (d: any) => { notifySuccess(t('plt.pay_approved', { receipt: d.receipt_no ?? '' })); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const reject = useMutation({
+    mutationFn: (args: { id: number; reason: string }) => api(`/api/admin/payment-claims/${args.id}/reject`, { method: 'POST', body: JSON.stringify({ reason: args.reason || undefined }) }),
+    onSuccess: () => { notifySuccess(t('plt.pay_rejected')); setRejecting(null); setReason(''); refresh(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  const cols: Column<any>[] = [
+    { key: 'created_at', label: t('st.bill.col_date'), render: (r) => thaiDate(r.created_at) },
+    { key: 'tenant', label: t('plt.obs_col_company'), render: (r) => <span className="font-medium">{r.tenant ?? `#${r.tenant_id}`}</span> },
+    { key: 'amount', label: t('plt.pay_col_amount'), align: 'right', render: (r) => <span className="tabular-nums">{baht(r.amount)}</span> },
+    { key: 'period', label: t('st.bill.col_period'), render: (r) => r.period ?? '—' },
+    { key: 'slip_ref', label: t('st.bill.pay_slip_ref'), className: 'tabular-nums' },
+    { key: 'note', label: t('plt.pay_col_note'), render: (r) => r.note ?? '—' },
+    {
+      key: 'actions', label: '', align: 'right',
+      render: (r) => r.status === 'Pending' ? (
+        <span className="flex justify-end gap-1.5">
+          <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate(r.id)}>{t('plt.pay_approve')}</Button>
+          <Button size="sm" variant="outline" onClick={() => { setRejecting(r); setReason(''); }}>{t('plt.pay_reject')}</Button>
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          {r.status}{r.receipt_no ? ` · ${r.receipt_no}` : ''}{r.decided_by ? ` · ${r.decided_by}` : ''}
+        </span>
+      ),
+    },
+  ];
+  return (
+    <div className="space-y-3" data-testid="payment-claims">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm text-muted-foreground">{t('plt.pay_sub')}</p>
+        <div className="ml-auto inline-flex rounded-lg border p-0.5 text-xs">
+          {(['Pending', 'Approved', 'Rejected', ''] as const).map((s) => (
+            <button key={s || 'all'} type="button" className={cn('rounded-md px-3 py-1 font-medium', status === s && 'bg-primary text-primary-foreground')} onClick={() => setStatus(s)}>
+              {s === 'Pending' ? t('st.bill.pay_status_pending') : s === 'Approved' ? t('st.bill.pay_status_approved') : s === 'Rejected' ? t('st.bill.pay_status_rejected') : t('plt.pay_filter_all')}
+            </button>
+          ))}
+        </div>
+      </div>
+      <StateView q={claims}>
+        <DataTable columns={cols} rows={claims.data?.claims ?? []} rowKey={(r) => String(r.id)} emptyText={t('plt.pay_empty')} />
+      </StateView>
+      <Dialog open={rejecting != null} onOpenChange={(o) => { if (!o) setRejecting(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('plt.pay_reject_title')}</DialogTitle>
+            <DialogDescription>{rejecting ? `${rejecting.tenant ?? `#${rejecting.tenant_id}`} · ${baht(rejecting.amount)} · ${rejecting.slip_ref}` : ''}</DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="min-h-20 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+            maxLength={500}
+            placeholder={t('plt.pay_reject_ph')}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejecting(null)}>{t('common.cancel')}</Button>
+            <Button variant="destructive" disabled={reject.isPending} onClick={() => rejecting && reject.mutate({ id: rejecting.id, reason: reason.trim() })}>{t('plt.pay_reject')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // Slide-over with the full picture of one company (drill-down without fully switching into it) + the
 // platform subscription controls (change plan / extend trial). Lives in this already-'use client' island.
 function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose: () => void; onChanged: () => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const detail = useQuery<any>({
     queryKey: ['tenant-detail', id],
     queryFn: () => api(`/api/admin/tenants/${id}`),
     enabled: id != null,
   });
-  const plans = useQuery<{ plans: { code: string; name: string }[] }>({
+  const plans = useQuery<{ plans: PlanRow[] }>({
     queryKey: ['plans'],
     queryFn: () => api('/api/billing/plans'),
     enabled: id != null,
@@ -118,6 +368,9 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
     setSmeHiddenGroups(detail.data?.sme_prefs?.hidden_nav_groups ?? []);
   }, [detail.data]);
   useEffect(() => { setResetConfirm(''); setDeleteConfirm(''); setPurgeConfirm(''); }, [id]);
+  // 0451 — this company's purchased add-on SKUs (checkbox state seeded from the subscription row).
+  const [addonSel, setAddonSel] = useState<string[]>([]);
+  useEffect(() => { setAddonSel(detail.data?.subscription?.addons ?? []); }, [detail.data]);
 
   const saveTags = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean) }) }),
@@ -133,6 +386,13 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
   const extendTrial = useMutation({
     mutationFn: () => api(`/api/admin/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: Number(days) || 14 }) }),
     onSuccess: () => { notifySuccess(t('plt.drawer_trial_extended')); detail.refetch(); onChanged(); },
+    onError: (e: any) => notifyError(e.message),
+  });
+  // 0451 — set the company's purchased add-ons; entitlement takes effect immediately (resolveEntitledSuites
+  // unions them on top of the plan at request time server-side, no plan-row change).
+  const saveAddons = useMutation({
+    mutationFn: () => api(`/api/admin/tenants/${id}/addons`, { method: 'POST', body: JSON.stringify({ addons: addonSel }) }),
+    onSuccess: () => { notifySuccess(t('plt.drawer_addons_saved')); detail.refetch(); onChanged(); },
     onError: (e: any) => notifyError(e.message),
   });
   // docs/49 H1 — save this company's SME overrides (hidden nav groups + accountant email; the server
@@ -258,6 +518,47 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 </div>
               </div>
 
+              {/* 0451 — purchased add-on SKUs + the effective module set (plan ∪ add-ons) god is reviewing */}
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center gap-1.5 text-xs font-medium">
+                  <Puzzle className="size-3.5 text-amber-600 dark:text-amber-400" /> {t('plt.drawer_addons_title')}
+                </div>
+                <div className="grid gap-1.5">
+                  {ADDON_KEYS.map((k) => {
+                    const planSuites = (plans.data?.plans ?? []).find((p) => p.code === d.subscription?.plan_code)?.features?.suites ?? [];
+                    const inPlan = ADDON_GRANTS[k].every((s) => planSuites.includes(s));
+                    return (
+                      <label key={k} className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm">
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={addonSel.includes(k)}
+                            onChange={(e) => setAddonSel(e.target.checked ? [...addonSel, k] : addonSel.filter((x) => x !== k))}
+                          />
+                          <span className="truncate">{suiteLabel(k, lang)}</span>
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {inPlan ? t('plt.drawer_addon_in_plan') : `${baht(ADDONS[k].priceMonthly)}${t('plt.plans_per_month')}`}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <Button size="sm" variant="outline" onClick={() => saveAddons.mutate()} disabled={saveAddons.isPending}>
+                  {t('plt.drawer_addons_save')}
+                </Button>
+                <div className="grid gap-1 border-t pt-2" data-testid="effective-modules">
+                  <div className="text-xs font-medium">{t('plt.drawer_modules_title')}</div>
+                  <SuiteChips
+                    suites={resolveEntitledSuites(
+                      d.subscription?.plan_code,
+                      (plans.data?.plans ?? []).find((p) => p.code === d.subscription?.plan_code)?.features?.suites,
+                      addonSel,
+                    ) as SuiteKey[]}
+                  />
+                </div>
+              </div>
+
               {/* docs/49 H1 — per-tenant SME settings (only for an 'sme' control profile). This company's
                   own copy of the SME prefs, editable after provisioning; the SME-01 review subscription
                   follows the accountant email automatically on the server. */}
@@ -309,6 +610,11 @@ function CompanyDrawer({ id, onClose, onChanged }: { id: number | null; onClose:
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => { setActingTenant({ id: d.id, name: d.name, code: d.code }); window.location.assign('/admin/users'); }}>
                   <Users className="size-3.5" /> {t('plt.drawer_manage_users')}
+                </Button>
+                {/* D2 — full tenant data export (offboarding / PDPA portability): one JSON of every
+                    tenant-scoped row, straight from the schema (auto-discovered tables). */}
+                <Button size="sm" variant="ghost" onClick={() => apiDownload(`/api/admin/tenants/${d.id}/export`, `tenant-${d.id}-export.json`).catch((e) => notifyError((e as Error).message))}>
+                  <Download className="size-3.5" /> {t('plt.drawer_export')}
                 </Button>
               </div>
 
@@ -376,8 +682,10 @@ export default function PlatformConsole({
   initialCompanies?: Company[];
   initialRequests?: SignupRequest[];
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const qc = useQueryClient();
+  // Plan catalogue (DB truth) — backs the onboarding module preview; shares the drawer/PlansTab cache key.
+  const planCatalog = useQuery<{ plans: PlanRow[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
   // Show-deleted toggle (migration 0386 soft-delete) — off by default so the fleet list matches the
   // pre-delete behaviour; flipping it refetches with deleted companies included, for restoreTenant.
   const [showDeleted, setShowDeleted] = useState(false);
@@ -452,7 +760,11 @@ export default function PlatformConsole({
     onError: (e: any) => notifyError(e.message),
   });
   const forcePurge = useMutation({
-    mutationFn: () => api<{ items_deleted: number; ref_rows_deleted: number }>('/api/admin/item-maintenance/force-purge', { method: 'POST', body: JSON.stringify({ confirm: 'FORCE-PURGE-ITEMS' }) }),
+    // `expected_ref_rows` echoes the blast radius this operator just saw. The server recomputes it and
+    // refuses (409 BLAST_RADIUS_MISMATCH) if it differs — so the preview is enforced, not merely advised,
+    // and a catalogue that changed since the preview cannot be destroyed on stale numbers. The button is
+    // only reachable once `forcePreview` is set, so the non-null assertion holds.
+    mutationFn: () => api<{ items_deleted: number; ref_rows_deleted: number }>('/api/admin/item-maintenance/force-purge', { method: 'POST', body: JSON.stringify({ confirm: 'FORCE-PURGE-ITEMS', expected_ref_rows: forcePreview?.total_ref_rows ?? -1 }) }),
     onSuccess: (r) => { notifySuccess(t('plt.mnt_force_done', { n: r.items_deleted, rows: r.ref_rows_deleted })); setForcePreview(null); setUnusedPreview(null); },
     onError: (e: any) => notifyError(e.message),
   });
@@ -626,7 +938,14 @@ export default function PlatformConsole({
         ? <Badge variant="secondary" className="bg-sky-500/15 text-sky-700 dark:text-sky-300">SME</Badge>
         : <Badge variant="outline">Enterprise</Badge>
     ) },
-    { key: 'plan_code', label: t('plt.col_plan'), render: (c) => c.plan_code ?? '—' },
+    { key: 'plan_code', label: t('plt.col_plan'), render: (c) => (
+      <div className="grid leading-tight">
+        <span>{c.plan_code ?? '—'}</span>
+        {(c.addons?.length ?? 0) > 0 && (
+          <span className="text-[10px] text-amber-700 dark:text-amber-300">{t('plt.col_addons_n', { n: c.addons!.length })}</span>
+        )}
+      </div>
+    ) },
     { key: 'users', label: t('plt.col_users'), align: 'right', sortable: true, render: (c) => c.users },
     { key: 'trial_ends_at', label: t('plt.col_trial_until'), render: (c) => (c.trial_ends_at ? thaiDate(c.trial_ends_at) : '—') },
     { key: 'created_at', label: t('plt.col_opened_at'), sortable: true, render: (c) => (c.created_at ? thaiDate(c.created_at) : '—') },
@@ -655,6 +974,19 @@ export default function PlatformConsole({
         <span className="text-xs text-muted-foreground">{r.tenant_code} · {r.admin_username}{r.email ? ` · ${r.email}` : ''}</span>
       </div>
     ) },
+    { key: 'requested_plan', label: t('plt.onb_requested_plan'), render: (r) => (r.requested_plan ? (
+      <div className="grid gap-0.5 leading-tight">
+        <span className="font-medium">{r.requested_plan}{r.requested_interval === 'annual' ? ` · ${t('plt.onb_annual')}` : ''}</span>
+        {(r.requested_addons?.length ?? 0) > 0 && <span className="text-xs text-muted-foreground">+ {r.requested_addons!.map((a) => suiteLabel(a, lang)).join(', ')}</span>}
+        {/* Module preview of the pack approve will provision — from the DB plan row (first 4 + count). */}
+        <SuiteChips
+          suites={[
+            ...((planCatalog.data?.plans ?? []).find((p) => p.code === r.requested_plan)?.features?.suites ?? []),
+          ]}
+          max={4}
+        />
+      </div>
+    ) : <span className="text-muted-foreground">—</span>) },
     { key: 'requested_at', label: t('plt.onb_requested_at'), render: (r) => (r.requested_at ? thaiDate(r.requested_at) : '—') },
     { key: 'actions', label: '', align: 'right', render: (r) => (
       <div className="flex justify-end gap-1">
@@ -677,7 +1009,7 @@ export default function PlatformConsole({
         <div className="grid gap-3">
           <div className="grid gap-1"><Label>{t('plt.prov_company_name')}</Label><Input value={prov.company_name} onChange={(e) => setProv({ ...prov, company_name: e.target.value })} placeholder={t('plt.prov_company_name_ph')} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1"><Label>{t('plt.prov_tenant_code')}</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="OSHINEI" /></div>
+            <div className="grid gap-1"><Label>{t('plt.prov_tenant_code')}</Label><Input value={prov.tenant_code} onChange={(e) => setProv({ ...prov, tenant_code: e.target.value })} placeholder="INVISIBLE" /></div>
             <div className="grid gap-1"><Label>{t('plt.prov_industry')}</Label>
               <Select className="w-auto" value={prov.industry} onChange={(e) => setProv({ ...prov, industry: e.target.value })}>
                 {INDUSTRIES.map((i) => <option key={i} value={i}>{i}</option>)}
@@ -952,6 +1284,15 @@ export default function PlatformConsole({
           {/* Platform health (item 10) — DB pool, cache, queue backlog + dead-letters. */}
           <div>
             <h3 className="mb-2 flex items-center gap-2 text-sm font-medium"><Server className="size-4 text-primary" /> {t('plt.ov_system_health')}</h3>
+            {/* D4 — server-evaluated alert thresholds (PLATFORM_ALERT_* envs): red banner when breached. */}
+            {(jobs.data?.alerts ?? []).length > 0 && (
+              <div className="mb-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm" data-testid="health-alerts">
+                <div className="flex items-center gap-1.5 font-medium text-destructive"><AlertTriangle className="size-4" /> {t('plt.ov_health_alerts')}</div>
+                <ul className="mt-1 list-disc pl-5 text-destructive">
+                  {jobs.data.alerts.map((a: any) => <li key={a.key}>{a.message}</li>)}
+                </ul>
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard label={t('plt.ov_db_pool')} value={`${ops.data ? '' : '—'}${jobs.data?.pool?.saturation_pct ?? 0}%`} icon={Database} tone={(jobs.data?.pool?.saturation_pct ?? 0) > 80 ? 'danger' : 'default'} hint={t('plt.ov_db_pool_hint', { inflight: num(jobs.data?.pool?.in_flight_tx ?? 0), max: num(jobs.data?.pool?.max ?? 0) })} />
               <StatCard label={t('plt.ov_jobs_queued')} value={num(jobs.data?.jobs?.queued ?? 0)} icon={Activity} hint={t('plt.ov_jobs_queued_hint', { running: num(jobs.data?.jobs?.running ?? 0) })} />
@@ -1174,6 +1515,8 @@ export default function PlatformConsole({
         tabs={[
           { key: 'overview', label: t('plt.tab_overview'), content: overviewTab },
           { key: 'companies', label: `${t('plt.tab_companies')} (${companies.data?.length ?? 0})`, content: companiesTab },
+          { key: 'plans', label: t('plt.tab_plans'), content: <PlansTab /> },
+          { key: 'payments', label: t('plt.tab_payments'), content: <PaymentClaimsTab /> },
           { key: 'onboarding', label: pending ? `${t('plt.tab_onboarding')} (${pending})` : t('plt.tab_onboarding'), content: onboardingTab },
           { key: 'notifications', label: (notifs.data?.unread_count ?? 0) > 0 ? `${t('plt.tab_notifications')} (${notifs.data?.unread_count})` : t('plt.tab_notifications'), content: notificationsTab },
           { key: 'activity', label: t('plt.tab_activity'), content: activityTab },

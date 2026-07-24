@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Postgres logical backup for Invisible ERP V2 (Railway / any Postgres).
+# Postgres logical backup for Invisible ERP (Railway / any Postgres).
 # Usage:  DATABASE_URL=postgres://… ./pg-backup.sh [OUT_DIR]
 # Cron:   0 * * * *  DATABASE_URL=… /path/pg-backup.sh /var/backups/ierp >> /var/log/ierp-backup.log 2>&1
 #

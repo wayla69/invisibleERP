@@ -5,7 +5,7 @@
  *
  *   NODE_OPTIONS=--experimental-sqlite pnpm --filter @ierp/cutover compliance
  *
- * Controls covered (see compliance/Oshinei_ERP_SOX_RCM_v1.xlsx):
+ * Controls covered (see compliance/Invisible_ERP_SOX_RCM_v1.xlsx):
  *   GL-05  — Manual journal-entry maker-checker: a manual JE posts as Draft (excluded from balances)
  *            and only a DIFFERENT user may approve it; preparer self-approval is blocked even for Admin.
  *   GL-11  — Chart-of-Accounts change control: canonical (`accounts`, shared universe) writes are a platform
@@ -67,6 +67,7 @@ async function main() {
     { username: 'fincon', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t1 }, // gl_close + approvals (checker)
     { username: 'execu', passwordHash: await pw.hash('pw'), role: 'Sales', tenantId: t1 },              // legacy 'exec' → holds BOTH gl_post and gl_close (residual-risk case maker-checker backstops)
     { username: 'finT2', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t2 },        // tenant-2 finance reader (creditors/ar) — RLS isolation probe
+    { username: 'fsT2', passwordHash: await pw.hash('pw'), role: 'FinancialController', tenantId: t2 }, // tenant-2 fin_report holder — GL-29 RLS isolation probe
     { username: 'apclerk', passwordHash: await pw.hash('pw'), role: 'ApClerk', tenantId: t1 },          // creditors only — AP-PAY maker
     { username: 'apdual', passwordHash: await pw.hash('pw'), role: 'Procurement', tenantId: t1 },       // creditors + approvals — residual self-approval case
     { username: 'payprep', passwordHash: await pw.hash('pw'), role: 'Admin', tenantId: t1 },            // PAY-03 payroll preparer (t1)
@@ -174,6 +175,38 @@ async function main() {
   });
   const adminSelf = await inj('POST', `/api/ledger/journal/${adminJe.json.entry_no}/approve`, admin);
   ok('GL-05: maker-checker binds even Admin (no self-approve override)', adminSelf.status === 403 && adminSelf.json.error?.code === 'SOD_VIOLATION', `${adminSelf.status} ${adminSelf.json.error?.code}`);
+
+  // ════════════════════════ GL-29 — Financial-statement issuance review & approval (maker-checker) ════════════════════════
+  // A preparer submits a fiscal year's statements (snapshot + hash of the key figures); a DIFFERENT user
+  // approves; the formatted FS pack then stamps "reviewed & approved" (vs "unaudited"), and flips to
+  // "re-review required" if the live GL figures later drift from the approved snapshot. Tenant-scoped (RLS).
+  const fsFy = Number(today.slice(0, 4));
+  const fsSubmit = await inj('POST', '/api/reports/fs/statement-pack/submit', glacct, { fiscal_year: fsFy });
+  ok('GL-29: preparer submits the FS pack → PendingApproval with a figures snapshot',
+    fsSubmit.status === 201 && fsSubmit.json.status === 'PendingApproval' && fsSubmit.json.prepared_by === 'glacct' && typeof fsSubmit.json.figures?.total_assets === 'number',
+    `${fsSubmit.status} st=${fsSubmit.json.status} by=${fsSubmit.json.prepared_by}`);
+  const fsrId = fsSubmit.json.id;
+  const fsSelf = await inj('POST', `/api/reports/fs/statement-reviews/${fsrId}/approve`, glacct);
+  ok('GL-29: preparer self-approval blocked → 403 SOD_VIOLATION (maker ≠ checker)',
+    fsSelf.status === 403 && fsSelf.json.error?.code === 'SOD_VIOLATION', `${fsSelf.status} ${fsSelf.json.error?.code}`);
+  const fsAppr = await inj('POST', `/api/reports/fs/statement-reviews/${fsrId}/approve`, fincon);
+  ok('GL-29: a DIFFERENT user approves → Approved (approved_by recorded)',
+    fsAppr.status === 201 && fsAppr.json.status === 'Approved' && fsAppr.json.approved_by === 'fincon', `${fsAppr.status} st=${fsAppr.json.status} by=${fsAppr.json.approved_by}`);
+  const fsReAppr = await inj('POST', `/api/reports/fs/statement-reviews/${fsrId}/approve`, fincon);
+  ok('GL-29: re-approving an approved review → 400 FS_REVIEW_NOT_PENDING', fsReAppr.status === 400 && fsReAppr.json.error?.code === 'FS_REVIEW_NOT_PENDING', `${fsReAppr.status} ${fsReAppr.json.error?.code}`);
+  const packApproved: string = (await inj('GET', `/api/reports/fs/statement-pack.pdf?fiscal_year=${fsFy}`, fincon)).text ?? '';
+  ok('GL-29: the FS pack stamps "reviewed & approved by <checker>" (not "unaudited")',
+    /Reviewed &amp; approved by fincon/.test(packApproved) && !/Unaudited — management accounts/.test(packApproved),
+    `approvedStamp=${/Reviewed &amp; approved by fincon/.test(packApproved)}`);
+  // Tamper: post a further JE into the fiscal year → the approved snapshot no longer matches the live figures.
+  const fsTamperJe = await inj('POST', '/api/ledger/journal', glacct, { date: today, memo: 'post-approval movement', source: 'Manual', lines: [{ account_code: '1000', debit: 555 }, { account_code: '4000', credit: 555 }] });
+  await inj('POST', `/api/ledger/journal/${fsTamperJe.json.entry_no}/approve`, fincon);
+  const packStale: string = (await inj('GET', `/api/reports/fs/statement-pack.pdf?fiscal_year=${fsFy}`, fincon)).text ?? '';
+  ok('GL-29: figures drift after approval → the pack flips to "re-review required" (tamper-evident)',
+    /re-review required/.test(packStale) && !/Reviewed &amp; approved by fincon/.test(packStale), `reReview=${/re-review required/.test(packStale)}`);
+  const fsT2 = await login('fsT2', 'pw');
+  ok('GL-29: statement reviews are tenant-isolated — another tenant sees 0 (RLS)',
+    Array.isArray((await inj('GET', '/api/reports/fs/statement-reviews', fsT2)).json) && (await inj('GET', '/api/reports/fs/statement-reviews', fsT2)).json.length === 0, 'rls');
 
   // ════════════════════════ AP-PAY — AP disbursement maker-checker ════════════════════════
   // A vendor payment must be REQUESTED by a `creditors` holder and APPROVED by a DIFFERENT user with
@@ -471,7 +504,7 @@ async function main() {
   const conflictPerms = ['procurement', 'creditors'];
 
   // 1. Assigning a conflicting permission set is BLOCKED (422 SOD_CONFLICT) and nothing is persisted.
-  const blocked = await inj('POST', '/api/admin/users', admin, { username: 'sod_blocked', password: 'pw1234', role: 'Sales', permissions: conflictPerms });
+  const blocked = await inj('POST', '/api/admin/users', admin, { username: 'sod_blocked', password: 'pw123456', role: 'Sales', permissions: conflictPerms });
   const listAfterBlock = await inj('GET', '/api/admin/users', admin);
   const notCreated = !(listAfterBlock.json.users ?? []).some((u: any) => u.username === 'sod_blocked');
   ok('ITGC-AC-09: conflicting permission set blocked → 422 SOD_CONFLICT, user NOT created',
@@ -483,7 +516,7 @@ async function main() {
 
   // 3. Explicit override WITH a reason is STAGED for two-person approval (audit G11) — it is NOT applied by
   //    the grantor. A DIFFERENT admin must approve the exception before the conflicting grant takes effect.
-  const overridden = await inj('POST', '/api/admin/users', admin, { username: 'sod_override', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true, sod_reason: 'small entity, compensating monthly review by CFO' });
+  const overridden = await inj('POST', '/api/admin/users', admin, { username: 'sod_override', password: 'pw123456', role: 'Sales', permissions: conflictPerms, allow_sod_override: true, sod_reason: 'small entity, compensating monthly review by CFO' });
   const excNo = overridden.json.access_exception_req_no;
   const notYet = !((await inj('GET', '/api/admin/users', admin)).json.users ?? []).some((u: any) => u.username === 'sod_override');
   ok('ITGC-AC-09/G11: justified override is STAGED PendingApproval (grantor cannot self-apply — user NOT created)',
@@ -499,7 +532,7 @@ async function main() {
     excAppr.json.status === 'Approved' && excAppr.json.approved_by === 'whchk' && excAppr.json.requested_by === 'admin' && nowCreated, `st=${excAppr.json.status} by=${excAppr.json.approved_by} created=${nowCreated}`);
 
   // 4. Override WITHOUT a reason is still rejected (reason is mandatory for the audit trail).
-  const noReason = await inj('POST', '/api/admin/users', admin, { username: 'sod_noreason', password: 'pw1234', role: 'Sales', permissions: conflictPerms, allow_sod_override: true });
+  const noReason = await inj('POST', '/api/admin/users', admin, { username: 'sod_noreason', password: 'pw123456', role: 'Sales', permissions: conflictPerms, allow_sod_override: true });
   ok('ITGC-AC-09: override without a reason is still rejected', noReason.status === 422 && noReason.json.error?.code === 'SOD_CONFLICT', `${noReason.status} ${noReason.json.error?.code}`);
 
   // 5. The override's WHO/WHY/WHICH-RULES is persisted as tamper-evident evidence in the hash-chained
@@ -519,7 +552,7 @@ async function main() {
   }
 
   // 6. A clean single-duty set is accepted with no friction.
-  const clean = await inj('POST', '/api/admin/users', admin, { username: 'sod_clean', password: 'pw1234', role: 'Sales', permissions: ['ar'] });
+  const clean = await inj('POST', '/api/admin/users', admin, { username: 'sod_clean', password: 'pw123456', role: 'Sales', permissions: ['ar'] });
   ok('ITGC-AC-09: conflict-free permission set assigned normally', (clean.status === 200 || clean.status === 201), `${clean.status}`);
 
   // 7. The same guard applies on UPDATE, not just create.
@@ -612,14 +645,23 @@ async function main() {
   ok('ITGC-AC-06: privileged user without MFA is flagged must_setup_mfa at login', adminLogin.json.must_setup_mfa === true, JSON.stringify({ setup: adminLogin.json.must_setup_mfa }));
 
   // 2. A non-privileged role (a Cashier — pos_sell only) is NOT required to enrol.
-  await inj('POST', '/api/admin/users', admin, { username: 'cashier1', password: 'pw1234', role: 'Cashier' });
-  const cashierLogin = await inj('POST', '/api/login', undefined, { username: 'cashier1', password: 'pw1234' });
+  await inj('POST', '/api/admin/users', admin, { username: 'cashier1', password: 'pw123456', role: 'Cashier' });
+  const cashierLogin = await inj('POST', '/api/login', undefined, { username: 'cashier1', password: 'pw123456' });
   ok('ITGC-AC-06: non-privileged role not flagged for MFA', cashierLogin.json.must_setup_mfa !== true, JSON.stringify({ setup: cashierLogin.json.must_setup_mfa }));
+
+  // Mint a TOTP with enough of the 30s step remaining that the (in-process) server verify lands in the
+  // SAME step. otplib's default verify window is 0 — a code minted at a step boundary would 401 as
+  // MFA_INVALID, a time-of-day flake that bit CI on the 00:0x-second runs. Harness-only; no product change.
+  const freshTotp = async (s: string): Promise<string> => {
+    const rem = authenticator.timeRemaining();
+    if (rem < 3) await new Promise((r) => setTimeout(r, (rem + 1) * 1000));
+    return authenticator.generate(s);
+  };
 
   // 3. Enrol TOTP for fincon: setup → secret; enable with a valid code activates the factor.
   const setup = await inj('POST', '/api/auth/mfa/setup', fincon);
   const secret = setup.json.secret as string;
-  const enable = await inj('POST', '/api/auth/mfa/enable', fincon, { code: authenticator.generate(secret) });
+  const enable = await inj('POST', '/api/auth/mfa/enable', fincon, { code: await freshTotp(secret) });
   ok('ITGC-AC-06: TOTP enrolment (setup → enable) activates the second factor', !!secret && enable.status === 200 && enable.json.enabled === true, `${enable.status} ${enable.json.enabled}`);
 
   // 4. With MFA enabled, password alone is rejected → 401 MFA_REQUIRED.
@@ -631,7 +673,7 @@ async function main() {
   ok('ITGC-AC-06: MFA-enabled login with a wrong code → 401 MFA_INVALID', badCode.status === 401 && badCode.json.error?.code === 'MFA_INVALID', `${badCode.status} ${badCode.json.error?.code}`);
 
   // 6. Password + a valid TOTP code authenticates (and the enrolled user is no longer flagged for setup).
-  const goodCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw', totp: authenticator.generate(secret) });
+  const goodCode = await inj('POST', '/api/login', undefined, { username: 'fincon', password: 'pw', totp: await freshTotp(secret) });
   ok('ITGC-AC-06: password + valid TOTP authenticates; setup flag cleared', goodCode.status === 200 && !!goodCode.json.token && goodCode.json.must_setup_mfa !== true, `${goodCode.status} setup=${goodCode.json.must_setup_mfa}`);
 
   // ════════════════════ ITGC-AC-10 — audit trail is tamper-evident (append-only) ════════════════════
@@ -656,6 +698,53 @@ async function main() {
   await pg.exec(`ALTER TABLE audit_log ENABLE TRIGGER USER`);
   const v2 = await inj('GET', '/api/admin/audit/verify', admin);
   ok('ITGC-AC-16: a past row altered behind the trigger is DETECTED → ok=false, hash mismatch', v2.json?.ok === false && /hash mismatch/.test(v2.json?.reason ?? ''), JSON.stringify({ ok: v2.json?.ok, at: v2.json?.broken_at, reason: v2.json?.reason }));
+
+  // ── AC-16 COMPLETENESS half (migration 0465) — the chain proves nothing was ALTERED; it cannot prove
+  //    nothing was OMITTED (seq comes from the last WRITTEN row, so a dropped write leaves no gap). The
+  //    expectation ledger, bumped inside each business transaction, makes `written >= expected` checkable. ──
+  // v2 above deliberately broke the chain; restore the tampered row so the completeness assertions read a
+  // clean walk rather than inheriting the injected hash mismatch.
+  await pg.exec(`ALTER TABLE audit_log DISABLE TRIGGER USER`);
+  await pg.query(`UPDATE audit_log SET actor='admin' WHERE actor='tamper'`);
+  await pg.exec(`ALTER TABLE audit_log ENABLE TRIGGER USER`);
+  const vc = await inj('GET', '/api/admin/audit/verify', admin);
+  const expRows = (await pg.query(`SELECT coalesce(sum(expected),0)::int n FROM audit_expectations`)).rows as any[];
+  ok('ITGC-AC-16: the expectation ledger is populated by ordinary mutations (bumped inside the business tx)',
+    Number(expRows[0].n) > 0, `expected_total=${expRows[0].n}`);
+  ok('ITGC-AC-16: completeness reconciles — every committed mutation is accounted for (written >= expected)',
+    vc.json?.ok === true && vc.json?.completeness?.available === true && vc.json?.completeness?.ok === true && (vc.json?.completeness?.shortfalls ?? []).length === 0,
+    JSON.stringify({ ok: vc.json?.ok, c: vc.json?.completeness?.ok, short: vc.json?.completeness?.shortfalls }));
+  // Simulate a LOST audit row: inflate the expectation for one tenant beyond what was written. This is the
+  // failure the hash chain is structurally blind to — a row that was never written leaves no gap to find.
+  const someTenant = ((await pg.query(`SELECT tenant_id FROM audit_expectations ORDER BY expected DESC LIMIT 1`)).rows as any[])[0];
+  const LOST = 100_000; // must exceed the legitimate written-over-expected slack, else no shortfall appears
+  await pg.query(`UPDATE audit_expectations SET expected = expected + ${LOST} WHERE tenant_id = ${someTenant.tenant_id} AND shard = (SELECT shard FROM audit_expectations WHERE tenant_id = ${someTenant.tenant_id} LIMIT 1)`);
+  const vLost = await inj('GET', '/api/admin/audit/verify', admin);
+  const short = (vLost.json?.completeness?.shortfalls ?? [])[0];
+  ok('ITGC-AC-16: a DROPPED audit row is now DETECTED (shortfall reported) — the gap the chain cannot see',
+    vLost.json?.completeness?.ok === false && vLost.json?.ok === false && !!short && short.missing >= 1,
+    JSON.stringify({ c: vLost.json?.completeness?.ok, short }));
+  // The chain walk itself is still intact — the failure is reported as a COMPLETENESS shortfall, not
+  // misattributed to tampering (an auditor must be able to tell "a row was lost" from "a row was edited").
+  ok('ITGC-AC-16: the loss is reported as a completeness shortfall, NOT as a hash/sequence break',
+    vLost.json?.rows_checked > 0 && !vLost.json?.reason,
+    JSON.stringify({ rows: vLost.json?.rows_checked, reason: vLost.json?.reason ?? null }));
+  await pg.query(`UPDATE audit_expectations SET expected = expected - ${LOST} WHERE tenant_id = ${someTenant.tenant_id} AND shard = (SELECT shard FROM audit_expectations WHERE tenant_id = ${someTenant.tenant_id} LIMIT 1)`);
+
+  // ── AC-16 data-EGRESS reads (@AuditRead) — a bulk export leaves the system, so taking one is itself
+  //    evidence. Ordinary reads stay unlogged; a marked export records WHAT left via meta.audit_read. ──
+  const egressBefore = Number(((await pg.query(`SELECT count(*)::int n FROM audit_log WHERE action LIKE 'GET %/audit/export%'`)).rows as any[])[0].n);
+  const auditCsv = await inj('GET', '/api/admin/audit/export', admin);
+  await new Promise((r) => setTimeout(r, 200));
+  const egressRow = ((await pg.query(`SELECT actor, status, meta FROM audit_log WHERE action LIKE 'GET %/audit/export%' ORDER BY id DESC LIMIT 1`)).rows as any[])[0];
+  ok('ITGC-AC-16: exporting the audit trail itself is audited (@AuditRead → meta.audit_read)',
+    auditCsv.status === 200 && egressBefore === 0 && !!egressRow && egressRow.meta?.audit_read === 'audit_log_csv' && egressRow.actor === 'admin',
+    JSON.stringify({ st: auditCsv.status, meta: egressRow?.meta ?? null }));
+  const plainRead = await inj('GET', '/api/admin/audit?limit=5', admin);
+  await new Promise((r) => setTimeout(r, 150));
+  const plainRows = Number(((await pg.query(`SELECT count(*)::int n FROM audit_log WHERE action LIKE 'GET %/admin/audit?%'`)).rows as any[])[0].n);
+  ok('ITGC-AC-16: an ordinary (unmarked) read of the same viewer is still NOT audited — only egress is',
+    plainRead.status === 200 && plainRows === 0, JSON.stringify({ st: plainRead.status, rows: plainRows }));
 
   // ════════════════════ ITGC-AC-14 — field-level before/after change log (financial tables) ════════════════════
   // The DB triggers (0116) capture OLD→NEW row images on the financial tables. The AP-PAY flow above mutated
@@ -890,9 +979,9 @@ async function main() {
     `sched=${sched.json.status} due1=${due1.json.campaigns_sent} due2=${due2.json.campaigns_sent}`);
 
   // ════════ LYL-13 — CRM SoD split (R14–R16): the granular crm_* permissions are enforced ════════
-  const r14Blocked = await inj('POST', '/api/admin/users', admin, { username: 'crm_conflict', password: 'pw1234', role: 'Sales', permissions: ['crm_reward', 'pos_sell'] });   // R14: config reward + redeem at till
+  const r14Blocked = await inj('POST', '/api/admin/users', admin, { username: 'crm_conflict', password: 'pw123456', role: 'Sales', permissions: ['crm_reward', 'pos_sell'] });   // R14: config reward + redeem at till
   const r14Msg = String(r14Blocked.json.error?.message ?? '');
-  const crmClean = await inj('POST', '/api/admin/users', admin, { username: 'crm_rewardmgr', password: 'pw1234', role: 'Sales', permissions: ['crm_reward'] });   // single-duty → clean
+  const crmClean = await inj('POST', '/api/admin/users', admin, { username: 'crm_rewardmgr', password: 'pw123456', role: 'Sales', permissions: ['crm_reward'] });   // single-duty → clean
   ok('LYL-13: CRM SoD split — crm_reward + pos_sell blocked as R14; a single-duty crm_reward role is clean',
     r14Blocked.status === 422 && r14Blocked.json.error?.code === 'SOD_CONFLICT' && r14Msg.includes('R14') && (crmClean.status === 200 || crmClean.status === 201),
     `r14=${r14Blocked.status}/${r14Blocked.json.error?.code} msg~R14=${r14Msg.includes('R14')} clean=${crmClean.status}`);
@@ -1189,6 +1278,13 @@ async function main() {
   ok('GL-27→GL-11: a DIFFERENT Admin approves → account created (D-normal, postable)',
     apprAcct.status === 200 && apprAcct.json.code === '9990' && apprAcct.json.normalBalance === 'D' && apprAcct.json.isPostable === true,
     `${apprAcct.status} ${JSON.stringify(apprAcct.json)}`);
+
+  // 1d-bis. P4 guardrail: the chart keeps ONE level of sub-accounts — a create under a code that is ITSELF
+  // a sub-account (126001 WIP-Earthwork, whose parent is 1260) is refused fail-closed at request time;
+  // deeper analytical detail belongs to a posting dimension (cost centre / project / branch), not a code.
+  const deepSub = await inj('POST', '/api/ledger/accounts', admin, { code: '126099', name: 'WIP earthwork — zone A', type: 'Asset', parentCode: '126001' });
+  ok('P4/GL-27: a sub-account of a sub-account → 400 SUBACCOUNT_TOO_DEEP (use a dimension for deeper detail)',
+    deepSub.status === 400 && deepSub.json.error?.code === 'SUBACCOUNT_TOO_DEEP', `${deepSub.status} ${deepSub.json.error?.code}`);
 
   // 1e. A rejected request leaves the chart untouched.
   const rejReq = await inj('POST', '/api/ledger/accounts', admin, { code: '9993', name: 'to be rejected', type: 'Expense' });

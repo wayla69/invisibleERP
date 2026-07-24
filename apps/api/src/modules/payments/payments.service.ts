@@ -2,14 +2,14 @@ import { Inject, Injectable, Optional, NotFoundException, BadRequestException, C
 import { assertMakerChecker } from '../../common/control-profile';
 import { sql, eq, and, desc } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { payments, paymentRefunds, tillSessions, cashMovements, tenants, refundRequests, xzReports, xzReportDenominations, posTipAdjustments } from '../../database/schema';
-import { createHash } from 'node:crypto';
+import { payments, paymentRefunds, tenants, refundRequests, posTipAdjustments } from '../../database/schema';
+import { TillPolicy } from './till-policy';
 import { DocNumberService } from '../../common/doc-number.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { postingDefault } from '../ledger/posting-events';
 import { n, fx } from '../../database/queries';
 import { round2, roundCurrency } from '../tax/money';
 import type { JwtUser } from '../../common/decorators';
+import { TillSessionService } from './till-session.service';
 import { resolveGateway } from './gateways';
 import { PosAuditService } from '../pos/audit/pos-audit.service';
 import { JournalService } from '../pos/fiscal/journal.service';
@@ -39,6 +39,7 @@ export interface RecordTenderDto {
   method: string;
   amount: number;
   tip?: number;          // tip portion — persisted separately, NOT folded into amount (cash recon)
+  cash_tendered?: number; // #1: cash physically handed over (cash tenders) → change_due computed & recorded
   currency?: string;
   gateway?: string;
   token?: string;             // card token / wallet source from the terminal SDK — for a real PSP charge
@@ -50,6 +51,7 @@ export interface AdjustTipDto { tip: number; reason?: string }
 export interface RefundDto { payment_no: string; amount: number; reason?: string }
 export interface OpenTillDto { opening_float?: number }
 export interface CloseTillDto { session_no: string; closing_count: number; denominations?: Record<string, number> }
+export interface TillSettingsDto { blind_close?: boolean }
 export interface CashMovementDto { type: 'paid_in' | 'paid_out' | 'drop'; amount: number; reason?: string }
 
 @Injectable()
@@ -61,7 +63,15 @@ export class PaymentService {
     @Optional() private readonly audit?: PosAuditService,   // wiring: central POS audit trail
     @Optional() private readonly journal?: JournalService,   // wiring: electronic journal
     @Optional() private readonly qr?: QrService,             // wiring: render the PromptPay QR as an image
-  ) {}
+  ) {
+    // Blind drawer close (0426, P1c) — ctor-body plain class so the positional ctor stays unchanged
+    // (service-size ratchet, docs/46 §4; same pattern as the projects facade's sub-services).
+    this.tillPolicy = new TillPolicy(this.db);
+    // Ctor-body plain class (god-service ratchet round) — the till/drawer/X-Z domain.
+    this.tills = new TillSessionService(this.db, docNo, ledger, this.tillPolicy);
+  }
+  private readonly tillPolicy: TillPolicy;
+  private readonly tills: TillSessionService;
 
   // POST /api/payments — run a tender against a gateway, persist the result.
   //
@@ -89,10 +99,26 @@ export class PaymentService {
     const promptpayId = gatewayName === 'promptpay' ? await this.tenantPromptPayId(tenantId) : undefined;
     const paymentNo = await this.docNo.nextDaily('PAY');
 
+    // #1 cash tendering / change-due: when the cashier passes the cash physically handed over we record the
+    // change to give back. For a CASH tender the tendered amount must cover what is due (INSUFFICIENT_TENDER);
+    // for a non-cash method the field is accepted but never gates (a "cash-back" style entry stays informational).
+    // Net drawer cash = amount (tendered in − change out), so this never touches the GL — it is a cashier aid
+    // and an audit trail for the drawer count / change disputes.
+    const isCashTender = /^cash$/i.test(dto.method) || /เงินสด/.test(dto.method);
+    let cashTendered: number | null = null, changeGiven: number | null = null;
+    if (dto.cash_tendered != null) {
+      cashTendered = round2(n(dto.cash_tendered));
+      if (isCashTender && cashTendered + 1e-9 < n(dto.amount)) {
+        throw new BadRequestException({ code: 'INSUFFICIENT_TENDER', message: `Cash tendered ${cashTendered} is less than the amount due ${n(dto.amount)}`, messageTh: `เงินที่รับมา (${cashTendered}) น้อยกว่ายอดที่ต้องชำระ (${n(dto.amount)})` });
+      }
+      changeGiven = round2(Math.max(0, cashTendered - n(dto.amount)));
+    }
+
     // Persist a Pending row first. ON CONFLICT DO NOTHING absorbs the concurrent-retry race on the key.
     const inserted = await db.insert(payments).values({
       paymentNo, saleNo: dto.sale_no, tenantId, tillSessionId: dto.till_session_id ?? null,
       method: dto.method, amount: fx(dto.amount, 4), tip: fx(dto.tip ?? 0, 4), currency, gateway: gatewayName,
+      cashTendered: cashTendered != null ? fx(cashTendered, 4) : null, changeGiven: changeGiven != null ? fx(changeGiven, 4) : null,
       status: 'Pending', idempotencyKey: key, createdBy: user.username,
     }).onConflictDoNothing({ target: payments.idempotencyKey }).returning({ id: payments.id });
 
@@ -125,7 +151,8 @@ export class PaymentService {
     }).where(eq(payments.paymentNo, paymentNo));
 
     // gateway_ref is the EMVCo payload for PromptPay → surface it as qr_payload for the POS to render.
-    return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref, qr_payload: gatewayName === 'promptpay' && promptpayId ? result.ref : null };
+    // change_due is what the cashier hands back (null unless cash_tendered was supplied).
+    return { payment_no: paymentNo, status: result.status, amount: n(dto.amount), gateway_ref: result.ref, qr_payload: gatewayName === 'promptpay' && promptpayId ? result.ref : null, cash_tendered: cashTendered, change_due: changeGiven };
   }
 
   // Look up a tender by its idempotency key (globally unique). Used to replay a retried capture.
@@ -138,7 +165,9 @@ export class PaymentService {
   private tenderResult(row: any, gatewayName: string) {
     return {
       payment_no: row.paymentNo, status: row.status, amount: n(row.amount), gateway_ref: row.gatewayRef,
-      qr_payload: gatewayName === 'promptpay' ? row.gatewayRef : null, replayed: true,
+      qr_payload: gatewayName === 'promptpay' ? row.gatewayRef : null,
+      cash_tendered: row.cashTendered != null ? n(row.cashTendered) : null, change_due: row.changeGiven != null ? n(row.changeGiven) : null,
+      replayed: true,
     };
   }
 
@@ -263,10 +292,19 @@ export class PaymentService {
     if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
 
     // REV-16 maker-checker: a STANDALONE refund (no outerTx — a goods-return refund is authorized by the
-    // return) at/above the materiality threshold is parked as a request and moves no money until a DIFFERENT
-    // user approves. opts.force lets approveRefund run the real refund past the gate.
-    if (!outerTx && !opts?.force && n(dto.amount) >= REFUND_APPROVAL_THRESHOLD) {
-      return this.requestRefund(dto, user);
+    // return) whose CUMULATIVE total crosses the materiality threshold is parked as a request and moves no
+    // money until a DIFFERENT user approves. opts.force lets approveRefund run the real refund past the gate.
+    // Security (pentest P6): the threshold is cumulative — settled refunds + already-pending requests + this
+    // amount — NOT per-call. A per-call gate let a large refund be split into sub-threshold parts that each
+    // skipped approval; summing defeats that. This read only routes the approval decision — the money
+    // invariant (over-refund) is still enforced under the FOR UPDATE lock in run()/requestRefund(), and
+    // requestRefund re-checks the running total under its own lock before queuing.
+    if (!outerTx && !opts?.force) {
+      const [prior] = await this.db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).where(eq(paymentRefunds.paymentNo, dto.payment_no));
+      const [pending] = await this.db.select({ v: sql<string>`coalesce(sum(${refundRequests.amount}),0)` }).from(refundRequests).where(and(eq(refundRequests.paymentNo, dto.payment_no), eq(refundRequests.status, 'PendingApproval')));
+      if (n(prior?.v) + n(pending?.v) + n(dto.amount) >= REFUND_APPROVAL_THRESHOLD) {
+        return this.requestRefund(dto, user);
+      }
     }
 
     const refundNo = await this.docNo.nextDaily('REF');
@@ -437,291 +475,47 @@ export class PaymentService {
     return { payment_no: paymentNo, status: 'Captured' };
   }
 
-  // POST /api/payments/till/open — open a till session with an opening float.
-  async openTill(dto: OpenTillDto, user: JwtUser) {
+  // GET /api/payments/pending-settlement — #3 reconciliation worklist for UNCONFIRMED tenders.
+  // An async tender (PromptPay/QR, a card AUTHORIZATION, a transfer) is captured **Pending/Authorized**
+  // until settlement is confirmed — by the inbound PSP webhook, an acquirer callback, or a manager pressing
+  // settle. Until then the money LOOKS collected but is not confirmed. This tenant-scoped read surfaces
+  // every such tender (oldest first, with its age) so nothing sits in limbo — a detective reconciliation
+  // surface mirroring the void/refund exception report (strengthens POS-08). `older_than_min` narrows to
+  // only the stale ones worth chasing. Read-only: posts no GL, adds no authority. Tenant-scoped EXPLICITLY
+  // (an HQ/Admin bypass caller would otherwise see other stores' unconfirmed tenders).
+  async pendingSettlement(opts: { older_than_min?: number; limit?: number }, user: JwtUser) {
     const db = this.db;
-    const sessionNo = await this.docNo.nextDaily('TILL');
-    // Scope the session to the user's tenant so POS can find "the current open till" per shop.
-    await db.insert(tillSessions).values({
-      sessionNo, tenantId: user.tenantId ?? null, openedBy: user.username, openingFloat: fx(dto.opening_float, 4), status: 'Open',
-    });
-    return { session_no: sessionNo, status: 'Open', opening_float: n(dto.opening_float) };
+    const conds: any[] = [sql`${payments.status}::text IN ('Pending','Authorized')`];
+    if (user.tenantId != null) conds.push(eq(payments.tenantId, user.tenantId));
+    const rows = await db.select({ paymentNo: payments.paymentNo, saleNo: payments.saleNo, method: payments.method, amount: payments.amount, currency: payments.currency, gateway: payments.gateway, status: payments.status, createdAt: payments.createdAt })
+      .from(payments).where(and(...conds)).orderBy(payments.createdAt).limit(opts.limit ?? 200);
+    const now = Date.now();
+    const mapped = rows.map((r: any) => ({
+      payment_no: r.paymentNo, sale_no: r.saleNo, method: r.method, amount: n(r.amount), currency: r.currency,
+      gateway: r.gateway, status: r.status, created_at: r.createdAt,
+      age_minutes: r.createdAt ? Math.round((now - new Date(r.createdAt).getTime()) / 60000) : null,
+    }));
+    const pending = opts.older_than_min != null ? mapped.filter((r) => (r.age_minutes ?? 0) >= opts.older_than_min!) : mapped;
+    return { pending, count: pending.length, total_unconfirmed: round2(pending.reduce((a: number, r: any) => a + r.amount, 0)) };
   }
 
-  // Most-recent OPEN till session for a tenant, or null if none is open.
-  async currentOpenTill(tenantId: number): Promise<{ id: number; sessionNo: string } | null> {
-    const db = this.db;
-    const [s] = await db.select({ id: tillSessions.id, sessionNo: tillSessions.sessionNo })
-      .from(tillSessions)
-      .where(and(eq(tillSessions.tenantId, tenantId), sql`${tillSessions.status}::text = 'Open'`))
-      .orderBy(desc(tillSessions.openedAt), desc(tillSessions.id))
-      .limit(1);
-    return s ? { id: Number(s.id), sessionNo: s.sessionNo } : null;
-  }
-
-  // GET /api/payments/till/current — the caller's tenant's current open till (or null). Lets the POS
-  // login flow decide whether to open a shift, so "เข้าสู่ระบบ / เปิดกะ" never opens a duplicate.
-  // Pending list — recent till sessions; feeds the /pos/close-of-day session dropdown so the Z-report
-  // signer picks the TILL-… session instead of typing it. Read-only; RLS scopes to the caller's tenant.
-  async listTillSessions(_user: JwtUser, status?: string) {
-    const rows = await this.db
-      .select({ sessionNo: tillSessions.sessionNo, status: tillSessions.status, openedBy: tillSessions.openedBy, openedAt: tillSessions.openedAt, closedAt: tillSessions.closedAt, varianceStatus: tillSessions.varianceStatus })
-      .from(tillSessions).where(status === 'Open' || status === 'Closed' ? eq(tillSessions.status, status) : undefined)
-      .orderBy(desc(tillSessions.id)).limit(100);
-    return { sessions: rows.map((r: any) => ({ session_no: r.sessionNo, status: r.status, opened_by: r.openedBy, opened_at: r.openedAt, closed_at: r.closedAt, variance_status: r.varianceStatus })) };
-  }
-
-  async currentTill(user: JwtUser): Promise<{ open: { id: number; session_no: string } | null }> {
-    if (user.tenantId == null) return { open: null };
-    const t = await this.currentOpenTill(Number(user.tenantId));
-    return { open: t ? { id: t.id, session_no: t.sessionNo } : null };
-  }
-
-  // POST /api/payments/till/close — reconcile cash: expected = float + Σ cash captured; variance = counted − expected.
-  async closeTill(dto: CloseTillDto, user: JwtUser) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, dto.session_no)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    if (String(sess.status) === 'Closed') throw new BadRequestException({ code: 'ALREADY_CLOSED', message: 'Till session already closed', messageTh: 'รอบเงินสดถูกปิดแล้ว' });
-
-    // expected cash now folds in cash movements (paid-in/out/drops) via the shared aggregator.
-    const a = await this.aggregateTill(Number(sess.id));
-    const expectedCash = roundCurrency(a.expected_cash, 'THB');
-    const variance = roundCurrency(n(dto.closing_count) - expectedCash, 'THB');
-
-    // POS-01: post the cash over/short to GL so book-cash (1000) tracks the physical count.
-    //   short (counted < expected): Dr 5830 Cash Over/Short, Cr 1000 Cash
-    //   over  (counted > expected): Dr 1000 Cash,            Cr 5830 Cash Over/Short
-    // A variance over the materiality threshold posts a DRAFT JE (pendingApproval) and parks the
-    // session in PendingApproval — a different user (manager) must approve it (maker-checker, GL-05
-    // SoD). Sub-threshold variances post immediately (no approval required). The till still CLOSES
-    // either way — the cash has physically left the drawer; only the GL clearing is gated.
-    let varianceJournalNo: string | null = null;
-    let varianceStatus: 'NotRequired' | 'PendingApproval' = 'NotRequired';
-    if (Math.abs(variance) >= 0.005 && !(await this.ledger.alreadyPosted('TILL_CLOSE', dto.session_no, sess.tenantId ?? null))) {
-      const material = Math.abs(variance) > CASH_VARIANCE_THRESHOLD;
-      const v = Math.abs(variance);
-      // docs/43 PR-2: over/short leg follows the tenant posting-rule (TILL.VARIANCE) ?? registry default;
-      // cash (1000) is CASH-set pinned and stays literal. hub-sync's till replay shares this event key.
-      const varAcct = (await this.ledger.postingOverrides('TILL.VARIANCE', sess.tenantId ?? null)).cash_over_short
-        ?? postingDefault('TILL.VARIANCE', 'cash_over_short');
-      const lines = variance < 0
-        ? [{ account_code: varAcct, debit: v }, { account_code: '1000', credit: v }]
-        : [{ account_code: '1000', debit: v }, { account_code: varAcct, credit: v }];
-      const je: any = await this.ledger.postEntry({
-        source: 'TILL_CLOSE', sourceRef: dto.session_no, tenantId: sess.tenantId ?? null,
-        memo: `Till close variance ${dto.session_no} (${variance < 0 ? 'short' : 'over'} ${v})`,
-        createdBy: user.username, pendingApproval: material, lines,
-      });
-      varianceJournalNo = je?.entry_no ?? null;
-      varianceStatus = material ? 'PendingApproval' : 'NotRequired';
-    }
-
-    await db.update(tillSessions).set({
-      closedBy: user.username, closedAt: new Date(), closingCount: fx(dto.closing_count, 4),
-      expectedCash: fx(expectedCash, 4), variance: fx(variance, 4), denominations: dto.denominations ?? null, status: 'Closed',
-      varianceJournalNo, varianceStatus,
-    }).where(eq(tillSessions.id, sess.id));
-    return { session_no: dto.session_no, status: 'Closed', expected_cash: expectedCash, closing_count: n(dto.closing_count), variance, variance_status: varianceStatus, variance_journal_no: varianceJournalNo, z_report: { ...a, counted_cash: n(dto.closing_count), variance, denominations: dto.denominations ?? null } };
-  }
-
-  // POST /api/payments/till/variance/:sessionNo/approve — manager clears a material cash variance.
-  // Maker-checker: the approver must differ from the cashier who closed the till (enforced by
-  // ledger.approveEntry → SOD_VIOLATION). Approving makes the parked Draft over/short JE effective.
-  async approveVariance(sessionNo: string, approver: JwtUser) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    if (String(sess.varianceStatus) !== 'PendingApproval' || !sess.varianceJournalNo) {
-      throw new BadRequestException({ code: 'NOT_PENDING', message: 'No cash variance pending approval for this till', messageTh: 'รอบเงินสดนี้ไม่มีผลต่างที่รออนุมัติ' });
-    }
-    await this.ledger.approveEntry(sess.varianceJournalNo, approver); // SoD: approver ≠ preparer (binds Admin)
-    await db.update(tillSessions).set({ varianceStatus: 'Approved', varianceApprovedBy: approver.username, varianceApprovedAt: new Date() }).where(eq(tillSessions.id, sess.id));
-    return { session_no: sessionNo, variance_status: 'Approved', variance_journal_no: sess.varianceJournalNo, variance: n(sess.variance), approved_by: approver.username, closed_by: sess.closedBy };
-  }
-
-  // POST /api/payments/till/variance/:sessionNo/reject — manager rejects a material cash variance.
-  // Voids the parked Draft over/short JE (the discrepancy stays recorded on the till for follow-up).
-  async rejectVariance(sessionNo: string, approver: JwtUser, reason?: string) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    if (String(sess.varianceStatus) !== 'PendingApproval' || !sess.varianceJournalNo) {
-      throw new BadRequestException({ code: 'NOT_PENDING', message: 'No cash variance pending approval for this till', messageTh: 'รอบเงินสดนี้ไม่มีผลต่างที่รออนุมัติ' });
-    }
-    await this.ledger.rejectEntry(sess.varianceJournalNo, approver, reason); // SoD: rejecter ≠ preparer
-    await db.update(tillSessions).set({ varianceStatus: 'Rejected', varianceApprovedBy: approver.username, varianceApprovedAt: new Date() }).where(eq(tillSessions.id, sess.id));
-    return { session_no: sessionNo, variance_status: 'Rejected', variance_journal_no: sess.varianceJournalNo, rejected_by: approver.username };
-  }
-
-  // ── Cash management: drawer movements + X/Z shift report ──
-
-  // record a paid-in / paid-out / drop on an OPEN till; paid_in/out also post GL (drop is drawer-only).
-  async recordCashMovement(tillId: number, dto: CashMovementDto, user: JwtUser) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    if (String(sess.status) === 'Closed') throw new BadRequestException({ code: 'TILL_CLOSED', message: 'Till session is closed', messageTh: 'รอบเงินสดถูกปิดแล้ว' });
-    if (n(dto.amount) <= 0) throw new BadRequestException({ code: 'BAD_REQUEST', message: 'Amount must be positive', messageTh: 'จำนวนเงินต้องมากกว่าศูนย์' });
-    const movementNo = await this.docNo.nextDaily('CASHMOV');
-    const amt = roundCurrency(dto.amount, 'THB');
-    await db.insert(cashMovements).values({ movementNo, tenantId: sess.tenantId, tillSessionId: tillId, type: dto.type, amount: fx(amt, 4), reason: dto.reason ?? null, createdBy: user.username });
-    let journalNo: string | null = null;
-    if ((dto.type === 'paid_in' || dto.type === 'paid_out') && !(await this.ledger.alreadyPosted('CASHMOV', movementNo))) {
-      // docs/43 PR-2: paid-in/out expense leg follows the tenant posting-rule (TILL.CASHMOV) ?? default.
-      const movAcct = (await this.ledger.postingOverrides('TILL.CASHMOV', sess.tenantId ?? null)).expense
-        ?? postingDefault('TILL.CASHMOV', 'expense');
-      const lines = dto.type === 'paid_out'
-        ? [{ account_code: movAcct, debit: amt }, { account_code: '1000', credit: amt }]
-        : [{ account_code: '1000', debit: amt }, { account_code: movAcct, credit: amt }];
-      const je: any = await this.ledger.postEntry({ source: 'CASHMOV', sourceRef: movementNo, tenantId: sess.tenantId ?? null, memo: `Cash ${dto.type} ${movementNo}`, createdBy: user.username, lines });
-      journalNo = je?.entry_no ?? null;
-      await db.update(cashMovements).set({ journalNo }).where(eq(cashMovements.movementNo, movementNo));
-    }
-    return { movement_no: movementNo, type: dto.type, amount: n(amt), till_session_id: tillId, journal_no: journalNo };
-  }
-
-  // shared aggregation for X-report / Z-report / closeTill
-  private async aggregateTill(sessId: number) {
-    const db = this.db;
-    const captured = sql`${payments.status}::text IN ('Captured','Settled','Refunded')`;
-    const [gross] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
-    const byMethod = await db.select({ method: payments.method, amount: sql<string>`coalesce(sum(${payments.amount}),0)`, cnt: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured)).groupBy(payments.method);
-    // Drawer cash from Cash tenders = amount + tip. `payments.amount` deliberately excludes the tip (it
-    // is sale money; the tip is a 2300 liability), but a CASH tip physically lands in the drawer — the
-    // sale's GL debits 1000 for `cashDue = total + tip`. Omitting it made every close with a cash tip
-    // read "over" by exactly the tip (a false variance that could trip the REV-13 maker-checker).
-    // Tips on non-cash tenders never enter the drawer, so the Cash filter also scopes the tip.
-    const [cashSales] = await db.select({ v: sql<string>`coalesce(sum(${payments.amount}),0) + coalesce(sum(${payments.tip}),0)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`, sql`${payments.status}::text IN ('Captured','Refunded')`));
-    // Cash refunds reduce THIS till's drawer only if the refund was processed against it (till the cash
-    // left), keyed by payment_refunds.till_session_id — not the original sale's till. Still gated to Cash
-    // tenders (a card refund moves no drawer cash).
-    const [cashRefunds] = await db.select({ v: sql<string>`coalesce(sum(${paymentRefunds.amount}),0)` }).from(paymentRefunds).innerJoin(payments, eq(paymentRefunds.paymentNo, payments.paymentNo)).where(and(eq(paymentRefunds.tillSessionId, sessId), sql`${payments.method}::text = 'Cash'`));
-    const mv = await db.select({ type: cashMovements.type, v: sql<string>`coalesce(sum(${cashMovements.amount}),0)` }).from(cashMovements).where(eq(cashMovements.tillSessionId, sessId)).groupBy(cashMovements.type);
-    const paidIn = n(mv.find((m: any) => m.type === 'paid_in')?.v), paidOut = n(mv.find((m: any) => m.type === 'paid_out')?.v), drops = n(mv.find((m: any) => m.type === 'drop')?.v);
-    const [txn] = await db.select({ c: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), captured));
-    const [voids] = await db.select({ c: sql<string>`count(*)` }).from(payments).where(and(eq(payments.tillSessionId, sessId), sql`${payments.status}::text = 'Voided'`));
-    const [sess] = await db.select({ f: tillSessions.openingFloat }).from(tillSessions).where(eq(tillSessions.id, sessId)).limit(1);
-    const openingFloat = n(sess?.f);
-    const expected = roundCurrency(openingFloat + n(cashSales?.v) + paidIn - paidOut - drops - n(cashRefunds?.v), 'THB');
-    return {
-      opening_float: openingFloat, gross_sales: roundCurrency(n(gross?.v), 'THB'),
-      by_method: byMethod.map((m: any) => ({ method: m.method, amount: roundCurrency(n(m.amount), 'THB'), count: Number(m.cnt) })),
-      cash_sales: roundCurrency(n(cashSales?.v), 'THB'), cash_refunds: roundCurrency(n(cashRefunds?.v), 'THB'),
-      paid_in: paidIn, paid_out: paidOut, drops, expected_cash: expected, txn_count: Number(txn?.c), void_count: Number(voids?.c),
-    };
-  }
-
-  // X-report — mid-shift, non-resetting, works on an open till. No writes.
-  async xReport(tillId: number, _user: JwtUser) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    const a = await this.aggregateTill(tillId);
-    return { report: 'X', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: null, variance: null };
-  }
-
-  // Z-report — shift summary at/after close.
-  async zReport(tillId: number, _user: JwtUser) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.id, tillId)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    const a = await this.aggregateTill(tillId);
-    const closed = String(sess.status) === 'Closed';
-    return { report: 'Z', session_no: sess.sessionNo, status: sess.status, ...a, counted_cash: closed ? n(sess.closingCount) : null, variance: closed ? n(sess.variance) : null, denominations: sess.denominations ?? null };
-  }
-
-  // POS-07 — sign the Z-report: snapshot the closed till's shift totals into an immutable, tamper-evident
-  // record with a manager attestation (pos_close) + denomination breakdown. content_hash = sha256 over the
-  // canonical totals, so any later edit to the persisted row is detectable. Idempotent per till: a second
-  // sign returns the existing signed record (no duplicate Z-tape).
-  async signZReport(sessionNo: string, user: JwtUser, denominations?: Record<string, number>) {
-    const db = this.db;
-    const [sess] = await db.select().from(tillSessions).where(eq(tillSessions.sessionNo, sessionNo)).limit(1);
-    if (!sess) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Till session not found', messageTh: 'ไม่พบรอบเงินสด' });
-    if (String(sess.status) !== 'Closed') throw new BadRequestException({ code: 'TILL_NOT_CLOSED', message: 'Z-report can only be signed for a closed till', messageTh: 'ลงนามรายงาน Z ได้เฉพาะรอบที่ปิดแล้ว' });
-
-    const [existing] = await db.select().from(xzReports)
-      .where(and(eq(xzReports.tillSessionId, Number(sess.id)), sql`${xzReports.reportType}::text = 'Z'`, sql`${xzReports.status}::text = 'SIGNED'`)).limit(1);
-    if (existing) return { ...(await this.getXzReport(Number(existing.id))), already: true };
-
-    const a = await this.aggregateTill(Number(sess.id));
-    const cardTotal = roundCurrency(n(a.gross_sales) - n(a.cash_sales), 'THB');
-    const denoms = denominations ?? (sess.denominations as Record<string, number> | null) ?? {};
-    const counted = n(sess.closingCount);
-    const variance = n(sess.variance);
-    // content_hash covers exactly the persisted scalars + denomination rows, so getXzReport can recompute
-    // it from the stored record and flag any later tamper (`hash_valid`). Fixed precision + sorted denoms
-    // make it deterministic.
-    const denomPairs = Object.entries(denoms).filter(([, c]) => Number(c) > 0).map(([d, c]) => ({ denomination: Number(d), count: Number(c), total: Number(d) * Number(c) }));
-    const contentHash = this.hashXz(Number(sess.id), n(a.gross_sales), n(a.cash_sales), cardTotal, n(a.cash_refunds), n(a.expected_cash), counted, variance, denomPairs);
-    const html = this.renderZHtml(sessionNo, a, cardTotal, counted, variance, denoms, user.username, contentHash);
-
-    const [rep] = await db.insert(xzReports).values({
-      tenantId: sess.tenantId ?? null, tillSessionId: Number(sess.id), reportType: 'Z',
-      generatedBy: user.username, grossSales: fx(a.gross_sales, 4), totalCash: fx(a.cash_sales, 4),
-      totalCard: fx(cardTotal, 4), totalRefund: fx(a.cash_refunds, 4), txnCount: a.txn_count, voidCount: a.void_count,
-      cashExpected: fx(a.expected_cash, 4), cashCounted: fx(counted, 4), variance: fx(variance, 4),
-      status: 'SIGNED', contentHash, htmlSnapshot: html,
-    }).returning({ id: xzReports.id });
-    const denomRows = Object.entries(denoms).filter(([, c]) => Number(c) > 0)
-      .map(([d, c]) => ({ tenantId: sess.tenantId ?? null, reportId: Number(rep!.id), denomination: fx(Number(d), 2), count: Number(c), total: fx(Number(d) * Number(c), 4) }));
-    if (denomRows.length) await db.insert(xzReportDenominations).values(denomRows);
-    return { ...(await this.getXzReport(Number(rep!.id))), already: false };
-  }
-
-  async listXzReports(_user: JwtUser, limit = 50) {
-    const db = this.db;
-    const rows = await db.select().from(xzReports).orderBy(desc(xzReports.generatedAt), desc(xzReports.id)).limit(limit);
-    return { reports: rows.map((r: any) => this.shapeXz(r)), count: rows.length };
-  }
-
-  async getXzReport(id: number) {
-    const db = this.db;
-    const [r] = await db.select().from(xzReports).where(eq(xzReports.id, id)).limit(1);
-    if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Z-report not found', messageTh: 'ไม่พบรายงาน Z' });
-    const dn = await db.select().from(xzReportDenominations).where(eq(xzReportDenominations.reportId, id)).orderBy(desc(xzReportDenominations.denomination));
-    const denoms = dn.map((d: any) => ({ denomination: n(d.denomination), count: d.count, total: n(d.total) }));
-    // re-verify the stored hash against the persisted totals → tamper flag for the auditor view.
-    const recomputed = this.hashXz(Number(r.tillSessionId), n(r.grossSales), n(r.totalCash), n(r.totalCard), n(r.totalRefund), n(r.cashExpected), n(r.cashCounted), n(r.variance), denoms);
-    return { ...this.shapeXz(r), denominations: denoms, hash_valid: recomputed === r.contentHash };
-  }
-
-  // deterministic content hash over a Z-report's persisted scalars + denomination rows (tamper-evidence).
-  private hashXz(tillId: number, gross: number, cash: number, card: number, refund: number, expected: number, counted: number, variance: number, denoms: { denomination: number; count: number; total: number }[]) {
-    const canonical = JSON.stringify({
-      till: tillId, gross: fx(gross, 4), cash: fx(cash, 4), card: fx(card, 4), refund: fx(refund, 4),
-      expected: fx(expected, 4), counted: fx(counted, 4), variance: fx(variance, 4),
-      denoms: denoms.map((d) => `${fx(d.denomination, 2)}:${d.count}`).sort(),
-    });
-    return createHash('sha256').update(canonical).digest('hex');
-  }
-
-  private shapeXz(r: any) {
-    return {
-      id: Number(r.id), till_session_id: Number(r.tillSessionId), report_type: r.reportType, status: r.status,
-      generated_by: r.generatedBy, generated_at: r.generatedAt, gross_sales: n(r.grossSales), total_cash: n(r.totalCash),
-      total_card: n(r.totalCard), total_refund: n(r.totalRefund), txn_count: r.txnCount, void_count: r.voidCount,
-      cash_expected: n(r.cashExpected), cash_counted: n(r.cashCounted), variance: n(r.variance), content_hash: r.contentHash,
-    };
-  }
-
-  private renderZHtml(sessionNo: string, a: any, card: number, counted: number, variance: number, denoms: Record<string, number>, by: string, hash: string) {
-    const rows = a.by_method.map((m: any) => `<tr><td>${m.method}</td><td style="text-align:right">${fx(m.amount, 2)}</td><td style="text-align:right">${m.count}</td></tr>`).join('');
-    const dnRows = Object.entries(denoms).filter(([, c]) => Number(c) > 0).map(([d, c]) => `<tr><td>฿${d}</td><td style="text-align:right">${c}</td><td style="text-align:right">${fx(Number(d) * Number(c), 2)}</td></tr>`).join('');
-    return `<!doctype html><html><head><meta charset="utf-8"><title>Z-Report ${sessionNo}</title></head><body style="font-family:sans-serif">
-<h2>รายงานปิดกะ (Z-Report)</h2><p>รอบ: <b>${sessionNo}</b> · ลงนามโดย: ${by}</p>
-<table><tr><td>ยอดขายรวม</td><td style="text-align:right">${fx(a.gross_sales, 2)}</td></tr>
-<tr><td>เงินสด</td><td style="text-align:right">${fx(a.cash_sales, 2)}</td></tr>
-<tr><td>บัตร/อื่นๆ</td><td style="text-align:right">${fx(card, 2)}</td></tr>
-<tr><td>เงินคืน</td><td style="text-align:right">${fx(a.cash_refunds, 2)}</td></tr>
-<tr><td>คาดว่าในลิ้นชัก</td><td style="text-align:right">${fx(a.expected_cash, 2)}</td></tr>
-<tr><td>นับจริง</td><td style="text-align:right">${fx(counted, 2)}</td></tr>
-<tr><td>ผลต่าง</td><td style="text-align:right">${fx(variance, 2)}</td></tr></table>
-<h3>ตามวิธีชำระ</h3><table><tr><th>วิธี</th><th>ยอด</th><th>จำนวน</th></tr>${rows}</table>
-${dnRows ? `<h3>นับเงินตามหน่วย</h3><table><tr><th>หน่วย</th><th>จำนวน</th><th>รวม</th></tr>${dnRows}</table>` : ''}
-<p style="font-size:11px;color:#666">content-hash: ${hash}</p></body></html>`;
-  }
+  // ── Till sessions / drawer cash / X-Z reports — extracted to TillSessionService (god-service ratchet
+  // round; ctor-body plain class). The tender/refund lifecycle stays on this facade. ──
+  async openTill(dto: OpenTillDto, user: JwtUser) { return this.tills.openTill(dto, user); }
+  async currentOpenTill(tenantId: number) { return this.tills.currentOpenTill(tenantId); }
+  async listTillSessions(user: JwtUser, status?: string) { return this.tills.listTillSessions(user, status); }
+  async currentTill(user: JwtUser) { return this.tills.currentTill(user); }
+  getTillSettings(user: JwtUser) { return this.tills.getTillSettings(user); }
+  putTillSettings(dto: TillSettingsDto, user: JwtUser) { return this.tills.putTillSettings(dto, user); }
+  async closeTill(dto: CloseTillDto, user: JwtUser) { return this.tills.closeTill(dto, user); }
+  async approveVariance(sessionNo: string, approver: JwtUser) { return this.tills.approveVariance(sessionNo, approver); }
+  async rejectVariance(sessionNo: string, approver: JwtUser, reason?: string) { return this.tills.rejectVariance(sessionNo, approver, reason); }
+  async recordCashMovement(tillId: number, dto: CashMovementDto, user: JwtUser) { return this.tills.recordCashMovement(tillId, dto, user); }
+  async xReport(tillId: number, user: JwtUser) { return this.tills.xReport(tillId, user); }
+  async zReport(tillId: number, user: JwtUser) { return this.tills.zReport(tillId, user); }
+  async signZReport(sessionNo: string, user: JwtUser, denominations?: Record<string, number>) { return this.tills.signZReport(sessionNo, user, denominations); }
+  async listXzReports(user: JwtUser, limit = 50) { return this.tills.listXzReports(user, limit); }
+  async getXzReport(id: number) { return this.tills.getXzReport(id); }
 
   // GET /api/payments?sale_no= — all tenders attached to a sale.
   async listPaymentsForSale(saleNo: string) {

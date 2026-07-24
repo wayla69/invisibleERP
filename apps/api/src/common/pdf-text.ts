@@ -38,6 +38,31 @@ export function pdfExtractText(buf: Buffer): string {
   return out.join('\n');
 }
 
+// Is an extracted text layer actually USABLE, or CID/UTF-16 mojibake? The old `length >= 20` routing
+// gate was fooled by garbage: a Thai CID-font PDF can inflate to plenty of characters of junk, which
+// then mis-extracted through the regex path instead of routing to vision / human review. Heuristic:
+// enough word characters (Latin/digit/Thai) both in ratio and in at least one contiguous run, and not
+// dominated by control/replacement characters.
+export function usableTextLayer(text: string): boolean {
+  const t = (text ?? '').trim();
+  if (t.length < 20) return false;
+  let word = 0;
+  let ctrl = 0;
+  let nonWs = 0;
+  let run = 0;
+  let maxRun = 0;
+  for (const ch of t) {
+    const code = ch.codePointAt(0)!;
+    const isWs = /\s/.test(ch);
+    if (!isWs) nonWs++;
+    const isWord = /[A-Za-z0-9ก-๛]/.test(ch);
+    if (isWord) { word++; run++; if (run > maxRun) maxRun = run; } else { run = 0; }
+    if ((code < 0x20 && ch !== '\n' && ch !== '\r' && ch !== '\t') || code === 0xfffd) ctrl++;
+  }
+  if (nonWs === 0) return false;
+  return word / nonWs >= 0.35 && maxRun >= 3 && ctrl / nonWs < 0.1;
+}
+
 function unescapePdfString(s: string): string {
   return s.replace(/\\(\d{1,3}|.)/g, (_all, esc: string) => {
     if (/^\d/.test(esc)) return String.fromCharCode(parseInt(esc, 8) & 0xff);

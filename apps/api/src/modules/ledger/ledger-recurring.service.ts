@@ -42,14 +42,21 @@ export class LedgerRecurringService {
     const tdM = nz.reduce((a, l) => a + toMinor4(n(l.debit)), 0n);
     const tcM = nz.reduce((a, l) => a + toMinor4(n(l.credit)), 0n);
     if (tdM !== tcM) throw new BadRequestException({ code: 'UNBALANCED', message: `Template not balanced: debit ${minorToNumber4(tdM)} != credit ${minorToNumber4(tcM)}`, messageTh: 'แม่แบบไม่สมดุล (เดบิตไม่เท่าเครดิต)' });
+    // B2 (docs/50 Wave 1): auto-reverse is an ACCRUAL semantic — one posting per business month that the
+    // next month's first sweep flips back. Daily/weekly cadences overwrite last_entry_no within the month,
+    // so only the last occurrence would ever reverse — reject the combination up front instead.
+    if (dto.autoReverse && dto.frequency !== 'monthly') {
+      throw new BadRequestException({ code: 'AUTO_REVERSE_MONTHLY_ONLY', message: 'auto_reverse is only supported on monthly templates (accrual semantics)', messageTh: 'การกลับรายการอัตโนมัติใช้ได้เฉพาะแม่แบบรายเดือน' });
+    }
     const tenantId = dto.tenantId ?? currentTenantStore()?.tenantId ?? user.tenantId ?? null;
     const nextRun = dto.startDate ?? ymd();
     const [r] = await db.insert(recurringJournals).values({
       tenantId, name: dto.name, frequency: dto.frequency, memo: dto.memo ?? null,
       ledgerCode: dto.ledgerCode ?? null, currency: dto.currency ?? 'THB', lines: nz, active: 'true',
+      autoReverse: dto.autoReverse ? 'true' : 'false',
       nextRunDate: nextRun, createdBy: user.username,
     }).returning({ id: recurringJournals.id });
-    return { id: Number(r!.id), name: dto.name, frequency: dto.frequency, next_run_date: nextRun, lines: nz };
+    return { id: Number(r!.id), name: dto.name, frequency: dto.frequency, auto_reverse: !!dto.autoReverse, next_run_date: nextRun, lines: nz };
   }
 
   async listRecurring(tenantId?: number) {
@@ -58,7 +65,8 @@ export class LedgerRecurringService {
     const rows = await db.select().from(recurringJournals).where(where).orderBy(desc(recurringJournals.id));
     return { recurring: rows.map((r: any) => ({
       id: Number(r.id), name: r.name, frequency: r.frequency, memo: r.memo, ledger_code: r.ledgerCode,
-      currency: r.currency, lines: r.lines, active: r.active === 'true', next_run_date: r.nextRunDate,
+      currency: r.currency, lines: r.lines, active: r.active === 'true', auto_reverse: r.autoReverse === 'true',
+      next_run_date: r.nextRunDate,
       last_run_date: r.lastRunDate, last_entry_no: r.lastEntryNo, created_by: r.createdBy,
     })), count: rows.length };
   }
@@ -77,6 +85,30 @@ export class LedgerRecurringService {
   async runDueRecurring(user: JwtUser) {
     const db = this.db;
     const today = ymd();
+    // ── B2 auto-reversal pass (docs/50 Wave 1; GL-08 + GL-17 semantics) — runs BEFORE the due pass so the
+    // reversal keys off the PRIOR month's posting (the due pass below overwrites last_run_date to today).
+    // An auto_reverse template whose last posting happened in an EARLIER business month than today gets that
+    // posting reversed: lines flipped, dated the 1st of the current month, DRAFT (maker-checker GL-05 — a
+    // different user approves, mirroring GL-17's distinct-reverser). Idempotent two ways: the stable
+    // source_ref `REC-<id>-<lastRunDate>-REV` dedupes at the ux_je_idem index, and once the due pass posts
+    // this month's occurrence, last_run_date is in the current month so the pass skips the template.
+    const reversals: { entry_no: string; recurring_id: number; name: string; reversed_run: string }[] = [];
+    const revCandidates = await db.select().from(recurringJournals)
+      .where(and(eq(recurringJournals.active, 'true'), eq(recurringJournals.autoReverse, 'true'), sql`${recurringJournals.lastRunDate} IS NOT NULL`, sql`${recurringJournals.lastEntryNo} IS NOT NULL`));
+    for (const r of revCandidates) {
+      const lastRun = String(r.lastRunDate);
+      if (lastRun.slice(0, 7) >= today.slice(0, 7)) continue; // same/future month → not yet reversible
+      const flipped = (r.lines as JournalLineDto[]).map((l) => ({ ...l, debit: l.credit, credit: l.debit }));
+      const res = await this.postEntry({
+        date: `${today.slice(0, 7)}-01`, source: 'Recurring', sourceRef: `REC-${Number(r.id)}-${lastRun}-REV`,
+        tenantId: r.tenantId ?? null, currency: r.currency ?? 'THB',
+        memo: `Auto-reversal of ${r.name} (${lastRun})`, lines: flipped,
+        createdBy: `${user?.username ?? 'system'} (recurring auto-reverse)`,
+        ledgerCode: r.ledgerCode ?? null, pendingApproval: true,
+      });
+      if (res.entry_no) reversals.push({ entry_no: res.entry_no, recurring_id: Number(r.id), name: r.name, reversed_run: lastRun });
+    }
+
     const due = await db.select().from(recurringJournals)
       .where(and(eq(recurringJournals.active, 'true'), sql`${recurringJournals.nextRunDate} <= ${today}`));
     const posted: { entry_no: string | null; recurring_id: number; name: string }[] = [];
@@ -93,7 +125,7 @@ export class LedgerRecurringService {
       }).where(eq(recurringJournals.id, r.id));
       if (res.entry_no) posted.push({ entry_no: res.entry_no, recurring_id: Number(r.id), name: r.name });
     }
-    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted };
+    return { as_of: today, scanned: due.length, posted: posted.length, entries: posted, reversals };
   }
 
   // ───────────────────── Prepaid amortization schedules (GL-09) ─────────────────────

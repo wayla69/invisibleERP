@@ -10,7 +10,15 @@ import { TenantController } from './tenant.controller';
 import { StripeWebhookController } from './stripe-webhook.controller';
 import { PlanGuard } from './plan.guard';
 import { PlatformNotificationsModule } from '../platform-notifications/platform-notifications.module';
+import { MailerModule } from '../mailer/mailer.module';
 import { BillingBiReports } from './billing-bi-reports';
+import { SaasLifecycleService } from './saas-lifecycle.service';
+import { SaasReceiptsService } from './saas-receipts.service';
+import { PdfModule } from '../pdf/pdf.module';
+import { StarterPackService } from './starter-pack.service';
+import { EntitlementObservationsService } from './entitlement-observations.service';
+import { SaasPaymentClaimsService } from './saas-payment-claims.service';
+import { TenantExportService } from './tenant-export.service';
 
 // AuthModule exports PasswordService (signup hashes the admin password); LedgerModule exports
 // LedgerService (signup provisions the new tenant's fiscal periods); TaxModule for cache invalidation.
@@ -18,9 +26,9 @@ import { BillingBiReports } from './billing-bi-reports';
 // PlanGuard is exported so AppModule can register it as APP_GUARD and so AdminUsersModule can
 // inject BillingService for the user-limit check.
 @Module({
-  imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule],
+  imports: [AuthModule, LedgerModule, TaxModule, PlatformNotificationsModule, MailerModule, PdfModule],
   controllers: [BillingController, TenantController, StripeWebhookController],
-  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasMetricsService, PlanGuard],
+  providers: [BillingBiReports, BillingService, TenantLifecycleService, SaasLifecycleService, SaasReceiptsService, SaasMetricsService, PlanGuard, StarterPackService, EntitlementObservationsService, SaasPaymentClaimsService, TenantExportService],
   exports: [BillingService, PlanGuard],
 })
 export class BillingModule {}

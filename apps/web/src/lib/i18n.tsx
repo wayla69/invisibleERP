@@ -6,11 +6,15 @@
 // interpolation and falls back to the Thai value then the key. setLang persists to the server (best-effort)
 // + localStorage. Catalogs live in messages.ts. Per-screen coverage stays incremental (opt in via t()).
 import * as React from 'react';
-import { MESSAGES, type Lang } from './messages';
+import { type Lang } from './messages';
+import { LANG_KEY as KEY, interpolate, lookup } from './i18n-static';
 import { api, hasSession } from './api';
 
 export type { Lang };
-const KEY = 'ierp_lang';
+// Set (to the chosen locale) when the server persist failed — e.g. offline, or a god in read-only company
+// view where every PUT is rejected (403 READONLY_IMPERSONATION). While present, the local choice is
+// authoritative: on mount we retry the persist instead of letting the stale server value clobber it.
+const PENDING_KEY = 'ierp_lang_pending';
 const LOCALES: { code: Lang; label: string }[] = [
   { code: 'th', label: 'ไทย' },
   { code: 'en', label: 'English' },
@@ -32,34 +36,47 @@ type Ctx = {
 };
 const LangContext = React.createContext<Ctx | null>(null);
 
-function interpolate(s: string, vars?: Record<string, string | number>) {
-  return vars ? s.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`)) : s;
-}
-function lookup(key: string, lang: Lang, fallback?: string) {
-  const m = MESSAGES[key];
-  return m?.[lang] ?? m?.th ?? fallback ?? key;
-}
-
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = React.useState<Lang>('th');
+  // True once the user explicitly picks a locale this mount — a still-in-flight mount-time server read must
+  // never clobber an explicit choice that raced past it (picking EN right after page load snapped back to TH).
+  const userChose = React.useRef(false);
 
   // Initial locale: localStorage cache first (instant), then the server-resolved value (user → tenant → th).
+  // If a previous choice never reached the server (PENDING_KEY set), the local choice wins — retry the
+  // persist and skip the server read, so a full page load can't revert the user's explicit selection.
   React.useEffect(() => {
-    const saved = typeof window !== 'undefined' ? window.localStorage.getItem(KEY) : null;
+    let saved: string | null = null;
+    let pending: string | null = null;
+    try { saved = window.localStorage.getItem(KEY); pending = window.localStorage.getItem(PENDING_KEY); } catch { /* ignore */ }
     if (isLang(saved)) setLangState(saved);
-    if (hasSession()) {
-      api<{ locale: string }>('/api/i18n/me')
-        .then((r) => { if (isLang(r?.locale)) { setLangState(r.locale); try { window.localStorage.setItem(KEY, r.locale); } catch { /* ignore */ } } })
-        .catch(() => { /* unauthenticated or offline — keep the cached/default locale */ });
+    if (!hasSession()) return;
+    if (isLang(pending)) {
+      api('/api/i18n/me', { method: 'PUT', body: JSON.stringify({ locale: pending }) })
+        .then(() => { try { window.localStorage.removeItem(PENDING_KEY); } catch { /* ignore */ } })
+        .catch(() => { /* still unpersistable (offline / read-only view) — keep honoring the local choice */ });
+      return;
     }
+    api<{ locale: string }>('/api/i18n/me')
+      .then((r) => {
+        if (userChose.current || !isLang(r?.locale)) return;
+        setLangState(r.locale);
+        try { window.localStorage.setItem(KEY, r.locale); } catch { /* ignore */ }
+      })
+      .catch(() => { /* unauthenticated or offline — keep the cached/default locale */ });
   }, []);
   React.useEffect(() => { if (typeof document !== 'undefined') document.documentElement.lang = lang; }, [lang]);
 
   const setLang = React.useCallback((l: Lang) => {
     if (!isLang(l)) return;
+    userChose.current = true;
     setLangState(l);
     try { window.localStorage.setItem(KEY, l); } catch { /* ignore */ }
-    if (hasSession()) api('/api/i18n/me', { method: 'PUT', body: JSON.stringify({ locale: l }) }).catch(() => { /* best-effort */ });
+    if (hasSession()) {
+      api('/api/i18n/me', { method: 'PUT', body: JSON.stringify({ locale: l }) })
+        .then(() => { try { window.localStorage.removeItem(PENDING_KEY); } catch { /* ignore */ } })
+        .catch(() => { try { window.localStorage.setItem(PENDING_KEY, l); } catch { /* ignore */ } });
+    }
   }, []);
 
   const value = React.useMemo<Ctx>(() => ({

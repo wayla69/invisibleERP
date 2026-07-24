@@ -35,7 +35,7 @@ const mockMailer = { async send(msg: any) { sent.push(msg); return { messageId: 
 async function seedInvoice(db: any, tid: number, docNo: string) {
   const [tiv] = await db.insert(s.taxInvoices).values({
     tenantId: tid, docNo, type: 'full', issueDate: '2026-06-22', sourceType: 'AR', sourceRef: 'INV-1',
-    sellerName: 'ร้านโอชิเนอิ', sellerTaxId: '0105551234567', sellerBranchCode: '00000', sellerBranchLabel: 'สำนักงานใหญ่',
+    sellerName: 'ร้านอินวิซิเบิล', sellerTaxId: '0105551234567', sellerBranchCode: '00000', sellerBranchLabel: 'สำนักงานใหญ่',
     sellerAddress: 'กทม.', buyerName: 'ลูกค้า', buyerTaxId: '0992001234567', buyerBranchCode: '00000', buyerAddress: 'นนทบุรี',
     currency: 'THB', subtotal: '100.00', discount: '0', vatRate: '0.0700', vatAmount: '7.00', grandTotal: '107.00', isVatInclusive: false, status: 'Issued',
   }).returning({ id: s.taxInvoices.id });
@@ -53,7 +53,7 @@ async function main() {
   for (const [r, ps] of Object.entries(DEFAULT_ROLE_PERMISSIONS))
     await db.insert(s.rolePermissions).values((ps as string[]).map((perm) => ({ role: r as any, perm }))).onConflictDoNothing();
   // HQ has a seller email; T2 does NOT (to prove the guard)
-  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ', email: 'shop@oshinei.co.th' }, { code: 'T2', name: 'No Email Co' }]).onConflictDoNothing();
+  await db.insert(s.tenants).values([{ code: 'HQ', name: 'HQ', email: 'shop@invisible.co.th' }, { code: 'T2', name: 'No Email Co' }]).onConflictDoNothing();
   const hq = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'HQ')))[0].id);
   const t2 = Number((await db.select().from(s.tenants).where(eq(s.tenants.code, 'T2')))[0].id);
   await db.insert(s.users).values([{ username: 'admin', passwordHash: await pw.hash('admin123'), role: 'Admin', tenantId: hq }]).onConflictDoNothing();
@@ -93,7 +93,7 @@ async function main() {
     ? String(att.content).includes('ใบกำกับภาษี')
     : Buffer.isBuffer(att?.content) && att.content.length > 0;
   ok('Mailer got: from seller, to buyer, CC ETDA, readable tax-invoice document attached (PDF, or HTML fallback since Chromium is unavailable in CI)',
-    !!m && m.from === 'shop@oshinei.co.th' && m.to === 'buyer@example.com' && m.cc === 'csemail@etda.or.th' && filenameOk && contentOk,
+    !!m && m.from === 'shop@invisible.co.th' && m.to === 'buyer@example.com' && m.cc === 'csemail@etda.or.th' && filenameOk && contentOk,
     JSON.stringify({ from: m?.from, filename: att?.filename, contentType: att?.contentType }));
 
   // ── 3. invalid recipient → 400 (zod) ──

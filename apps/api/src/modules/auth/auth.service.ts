@@ -37,7 +37,13 @@ export class AuthService {
       void this.attempts.recordFailure(norm); // fire-and-forget autocommit; do not delay the 401
       return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or password', messageTh: 'Username หรือ Password ไม่ถูกต้อง' });
     };
-    if (!row) throw fail();
+    if (!row) {
+      // Anti-enumeration (pentest P10): the known-user branch always runs a full scrypt verify, so the
+      // unknown-user branch must spend comparable work or login latency reveals whether a username exists.
+      // Mirrors the member-OTP hardening (member-auth.service.ts). Cost matches verify() — one scrypt at N.
+      await this.passwords.hash(password).catch(() => undefined);
+      throw fail();
+    }
 
     const { ok, needsRehash } = await this.passwords.verify(password, row.passwordHash);
     if (!ok) throw fail();
@@ -80,7 +86,12 @@ export class AuthService {
       // Generic message (don't reveal whether the username exists or merely lacks a PIN) — anti-enumeration.
       return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Invalid username or PIN', messageTh: 'Username หรือ PIN ไม่ถูกต้อง' });
     };
-    if (!row || !row.pinHash) throw fail();
+    if (!row || !row.pinHash) {
+      // Anti-enumeration (pentest P10): spend ~one scrypt on the unknown-user / no-PIN branch so latency does
+      // not distinguish it from a real PIN verify below.
+      await this.passwords.hash(pin).catch(() => undefined);
+      throw fail();
+    }
     // verifyScrypt (no legacy SHA-256 branch) — a PIN is always scrypt, so it never flows into a weak hash.
     const { ok, needsRehash } = await this.passwords.verifyScrypt(pin, row.pinHash);
     if (!ok) throw fail();
@@ -286,16 +297,28 @@ export class AuthService {
 
   async me(user: AuthUser, opts?: { controlProfile?: 'enterprise' | 'sme' | null; tenantId?: number | null }): Promise<AuthUser> {
     const [row] = await this.db.select({ m: users.mustChangePassword }).from(users).where(eq(users.username, user.username)).limit(1);
+    // The active company's display name (tenants.name) — the sidebar shows it so users always know which
+    // company they're working in (customer_name only carries the tenant CODE). Null for HQ/no-tenant sessions.
+    const tenant = opts?.tenantId != null
+      ? (await this.db.select({ name: tenants.name, prefs: tenants.smePrefs }).from(tenants).where(eq(tenants.id, opts.tenantId)).limit(1))[0]
+      : undefined;
     // SME single-user edition (docs/49) — surface the tenant's profile + its stamped hidden-nav prefs so
     // the web shows the persistent SME badge and hides the configured groups. 'enterprise' sends neither.
-    let sme: Pick<AuthUser, 'control_profile' | 'sme_hidden_nav_groups'> = {};
+    let sme: Pick<AuthUser, 'control_profile' | 'sme_hidden_nav_groups' | 'sme_open_nav_groups'> = {};
     if (opts?.controlProfile === 'sme' && opts.tenantId != null) {
-      const [t] = await this.db.select({ prefs: tenants.smePrefs }).from(tenants).where(eq(tenants.id, opts.tenantId)).limit(1);
-      const hidden = (t?.prefs as { hidden_nav_groups?: unknown } | null)?.hidden_nav_groups;
-      sme = { control_profile: 'sme', sme_hidden_nav_groups: Array.isArray(hidden) ? hidden.map(String) : [] };
+      const prefs = (tenant?.prefs ?? null) as { hidden_nav_groups?: unknown; open_nav_groups?: unknown } | null;
+      const hidden = prefs?.hidden_nav_groups;
+      // B1 (docs/50): the industry-derived default-open group keys stamped at provisioning; the web
+      // sidebar folds everything else by default (a user's own synced navFold still wins).
+      const open = prefs?.open_nav_groups;
+      sme = {
+        control_profile: 'sme',
+        sme_hidden_nav_groups: Array.isArray(hidden) ? hidden.map(String) : [],
+        sme_open_nav_groups: Array.isArray(open) ? open.map(String) : [],
+      };
     }
     // is_platform_owner drives the web company-switcher (only a "god" sees it). Env-derived, never a claim.
-    return { ...user, ...sme, must_change_password: !!row?.m, is_platform_owner: isPlatformAdmin(user.username) };
+    return { ...user, ...sme, company_name: tenant?.name ?? null, must_change_password: !!row?.m, is_platform_owner: isPlatformAdmin(user.username) };
   }
 
   // A5 — rotate password (verify current, set new, clear the force-change flag). Min 8 chars.

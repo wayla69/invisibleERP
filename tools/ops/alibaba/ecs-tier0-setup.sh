@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent bootstrap for an Alibaba Cloud ECS host (Ubuntu 22.04 LTS) → Invisible ERP V2 "Tier 0".
+# Idempotent bootstrap for an Alibaba Cloud ECS host (Ubuntu 22.04 LTS) → Invisible ERP "Tier 0".
 # Installs Docker + compose plugin + postgresql-client + rclone, brings up the stack, and installs the
 # hourly-backup + monthly-restore-drill cron jobs. Safe to re-run.
 #

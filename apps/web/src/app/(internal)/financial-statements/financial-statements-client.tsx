@@ -7,12 +7,13 @@
 //   • งบกำไรขาดทุน     → GET /api/ledger/income-statement?from=&to=&ledger=  (+ /by-branch)
 //   • งบกระแสเงินสด    → GET /api/ledger/cash-flow{,-direct,-forecast}
 // Read-only; multi-GAAP ledger selectable (TFRS / TAX / IFRS). CSV export per statement.
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck, PlayCircle, Landmark, FileText, Scale } from 'lucide-react';
 
-import { api } from '@/lib/api';
+import { api, apiDownload } from '@/lib/api';
+import { notifyError, notifySuccess } from '@/lib/notify';
 import { useLang } from '@/lib/i18n';
 import { baht } from '@/lib/format';
 import { PageHeader } from '@/components/page-header';
@@ -602,7 +603,14 @@ interface DbdResp {
 }
 interface FsDef { code: string; name: string; statement_type: string; active: boolean }
 interface RenderRow { key: string; label?: string; label_th?: string | null; account_name?: string; level: number; is_subtotal?: boolean; current: number; prior?: number }
-interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; comparative: boolean; rows: RenderRow[] }
+interface FsKpi { key: string; label: string; label_th: string; format: 'pct' | 'ratio'; value: number; numerator: number; denominator: number; prior?: number | null }
+interface RevDisaggCat { account_code: string; account_name: string | null; current: number; prior: number | null; timing: 'over_time' | 'point_in_time' }
+interface RevDisaggResp { industry: string | null; comparative: boolean; categories: RevDisaggCat[]; timing_summary: { over_time: { current: number; prior: number | null }; point_in_time: { current: number; prior: number | null } }; total: { current: number; prior: number | null }; ties_to_income_statement: boolean; policy: { en: string; th: string } }
+interface FsReview { id: number; fiscal_year: number; ledger: string; status: 'PendingApproval' | 'Approved'; prepared_by: string | null; approved_by: string | null; approved_at: string | null }
+interface RenderResp { code: string; name: string; statement_type: string; as_of: string; from: string | null; industry: string | null; comparative: boolean; rows: RenderRow[]; kpis?: FsKpi[] }
+interface IndustryLayout { industry: string; name: string }
+interface IndustryStmtLayouts { generic_name: string; own_has_layout: boolean; layouts: IndustryLayout[] }
+interface IndustryLayoutsResp { own_industry: string | null; statements: Record<string, IndustryStmtLayouts> }
 interface NoteLine { account_code: string; account_name: string; current: number; prior: number | null }
 interface NoteBlock { number: string; title: string; title_th: string | null; policy_text: string | null; lines: NoteLine[]; total: number; prior_total: number | null }
 interface NotesResp { code: string; name: string; as_of?: string; basis: string; comparative: boolean; notes: NoteBlock[] }
@@ -768,26 +776,47 @@ function DbdExport({ lp }: { lp: string }) {
 }
 
 // ── Definition-driven statement + note-schedule viewer ──
+const fmtKpi = (k: FsKpi) => (k.format === 'pct' ? `${(k.value * 100).toFixed(1)}%` : `${k.value.toFixed(2)}×`);
+
 function CustomStatements({ lp }: { lp: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const defsQ = useQuery<{ definitions: FsDef[]; count: number }>({ queryKey: ['fs-defs'], queryFn: () => api('/api/reports/fs/definitions') });
+  const layoutsQ = useQuery<IndustryLayoutsResp>({ queryKey: ['fs-industry-layouts'], queryFn: () => api('/api/reports/fs/industry-layouts') });
   const [code, setCode] = useState('');
   const [asOf, setAsOf] = useState(today());
   const [from, setFrom] = useState(yearStart());
+  const [industry, setIndustry] = useState('');
   const [prior, setPrior] = useState(false);
   const [priorAsOf, setPriorAsOf] = useState('');
   const [priorFrom, setPriorFrom] = useState('');
-  const [run, setRun] = useState<{ code: string; type: string } | null>(null);
+  const [run, setRun] = useState<{ code: string; type: string; industry: string } | null>(null);
+  const [packBusy, setPackBusy] = useState(false);
+  // P9: download the whole statutory set (BS + P&L + SOCE + notes) as one formatted PDF over the SAME period +
+  // comparative + industry the viewer has selected. Independent of which single statement is chosen above.
+  async function downloadPack() {
+    setPackBusy(true);
+    try {
+      const compQs = prior && priorAsOf ? `&prior_as_of=${priorAsOf}${priorFrom ? `&prior_from=${priorFrom}` : ''}` : '';
+      const indQs = industry ? `&industry=${encodeURIComponent(industry)}` : '';
+      await apiDownload(`/api/reports/fs/statement-pack.pdf?as_of=${asOf}&from=${from}${compQs}${indQs}${lp}`, `financial-statements-${asOf}.pdf`);
+    } catch (e: any) { notifyError(e?.message ?? 'download failed'); }
+    finally { setPackBusy(false); }
+  }
 
   const defs = defsQ.data?.definitions ?? [];
   const selected = defs.find((d) => d.code === code);
   const isNotes = selected?.statement_type === 'notes';
   const isPl = selected?.statement_type === 'pl';
+  // P6/P7: the built-in DBD P&L and Balance Sheet have industry-specific statutory shapes to pick between.
+  const stmtLayouts = layoutsQ.data?.statements?.[code];
+  const showIndustry = (code === 'DBD-PL' || code === 'DBD-BS') && !!stmtLayouts;
+  const layouts = layoutsQ.data;
 
   const priorQs = prior && priorAsOf ? `&prior_as_of=${priorAsOf}${isPl && priorFrom ? `&prior_from=${priorFrom}` : ''}` : '';
+  const industryQs = run?.industry ? `&industry=${encodeURIComponent(run.industry)}` : '';
   const renderQ = useQuery<RenderResp>({
-    queryKey: ['fs-render', run, asOf, from, priorQs, lp],
-    queryFn: () => api(`/api/reports/fs/render/${run!.code}?as_of=${asOf}${isPl ? `&from=${from}` : ''}${priorQs}${lp}`),
+    queryKey: ['fs-render', run, asOf, from, priorQs, industryQs, lp],
+    queryFn: () => api(`/api/reports/fs/render/${run!.code}?as_of=${asOf}${isPl ? `&from=${from}` : ''}${priorQs}${industryQs}${lp}`),
     enabled: run != null && run.type !== 'notes',
   });
   const notesQ = useQuery<NotesResp>({
@@ -795,6 +824,36 @@ function CustomStatements({ lp }: { lp: string }) {
     queryFn: () => api(`/api/reports/fs/notes/${run!.code}?as_of=${asOf}${priorQs}&basis=bs${lp}`),
     enabled: run != null && run.type === 'notes',
   });
+  // P10: alongside a rendered P&L, the TFRS-15 revenue-disaggregation note (by category + timing of transfer).
+  const disaggQ = useQuery<RevDisaggResp>({
+    queryKey: ['fs-revdisagg', run, asOf, from, priorQs, industryQs, lp],
+    queryFn: () => api(`/api/reports/fs/revenue-disaggregation?as_of=${asOf}&from=${from}${priorQs}${industryQs}${lp}`),
+    enabled: run != null && run.code === 'DBD-PL',
+  });
+  // GL-29: financial-statement issuance review & approval (maker-checker) for the fiscal year of `as_of`.
+  const ledger = lp.startsWith('&ledger=') ? decodeURIComponent(lp.slice('&ledger='.length)) : '';
+  const fsYear = Number(String(asOf).slice(0, 4));
+  const reviewsQ = useQuery<FsReview[]>({
+    queryKey: ['fs-reviews', fsYear, ledger],
+    queryFn: () => api(`/api/reports/fs/statement-reviews?fiscal_year=${fsYear}`),
+    enabled: Number.isFinite(fsYear) && fsYear > 2000,
+  });
+  const latestReview = (reviewsQ.data ?? []).find((r) => r.ledger === (ledger || 'LEADING')) ?? (reviewsQ.data ?? [])[0];
+  const [reviewBusy, setReviewBusy] = useState(false);
+  async function submitReview() {
+    setReviewBusy(true);
+    try {
+      await api('/api/reports/fs/statement-pack/submit', { method: 'POST', body: JSON.stringify({ fiscal_year: fsYear, ledger: ledger || undefined, industry: industry || undefined }) });
+      notifySuccess(t('fnx.fs.stat.review_submitted')); await reviewsQ.refetch();
+    } catch (e: any) { notifyError(e?.message ?? 'submit failed'); } finally { setReviewBusy(false); }
+  }
+  async function approveReview(id: number) {
+    setReviewBusy(true);
+    try {
+      await api(`/api/reports/fs/statement-reviews/${id}/approve`, { method: 'POST', body: JSON.stringify({}) });
+      notifySuccess(t('fnx.fs.stat.review_approved')); await reviewsQ.refetch();
+    } catch (e: any) { notifyError(e?.message ?? 'approve failed'); } finally { setReviewBusy(false); }
+  }
 
   return (
     <Card className="space-y-4 p-5">
@@ -812,44 +871,137 @@ function CustomStatements({ lp }: { lp: string }) {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="grid gap-2">
                   <Label htmlFor="cs-def">{t('fnx.fs.stat.definition')}</Label>
-                  <Select id="cs-def" className="w-auto" value={code} onChange={(e) => { setCode(e.target.value); setRun(null); }}>
+                  <Select id="cs-def" className="w-auto" value={code} onChange={(e) => { setCode(e.target.value); setIndustry(''); setRun(null); }}>
                     <option value="">{t('fnx.fs.stat.pick_definition')}</option>
                     {defs.map((d) => <option key={d.code} value={d.code}>{d.name} ({d.statement_type.toUpperCase()})</option>)}
                   </Select>
                 </div>
                 <div className="grid gap-2"><Label htmlFor="cs-asof">{t('fnx.fs.stat.as_of')}</Label><Input id="cs-asof" type="date" className="max-w-[170px]" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></div>
                 {isPl && <div className="grid gap-2"><Label htmlFor="cs-from">{t('fnx.fs.from')}</Label><Input id="cs-from" type="date" className="max-w-[170px]" value={from} onChange={(e) => setFrom(e.target.value)} /></div>}
+                {showIndustry && stmtLayouts && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="cs-industry">{t('fnx.fs.stat.industry_layout')}</Label>
+                    <Select id="cs-industry" className="w-auto" value={industry} onChange={(e) => setIndustry(e.target.value)}>
+                      <option value="">
+                        {stmtLayouts.own_has_layout
+                          ? t('fnx.fs.stat.industry_own', { name: stmtLayouts.layouts.find((l) => l.industry === layouts?.own_industry)?.name ?? layouts?.own_industry ?? '' })
+                          : t('fnx.fs.stat.industry_auto')}
+                      </option>
+                      <option value="generic">{t('fnx.fs.stat.industry_generic')}</option>
+                      {stmtLayouts.layouts.map((l) => <option key={l.industry} value={l.industry}>{l.name}</option>)}
+                    </Select>
+                  </div>
+                )}
                 <label className="flex items-center gap-2 pb-2 text-sm">
                   <input type="checkbox" className="size-4" checked={prior} onChange={(e) => setPrior(e.target.checked)} /> {t('fnx.fs.stat.comparative')}
                 </label>
                 {prior && <div className="grid gap-2"><Label htmlFor="cs-pasof">{t('fnx.fs.stat.prior_as_of')}</Label><Input id="cs-pasof" type="date" className="max-w-[170px]" value={priorAsOf} onChange={(e) => setPriorAsOf(e.target.value)} /></div>}
                 {prior && isPl && <div className="grid gap-2"><Label htmlFor="cs-pfrom">{t('fnx.fs.stat.prior_from')}</Label><Input id="cs-pfrom" type="date" className="max-w-[170px]" value={priorFrom} onChange={(e) => setPriorFrom(e.target.value)} /></div>}
-                <Button disabled={!selected} onClick={() => selected && setRun({ code: selected.code, type: selected.statement_type })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
+                <Button disabled={!selected} onClick={() => selected && setRun({ code: selected.code, type: selected.statement_type, industry: showIndustry ? industry : '' })}><PlayCircle className="size-4" /> {t('fnx.fs.stat.run')}</Button>
+                <Button variant="outline" disabled={!asOf || !from || packBusy} onClick={downloadPack}><Download className="size-4" /> {t('fnx.fs.stat.pack_pdf')}</Button>
+              </div>
+
+              {/* GL-29: issuance review & approval (maker-checker) — governs the statement pack for the fiscal year. */}
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 p-3 text-sm">
+                <ShieldCheck className="size-4 text-muted-foreground" />
+                <span className="font-medium">{t('fnx.fs.stat.review')} · {fsYear}</span>
+                {latestReview?.status === 'Approved' ? (
+                  <Badge className="bg-green-100 text-green-800">{t('fnx.fs.stat.review_approved_by', { by: latestReview.approved_by ?? '' })}</Badge>
+                ) : latestReview?.status === 'PendingApproval' ? (
+                  <Badge className="bg-amber-100 text-amber-800">{t('fnx.fs.stat.review_pending_by', { by: latestReview.prepared_by ?? '' })}</Badge>
+                ) : (
+                  <Badge variant="outline">{t('fnx.fs.stat.review_none')}</Badge>
+                )}
+                <div className="ml-auto flex gap-2">
+                  <Button variant="outline" size="sm" disabled={reviewBusy} onClick={submitReview}>{t('fnx.fs.stat.review_submit')}</Button>
+                  {latestReview?.status === 'PendingApproval' && (
+                    <Button size="sm" disabled={reviewBusy} onClick={() => approveReview(latestReview.id)}>{t('fnx.fs.stat.review_approve')}</Button>
+                  )}
+                </div>
               </div>
 
               {run != null && !isNotes && (
                 <StateView q={renderQ}>
                   {renderQ.data && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead><tr className="text-left text-muted-foreground">
-                          <th className="py-1">{renderQ.data.name}</th>
-                          <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
-                          {renderQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
-                        </tr></thead>
-                        <tbody>
-                          {renderQ.data.rows.map((r) => (
-                            <tr key={r.key} className={`border-t ${r.is_subtotal ? 'font-semibold' : ''}`}>
-                              <td className="py-1" style={{ paddingLeft: `${(r.level ?? 0) * 16}px` }}>{r.label ?? r.account_name}</td>
-                              <td className="py-1 text-right tabular">{baht(r.current)}</td>
-                              {renderQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(r.prior ?? 0)}</td>}
-                            </tr>
+                    <div className="space-y-4">
+                      {(renderQ.data.kpis ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-3">
+                          {renderQ.data.kpis!.map((k) => (
+                            <div key={k.key} className="min-w-[140px] flex-1 rounded-lg border bg-muted/30 px-3 py-2" title={`${baht(k.numerator)} ÷ ${baht(k.denominator)}`}>
+                              <div className="text-xs text-muted-foreground">{lang === 'th' ? k.label_th : k.label}</div>
+                              <div className="text-lg font-semibold tabular">{fmtKpi(k)}</div>
+                              {k.prior != null && (
+                                <div className="text-xs text-muted-foreground">
+                                  {t('fnx.fs.stat.col_prior')}: {k.format === 'pct' ? `${(k.prior * 100).toFixed(1)}%` : `${k.prior.toFixed(2)}×`}
+                                </div>
+                              )}
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                      )}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-left text-muted-foreground">
+                            <th className="py-1">{renderQ.data.name}</th>
+                            <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
+                            {renderQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
+                          </tr></thead>
+                          <tbody>
+                            {renderQ.data.rows.map((r) => (
+                              <tr key={r.key} className={`border-t ${r.is_subtotal ? 'font-semibold' : ''}`}>
+                                <td className="py-1" style={{ paddingLeft: `${(r.level ?? 0) * 16}px` }}>{r.label ?? r.account_name}</td>
+                                <td className="py-1 text-right tabular">{baht(r.current)}</td>
+                                {renderQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(r.prior ?? 0)}</td>}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </StateView>
+              )}
+
+              {run?.code === 'DBD-PL' && disaggQ.data && disaggQ.data.categories.length > 0 && (
+                <div className="mt-4 space-y-2 rounded-md border p-3">
+                  <div className="text-sm font-semibold">{t('fnx.fs.stat.revdisagg')}</div>
+                  <p className="text-xs text-muted-foreground">{lang === 'th' ? disaggQ.data.policy.th : disaggQ.data.policy.en}</p>
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-left text-muted-foreground">
+                      <th className="py-1">{t('fnx.fs.stat.revdisagg_cat')}</th>
+                      <th className="py-1 text-right">{t('fnx.fs.stat.col_current')}</th>
+                      {disaggQ.data.comparative && <th className="py-1 text-right">{t('fnx.fs.stat.col_prior')}</th>}
+                    </tr></thead>
+                    <tbody>
+                      {(['over_time', 'point_in_time'] as const).map((tm) => {
+                        const cats = disaggQ.data!.categories.filter((c) => c.timing === tm);
+                        if (!cats.length) return null;
+                        const sub = disaggQ.data!.timing_summary[tm];
+                        return (
+                          <Fragment key={tm}>
+                            <tr className="border-t bg-muted/40 font-medium">
+                              <td className="py-1">{t(tm === 'over_time' ? 'fnx.fs.stat.revdisagg_overtime' : 'fnx.fs.stat.revdisagg_pit')}</td>
+                              <td className="py-1 text-right tabular">{baht(sub.current)}</td>
+                              {disaggQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(sub.prior ?? 0)}</td>}
+                            </tr>
+                            {cats.map((c) => (
+                              <tr key={c.account_code} className="border-t">
+                                <td className="py-1 pl-4">{c.account_name ?? c.account_code} <span className="text-xs text-muted-foreground tabular">{c.account_code}</span></td>
+                                <td className="py-1 text-right tabular">{baht(c.current)}</td>
+                                {disaggQ.data!.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(c.prior ?? 0)}</td>}
+                              </tr>
+                            ))}
+                          </Fragment>
+                        );
+                      })}
+                      <tr className="border-t font-semibold">
+                        <td className="py-1">{t('fnx.fs.stat.revdisagg_total')}</td>
+                        <td className="py-1 text-right tabular">{baht(disaggQ.data.total.current)}</td>
+                        {disaggQ.data.comparative && <td className="py-1 text-right tabular text-muted-foreground">{baht(disaggQ.data.total.prior ?? 0)}</td>}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               )}
 
               {run != null && isNotes && (

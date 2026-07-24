@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Send } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useLang } from '@/lib/i18n';
 import { PageHeader } from '@/components/page-header';
 import { StateView } from '@/components/state-view';
 import { Msg } from '@/components/tabs';
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export default function PortalSurveyPage() {
+  const { t } = useLang();
   const list = useQuery<any>({ queryKey: ['portal-surveys'], queryFn: () => api('/api/portal/surveys') });
   const [sel, setSel] = useState('');
   const [nps, setNps] = useState(10);
@@ -22,7 +24,7 @@ export default function PortalSurveyPage() {
 
   const submit = useMutation({
     mutationFn: () => api(`/api/portal/surveys/${encodeURIComponent(sel)}/responses`, { method: 'POST', body: JSON.stringify({ nps_score: nps, comments: comments || undefined, q1: q.q1 || undefined, q2: q.q2 || undefined, q3: q.q3 || undefined }) }),
-    onSuccess: () => { setMsg('✅ ขอบคุณสำหรับความคิดเห็น!'); setComments(''); setQ({ q1: '', q2: '', q3: '' }); setSel(''); },
+    onSuccess: () => { setMsg(t('pt.sv.thanks')); setComments(''); setQ({ q1: '', q2: '', q3: '' }); setSel(''); },
     onError: (e: any) => setMsg(`❌ ${e.message}`),
   });
 
@@ -32,36 +34,36 @@ export default function PortalSurveyPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="แบบสำรวจความพึงพอใจ (Survey)" description="ให้คะแนนและความคิดเห็นเพื่อช่วยเราพัฒนาบริการ" />
+      <PageHeader title={t('pt.sv.title')} description={t('pt.sv.desc')} />
       <StateView q={list}>
         {!sel ? (
           <div className="grid gap-3 sm:grid-cols-2">
-            {surveys.length === 0 && <Card className="p-5 text-sm text-muted-foreground">ยังไม่มีแบบสำรวจที่เปิดอยู่</Card>}
+            {surveys.length === 0 && <Card className="p-5 text-sm text-muted-foreground">{t('pt.sv.none_open')}</Card>}
             {surveys.map((s: any) => (
               <Card key={sid(s)} className="gap-2 p-5">
                 <h3 className="text-base font-semibold">{sname(s)}</h3>
                 <p className="text-sm text-muted-foreground">{s.surveyType ?? s.survey_type ?? 'NPS'}</p>
-                <Button className="w-fit" onClick={() => { setSel(sid(s)); setMsg(''); }}>ทำแบบสำรวจ</Button>
+                <Button className="w-fit" onClick={() => { setSel(sid(s)); setMsg(''); }}>{t('pt.sv.take')}</Button>
               </Card>
             ))}
           </div>
         ) : (
           <Card className="max-w-xl gap-4 p-5">
             <div className="grid gap-1.5">
-              <Label>คุณจะแนะนำเราให้เพื่อนไหม? (0–10)</Label>
+              <Label>{t('pt.sv.nps_q')}</Label>
               <div className="flex flex-wrap gap-1">
                 {Array.from({ length: 11 }, (_, i) => (
                   <Button key={i} size="sm" variant={nps === i ? 'default' : 'outline'} onClick={() => setNps(i)}>{i}</Button>
                 ))}
               </div>
             </div>
-            <div className="grid gap-1.5"><Label>ความคิดเห็น</Label><Input value={comments} onChange={(e) => setComments(e.target.value)} placeholder="บอกเราเพิ่มเติม…" /></div>
-            <div className="grid gap-1.5"><Label>สิ่งที่ชอบที่สุด</Label><Input value={q.q1} onChange={(e) => setQ({ ...q, q1: e.target.value })} /></div>
-            <div className="grid gap-1.5"><Label>สิ่งที่ควรปรับปรุง</Label><Input value={q.q2} onChange={(e) => setQ({ ...q, q2: e.target.value })} /></div>
-            <div className="grid gap-1.5"><Label>ข้อเสนอแนะอื่น ๆ</Label><Input value={q.q3} onChange={(e) => setQ({ ...q, q3: e.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pt.sv.comments')}</Label><Input value={comments} onChange={(e) => setComments(e.target.value)} placeholder={t('pt.sv.tell_more')} /></div>
+            <div className="grid gap-1.5"><Label>{t('pt.sv.like')}</Label><Input value={q.q1} onChange={(e) => setQ({ ...q, q1: e.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pt.sv.improve')}</Label><Input value={q.q2} onChange={(e) => setQ({ ...q, q2: e.target.value })} /></div>
+            <div className="grid gap-1.5"><Label>{t('pt.sv.other')}</Label><Input value={q.q3} onChange={(e) => setQ({ ...q, q3: e.target.value })} /></div>
             <div className="flex gap-2">
-              <Button disabled={submit.isPending} onClick={() => submit.mutate()}><Send className="size-4" /> ส่งแบบสำรวจ</Button>
-              <Button variant="ghost" onClick={() => setSel('')}>ยกเลิก</Button>
+              <Button disabled={submit.isPending} onClick={() => submit.mutate()}><Send className="size-4" /> {t('pt.sv.send')}</Button>
+              <Button variant="ghost" onClick={() => setSel('')}>{t('pt.cancel')}</Button>
             </div>
             <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
           </Card>

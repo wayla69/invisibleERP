@@ -9,7 +9,7 @@
 
 /* ───────────────────────── Design tokens ─────────────────────────
    Clean enterprise neutral: slate/zinc surfaces, a single refined
-   ruby accent (the Oshinei brand), theme-aware status colors.
+   ruby accent (the Invisible brand), theme-aware status colors.
    Light under :root, dark under .dark. Swap accent in ONE place. */
 :root {
   --radius: 0.625rem;

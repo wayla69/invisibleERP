@@ -1,8 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CircleDollarSign, Package, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
+import { CalendarClock, CircleDollarSign, Landmark, Package, Puzzle, QrCode, ShieldCheck, Sparkles, Gauge } from 'lucide-react';
+// A3 — the add-on vocabulary from the shared entitlement maps (same source the API prices/gates by).
+// slipTransferRef — the Slip-Verify mini-QR TLV parser (slip pre-fill; same code path API tests cover).
+import { ADDON_GRANTS, ADDON_KEYS, ADDONS, slipTransferRef } from '@ierp/shared';
+import { createFrameDecoder } from '@/lib/qr-decode';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { baht, thaiDate, num } from '@/lib/format';
@@ -20,7 +24,7 @@ import { statusVariant } from '@/components/ui';
 type Plan = { code: string; name: string; price_monthly: number; price_yearly?: number | null; features?: any };
 
 export default function BillingPage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const qc = useQueryClient();
   const sub = useQuery<any>({ queryKey: ['subscription'], queryFn: () => api('/api/billing/subscription') });
   const plans = useQuery<{ plans: Plan[] }>({ queryKey: ['plans'], queryFn: () => api('/api/billing/plans') });
@@ -28,9 +32,22 @@ export default function BillingPage() {
   // 1.4/1.5 — this month's metered usage (e-Tax docs / POS txns vs plan quota) + the overage charge history.
   const usage = useQuery<any>({ queryKey: ['billing-usage'], queryFn: () => api('/api/billing/usage') });
   const usageRuns = useQuery<any>({ queryKey: ['usage-overage-runs'], queryFn: () => api('/api/billing/usage-overage/runs') });
+  // A4 — the platform's receipts for this company's subscription payments.
+  const receipts = useQuery<{ receipts: any[] }>({ queryKey: ['saas-receipts'], queryFn: () => api('/api/billing/receipts') });
   const aiRuns = useQuery<any>({ queryKey: ['ai-overage-runs'], queryFn: () => api('/api/billing/ai-overage/runs') });
   const [msg, setMsg] = useState('');
   const [billInterval, setBillInterval] = useState<'monthly' | 'annual'>('monthly'); // 1.7 — annual billing toggle
+  // A3 — self-serve add-on selection, seeded from the subscription row.
+  const [addonSel, setAddonSel] = useState<string[]>([]);
+  useEffect(() => { setAddonSel(Array.isArray(sub.data?.addons) ? sub.data.addons : []); }, [sub.data]);
+  const saveAddons = useMutation({
+    mutationFn: () => api<{ addons: string[]; billing: { added: number; removed: number; mock: boolean } }>('/api/billing/addons', { method: 'POST', body: JSON.stringify({ addons: addonSel }) }),
+    onSuccess: (d) => {
+      setMsg(d.billing?.mock ? t('st.bill.addons_saved') : t('st.bill.addons_saved_billed', { added: d.billing.added, removed: d.billing.removed }));
+      qc.invalidateQueries({ queryKey: ['subscription'] });
+    },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
 
   const change = useMutation({
     mutationFn: (args: { plan_code: string; interval: 'monthly' | 'annual' }) => api('/api/billing/change-plan', { method: 'POST', body: JSON.stringify(args) }),
@@ -162,6 +179,107 @@ export default function BillingPage() {
           </Card>
         )}
 
+        {/* A3 — à-la-carte add-ons: toggle + save; entitlement applies immediately, a live Stripe
+            subscription gets its line items reconciled (prorated) server-side. */}
+        {sub.data && (
+          <Card className="gap-3 p-5">
+            <div className="flex items-center gap-2">
+              <Puzzle className="size-4 text-primary" />
+              <strong className="text-sm">{t('st.bill.addons_title')}</strong>
+            </div>
+            <p className="text-xs text-muted-foreground">{t('st.bill.addons_sub')}</p>
+            {(() => {
+              const planSuites: string[] = Array.isArray(sub.data?.features?.suites) ? sub.data.features.suites : [];
+              const inPlan = (k: string) => ADDON_GRANTS[k as keyof typeof ADDON_GRANTS].every((sv) => planSuites.includes(sv));
+              const MODULE_ADDONS = ['planning', 'marketing', 'crm_loyalty', 'ai'] as const;
+              const groups = [
+                { header: t('st.bill.addons_group_modules'), keys: ADDON_KEYS.filter((k) => (MODULE_ADDONS as readonly string[]).includes(k)) },
+                { header: t('st.bill.addons_group_advanced'), keys: ADDON_KEYS.filter((k) => !(MODULE_ADDONS as readonly string[]).includes(k)) },
+              ];
+              // Live billable delta (selected, not already in the plan) — what บันทึก will actually add.
+              const billable = addonSel.filter((k) => !inPlan(k));
+              const deltaSum = billable.reduce((s, k) => s + (ADDONS[k as keyof typeof ADDONS]?.priceMonthly ?? 0), 0);
+              const moduleCount = billable.filter((k) => (MODULE_ADDONS as readonly string[]).includes(k)).length;
+              return (
+                <>
+                  {groups.map((g) => (
+                    <div key={g.header} className="grid gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.header}</div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {g.keys.map((k) => {
+                          const included = inPlan(k);
+                          const checked = addonSel.includes(k);
+                          return (
+                            <label key={k} className={cn('flex items-center justify-between gap-2 rounded-lg border p-3 text-sm', checked && !included && 'border-primary/50', included && 'opacity-80')}>
+                              <span className="flex min-w-0 items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={included || checked}
+                                  disabled={included}
+                                  onChange={(e) => setAddonSel(e.target.checked ? [...addonSel, k] : addonSel.filter((x) => x !== k))}
+                                />
+                                <span className="min-w-0">
+                                  <span className="block truncate">{lang === 'en' ? ADDONS[k].labels.en : ADDONS[k].labels.th}</span>
+                                  {k === 'ai' && !included && <span className="block text-[11px] text-muted-foreground">{t('st.bill.addons_ai_note')}</span>}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {included ? `✓ ${t('st.bill.addon_in_plan')}` : `${baht(ADDONS[k].priceMonthly)}${t('st.bill.per_month_short')}`}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Honesty nudge: at 3+ module add-ons the Professional bundle is the better deal by design. */}
+                  {moduleCount >= 3 && (
+                    <p data-testid="addons-upsell" className="rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs leading-relaxed">
+                      💡 {t('st.bill.addons_upsell_hint')}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button size="sm" variant="outline" disabled={saveAddons.isPending} onClick={() => saveAddons.mutate()}>
+                      {t('st.bill.addons_save')}
+                    </Button>
+                    {deltaSum > 0 && (
+                      <span className="text-sm text-muted-foreground">{t('st.bill.addons_delta', { amount: baht(deltaSum) })}</span>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </Card>
+        )}
+
+        {/* Wave C — pay by bank transfer / PromptPay: WHERE to pay (platform PromptPay QR + bank account),
+            HOW MUCH (plan + purchased add-ons), then file the slip claim the platform owner verifies. */}
+        {sub.data && <PayByTransferCard />}
+
+        {/* A4 — subscription receipts: list + printable document (PDF, HTML fallback). */}
+        {(receipts.data?.receipts ?? []).length > 0 && (
+          <Card className="gap-3 p-5">
+            <strong className="text-sm">{t('st.bill.receipts_title')}</strong>
+            <p className="text-xs text-muted-foreground">{t('st.bill.receipts_sub')}</p>
+            <DataTable
+              dense
+              rows={receipts.data!.receipts}
+              rowKey={(r: any) => r.receipt_no}
+              columns={[
+                { key: 'receipt_no', label: t('st.bill.col_receipt_no'), className: 'tabular-nums' },
+                { key: 'created_at', label: t('st.bill.col_date'), render: (r: any) => thaiDate(r.created_at) },
+                { key: 'period', label: t('st.bill.col_period'), render: (r: any) => r.period ?? '—' },
+                { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular-nums">{baht(r.amount)}</span> },
+                { key: 'open', label: '', align: 'right', render: (r: any) => (
+                  <a className="text-xs font-medium text-primary hover:underline" href={`/api/billing/receipts/${encodeURIComponent(r.receipt_no)}/pdf`} target="_blank" rel="noreferrer">
+                    {t('st.bill.receipt_open')}
+                  </a>
+                ) },
+              ]}
+            />
+          </Card>
+        )}
+
         <div>
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <h3 className="text-sm font-semibold text-muted-foreground">{t('st.bill.choose_plan')}</h3>
@@ -208,5 +326,178 @@ export default function BillingPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Wave C — the Thai-payment-rails card: shows the platform's PromptPay QR (dynamic, amount due) and/or
+// bank account, takes the tenant's slip claim (transfer reference + amount), and lists the claims with
+// their verification status. A claim only becomes money after the platform owner verifies it — approve
+// issues the receipt (appears in the A4 list above) and re-activates the subscription.
+function PayByTransferCard() {
+  const { t } = useLang();
+  const qc = useQueryClient();
+  const info = useQuery<any>({ queryKey: ['payment-info'], queryFn: () => api('/api/billing/payment-info') });
+  const claims = useQuery<{ claims: any[] }>({ queryKey: ['payment-claims'], queryFn: () => api('/api/billing/payment-claims') });
+  const [amount, setAmount] = useState('');
+  const [period, setPeriod] = useState('');
+  const [slipRef, setSlipRef] = useState('');
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    if (info.data) {
+      setAmount((prev) => prev || String(info.data.amount_due ?? ''));
+      setPeriod((prev) => prev || String(info.data.suggested_period ?? ''));
+    }
+  }, [info.data]);
+  const [slipBusy, setSlipBusy] = useState(false);
+  // Read an uploaded slip image: (1) draw to canvas → decode the mini-QR → exact transfer ref;
+  // (2) send a bounded JPEG to doc-ai for amount/date (+ref fallback when no QR decoded).
+  const readSlip = async (file: File) => {
+    setSlipBusy(true);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('bad image'));
+        el.src = URL.createObjectURL(file);
+      });
+      const draw = (scale: number) => {
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+        return c;
+      };
+      let ref: string | null = null;
+      try {
+        const decoder = await createFrameDecoder();
+        for (const scale of [1, 2]) {
+          const decoded = await decoder.decode(draw(scale));
+          if (decoded) { ref = slipTransferRef(decoded); if (ref) break; }
+        }
+      } catch { /* no decoder / no QR — the AI fallback below still runs */ }
+      if (ref) setSlipRef(ref);
+      // Bound the upload the same way parseInvoiceDataUrl expects (phone photos can be huge).
+      const maxSide = 1600;
+      const scaleDown = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const dataUrl = draw(scaleDown).toDataURL('image/jpeg', 0.85);
+      let aiAmount = false;
+      try {
+        const r = await api<{ fields: { amount: number | null; transfer_ref: string | null; date: string | null } }>('/api/doc-ai/slip-extract', { method: 'POST', body: JSON.stringify({ data_url: dataUrl }) });
+        if (r.fields.amount) { setAmount(String(r.fields.amount)); aiAmount = true; }
+        if (!ref && r.fields.transfer_ref) { ref = r.fields.transfer_ref; setSlipRef(ref); }
+        if (r.fields.date) setPeriod(r.fields.date.slice(0, 7));
+      } catch { /* extraction is best-effort — the form stays manual */ }
+      URL.revokeObjectURL(img.src);
+      setMsg(ref || aiAmount ? `✅ ${t('st.bill.pay_slip_read_done')}` : t('st.bill.pay_slip_read_none'));
+    } finally {
+      setSlipBusy(false);
+    }
+  };
+  const submit = useMutation({
+    mutationFn: () => api('/api/billing/payment-claims', {
+      method: 'POST',
+      body: JSON.stringify({ amount: Number(amount), period: period || undefined, slip_ref: slipRef.trim(), note: note.trim() || undefined }),
+    }),
+    onSuccess: () => {
+      setMsg(`✅ ${t('st.bill.pay_claim_filed')}`);
+      setSlipRef(''); setNote('');
+      qc.invalidateQueries({ queryKey: ['payment-claims'] });
+    },
+    onError: (e: any) => setMsg(`❌ ${e.message}`),
+  });
+  const d = info.data;
+  const claimStatus = (s: string) => (
+    <Badge variant={s === 'Approved' ? 'success' : s === 'Rejected' ? 'destructive' : 'secondary'}>
+      {s === 'Approved' ? t('st.bill.pay_status_approved') : s === 'Rejected' ? t('st.bill.pay_status_rejected') : t('st.bill.pay_status_pending')}
+    </Badge>
+  );
+  return (
+    <Card className="gap-4 p-5">
+      <div className="flex items-center gap-2">
+        <Landmark className="size-4 text-primary" />
+        <strong className="text-sm">{t('st.bill.pay_title')}</strong>
+      </div>
+      <p className="text-xs text-muted-foreground">{t('st.bill.pay_sub')}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-3">
+          {d?.amount_due > 0 && (
+            <div className="rounded-lg border p-3 text-sm">
+              <span className="text-muted-foreground">{t('st.bill.pay_amount_due', { plan: String(d.plan_name ?? d.plan_code ?? ''), interval: d.interval === 'annual' ? t('st.bill.interval_annual') : t('st.bill.interval_monthly') })}</span>
+              <div className="text-2xl font-bold tabular-nums">{baht(d.amount_due)}</div>
+            </div>
+          )}
+          {d?.qr_image && (
+            <div className="flex items-center gap-3 rounded-lg border p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={d.qr_image} alt="PromptPay QR" className="size-36 rounded-lg border bg-white p-1" />
+              <div className="grid gap-1 text-sm">
+                <span className="flex items-center gap-1.5 font-medium"><QrCode className="size-4" /> PromptPay</span>
+                <span className="tabular-nums text-muted-foreground">{d.promptpay_id}</span>
+                <span className="text-xs text-muted-foreground">{t('st.bill.pay_qr_hint')}</span>
+              </div>
+            </div>
+          )}
+          {d?.bank_details && (
+            <div className="rounded-lg border p-3 text-sm">
+              <span className="font-medium">{t('st.bill.pay_bank_title')}</span>
+              <div className="whitespace-pre-line text-muted-foreground">{d.bank_details}</div>
+            </div>
+          )}
+        </div>
+        <div className="grid content-start gap-2">
+          <strong className="text-sm">{t('st.bill.pay_claim_title')}</strong>
+          {/* Slip pre-fill: decode the slip's Slip-Verify mini-QR client-side (exact transfer ref, free),
+              then ask doc-ai for amount/date (+ref fallback). Pre-fill ONLY — the user confirms the form
+              and the platform owner still verifies against the real bank statement. */}
+          <label className={cn('flex w-fit cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium', slipBusy && 'opacity-60')}>
+            {slipBusy ? t('st.bill.pay_slip_reading') : t('st.bill.pay_slip_read')}
+            <input type="file" accept="image/*" className="hidden" disabled={slipBusy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void readSlip(f); e.target.value = ''; }} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('fin.col_amount')}
+            <input type="number" min="0" step="0.01" className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('st.bill.col_period')}
+            <input type="month" className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={period} onChange={(e) => setPeriod(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('st.bill.pay_slip_ref')}
+            <input className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" placeholder={t('st.bill.pay_slip_ref_ph')} value={slipRef} onChange={(e) => setSlipRef(e.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            {t('st.bill.pay_note')}
+            <input className="rounded-md border bg-transparent px-3 py-2 text-sm text-foreground" value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+          <Button size="sm" className="w-fit" disabled={submit.isPending || !slipRef.trim() || !(Number(amount) > 0)} onClick={() => submit.mutate()}>
+            {t('st.bill.pay_claim_submit')}
+          </Button>
+          <Msg ok={msg.startsWith('✅')}>{msg}</Msg>
+        </div>
+      </div>
+      {(claims.data?.claims ?? []).length > 0 && (
+        <DataTable
+          dense
+          rows={claims.data!.claims}
+          rowKey={(r: any) => String(r.id)}
+          columns={[
+            { key: 'created_at', label: t('st.bill.col_date'), render: (r: any) => thaiDate(r.created_at) },
+            { key: 'slip_ref', label: t('st.bill.pay_slip_ref'), className: 'tabular-nums' },
+            { key: 'period', label: t('st.bill.col_period'), render: (r: any) => r.period ?? '—' },
+            { key: 'amount', label: t('fin.col_amount'), align: 'right', render: (r: any) => <span className="tabular-nums">{baht(r.amount)}</span> },
+            { key: 'status', label: t('fin.col_status'), render: (r: any) => (
+              <span className="inline-flex items-center gap-2">
+                {claimStatus(r.status)}
+                {r.status === 'Rejected' && r.reject_reason ? <span className="text-xs text-muted-foreground">{r.reject_reason}</span> : null}
+                {r.status === 'Approved' && r.receipt_no ? (
+                  <a className="text-xs font-medium text-primary hover:underline" href={`/api/billing/receipts/${encodeURIComponent(r.receipt_no)}/pdf`} target="_blank" rel="noreferrer">{r.receipt_no}</a>
+                ) : null}
+              </span>
+            ) },
+          ]}
+        />
+      )}
+    </Card>
   );
 }

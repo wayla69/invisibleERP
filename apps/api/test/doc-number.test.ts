@@ -44,8 +44,8 @@ describe('DocNumberService — stamped formats (pure)', () => {
 
   it('nextTenantStamped slices the tenant code per type (MPO 3 / PND 6 / else 4), strips spaces, uppercases', () => {
     expect(svc.nextTenantStamped('MPO', 'my co ltd', D)).toBe(`MPO-MYC-${bizStamp(D)}`);
-    expect(svc.nextTenantStamped('PND', 'oshinei', D)).toBe(`PND-OSHINE-${bizStamp(D)}`);
-    expect(svc.nextTenantStamped('SALE', 'oshinei', D)).toBe(`SALE-OSHI-${bizStamp(D)}`);
+    expect(svc.nextTenantStamped('PND', 'invisible', D)).toBe(`PND-INVISI-${bizStamp(D)}`);
+    expect(svc.nextTenantStamped('SALE', 'invisible', D)).toBe(`SALE-INVI-${bizStamp(D)}`);
     expect(svc.nextTenantStamped('PRD', '', D)).toBe(`PRD--${bizStamp(D)}`); // empty code degrades, no crash
   });
 

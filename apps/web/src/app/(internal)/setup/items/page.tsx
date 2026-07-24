@@ -29,6 +29,9 @@ type Profile = {
   min_stock?: number | null; max_stock?: number | null; avg_daily_usage?: number | null; lead_time_days?: number | null;
   min_order_qty?: number | null; order_multiple?: number | null; order_cost?: number | null; holding_cost?: number | null;
   is_fixed_asset?: boolean; default_asset_category_id?: number | null;
+  is_lot_tracked?: boolean; // docs/52 Phase 3a — FEFO lot capture at the POS
+  is_serial_tracked?: boolean; // docs/52 Phase 3b — serial/IMEI capture at the POS
+  min_age?: number | null; // docs/52 Phase 3c — minimum buyer age (0 = unrestricted)
   status?: string; superseded_by?: number | null;
 };
 
@@ -55,7 +58,7 @@ export default function ItemPostingSetupPage() {
 
   const save = useMutation({
     mutationFn: () => {
-      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null };
+      const p: any = { category_id: form!.category_id ?? null, is_fixed_asset: !!form!.is_fixed_asset, default_asset_category_id: form!.default_asset_category_id ?? null, is_lot_tracked: !!form!.is_lot_tracked, is_serial_tracked: !!form!.is_serial_tracked, min_age: Number(form!.min_age) || 0 };
       for (const k of ['revenue_account', 'cogs_account', 'inventory_account', 'valuation_account', 'vat_code', 'wht_income_type', 'default_location_id', ...TEXT_FIELDS] as const) p[k] = (form as any)[k] ? (form as any)[k] : null;
       for (const k of NUM_FIELDS) p[k] = (form as any)[k] ?? null;
       return api(`/api/item-setup/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: JSON.stringify(p) });
@@ -223,6 +226,32 @@ export default function ItemPostingSetupPage() {
                   </Select>
                 </div>
               )}
+              {/* docs/52 Phase 3a — lot-tracked: the POS sells this item only from a real, non-expired, non-held lot (FEFO). */}
+              <div className="grid gap-2">
+                <Label>ติดตามล็อต/วันหมดอายุ (Lot-tracked — FEFO at POS)</Label>
+                <Select value={form.is_lot_tracked ? '1' : '0'} onValueChange={(v) => setForm((f) => f && ({ ...f, is_lot_tracked: v === '1' }))}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t('st.sitm_no')}</SelectItem>
+                    <SelectItem value="1">{t('st.sitm_yes')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* docs/52 Phase 3b — serial-tracked: the POS sells this item as a specific serial/IMEI unit. */}
+              <div className="grid gap-2">
+                <Label>ติดตามซีเรียล/IMEI (Serial-tracked at POS)</Label>
+                <Select value={form.is_serial_tracked ? '1' : '0'} onValueChange={(v) => setForm((f) => f && ({ ...f, is_serial_tracked: v === '1' }))}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t('st.sitm_no')}</SelectItem>
+                    <SelectItem value="1">{t('st.sitm_yes')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* docs/52 Phase 3c — age-restricted: the POS blocks the sale until the buyer's age is verified. */}
+              <Field label="อายุขั้นต่ำผู้ซื้อ (Min buyer age — 0 = none, e.g. 20 for alcohol/tobacco)">
+                <Input type="number" min="0" max="120" step="1" value={form.min_age ?? 0} onChange={(e) => setForm((f) => f && ({ ...f, min_age: e.target.value === '' ? 0 : Number(e.target.value) }))} />
+              </Field>
             </div>
             <div>
               <Button disabled={save.isPending} onClick={() => save.mutate()}><Save className="size-4" /> {save.isPending ? t('st.sitm_saving') : t('st.sitm_save_btn')}</Button>
@@ -253,6 +282,9 @@ export default function ItemPostingSetupPage() {
               buildBody={(target, relType) => ({ to_item_id: target, rel_type: relType })}
             />
             <ScheduledChangesSection entity="item" entityKey={itemId} fields={['unit_price', 'status']} />
+            <VariantsSection itemId={itemId} />
+            <KitSection itemId={itemId} />
+            {form.is_serial_tracked && <SerialsSection itemId={itemId} />}
           </Card>
         )}
 
@@ -269,4 +301,131 @@ export default function ItemPostingSetupPage() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="grid gap-2"><Label>{label}</Label>{children}</div>;
+}
+
+// docs/52 Phase 2b — generate a size×color (etc.) variant matrix under this item. Minimal: enter up to two
+// axes as comma-separated values, generate the child SKUs, and list them.
+interface VariantRow { item_id: string; description: string | null; barcode: string | null; unit_price: number; attributes: { axis: string; value: string }[] }
+function VariantsSection({ itemId }: { itemId: string }) {
+  const qc = useQueryClient();
+  const [axis1, setAxis1] = useState('Size');
+  const [vals1, setVals1] = useState('');
+  const [axis2, setAxis2] = useState('Color');
+  const [vals2, setVals2] = useState('');
+  const q = useQuery<{ is_matrix_parent: boolean; count: number; variants: VariantRow[] }>({ queryKey: ['item-variants', itemId], queryFn: () => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/variants`) });
+  const gen = useMutation({
+    mutationFn: () => {
+      const split = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+      const axes = [{ axis: axis1.trim(), values: split(vals1) }, { axis: axis2.trim(), values: split(vals2) }].filter((a) => a.axis && a.values.length);
+      return api(`/api/item-setup/items/${encodeURIComponent(itemId)}/variants`, { method: 'POST', body: JSON.stringify({ axes }) });
+    },
+    onSuccess: (r: any) => { notifySuccess(`สร้างตัวเลือกใหม่ ${r.generated} รายการ (Generated ${r.generated})`); setVals1(''); setVals2(''); qc.invalidateQueries({ queryKey: ['item-variants', itemId] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  return (
+    <div className="grid gap-2 border-t pt-4">
+      <Label className="text-sm font-semibold">ตัวเลือกสินค้า (Variants — size × color)</Label>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Input value={axis1} onChange={(e) => setAxis1(e.target.value)} placeholder="Axis 1 (e.g. Size)" />
+        <Input value={vals1} onChange={(e) => setVals1(e.target.value)} placeholder="S, M, L" />
+        <Input value={axis2} onChange={(e) => setAxis2(e.target.value)} placeholder="Axis 2 (e.g. Color)" />
+        <Input value={vals2} onChange={(e) => setVals2(e.target.value)} placeholder="Red, Blue" />
+      </div>
+      <div><Button size="sm" disabled={gen.isPending || (!vals1.trim() && !vals2.trim())} onClick={() => gen.mutate()}>สร้างตัวเลือก (Generate)</Button></div>
+      {(q.data?.variants ?? []).length > 0 && (
+        <div className="mt-1 grid gap-1 text-sm">
+          {q.data!.variants.map((v) => (
+            <div key={v.item_id} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1">
+              <span className="font-mono text-xs">{v.item_id}</span>
+              <span className="text-muted-foreground">{v.attributes.map((a) => `${a.axis}: ${a.value}`).join(' · ')}</span>
+              {v.barcode && <span className="ml-auto font-mono text-xs text-muted-foreground">⏛ {v.barcode}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// docs/52 Phase 2c — kits/bundles: this item is sold as one line, but its components are consumed from stock
+// on sale. Manage the component list (a "bill of materials") with per-component quantities here. Components
+// are stored as outgoing kit_component item_relationships; the POS explodes them at checkout.
+interface KitRow { id: number; rel_type: string; direction: string; qty: number; party: { item_id: string; name: string } }
+function KitSection({ itemId }: { itemId: string }) {
+  const qc = useQueryClient();
+  const [comp, setComp] = useState('');
+  const [qty, setQty] = useState('1');
+  const q = useQuery<{ item_id: string; relationships: KitRow[] }>({ queryKey: ['item-relationships', itemId], queryFn: () => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`) });
+  const components = (q.data?.relationships ?? []).filter((r) => r.direction === 'outgoing' && r.rel_type === 'kit_component');
+  const add = useMutation({
+    mutationFn: () => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships`, { method: 'POST', body: JSON.stringify({ to_item_id: comp.trim(), rel_type: 'kit_component', qty: Math.max(0.001, Number(qty) || 1) }) }),
+    onSuccess: () => { notifySuccess('เพิ่มส่วนประกอบชุดสินค้าแล้ว (Component added)'); setComp(''); setQty('1'); qc.invalidateQueries({ queryKey: ['item-relationships', itemId] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const del = useMutation({
+    mutationFn: (relId: number) => api(`/api/item-setup/items/${encodeURIComponent(itemId)}/relationships/${relId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['item-relationships', itemId] }),
+    onError: (e: Error) => notifyError(e.message),
+  });
+  return (
+    <div className="grid gap-2 border-t pt-4">
+      <Label className="text-sm font-semibold">ชุดสินค้า / ส่วนประกอบ (Kit / bundle components)</Label>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Input className="sm:col-span-2" value={comp} onChange={(e) => setComp(e.target.value)} placeholder="Component item_id" />
+        <Input type="number" min="0.001" step="any" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty per kit" />
+        <Button size="sm" disabled={add.isPending || !comp.trim()} onClick={() => add.mutate()}>เพิ่ม (Add)</Button>
+      </div>
+      {components.length > 0 && (
+        <div className="mt-1 grid gap-1 text-sm">
+          {components.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1">
+              <span className="font-mono text-xs">{c.party.item_id}</span>
+              <span className="text-muted-foreground">{c.party.name}</span>
+              <span className="ml-auto">× {c.qty}</span>
+              <Button size="sm" variant="ghost" disabled={del.isPending} onClick={() => del.mutate(c.id)}>ลบ</Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// docs/52 Phase 3b — register serial/IMEI units into stock for a serial-tracked item and see what's in stock
+// vs sold. The POS then sells a specific in-stock serial (marking it Sold).
+interface SerialRow { serial_no: string; status: string; sale_no: string | null }
+function SerialsSection({ itemId }: { itemId: string }) {
+  const qc = useQueryClient();
+  const [raw, setRaw] = useState('');
+  const q = useQuery<{ item_id: string; count: number; serials: SerialRow[] }>({ queryKey: ['item-serials', itemId], queryFn: () => api(`/api/serials/items/${encodeURIComponent(itemId)}`) });
+  const add = useMutation({
+    mutationFn: () => {
+      const serials = raw.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+      return api(`/api/serials/items/${encodeURIComponent(itemId)}`, { method: 'POST', body: JSON.stringify({ serials }) });
+    },
+    onSuccess: (r: any) => { notifySuccess(`เพิ่มซีเรียล ${r.added} หมายเลข (Added ${r.added})`); setRaw(''); qc.invalidateQueries({ queryKey: ['item-serials', itemId] }); },
+    onError: (e: Error) => notifyError(e.message),
+  });
+  const serials = q.data?.serials ?? [];
+  const inStock = serials.filter((s) => s.status === 'InStock').length;
+  return (
+    <div className="grid gap-2 border-t pt-4">
+      <Label className="text-sm font-semibold">ซีเรียล / IMEI (Serial units) — {inStock} in stock / {serials.length} total</Label>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Input className="sm:col-span-3" value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="Serial/IMEI numbers (comma or space separated)" />
+        <Button size="sm" disabled={add.isPending || !raw.trim()} onClick={() => add.mutate()}>เพิ่มเข้าสต๊อก (Add)</Button>
+      </div>
+      {serials.length > 0 && (
+        <div className="mt-1 grid gap-1 text-sm">
+          {serials.slice(0, 50).map((sn) => (
+            <div key={sn.serial_no} className="flex flex-wrap items-center gap-2 rounded border px-2 py-1">
+              <span className="font-mono text-xs">{sn.serial_no}</span>
+              <span className={`ml-auto text-xs ${sn.status === 'InStock' ? 'text-success' : 'text-muted-foreground'}`}>{sn.status}</span>
+              {sn.sale_no && <span className="font-mono text-xs text-muted-foreground">{sn.sale_no}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

@@ -1,7 +1,8 @@
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { eq, and, inArray } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDb } from '../../database/database.module';
-import { journalEntries, journalLines, revContracts, revrecSchedules } from '../../database/schema';
+import { revContracts, revrecSchedules } from '../../database/schema';
+import { LedgerReadService } from '../ledger/ledger-read.service';
 import { n } from '../../database/queries';
 import type { JwtUser } from '../../common/decorators';
 
@@ -31,7 +32,13 @@ function classifySource(src: string | null): 'billings' | 'recognized' | 'financ
 
 @Injectable()
 export class RevDisclosureService {
-  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
+  // GL reads ride the narrow LedgerReadService (docs/46 Phase 3); ctor-body construction keeps
+  // hand-constructed harness uses unchanged.
+  private readonly ledgerRead: LedgerReadService;
+
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {
+    this.ledgerRead = new LedgerReadService(db);
+  }
 
   private tenantOf(user: JwtUser, explicit?: number | null): number | null {
     const t = explicit ?? user.tenantId ?? null;
@@ -43,14 +50,8 @@ export class RevDisclosureService {
   // the period from the GL journal lines, decomposed by source. Ties to GL by construction.
   async contractLiabilityRollforward(period: string, user: JwtUser, explicitTenantId?: number | null) {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException({ code: 'INVALID_PERIOD', message: 'period must be YYYY-MM', messageTh: 'งวดต้องเป็น YYYY-MM' });
-    const db = this.db;
     const tenantId = this.tenantOf(user, explicitTenantId);
-    const conds = [eq(journalEntries.status, 'Posted'), inArray(journalLines.accountCode, [CONTRACT_LIABILITY, CONTRACT_ASSET])];
-    if (tenantId != null) conds.push(eq(journalEntries.tenantId, tenantId));
-    const rows = await db.select({
-      accountCode: journalLines.accountCode, debit: journalLines.debit, credit: journalLines.credit,
-      entryDate: journalEntries.entryDate, source: journalEntries.source,
-    }).from(journalLines).innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id)).where(and(...conds));
+    const rows = await this.ledgerRead.accountActivity([CONTRACT_LIABILITY, CONTRACT_ASSET], { tenantId });
 
     const build = (account: string, creditNormal: boolean) => {
       let opening = 0;

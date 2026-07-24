@@ -42,6 +42,8 @@ type RawAccount = {
   isPostable?: boolean | null;
   cfBucket?: string | null;
   isCurrent?: boolean | null;
+  bsGroup?: string | null;
+  isGroup?: string | null;
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   requireDimension?: Record<string, boolean> | null;
@@ -63,6 +65,8 @@ type Row = {
   active: boolean;
   cfBucket: string | null;
   isCurrent: boolean | null;
+  bsGroup: string | null;
+  isGroup: string | null;
   effectiveFrom: string | null;
   effectiveTo: string | null;
 };
@@ -94,6 +98,7 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [subOf, setSubOf] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | null>(null);
   const [deactivating, setDeactivating] = useState<Row | null>(null);
 
@@ -165,6 +170,8 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
         active: activeRaw === false || activeRaw === 'false' ? false : true,
         cfBucket: c?.cfBucket ?? null,
         isCurrent: c?.isCurrent ?? null,
+        bsGroup: c?.bsGroup ?? null,
+        isGroup: c?.isGroup ?? null,
         effectiveFrom: c?.effectiveFrom ?? null,
         effectiveTo: c?.effectiveTo ?? null,
       };
@@ -259,6 +266,11 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
                   <Eye className="size-4" />
                 </Button>
               ))}
+              {isAdmin && (
+                <Button size="sm" variant="ghost" title={t('fnx.coa.add_sub')} onClick={() => setSubOf(r)}>
+                  <Layers className="size-4" />
+                </Button>
+              )}
               {isAdmin && (
                 <Button size="sm" variant="ghost" title={t('fnx.coa.edit')} onClick={() => setEditing(r)}>
                   <Pencil className="size-4" />
@@ -406,6 +418,7 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
       </StateView>
 
       {creating && <CreateAccountDialog onClose={() => setCreating(false)} onSaved={() => { setCreating(false); refresh(); }} />}
+      {subOf && <CreateAccountDialog preset={{ parentCode: subOf.code, type: subOf.type, suggestCode: nextChildCode(subOf.code, rows) }} onClose={() => setSubOf(null)} onSaved={() => { setSubOf(null); refresh(); }} />}
       {editing && <EditAccountDialog account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
       {deactivating && <DeactivateAccountDialog account={deactivating} onClose={() => setDeactivating(null)} onSaved={() => { setDeactivating(null); refresh(); }} />}
     </div>
@@ -414,25 +427,75 @@ export function ChartOfAccountsClient({ initialCanon, initialOverlay }: { initia
 
 const SELECT_CLS = 'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50';
 
-// Canonical create (COA_ADMIN_ONLY server-side): a new 4-digit code joins the SHARED universe. The service
-// derives normal balance from the type unless overridden; new accounts default postable.
-function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+const BS_GROUP_OPTS = ['current_asset', 'noncurrent_asset', 'current_liability', 'noncurrent_liability', 'equity'] as const;
+const IS_GROUP_OPTS = ['revenue', 'cogs', 'selling_admin', 'other_income', 'other_expense', 'finance_cost', 'tax'] as const;
+
+// 0438 — statement-section binding fields, shared by the create + edit dialogs. Balance-sheet accounts
+// (Asset/Liability/Equity) pick a งบดุล section; P&L accounts (Revenue/Expense) pick a งบกำไรขาดทุน section.
+// '' = the canonical default (resolved server-side). Renders nothing for a type with no statement.
+function StatementSectionFields({ type, bsGroup, setBsGroup, isGroup, setIsGroup }: {
+  type: string; bsGroup: string; setBsGroup: (v: string) => void; isGroup: string; setIsGroup: (v: string) => void;
+}) {
   const { t } = useLang();
-  const [code, setCode] = useState('');
+  const isBs = type === 'Asset' || type === 'Liability' || type === 'Equity';
+  const isPl = type === 'Revenue' || type === 'Expense';
+  if (!isBs && !isPl) return null;
+  return isBs ? (
+    <FormField label={t('fnx.coa.f_bs_group')} htmlFor="coa-bsg">
+      <select id="coa-bsg" className={SELECT_CLS} value={bsGroup} onChange={(e) => setBsGroup(e.target.value)}>
+        <option value="">{t('fnx.coa.f_stmt_auto')}</option>
+        {BS_GROUP_OPTS.map((g) => <option key={g} value={g}>{t(`fnx.coa.bs_${g}`)}</option>)}
+      </select>
+    </FormField>
+  ) : (
+    <FormField label={t('fnx.coa.f_is_group')} htmlFor="coa-isg">
+      <select id="coa-isg" className={SELECT_CLS} value={isGroup} onChange={(e) => setIsGroup(e.target.value)}>
+        <option value="">{t('fnx.coa.f_stmt_auto')}</option>
+        {IS_GROUP_OPTS.map((g) => <option key={g} value={g}>{t(`fnx.coa.is_${g}`)}</option>)}
+      </select>
+    </FormField>
+  );
+}
+
+// Suggest the next free sub-account code under a parent: the parent code + a running 2-digit ordinal
+// (e.g. 5150 → 515001, 515002…). Falls back to a longer suffix if the 6-digit space fills; the server
+// re-checks uniqueness + the 4–6-digit format, so a clash just needs a manual edit.
+function nextChildCode(parentCode: string, rows: Row[]): string {
+  const children = rows.filter((r) => r.parentCode === parentCode).length;
+  for (let n = children + 1; n < 100; n++) {
+    const candidate = `${parentCode}${String(n).padStart(2, '0')}`;
+    if (candidate.length <= 6 && !rows.some((r) => r.code === candidate)) return candidate;
+  }
+  return '';
+}
+
+// Canonical create (COA_ADMIN_ONLY server-side): a new 4–6-digit code joins the SHARED universe. A code is
+// 4 digits for a control/summary account and one or two extra digits for a SUB-ACCOUNT under a parent
+// (e.g. 5150 ค่าเดินทาง → 515001 ค่าเครื่องบิน). The service derives normal balance from the type unless
+// overridden; new accounts default postable. `preset` pre-fills the parent + type for the "add sub-account"
+// action, and locks the type to the parent's (a sub-account shares its parent's account type).
+function CreateAccountDialog({ preset, onClose, onSaved }: { preset?: { parentCode: string; type: string; suggestCode: string }; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLang();
+  const isSub = !!preset;
+  const [code, setCode] = useState(preset?.suggestCode ?? '');
   const [name, setName] = useState('');
   const [nameTh, setNameTh] = useState('');
-  const [type, setType] = useState<string>('Expense');
-  const [parentCode, setParentCode] = useState('');
+  const [type, setType] = useState<string>(preset?.type ?? 'Expense');
+  const [parentCode, setParentCode] = useState(preset?.parentCode ?? '');
+  // A sub-account posts (a leaf), while the parent it rolls up into is typically a non-postable header.
   const [postable, setPostable] = useState(true);
   // docs/43 PR-8: a balance-sheet account self-declares its SCF bucket + current/non-current so the
   // indirect cash flow and the BS metrics classify it without a code change.
   const [cfBucket, setCfBucket] = useState('');
   const [isCurrent, setIsCurrent] = useState('');
+  // 0438: which งบดุล / งบกำไรขาดทุน section this account rolls into ('' = canonical default).
+  const [bsGroup, setBsGroup] = useState('');
+  const [isGroup, setIsGroup] = useState('');
   // COA-D2: effective window + required dimensions — now ENFORCED by the posting guard when set.
   const [effFrom, setEffFrom] = useState('');
   const [effTo, setEffTo] = useState('');
   const [reqDims, setReqDims] = useState<Record<string, boolean>>({});
-  const codeOk = /^\d{4}$/.test(code);
+  const codeOk = /^\d{4,6}$/.test(code);
   const save = useMutation({
     mutationFn: () =>
       api('/api/ledger/accounts', {
@@ -444,6 +507,8 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
           isPostable: postable,
           ...(cfBucket ? { cfBucket } : {}),
           ...(isCurrent !== '' ? { isCurrent: isCurrent === 'true' } : {}),
+          ...(bsGroup ? { bsGroup } : {}),
+          ...(isGroup ? { isGroup } : {}),
           ...(effFrom ? { effectiveFrom: effFrom } : {}),
           ...(effTo ? { effectiveTo: effTo } : {}),
           ...(Object.values(reqDims).some(Boolean) ? { requireDimension: reqDims } : {}),
@@ -456,12 +521,25 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('fnx.coa.create_title')}</DialogTitle>
-          <DialogDescription>{t('fnx.coa.create_desc')}</DialogDescription>
+          <DialogTitle>{isSub ? t('fnx.coa.create_sub_title', { parent: preset!.parentCode }) : t('fnx.coa.create_title')}</DialogTitle>
+          <DialogDescription>{isSub ? t('fnx.coa.create_sub_desc') : t('fnx.coa.create_desc')}</DialogDescription>
         </DialogHeader>
+        {isSub && (
+          // P5 — sub-account vs dimension guidance: steer analytical breakdowns to the posting dimensions
+          // (cost centre / project / branch) rather than an ever-deeper code tree, and state the P4 rules.
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-950/30 p-3 text-sm">
+            <p className="font-medium">{t('fnx.coa.sub_vs_dim_title')}</p>
+            <ul className="mt-1 list-disc pl-5 space-y-1 text-muted-foreground">
+              <li>{t('fnx.coa.sub_vs_dim_sub')}</li>
+              <li>{t('fnx.coa.sub_vs_dim_dim')}</li>
+            </ul>
+            <p className="mt-2 text-xs text-muted-foreground">{t('fnx.coa.sub_vs_dim_rules')}</p>
+            <a href="/cost-centers" className="mt-1 inline-block text-xs font-medium text-primary underline underline-offset-2">{t('fnx.coa.sub_vs_dim_manage')} →</a>
+          </div>
+        )}
         <div className="grid gap-4">
           <FormField label={t('fnx.coa.f_code')} htmlFor="coa-code" required error={code && !codeOk ? t('fnx.coa.f_code_error') : undefined}>
-            <Input id="coa-code" value={code} onChange={(e) => setCode(e.target.value.trim())} maxLength={4} inputMode="numeric" />
+            <Input id="coa-code" value={code} onChange={(e) => setCode(e.target.value.trim())} maxLength={6} inputMode="numeric" />
           </FormField>
           <FormField label={t('fnx.coa.f_name_en')} htmlFor="coa-name" required>
             <Input id="coa-name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -469,13 +547,13 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
           <FormField label={t('fnx.coa.f_name_th')} htmlFor="coa-name-th">
             <Input id="coa-name-th" value={nameTh} onChange={(e) => setNameTh(e.target.value)} />
           </FormField>
-          <FormField label={t('fnx.coa.f_type')} htmlFor="coa-type" required>
-            <select id="coa-type" className={SELECT_CLS} value={type} onChange={(e) => setType(e.target.value)}>
+          <FormField label={t('fnx.coa.f_type')} htmlFor="coa-type" required hint={isSub ? t('fnx.coa.f_type_sub_hint', { parent: preset!.parentCode }) : undefined}>
+            <select id="coa-type" className={SELECT_CLS} value={type} onChange={(e) => setType(e.target.value)} disabled={isSub}>
               {TYPE_ORDER.map((tp) => <option key={tp} value={tp}>{TYPE_KEY[tp] ? t(TYPE_KEY[tp]) : tp}</option>)}
             </select>
           </FormField>
-          <FormField label={t('fnx.coa.f_parent')} htmlFor="coa-parent">
-            <Input id="coa-parent" value={parentCode} onChange={(e) => setParentCode(e.target.value.trim())} maxLength={4} inputMode="numeric" />
+          <FormField label={t('fnx.coa.f_parent')} htmlFor="coa-parent" hint={isSub ? undefined : t('fnx.coa.f_parent_hint')}>
+            <Input id="coa-parent" value={parentCode} onChange={(e) => setParentCode(e.target.value.trim())} maxLength={6} inputMode="numeric" readOnly={isSub} />
           </FormField>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={postable} onChange={(e) => setPostable(e.target.checked)} />
@@ -521,6 +599,7 @@ function CreateAccountDialog({ onClose, onSaved }: { onClose: () => void; onSave
               </FormField>
             </>
           )}
+          <StatementSectionFields type={type} bsGroup={bsGroup} setBsGroup={setBsGroup} isGroup={isGroup} setIsGroup={setIsGroup} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>
@@ -544,6 +623,10 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
   const cur0 = account.isCurrent === true ? 'true' : account.isCurrent === false ? 'false' : '';
   const [cfBucket, setCfBucket] = useState(cf0);
   const [isCurrent, setIsCurrent] = useState(cur0);
+  // 0438: statement-section binding backfill ('' = auto; null clears back to auto).
+  const bsg0 = account.bsGroup ?? '', isg0 = account.isGroup ?? '';
+  const [bsGroup, setBsGroup] = useState(bsg0);
+  const [isGroup, setIsGroup] = useState(isg0);
   // COA-D2: effective window + required dimensions (enforced by the posting guard when set).
   const ef0 = account.effectiveFrom ?? '', et0 = account.effectiveTo ?? '';
   const rd0 = account.requireDimension ?? {};
@@ -561,6 +644,8 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
           ...(postable !== account.isPostable ? { isPostable: postable } : {}),
           ...(cfBucket !== cf0 ? { cfBucket: cfBucket || null } : {}),
           ...(isCurrent !== cur0 ? { isCurrent: isCurrent === '' ? null : isCurrent === 'true' } : {}),
+          ...(bsGroup !== bsg0 ? { bsGroup: bsGroup || null } : {}),
+          ...(isGroup !== isg0 ? { isGroup: isGroup || null } : {}),
           ...(effFrom !== ef0 ? { effectiveFrom: effFrom } : {}),
           ...(effTo !== et0 ? { effectiveTo: effTo } : {}),
           ...(JSON.stringify(reqDims) !== JSON.stringify(rd0) ? { requireDimension: reqDims } : {}),
@@ -627,6 +712,7 @@ function EditAccountDialog({ account, onClose, onSaved }: { account: Row; onClos
               </FormField>
             </>
           )}
+          <StatementSectionFields type={account.type} bsGroup={bsGroup} setBsGroup={setBsGroup} isGroup={isGroup} setIsGroup={setIsGroup} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>{t('fnx.coa.cancel')}</Button>

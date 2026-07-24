@@ -142,8 +142,9 @@ Extend the proven idempotency contract from "quick-sale replay" to the full fina
   holds → a close with a cash tip read "over" by the tip. It now counts cash-tender tips (and still
   excludes card tips), so online and hub closes agree. REV-13 text updated; `cashreport` proves both
   directions; `pos-p0`/`restaurant`/`tips`/`splitbill` unaffected (their sales carry no cash tip).
-- **PLANNED:** loyalty-redeem sales (cross-system points state — today a visible `skipped_unsupported`
-  queue), tip-pool distributions (policy today: distribute on the CLOUD after sync — per-sale tips already
+- **DELIVERED 2026-07-16 (docs/50 Wave 4 C4):** loyalty-redeem sales now replay with a CLOUD-side balance
+  clamp ("adjusted at sync"; member sourced from the hub's own Redeem ledger row; re-push never
+  double-deducts — see PN-24 rev 0.11). Still planned: tip-pool distributions (policy today: distribute on the CLOUD after sync — per-sale tips already
   accrue to 2300 at ingest), hub-local stock ops (waste/receives; sale-driven BOM deductions already post
   at cloud ingest), fiscal hash-chain verification at ingest (PN-20).
 

@@ -1,5 +1,5 @@
 /**
- * Demo operations history for the Oshinei Japanese Buffet tenant.
+ * Demo operations history for the Invisible Japanese Buffet tenant.
  *
  *  • ~45 business days of POS sales (cust_pos_sales + cust_pos_items) so Finance,
  *    daily-sales reports and dashboards show realistic numbers.
@@ -85,8 +85,8 @@ async function main() {
   await db.transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
 
-    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'OSHINEI')))[0];
-    if (!tenant) throw new Error('OSHINEI tenant not found — run db:seed:demo first');
+    const tenant = (await tx.select().from(schema.tenants).where(eq(schema.tenants.code, 'INVISIBLE')))[0];
+    if (!tenant) throw new Error('INVISIBLE tenant not found — run db:seed:demo first');
     const T = tenant.id;
 
     const items = await tx.select().from(schema.menuItems).where(eq(schema.menuItems.tenantId, T));
@@ -156,7 +156,7 @@ async function main() {
         }
         const subtotal = r2(revLines.reduce((a, l) => a + l.amount, 0));
         tickets.push({
-          saleNo: `SALE-OSHI-${ymd}-${String(s).padStart(3, '0')}`, day, openedAt: at(day, h, m),
+          saleNo: `SALE-INVI-${ymd}-${String(s).padStart(3, '0')}`, day, openedAt: at(day, h, m),
           tableIdx: between(0, tables.length - 1), server: pick(STAFF)!, pax, isBuffet, pkgId,
           revLines, dishes, subtotal, tax: r2(subtotal - subtotal / (1 + VAT)), payment: weighted(PAYMENTS),
         });
@@ -295,7 +295,7 @@ async function main() {
       const subtotal = r2(revLines.reduce((a, l) => a + l.qty * l.price, 0));
       const tax = r2(subtotal - subtotal / (1 + VAT));
       const fee = between(40, 60);
-      const saleNo = completed ? `SALE-OSHI-DLV-${String(i + 1).padStart(3, '0')}` : null;
+      const saleNo = completed ? `SALE-INVI-DLV-${String(i + 1).padStart(3, '0')}` : null;
       const fStatus = (completed ? 'completed' : pick(['preparing', 'ready', 'out_for_delivery'])) as 'completed' | 'preparing' | 'ready' | 'out_for_delivery';
       const [ord] = await tx.insert(schema.dineInOrders).values({
         tenantId: T, orderNo, tableId: null, zoneId: null, sessionId: null,
