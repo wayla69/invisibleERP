@@ -33,6 +33,17 @@ export function inQuietHours(now: Date, quietStart: string, quietEnd: string): b
   const s = (sh ?? 21) * 60 + (sm ?? 0), e = (eh ?? 9) * 60 + (em ?? 0);
   return s < e ? cur >= s && cur < e : cur >= s || cur < e;
 }
+// W3 (docs/27) — count a member's SENT marketing messages since `since`, across every channel and engine
+// (the global cross-channel frequency cap denominator). Shared by MessagingService.send AND the broadcast
+// campaign path (CampaignsService) so the cap is enforced identically wherever a marketing message is sent.
+export async function countRecentMarketingSends(db: DrizzleDb, memberId: number, tenantId: number | null | undefined, since: Date): Promise<number> {
+  const recent = await db.select({ campaign: messageLog.campaign }).from(messageLog).where(and(
+    eq(messageLog.memberId, memberId), eq(messageLog.status, 'sent'), gte(messageLog.createdAt, since),
+    ...(tenantId != null ? [eq(messageLog.tenantId, tenantId)] : []),
+  ));
+  return recent.filter((r: { campaign: string | null }) => isMarketingCampaign(r.campaign)).length;
+}
+
 type BlastDto = { audience: 'all' | 'birthdays_today' | 'segment' | 'saved_segment'; segment?: string; segment_id?: number; channel: MessageChannel; body: string; campaign?: string };
 type BroadcastDto = { body?: string; flex?: any; alt_text?: string; campaign?: string };
 type FlexDto = { to: string; alt_text: string; flex: any; member_id?: number; campaign?: string };
@@ -75,11 +86,7 @@ export class MessagingService {
         }
         if (gov.weekly_cap > 0) {
           const since = new Date(now.getTime() - 7 * 86400_000);
-          const recent = await db.select({ campaign: messageLog.campaign }).from(messageLog).where(and(
-            eq(messageLog.memberId, dto.member_id), eq(messageLog.status, 'sent'), gte(messageLog.createdAt, since),
-            ...(user.tenantId != null ? [eq(messageLog.tenantId, user.tenantId)] : []),
-          ));
-          const marketingSent = recent.filter((r: any) => isMarketingCampaign(r.campaign)).length;
+          const marketingSent = await countRecentMarketingSends(db, dto.member_id, user.tenantId, since);
           if (marketingSent >= gov.weekly_cap) {
             return this.record(user, { memberId: dto.member_id, channel: dto.channel, recipient: null, body: dto.body, campaign: dto.campaign, status: 'skipped', provider: null, error: 'global cap' });
           }
