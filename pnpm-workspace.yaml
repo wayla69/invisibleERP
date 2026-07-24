@@ -23,6 +23,11 @@ overrides:
   # so both are remediated (not ignored). Still transitive via @nestjs/platform-fastify>fastify>ajv.
   "fast-uri@<3.1.4": ">=3.1.4"
   "@fastify/middie@<9.3.2": ">=9.3.2"
+  # 2026-07-24 (GHSA-c96f-x56v-gq3h): find-my-way DDoS with HTTP2 — a crafted request can wedge the router
+  # (patched 9.6.1). Transitive via @nestjs/platform-fastify>fastify>find-my-way (still on 9.6.0). Bump the
+  # floor to the patched line (stays within major 9, so fastify-5's router contract is unchanged); remediated,
+  # not ignored. See compliance/vulnerability-triage.md.
+  "find-my-way@<9.6.1": ">=9.6.1"
   # 2026-07-20 (GHSA-3jxr-9vmj-r5cp, GHSA-52cp-r559-cp3m): brace-expansion exponential-expansion DoS across
   # all three major lines (transitive via exceljs→archiver/unzipper→glob, @nestjs/cli, @vitest/coverage-v8)
   # and js-yaml 4.x merge-key quadratic CPU (via @nestjs/swagger — runtime — and @nestjs/cli). Patch-level
